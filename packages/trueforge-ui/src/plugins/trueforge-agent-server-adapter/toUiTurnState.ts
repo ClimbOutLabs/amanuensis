@@ -62,21 +62,31 @@ const INCOMPATIBLE_EVENT_TYPES: readonly string[] = [
 ];
 
 /**
+ * An approval event that only lists actions a scheduled run held for the owner. The Sentinel tap
+ * renders those as their own block; passed to the vendor runtime they would read as approvals the
+ * chat is waiting on and block the composer.
+ */
+function listsOnlyHeldActions(event: TrueForgeApi.SessionEvent | TrueForgeApi.TurnStreamingEvent): boolean {
+  return event.type === 'tool.approval_required' && event.toolCalls.every(call => call.held === true);
+}
+
+/**
  * Type guard for the vendor-typed event unions. The vendor types omit `aman.skill.used`
  * (host skill-telemetry) even though it arrives at runtime, so a direct `event.type ===`
  * comparison fails type-checking. This runtime check with a type predicate narrows soundly
- * without assertion escapes.
+ * without assertion escapes. Callers only drop what it rejects, so the held-action approval
+ * lists it also rejects are dropped the same way.
  */
 export function isCompatibleSessionEvent(
   event: TrueForgeApi.SessionEvent,
 ): event is Exclude<TrueForgeApi.SessionEvent, { type: VendorIncompatibleEventType }> {
-  return !INCOMPATIBLE_EVENT_TYPES.includes(event.type);
+  return !INCOMPATIBLE_EVENT_TYPES.includes(event.type) && !listsOnlyHeldActions(event);
 }
 
 export function isCompatibleStreamingEvent(
   event: TrueForgeApi.TurnStreamingEvent,
 ): event is Exclude<TrueForgeApi.TurnStreamingEvent, { type: VendorIncompatibleEventType }> {
-  return !INCOMPATIBLE_EVENT_TYPES.includes(event.type);
+  return !INCOMPATIBLE_EVENT_TYPES.includes(event.type) && !listsOnlyHeldActions(event);
 }
 
 export function toUiSessionEvent(

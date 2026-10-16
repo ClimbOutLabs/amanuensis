@@ -395,6 +395,10 @@
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
           },
+          "expires_at": {
+            "description": "ISO 8601 time after which a held action can no longer be approved.",
+            "type": "string"
+          },
           "held": {
             "description": "Set when a scheduled run held this action for the owner. The run did not wait for an answer.",
             "enum": [

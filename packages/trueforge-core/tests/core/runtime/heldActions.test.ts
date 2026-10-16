@@ -227,7 +227,7 @@ describe('an unattended run', () => {
     const listed = brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
     expect(listed).toMatchObject({
       type: EventType.TOOL_APPROVAL_REQUIRED,
-      tool_calls: [{ id: 'call-send', held: true, can_always_allow: false, tier: 3 }],
+      tool_calls: [{ id: 'call-send', held: true, can_always_allow: false, tier: 3, expires_at: expect.any(String) }],
     });
 
     // The model reads that the action is held and goes on to write its summary.

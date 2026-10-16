@@ -241,6 +241,38 @@ describe('dismissPendingApprovals', () => {
   });
 });
 
+describe('answerHeldAction', () => {
+  async function answerWith(answer: 'approve' | 'always_allow' | 'deny') {
+    const { extensions, sessions } = createFakeClient({});
+    await extensions.answerHeldAction({ sessionId: 'ses_1', threadId: 'main', toolCallId: 'call_held', answer });
+    assert.equal(sessions.createTurnStream.mock.calls.length, 1);
+    return sessions.createTurnStream.mock.calls[0];
+  }
+
+  it.each([
+    ['approve', { status: 'allow', scope: 'once' }],
+    ['always_allow', { status: 'allow', scope: 'always' }],
+    ['deny', { status: 'deny' }],
+  ] as const)('sends %s as one decision on the held call, chained from the newest turn', async (answer, approval) => {
+    assert.deepEqual(await answerWith(answer), [
+      'ses_1',
+      {
+        input: [{ type: 'user.tool_approval', threadId: 'main', toolCallId: 'call_held', approval }],
+        previousTurnId: 'auto',
+      },
+    ]);
+  });
+
+  it('lets a refusal reach the caller', async () => {
+    const refusal = new Error('Expired, nothing was done. Ask again in chat.');
+    const { extensions } = createFakeClient({ createTurnStream: vi.fn().mockRejectedValue(refusal) });
+    await assert.rejects(
+      extensions.answerHeldAction({ sessionId: 'ses_1', threadId: 'main', toolCallId: 'call_held', answer: 'approve' }),
+      refusal,
+    );
+  });
+});
+
 describe('chat whose first turn kept historic required actions', () => {
   const turns = [pausedTurn('trn_1'), doneTurn({ id: 'trn_2' }), doneTurn({ id: 'trn_3' })];
 

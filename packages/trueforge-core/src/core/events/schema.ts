@@ -642,6 +642,7 @@ export const ApprovalToolCallRefSchema = z
       .optional()
       .describe('Set when a scheduled run held this action for the owner. The run did not wait for an answer.'),
     can_always_allow: z.boolean().optional().describe('Whether the owner may allow this tool for good.'),
+    expires_at: z.string().optional().describe('ISO 8601 time after which a held action can no longer be approved.'),
   })
   .openapi('ApprovalToolCallRef');
 

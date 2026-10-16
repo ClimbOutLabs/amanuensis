@@ -3950,6 +3950,9 @@ export class AgentThread {
               ...approvalCardFields(call),
               held: true as const,
               can_always_allow: allowsToolGrant(call.tool_info),
+              ...(call.tool_info.held_for_owner === undefined
+                ? {}
+                : { expires_at: call.tool_info.held_for_owner.expires_at }),
             },
           ]
         : [];
