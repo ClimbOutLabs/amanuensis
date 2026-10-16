@@ -1,7 +1,8 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
-import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage, GmailThread } from './gmailWire';
-import { headerOf, labelIdsOf, readMessage, type AttachmentInfo } from './message';
+import { decodeEntities } from './htmlText';
+import { headerOf, labelIdsOf, rawHeaderOf, readMessage, type AttachmentInfo } from './message';
+import { stripInvisible } from './mimeText';
 import { estimateTokens, MAX_TOKENS_PER_CALL, snippetOf, truncateToTokens } from './tokenBound';
 
 export const UNTRUSTED_NOTICE =
@@ -15,24 +16,62 @@ export function neutralizeInternalTags(text: string): string {
   return text.replace(/<(\s*\/?\s*tfy-)/gi, '&lt;$1');
 }
 
+/** Every string of a result made safe to hand the model: invisible characters removed, internal tags neutralized. */
+export function neutralizeDeep(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return neutralizeInternalTags(stripInvisible(value));
+  }
+  if (Array.isArray(value)) {
+    return value.map(neutralizeDeep);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, neutralizeDeep(item)]));
+  }
+  return value;
+}
+
 export interface ResultContext {
   account: string;
 }
 
 function envelope(context: ResultContext) {
-  return { account: context.account, untrustedContent: UNTRUSTED_NOTICE };
+  return { account: context.account, untrusted_content: UNTRUSTED_NOTICE };
 }
 
-/** Bare addresses out of a header such as `Ada <ada@example.com>, grace@example.com`. */
-export function addressesOf(header: string): string[] {
-  return header
+/** Most messages of one thread a result lists, and most attachments it names per message. */
+const MAX_THREAD_MESSAGES = 60;
+const MAX_ATTACHMENTS_LISTED = 20;
+
+/** Most addresses one header lists in a result; a longer list is cut so a result stays inside its bound. */
+const MAX_ADDRESSES = 50;
+
+/**
+ * Bare addresses out of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The
+ * header is split before any name is decoded, so a name like "Doe, John" stays one name.
+ */
+export function addressesOf(rawHeader: string): string[] {
+  return rawHeader
     .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    .map(part => /<([^>]+)>/.exec(part)?.[1] ?? part.trim())
+    .map(part => /<([^<>]{1,320})>/.exec(part)?.[1] ?? part.trim())
     .filter(address => address !== '');
 }
 
+/** Every address of a header, uncapped: a send must be shown and hashed with all of them. */
+export function addressesIn(input: { message: GmailMessage; name: string }): string[] {
+  return input.message.payload === undefined
+    ? []
+    : addressesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+}
+
+/** Gmail's snippet is HTML-escaped plain text. */
+function cleanSnippet(snippet: string | undefined): string {
+  return snippetOf(stripInvisible(decodeEntities(snippet ?? '')));
+}
+
 function attachmentList(attachments: AttachmentInfo[]) {
-  return attachments.map(file => ({ id: file.id, filename: file.filename, mimeType: file.mimeType, size: file.size }));
+  return attachments
+    .slice(0, MAX_ATTACHMENTS_LISTED)
+    .map(file => ({ id: file.id, filename: file.filename, mime_type: file.mimeType, size: file.size }));
 }
 
 function dateOf(message: GmailMessage): string {
@@ -49,26 +88,26 @@ function threadRow(thread: GmailThread) {
   if (latest === undefined) {
     return {
       id: thread.id,
-      threadId: thread.id,
+      thread_id: thread.id,
       from: '',
       subject: '',
       snippet: '',
       date: '',
-      internalDate: '',
-      labelIds: [],
-      messageCount: 0,
+      internal_date: '',
+      label_ids: [],
+      message_count: 0,
     };
   }
   return {
     id: thread.id,
-    threadId: thread.id,
+    thread_id: thread.id,
     from: headerOf({ message: latest, name: 'From' }),
     subject: headerOf({ message: latest, name: 'Subject' }),
-    snippet: snippetOf(latest.snippet ?? ''),
+    snippet: cleanSnippet(latest.snippet),
     date: dateOf(latest),
-    internalDate: latest.internalDate ?? '',
-    labelIds: [...new Set(messages.flatMap(labelIdsOf))],
-    messageCount: messages.length,
+    internal_date: latest.internalDate ?? '',
+    label_ids: [...new Set(messages.flatMap(labelIdsOf))],
+    message_count: messages.length,
   };
 }
 
@@ -92,13 +131,14 @@ export function listThreadsResult(input: {
   return {
     ...envelope(input.context),
     threads: rows,
+    result_size_estimate: input.providerEstimate,
     coverage: {
       returned: rows.length,
-      providerEstimate: input.providerEstimate,
-      truncatedBy: omitted > 0 ? 'token_bound' : input.nextPageToken === undefined ? null : 'max_results',
-      omittedByTokenBound: omitted,
+      provider_estimate: input.providerEstimate,
+      truncated_by: omitted > 0 ? 'token_bound' : input.nextPageToken === undefined ? null : 'max_results',
+      omitted_by_token_bound: omitted,
     },
-    ...(input.nextPageToken === undefined ? {} : { nextPageToken: input.nextPageToken }),
+    ...(input.nextPageToken === undefined ? {} : { next_page_token: input.nextPageToken }),
   };
 }
 
@@ -118,11 +158,11 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
   return {
     ...envelope(input.context),
     id: input.message.id,
-    threadId: input.message.threadId,
+    thread_id: input.message.threadId,
     ...messageFields(input.message),
     attachments: attachmentList(attachments),
     body: bounded.text,
-    bodyTruncated: bounded.truncated,
+    body_truncated: bounded.truncated,
   };
 }
 
@@ -131,7 +171,10 @@ export function threadResult(input: {
   thread: GmailThread;
   format: 'full' | 'metadata' | 'minimal';
 }) {
-  const messages = input.thread.messages ?? [];
+  const all = input.thread.messages ?? [];
+  // A very long thread keeps its newest messages; the older ones are counted, not listed.
+  const messages = all.slice(-MAX_THREAD_MESSAGES);
+  const omittedMessages = all.length - messages.length;
   const withBody = input.format === 'full';
   // Newest messages get the token budget first, so a long thread keeps what was said last; older bodies
   // that no longer fit are left out and their ids stay.
@@ -155,17 +198,18 @@ export function threadResult(input: {
     return {
       id: message.id,
       ...messageFields(message),
-      labelIds: labelIdsOf(message),
+      label_ids: labelIdsOf(message),
       attachments: attachmentList(readMessage(message).attachments),
-      ...(body === undefined ? {} : { body: body.text, ...(body.omitted ? { bodyTruncated: true } : {}) }),
+      ...(body === undefined ? {} : { body: body.text, ...(body.omitted ? { body_truncated: true } : {}) }),
     };
   });
   return {
     ...envelope(input.context),
-    threadId: input.thread.id,
-    messageCount: rows.length,
+    thread_id: input.thread.id,
+    message_count: all.length,
     messages: rows,
-    truncated: [...bodies.values()].some(body => body.omitted),
+    ...(omittedMessages > 0 ? { omitted_older_messages: omittedMessages } : {}),
+    truncated: omittedMessages > 0 || [...bodies.values()].some(body => body.omitted),
   };
 }
 
@@ -174,18 +218,29 @@ export function listDraftsResult(input: {
   drafts: { draftId: string; message: GmailMessage }[];
   nextPageToken: string | undefined;
 }) {
+  const rows = [];
+  let tokens = 0;
+  for (const { draftId, message } of input.drafts) {
+    const row = {
+      draft_id: draftId,
+      message_id: message.id,
+      thread_id: message.threadId,
+      subject: headerOf({ message, name: 'Subject' }),
+      to: addressesIn({ message, name: 'To' }).slice(0, MAX_ADDRESSES),
+      date: dateOf(message),
+      snippet: cleanSnippet(message.snippet),
+    };
+    tokens += estimateTokens(JSON.stringify(row));
+    if (tokens > MAX_TOKENS_PER_CALL) {
+      break;
+    }
+    rows.push(row);
+  }
   return {
     ...envelope(input.context),
-    drafts: input.drafts.map(({ draftId, message }) => ({
-      draftId,
-      messageId: message.id,
-      threadId: message.threadId,
-      subject: headerOf({ message, name: 'Subject' }),
-      to: addressesOf(headerOf({ message, name: 'To' })),
-      date: dateOf(message),
-      snippet: snippetOf(message.snippet ?? ''),
-    })),
-    ...(input.nextPageToken === undefined ? {} : { nextPageToken: input.nextPageToken }),
+    drafts: rows,
+    ...(rows.length < input.drafts.length ? { omitted_by_token_bound: input.drafts.length - rows.length } : {}),
+    ...(input.nextPageToken === undefined ? {} : { next_page_token: input.nextPageToken }),
   };
 }
 
@@ -195,35 +250,16 @@ export function getDraftResult(input: { context: ResultContext; draftId: string;
   const inReplyTo = headerOf({ message, name: 'In-Reply-To' });
   return {
     ...envelope(input.context),
-    draftId: input.draftId,
-    messageId: message.id,
-    to: addressesOf(headerOf({ message, name: 'To' })),
-    cc: addressesOf(headerOf({ message, name: 'Cc' })),
-    bcc: addressesOf(headerOf({ message, name: 'Bcc' })),
+    draft_id: input.draftId,
+    message_id: message.id,
+    to: addressesIn({ message, name: 'To' }).slice(0, MAX_ADDRESSES),
+    cc: addressesIn({ message, name: 'Cc' }).slice(0, MAX_ADDRESSES),
+    bcc: addressesIn({ message, name: 'Bcc' }).slice(0, MAX_ADDRESSES),
     subject: headerOf({ message, name: 'Subject' }),
     body: truncateToTokens({ text: body, maxTokens: MAX_TOKENS_PER_CALL }).text,
-    htmlBody: null,
     from: headerOf({ message, name: 'From' }),
-    mimeType: 'text/plain',
-    inlineImages: [],
-    threadId: message.threadId,
-    inReplyTo: inReplyTo === '' ? null : inReplyTo,
+    thread_id: message.threadId,
+    in_reply_to: inReplyTo === '' ? null : inReplyTo,
     attachments: attachmentList(attachments),
-  };
-}
-
-/** A draft as a send would deliver it, and how many attachments it carries (a send refuses any). */
-export function reviewableDraft(message: GmailMessage): { draft: ReviewableDraft; attachmentCount: number } {
-  const { body, attachments } = readMessage(message);
-  return {
-    draft: {
-      to: addressesOf(headerOf({ message, name: 'To' })),
-      cc: addressesOf(headerOf({ message, name: 'Cc' })),
-      bcc: addressesOf(headerOf({ message, name: 'Bcc' })),
-      subject: headerOf({ message, name: 'Subject' }),
-      body,
-      threadId: message.threadId,
-    },
-    attachmentCount: attachments.length,
   };
 }

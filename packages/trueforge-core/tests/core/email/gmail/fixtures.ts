@@ -45,6 +45,40 @@ export function message(input: {
   };
 }
 
+/** A draft shaped the way Aman saves one: a single text/plain part with its headers on the message. */
+export function plainDraft(input: {
+  id: string;
+  threadId?: string;
+  from?: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject?: string;
+  body: string;
+  extraHeaders?: { name: string; value: string }[];
+}): GmailMessage {
+  const optional = (name: string, value: string | undefined) => (value === undefined ? [] : [{ name, value }]);
+  return {
+    id: input.id,
+    threadId: input.threadId ?? `t-${input.id}`,
+    labelIds: ['DRAFT'],
+    snippet: input.body.slice(0, 80),
+    payload: {
+      mimeType: 'text/plain',
+      headers: [
+        { name: 'From', value: input.from ?? 'Ada <ada@example.com>' },
+        { name: 'To', value: input.to ?? 'Grace <grace@example.com>, lin@example.com' },
+        ...optional('Cc', input.cc),
+        ...optional('Bcc', input.bcc),
+        { name: 'Subject', value: input.subject ?? 'Lease' },
+        { name: 'Content-Type', value: 'text/plain; charset="UTF-8"' },
+        ...(input.extraHeaders ?? []),
+      ],
+      body: { data: b64url(input.body), size: input.body.length },
+    },
+  };
+}
+
 export function thread(id: string, messages: GmailMessage[]): GmailThread {
   return { id, messages };
 }

@@ -26,7 +26,12 @@ describe('GoogleAccessTokens', () => {
     await connections.save(connectedRecord({ granted_scopes: ['s1', 's2'] }));
     const google = new FakeGoogle();
     google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
-    const access = await new GoogleAccessTokens({ connections, owner: OWNER, fetchImpl: google.fetch }).get();
+    const access = await new GoogleAccessTokens({
+      now: undefined,
+      connections,
+      owner: OWNER,
+      fetchImpl: google.fetch,
+    }).get();
     expect(access.granted_scopes).toEqual(['s1', 's2']);
   });
 
@@ -37,7 +42,7 @@ describe('GoogleAccessTokens', () => {
       await connections.save(connectedRecord());
       const google = new FakeGoogle();
       google.on(GOOGLE_TOKEN_URL, () => json({ error: code }, 400));
-      const tokens = new GoogleAccessTokens({ connections, owner: OWNER, fetchImpl: google.fetch });
+      const tokens = new GoogleAccessTokens({ now: undefined, connections, owner: OWNER, fetchImpl: google.fetch });
 
       await expect(tokens.get()).rejects.toBeInstanceOf(GoogleReconnectRequiredError);
       expect((await connections.get(OWNER))?.status).toBe('needs_reconnect');
@@ -50,7 +55,7 @@ describe('GoogleAccessTokens', () => {
     const connections = new FakeConnections();
     await connections.save(connectedRecord());
     const fetchImpl: typeof fetch = () => Promise.reject(new TypeError('getaddrinfo ENOTFOUND oauth2.googleapis.com'));
-    const tokens = new GoogleAccessTokens({ connections, owner: OWNER, fetchImpl });
+    const tokens = new GoogleAccessTokens({ now: undefined, connections, owner: OWNER, fetchImpl });
     const error = await tokens.get().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GoogleOAuthError);
     expect(String(error)).not.toContain('ENOTFOUND');
@@ -66,12 +71,17 @@ describe('GoogleAccessTokens', () => {
       signal = init?.signal;
       return Promise.resolve(json({ access_token: 'at' }));
     };
-    await new GoogleAccessTokens({ connections, owner: OWNER, fetchImpl }).get();
+    await new GoogleAccessTokens({ now: undefined, connections, owner: OWNER, fetchImpl }).get();
     expect(signal).toBeInstanceOf(AbortSignal);
   });
 
   it('needs a login', async () => {
-    const tokens = new GoogleAccessTokens({ connections: new FakeConnections(), owner: OWNER });
+    const tokens = new GoogleAccessTokens({
+      now: undefined,
+      fetchImpl: undefined,
+      connections: new FakeConnections(),
+      owner: OWNER,
+    });
     await expect(tokens.get()).rejects.toBeInstanceOf(GoogleReconnectRequiredError);
   });
 });

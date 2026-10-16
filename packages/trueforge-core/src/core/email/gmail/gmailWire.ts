@@ -3,27 +3,19 @@ import { z } from 'zod';
 
 const HeaderSchema = z.object({ name: z.string(), value: z.string() });
 
-export interface MessagePart {
-  partId?: string | undefined;
-  mimeType?: string | undefined;
-  filename?: string | undefined;
-  headers?: { name: string; value: string }[] | undefined;
-  body?: { size?: number | undefined; data?: string | undefined; attachmentId?: string | undefined } | undefined;
-  parts?: MessagePart[] | undefined;
-}
-
-export const MessagePartSchema: z.ZodType<MessagePart> = z.lazy(() =>
-  z.object({
-    partId: z.string().optional(),
-    mimeType: z.string().optional(),
-    filename: z.string().optional(),
-    headers: z.array(HeaderSchema).optional(),
-    body: z
-      .object({ size: z.number().optional(), data: z.string().optional(), attachmentId: z.string().optional() })
-      .optional(),
-    parts: z.array(MessagePartSchema).optional(),
-  }),
-);
+export const MessagePartSchema = z.object({
+  partId: z.string().optional(),
+  mimeType: z.string().optional(),
+  filename: z.string().optional(),
+  headers: z.array(HeaderSchema).optional(),
+  body: z
+    .object({ size: z.number().optional(), data: z.string().optional(), attachmentId: z.string().optional() })
+    .optional(),
+  get parts() {
+    return z.array(MessagePartSchema).optional();
+  },
+});
+export type MessagePart = z.infer<typeof MessagePartSchema>;
 
 export const GmailMessageSchema = z.object({
   id: z.string(),

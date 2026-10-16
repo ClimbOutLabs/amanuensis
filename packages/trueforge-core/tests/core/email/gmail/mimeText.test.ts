@@ -1,7 +1,7 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
-import { headerOf, htmlToText, readMessage } from '../../../../src/core/email/gmail/message';
-import { charsetOf, decodeBytes, decodeEncodedWords } from '../../../../src/core/email/gmail/mimeText';
-import { listThreadsResult, readEmailResult } from '../../../../src/core/email/gmail/results';
+import { headerOf, readMessage } from '../../../../src/core/email/gmail/message';
+import { charsetOf, decodeBytes, decodeEncodedWords, stripInvisible } from '../../../../src/core/email/gmail/mimeText';
+import { addressesIn, listThreadsResult, readEmailResult } from '../../../../src/core/email/gmail/results';
 import { CHARSET_SAMPLES, ENCODED_WORD_SAMPLES } from './charsetFixtures';
 import { message } from './fixtures';
 
@@ -90,19 +90,6 @@ describe('HTML-only bodies', () => {
     expect(read.body).toBe('お世話になっております。\n契約書を確認しました。');
   });
 
-  it('decodes Portuguese entities and keeps accented letters', () => {
-    expect(
-      htmlToText(
-        '<p>Ol&aacute;, voc&ecirc; j&aacute; recebeu a a&ccedil;&atilde;o?</p><p>Ol&Aacute;&nbsp;Jo&atilde;o</p>',
-      ),
-    ).toBe('Olá, você já recebeu a ação?\nOlÁ João');
-  });
-
-  it('does not mangle Arabic, Hebrew, Chinese or Russian in HTML', () => {
-    const html = '<div dir="rtl">مرحبا بالعالم</div><div>שלום עולם</div><div>您好，世界</div><div>Привет, мир</div>';
-    expect(htmlToText(html)).toBe('مرحبا بالعالم\nשלום עולם\n您好，世界\nПривет, мир');
-  });
-
   it('prefers the plain text part when both exist, even when it is not UTF-8', () => {
     const sample = CHARSET_SAMPLES.find(item => item.name === 'chineseGbk');
     const mixed: GmailMessage = {
@@ -128,7 +115,132 @@ describe('HTML-only bodies', () => {
   });
 });
 
+describe('HTML parts that declare their charset only in a meta tag', () => {
+  it('reads Shift_JIS HTML with a meta http-equiv declaration', () => {
+    const mail: GmailMessage = {
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'text/html',
+        body: {
+          data: 'PGh0bWw-PGhlYWQ-PG1ldGEgaHR0cC1lcXVpdj0iQ29udGVudC1UeXBlIiBjb250ZW50PSJ0ZXh0L2h0bWw7IGNoYXJzZXQ9c2hpZnRfamlzIj48L2hlYWQ-PGJvZHk-PHA-gqiQophigsmCyILBgsSCqILogtyCt4FCPC9wPjwvYm9keT48L2h0bWw-',
+        },
+      },
+    };
+    expect(readMessage(mail).body).toBe('お世話になっております。');
+  });
+
+  it('reads Windows-1251 HTML with a short meta charset declaration', () => {
+    const mail: GmailMessage = {
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'text/html',
+        body: {
+          data: 'PGh0bWw-PGhlYWQ-PG1ldGEgY2hhcnNldD0id2luZG93cy0xMjUxIj48L2hlYWQ-PGJvZHk-z_Do4uXyLCDs6PA8L2JvZHk-PC9odG1sPg',
+        },
+      },
+    };
+    expect(readMessage(mail).body).toBe('Привет, мир');
+  });
+});
+
+describe('message structure', () => {
+  const plain = (text: string) => ({
+    mimeType: 'text/plain',
+    body: { data: Buffer.from(text, 'utf8').toString('base64url') },
+  });
+  const html = (text: string) => ({
+    mimeType: 'text/html',
+    body: { data: Buffer.from(text, 'utf8').toString('base64url') },
+  });
+
+  it('finds the text in nested multipart/alternative inside multipart/mixed and multipart/related', () => {
+    const mail: GmailMessage = {
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'multipart/mixed',
+        parts: [
+          {
+            mimeType: 'multipart/related',
+            parts: [
+              { mimeType: 'multipart/alternative', parts: [plain('Plain version'), html('<p>HTML version</p>')] },
+            ],
+          },
+        ],
+      },
+    };
+    const read = readMessage(mail);
+    expect(read.body).toBe('Plain version');
+    expect(read.hasHtml).toBe(true);
+  });
+
+  it('falls back to the HTML when the plain part is blank', () => {
+    const mail: GmailMessage = {
+      id: 'm1',
+      threadId: 't1',
+      payload: { mimeType: 'multipart/alternative', parts: [plain(' \r\n '), html('<p>Only in the <b>HTML</b></p>')] },
+    };
+    expect(readMessage(mail).body).toBe('Only in the HTML');
+  });
+
+  it('counts any part served by attachment id as an attachment, named or not', () => {
+    const mail: GmailMessage = {
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'multipart/mixed',
+        parts: [
+          plain('see files'),
+          { mimeType: 'application/pdf', filename: '', body: { attachmentId: 'a1', size: 10 } },
+          { mimeType: 'image/png', body: { attachmentId: 'a2', size: 20 } },
+        ],
+      },
+    };
+    expect(readMessage(mail).attachments.map(file => [file.id, file.filename])).toEqual([
+      ['a1', 'attachment'],
+      ['a2', 'attachment'],
+    ]);
+  });
+});
+
+describe('hidden characters', () => {
+  it('removes Unicode tag characters and bidi controls from headers and bodies', () => {
+    const tagged = String.fromCodePoint(0xe0049, 0xe0067, 0xe006e) + 'Hello';
+    const mail = message({
+      id: 'm1',
+      subject: `Lea\u202Ese\u2066 ${tagged}`,
+      body: `${tagged} body\u202E here\u200B!`,
+    });
+    expect(headerOf({ message: mail, name: 'Subject' })).toBe('Lease Hello');
+    expect(readMessage(mail).body).toBe('Hello body here!');
+  });
+
+  it('keeps the joiners that Persian and Indic scripts need', () => {
+    expect(stripInvisible('می\u200Cخواهم')).toBe('می\u200Cخواهم');
+  });
+
+  it('bounds a header that is far longer than any subject', () => {
+    const mail = message({ id: 'm1', subject: 'x'.repeat(50_000), body: 'hi' });
+    expect(headerOf({ message: mail, name: 'Subject' }).length).toBeLessThan(1100);
+  });
+});
+
 describe('RFC 2047 encoded words in headers', () => {
+  it('joins adjacent words of one charset before decoding, so a character split between them survives', () => {
+    expect(decodeEncodedWords('=?utf-8?B?5pel5g==?= =?utf-8?B?nKzoqp4=?=')).toBe('日本語');
+  });
+
+  it('splits an address list before decoding, so a comma inside a name does not make a second address', () => {
+    const mail = message({
+      id: 'm1',
+      to: '=?utf-8?Q?Doe=2C_John?= <john@example.com>, =?utf-8?B?5p2O?= <li@example.com>',
+      body: 'hi',
+    });
+    expect(addressesIn({ message: mail, name: 'To' })).toEqual(['john@example.com', 'li@example.com']);
+  });
+
   it.each(ENCODED_WORD_SAMPLES)('decodes $name', sample => {
     expect(decodeEncodedWords(sample.header)).toBe(sample.decoded);
     expect(decodeEncodedWords(sample.header)).not.toContain(REPLACEMENT);

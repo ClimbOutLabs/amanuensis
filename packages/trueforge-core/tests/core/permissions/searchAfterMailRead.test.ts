@@ -28,7 +28,7 @@ const SEARCH: SentinelAction = {
 
 const MAIL_READ: SentinelAction = {
   tool_name: 'read_email',
-  canonical_params: { messageId: 'm1' },
+  canonical_params: { message_id: 'm1' },
   tool_type: 'truefoundry-system',
   mcp_server_name: 'gmail',
   mcp_hints: { read_only_hint: true, open_world_hint: true },

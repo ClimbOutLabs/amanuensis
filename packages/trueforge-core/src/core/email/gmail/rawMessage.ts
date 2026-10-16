@@ -7,28 +7,38 @@ export interface ReplyTarget {
   referencesHeader: string;
 }
 
-function assertSingleLine(input: { value: string; field: string }): void {
-  if (/[\r\n]/.test(input.value)) {
+/** The fields of a draft as written, after any reply threading has been decided. */
+export type RawDraftContent = Pick<DraftContent, 'to' | 'cc' | 'bcc' | 'subject' | 'body'>;
+
+/** Longest encoded word in bytes of text: base64 makes 60 characters, plus 12 of framing, under the 75 limit. */
+const MAX_WORD_BYTES = 45;
+
+/** A header value on one line: folded lines are joined, and any line break that remains is refused. */
+function singleLine(input: { value: string; field: string }): string {
+  const unfolded = input.value.replace(/\r?\n[ \t]+/g, ' ');
+  if (/[\r\n]/.test(unfolded)) {
     throw new RangeError(`The ${input.field} cannot contain line breaks.`);
   }
+  return unfolded;
 }
 
-/** Non-ASCII header text as one RFC 2047 encoded word per 40 characters, so no line passes 75 octets. */
+/** Non-ASCII header text as RFC 2047 encoded words of at most 45 bytes, never splitting a character. */
 function encodeHeaderText(text: string): string {
-  if (/^[\x20-\x7e]*$/.test(text)) {
+  if (/^[ -~]*$/.test(text)) {
     return text;
   }
   const words: string[] = [];
-  let current = '';
+  let current: number[] = [];
   for (const character of text) {
-    if (Array.from(current).length >= 40) {
-      words.push(current);
-      current = '';
+    const bytes = Buffer.from(character, 'utf8');
+    if (current.length + bytes.length > MAX_WORD_BYTES) {
+      words.push(Buffer.from(current).toString('base64'));
+      current = [];
     }
-    current += character;
+    current.push(...bytes);
   }
-  words.push(current);
-  return words.map(word => `=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`).join('\r\n ');
+  words.push(Buffer.from(current).toString('base64'));
+  return words.map(word => `=?UTF-8?B?${word}?=`).join('\r\n ');
 }
 
 function wrapBase64(text: string): string {
@@ -39,27 +49,40 @@ function wrapBase64(text: string): string {
   ).join('\r\n');
 }
 
-/** The base64url `raw` field Gmail's drafts API takes. Throws on a line break in any header field. */
-export function buildRawMessage(input: { content: DraftContent; reply: ReplyTarget | undefined }): string {
+/** An RFC 5322 message id list such as `<a@b> <c@d>`; anything else is dropped rather than copied into a header. */
+function messageIds(value: string): string[] {
+  return singleLine({ value, field: 'reply headers' }).match(/<[^<>\s]{1,300}>/g) ?? [];
+}
+
+/** `Re: <original subject>` without stacking prefixes. */
+export function replySubject(original: string): string {
+  const base = original.replace(/^(\s*re\s*:\s*)+/i, '').trim();
+  return `Re: ${base}`;
+}
+
+/** The base64url `raw` field Gmail's drafts API takes. Throws a RangeError on a line break in any header field. */
+export function buildRawMessage(input: { content: RawDraftContent; reply: ReplyTarget | undefined }): string {
   const { content } = input;
-  assertSingleLine({ value: content.subject, field: 'subject' });
+  const subject = singleLine({ value: content.subject, field: 'subject' });
+  const replyId = input.reply === undefined ? '' : messageIds(input.reply.messageIdHeader).join(' ');
+  const references =
+    input.reply === undefined
+      ? ''
+      : [...new Set([...messageIds(input.reply.referencesHeader), ...messageIds(input.reply.messageIdHeader)])].join(
+          ' ',
+        );
   const headers = [
     `To: ${content.to.join(', ')}`,
     ...(content.cc === undefined || content.cc.length === 0 ? [] : [`Cc: ${content.cc.join(', ')}`]),
     ...(content.bcc === undefined || content.bcc.length === 0 ? [] : [`Bcc: ${content.bcc.join(', ')}`]),
-    `Subject: ${encodeHeaderText(content.subject)}`,
-    ...(input.reply === undefined || input.reply.messageIdHeader === ''
-      ? []
-      : [
-          `In-Reply-To: ${input.reply.messageIdHeader}`,
-          `References: ${[input.reply.referencesHeader, input.reply.messageIdHeader].filter(part => part !== '').join(' ')}`,
-        ]),
+    `Subject: ${encodeHeaderText(subject)}`,
+    ...(replyId === '' ? [] : [`In-Reply-To: ${replyId}`, `References: ${references}`]),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
   ];
   for (const header of headers) {
-    assertSingleLine({ value: header.replace(/\r\n /g, ''), field: 'message headers' });
+    singleLine({ value: header.replace(/\r\n /g, ' '), field: 'message headers' });
   }
   const message = `${headers.join('\r\n')}\r\n\r\n${wrapBase64(content.body)}\r\n`;
   return Buffer.from(message, 'utf8').toString('base64url');

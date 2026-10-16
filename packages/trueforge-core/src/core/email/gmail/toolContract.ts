@@ -1,7 +1,6 @@
 /**
- * Canonical owner of the Gmail tool contract: names, parameter schemas and annotations. Parameter names keep
- * Gmail's own camelCase because the tools stand in for a third-party mail surface; the wire-shape rule for
- * this API does not apply to them.
+ * Canonical owner of the Gmail tool contract: names, parameter schemas and annotations. Parameters are
+ * snake_case like the sandbox tools; the mapping onto Gmail's own field names stays inside the API client.
  */
 import { z } from 'zod';
 
@@ -44,34 +43,36 @@ const id = z.string().min(1).max(128);
 export const ListInboxThreadsSchema = z
   .object({
     query: z.string().max(256).default('in:inbox'),
-    maxResults: z.number().int().min(1).max(MAX_RESULTS_CAP).default(DEFAULT_MAX_RESULTS),
-    pageToken: z.string().max(512).optional(),
+    max_results: z.number().int().min(1).max(MAX_RESULTS_CAP).default(DEFAULT_MAX_RESULTS),
+    page_token: z.string().max(512).optional(),
   })
   .strict();
 
 export const GetThreadSchema = z
   .object({
-    threadId: id.optional(),
-    messageId: id.optional(),
+    thread_id: id.optional(),
+    message_id: id.optional(),
     format: z.enum(['full', 'metadata', 'minimal']).default('full'),
   })
   .strict()
-  .refine(value => (value.threadId === undefined) !== (value.messageId === undefined), {
-    message: 'Provide exactly one of threadId or messageId',
+  .refine(value => (value.thread_id === undefined) !== (value.message_id === undefined), {
+    message: 'Provide exactly one of thread_id or message_id',
   });
 
-export const ReadEmailSchema = z.object({ messageId: id }).strict();
+export const ReadEmailSchema = z.object({ message_id: id }).strict();
 
-export const DownloadAttachmentSchema = z.object({ messageId: id, attachmentId: z.string().min(1).max(512) }).strict();
+export const DownloadAttachmentSchema = z
+  .object({ message_id: id, attachment_id: z.string().min(1).max(512) })
+  .strict();
 
 export const ListDraftsSchema = z
   .object({
-    maxResults: z.number().int().min(1).max(MAX_RESULTS_CAP).default(DEFAULT_MAX_RESULTS),
-    pageToken: z.string().max(512).optional(),
+    max_results: z.number().int().min(1).max(MAX_RESULTS_CAP).default(DEFAULT_MAX_RESULTS),
+    page_token: z.string().max(512).optional(),
   })
   .strict();
 
-export const DraftIdSchema = z.object({ draftId: id }).strict();
+export const DraftIdSchema = z.object({ draft_id: id }).strict();
 
 const DraftContentShape = {
   to: z.array(z.email()).min(1).max(20),
@@ -79,12 +80,12 @@ const DraftContentShape = {
   body: z.string().max(20_000),
   cc: z.array(z.email()).max(20).optional(),
   bcc: z.array(z.email()).max(20).optional(),
-  threadId: id.optional(),
-  inReplyTo: id.optional(),
+  thread_id: id.optional(),
+  in_reply_to: id.optional(),
 };
 
 export const DraftEmailSchema = z.object(DraftContentShape).strict();
-export const UpdateDraftSchema = z.object({ draftId: id, ...DraftContentShape }).strict();
+export const UpdateDraftSchema = z.object({ draft_id: id, ...DraftContentShape }).strict();
 
 export type DraftContent = z.infer<typeof DraftEmailSchema>;
 

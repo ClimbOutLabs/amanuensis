@@ -21,7 +21,7 @@ export interface GmailCapabilityOptions {
   /** Absent until the server's `stageAttachment` helper is bound to the turn's sandbox; attachment fetch then says there is no workspace. */
   attachmentStager: AttachmentStager | undefined;
   /** Replaceable so tests never reach Google. */
-  fetchImpl?: typeof fetch | undefined;
+  fetchImpl: typeof fetch | undefined;
 }
 
 export async function gmailCapability(options: GmailCapabilityOptions): Promise<AgentCapability | undefined> {
@@ -34,6 +34,7 @@ export async function gmailCapability(options: GmailCapabilityOptions): Promise<
     return undefined;
   }
   const tokens = new GoogleAccessTokens({
+    now: undefined,
     connections: options.connections,
     owner: options.owner,
     fetchImpl: options.fetchImpl,
@@ -42,7 +43,7 @@ export async function gmailCapability(options: GmailCapabilityOptions): Promise<
     systemToolSets: [
       new GmailToolSet({
         tracing: options.tracing,
-        api: new GmailApi({ tokens, fetchImpl: options.fetchImpl }),
+        api: new GmailApi({ sleep: undefined, tokens, fetchImpl: options.fetchImpl }),
         account: record.account_email ?? 'your Google account',
         features,
         attachmentStager: options.attachmentStager,

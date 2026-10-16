@@ -78,6 +78,50 @@ describe('buildRawMessage', () => {
     expect(headerOf({ message, name: 'References' })).toBe('<first@mail.example.com> <orig@mail.example.com>');
   });
 
+  it('lists each reference once when the original is already named in them', () => {
+    const message = parse(
+      buildRawMessage({
+        content: BASE,
+        reply: {
+          messageIdHeader: '<orig@mail.example.com>',
+          referencesHeader: '<first@mail.example.com> <orig@mail.example.com>',
+        },
+      }),
+    );
+    expect(headerOf({ message, name: 'References' })).toBe('<first@mail.example.com> <orig@mail.example.com>');
+  });
+
+  it('drops anything in the reply headers that is not a message id', () => {
+    const message = parse(
+      buildRawMessage({
+        content: BASE,
+        reply: { messageIdHeader: '<orig@mail.example.com> junk', referencesHeader: 'Bcc: mallory@example.com' },
+      }),
+    );
+    expect(headerOf({ message, name: 'References' })).toBe('<orig@mail.example.com>');
+  });
+
+  it('encodes a long subject in encoded words of at most 45 bytes that never split a character', () => {
+    const subject = '会議の予定とても長い件名🙂'.repeat(12);
+    const text = Buffer.from(
+      buildRawMessage({ content: { ...BASE, subject }, reply: undefined }),
+      'base64url',
+    ).toString();
+    const words = [...text.matchAll(/=\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/g)];
+    expect(words.length).toBeGreaterThan(1);
+    for (const [word, payload = ''] of words) {
+      expect(word.length).toBeLessThanOrEqual(75);
+      expect(Buffer.from(payload, 'base64').length).toBeLessThanOrEqual(45);
+      expect(Buffer.from(payload, 'base64').toString('utf8')).not.toContain('\uFFFD');
+    }
+    expect(
+      headerOf({
+        message: parse(buildRawMessage({ content: { ...BASE, subject }, reply: undefined })),
+        name: 'Subject',
+      }),
+    ).toBe(subject);
+  });
+
   it('refuses a line break in the subject, which would inject a header', () => {
     expect(() =>
       buildRawMessage({ content: { ...BASE, subject: 'Hi\r\nBcc: mallory@example.com' }, reply: undefined }),

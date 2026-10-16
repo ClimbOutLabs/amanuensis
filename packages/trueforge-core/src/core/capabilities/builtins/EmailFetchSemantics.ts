@@ -15,8 +15,9 @@
  * same table. Qualify an entry by server only if a second integration ever
  * collides on a tool name with a compatible shape but different mechanics.
  *
- * Current entries cover the Gmail MCP server (@george43g/gmail-mcp).
+ * Current entries cover the Gmail MCP server (@george43g/gmail-mcp) and Aman's own Gmail tools.
  */
+import { GMAIL_SERVER_ID } from '../../email/gmail/toolContract';
 import {
   buildBoundedTextSummary,
   MAX_SUMMARY_ITEMS,
@@ -85,7 +86,63 @@ const GMAIL_PAGINATION: EmailPaginationSemantics = {
   nextTokenField: 'nextPageToken',
 };
 
+const AMAN_GMAIL_PAGINATION: EmailPaginationSemantics = {
+  maxResultsParam: 'max_results',
+  pageTokenParam: 'page_token',
+  nextTokenField: 'next_page_token',
+};
+
+/** Aman's own Gmail tools take and return snake_case, so they carry their own entries ahead of the generic ones. */
+const AMAN_GMAIL_SEMANTICS: readonly EmailFetchSemantics[] = [
+  {
+    toolName: 'list_inbox_threads',
+    serverId: GMAIL_SERVER_ID,
+    idField: 'thread_id',
+    envelopeFields: ['threads'],
+    totalFields: ['result_size_estimate'],
+    totalApproximate: true,
+    fetchTool: 'get_thread',
+    fetchIdParam: 'thread_id',
+    pagination: AMAN_GMAIL_PAGINATION,
+    narrowing: undefined,
+    nestedField: undefined,
+    nestedIdField: undefined,
+    singleItem: undefined,
+  },
+  {
+    toolName: 'get_thread',
+    serverId: GMAIL_SERVER_ID,
+    idField: 'id',
+    envelopeFields: ['messages'],
+    totalFields: ['message_count'],
+    totalApproximate: false,
+    fetchTool: 'read_email',
+    fetchIdParam: 'message_id',
+    pagination: undefined,
+    narrowing: { param: 'format', value: 'metadata', idEchoField: 'thread_id', idParam: 'thread_id' },
+    nestedField: undefined,
+    nestedIdField: undefined,
+    singleItem: undefined,
+  },
+  {
+    toolName: 'read_email',
+    serverId: GMAIL_SERVER_ID,
+    idField: 'id',
+    envelopeFields: [],
+    totalFields: [],
+    totalApproximate: false,
+    fetchTool: 'read_email',
+    fetchIdParam: 'message_id',
+    pagination: undefined,
+    narrowing: undefined,
+    nestedField: undefined,
+    nestedIdField: undefined,
+    singleItem: true,
+  },
+];
+
 const EMAIL_FETCH_SEMANTICS: readonly EmailFetchSemantics[] = [
+  ...AMAN_GMAIL_SEMANTICS,
   {
     toolName: 'search_emails',
     serverId: undefined,

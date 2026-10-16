@@ -1,4 +1,4 @@
-import { htmlToText, readMessage } from '../../../../src/core/email/gmail/message';
+import { readMessage } from '../../../../src/core/email/gmail/message';
 import {
   addressesOf,
   getDraftResult,
@@ -33,10 +33,6 @@ describe('message reading', () => {
     expect(read.body).toBe('Hello Ada');
   });
 
-  it('decodes numeric entities and leaves unknown ones', () => {
-    expect(htmlToText('&#65;&#x42; &unknown; &amp;')).toBe('AB &unknown; &');
-  });
-
   it('splits an address header on commas outside quotes', () => {
     expect(addressesOf('"Lovelace, Ada" <ada@example.com>, grace@example.com')).toEqual([
       'ada@example.com',
@@ -55,7 +51,7 @@ describe('result shapes', () => {
     ];
     for (const result of results) {
       expect(result.account).toBe('ada@example.com');
-      expect(result.untrustedContent).toBe(UNTRUSTED_NOTICE);
+      expect(result.untrusted_content).toBe(UNTRUSTED_NOTICE);
     }
   });
 
@@ -73,18 +69,18 @@ describe('result shapes', () => {
     });
     expect(result.threads[0]).toMatchObject({
       id: 't1',
-      threadId: 't1',
+      thread_id: 't1',
       subject: 'Re: Lease',
-      messageCount: 2,
-      labelIds: ['INBOX'],
+      message_count: 2,
+      label_ids: ['INBOX'],
     });
     expect(result.coverage).toEqual({
       returned: 1,
-      providerEstimate: 12,
-      truncatedBy: 'max_results',
-      omittedByTokenBound: 0,
+      provider_estimate: 12,
+      truncated_by: 'max_results',
+      omitted_by_token_bound: 0,
     });
-    expect(result.nextPageToken).toBe('next');
+    expect(result.next_page_token).toBe('next');
   });
 
   it('keeps a long thread inside the token bound, newest bodies first, and keeps every message id', () => {
@@ -121,7 +117,7 @@ describe('result shapes', () => {
 
   it('states when a single message body is cut', () => {
     const result = readEmailResult({ context, message: message({ id: 'm1', body: 'word '.repeat(20_000) }) });
-    expect(result.bodyTruncated).toBe(true);
+    expect(result.body_truncated).toBe(true);
   });
 
   it('reads a draft with its recipients split into addresses', () => {
@@ -139,11 +135,11 @@ describe('result shapes', () => {
       }),
     });
     expect(result).toMatchObject({
-      draftId: 'd1',
+      draft_id: 'd1',
       to: ['grace@example.com', 'lin@example.com'],
       cc: ['sam@example.com'],
       bcc: [],
-      inReplyTo: '<abc@mail.example.com>',
+      in_reply_to: '<abc@mail.example.com>',
       attachments: [],
     });
   });

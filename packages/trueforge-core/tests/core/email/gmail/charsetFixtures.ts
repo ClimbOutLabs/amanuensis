@@ -57,6 +57,30 @@ export const CHARSET_SAMPLES: CharsetSample[] = [
     data: '-sTSwdfT1NfVytTFLCDEz8fP18_SINDPzNXexc4uIPPQwdPJws8u',
   },
   {
+    name: 'arabicWindows1256',
+    charset: 'windows-1256',
+    text: 'مرحبا بك، تم استلام العقد. شكرا لك',
+    data: '49HNyMcgyN-hIMrjIMfTyuHH4yDH4drezy4g1N_RxyDh3w',
+  },
+  {
+    name: 'hebrewWindows1255',
+    charset: 'windows-1255',
+    text: 'שלום, קיבלתי את החוזה. תודה רבה',
+    data: '-ezl7Swg9-nh7PrpIOD6IOTn5ebkLiD65ePkIPjh5A',
+  },
+  {
+    name: 'hebrewIso88598',
+    charset: 'iso-8859-8',
+    text: 'שלום, קיבלתי את החוזה. תודה רבה',
+    data: '-ezl7Swg9-nh7PrpIOD6IOTn5ebkLiD65ePkIPjh5A',
+  },
+  {
+    name: 'koreanEucKr',
+    charset: 'euc-kr',
+    text: '안녕하세요, 계약서를 받았습니다. 감사합니다',
+    data: 'vsiz58fPvLy_5CwgsOi-4LytuKYgud6-0r3AtM-02S4gsKi758fVtM-02Q',
+  },
+  {
     name: 'arabic',
     charset: 'utf-8',
     text: 'مرحبا، استلمت العقد. شكرا لك. الاجتماع الخميس 10:30.',

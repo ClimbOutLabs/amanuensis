@@ -1,6 +1,10 @@
 /** Reads a Gmail message into the plain fields the tools return. Mail text is data and is never interpreted here. */
 import type { GmailMessage, MessagePart } from './gmailWire';
-import { charsetOf, decodeBytes, decodeEncodedWords } from './mimeText';
+import { htmlToText } from './htmlText';
+import { charsetOf, decodeBytes, decodeEncodedWords, sniffHtmlCharset, stripInvisible } from './mimeText';
+
+/** Longest header value kept; a header this long is an attack or an accident, never a subject. */
+const MAX_HEADER_CHARS = 1000;
 
 export interface AttachmentInfo {
   id: string;
@@ -9,77 +13,42 @@ export interface AttachmentInfo {
   size: number;
 }
 
-/** A header's value with any RFC 2047 encoded words read in their own charset. */
-export function headerOf(input: { message: GmailMessage; name: string }): string {
+/** A header exactly as Gmail returned it, with folded lines joined. */
+export function rawHeaderOf(input: { part: MessagePart; name: string }): string {
   const wanted = input.name.toLowerCase();
-  const value = input.message.payload?.headers?.find(header => header.name.toLowerCase() === wanted)?.value ?? '';
-  return decodeEncodedWords(value);
+  const value = input.part.headers?.find(header => header.name.toLowerCase() === wanted)?.value ?? '';
+  return value.replace(/\r?\n[ \t]+/g, ' ');
 }
 
-function partCharset(part: MessagePart): string | null {
-  const contentType = part.headers?.find(header => header.name.toLowerCase() === 'content-type')?.value ?? '';
-  return charsetOf(contentType);
+/** A header's value with RFC 2047 encoded words read in their own charset, invisible characters removed, and the length bounded. */
+export function headerOf(input: { message: GmailMessage; name: string }): string {
+  if (input.message.payload === undefined) {
+    return '';
+  }
+  const value = stripInvisible(decodeEncodedWords(rawHeaderOf({ part: input.message.payload, name: input.name })));
+  return value.length > MAX_HEADER_CHARS ? `${value.slice(0, MAX_HEADER_CHARS)}...` : value;
 }
 
 function decodePart(input: { part: MessagePart; data: string }): string {
-  const bytes = Uint8Array.from(Buffer.from(input.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
-  return decodeBytes({ bytes, charset: partCharset(input.part) });
+  const bytes = Uint8Array.from(Buffer.from(input.data, 'base64url'));
+  const declared = charsetOf(rawHeaderOf({ part: input.part, name: 'content-type' }));
+  const charset = declared ?? (input.part.mimeType === 'text/html' ? sniffHtmlCharset(bytes) : null);
+  return decodeBytes({ bytes, charset });
 }
 
-/** Latin-1 supplement names (U+00A0 to U+00FF), in code point order, then the markup and punctuation ones. */
-const LATIN1_ENTITY_NAMES =
-  'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(
-    ' ',
-  );
-
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  ndash: '\u2013',
-  mdash: '\u2014',
-  lsquo: '\u2018',
-  rsquo: '\u2019',
-  ldquo: '\u201c',
-  rdquo: '\u201d',
-  hellip: '\u2026',
-  euro: '\u20ac',
-  trade: '\u2122',
-  bull: '\u2022',
-  ...Object.fromEntries(LATIN1_ENTITY_NAMES.map((name, index) => [name, String.fromCodePoint(0xa0 + index)])),
-};
-
-function decodeEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-    if (entity.startsWith('#')) {
-      const code =
-        entity[1]?.toLowerCase() === 'x' ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10);
-      return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-    }
-    return NAMED_ENTITIES[entity] ?? NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-  });
+interface Collected {
+  plain: string[];
+  html: string[];
+  attachments: AttachmentInfo[];
 }
 
-/** A readable plain-text version of an HTML body: no scripts, styles or tags. */
-export function htmlToText(html: string): string {
-  const withoutBlocks = html.replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
-  const withBreaks = withoutBlocks.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n');
-  return decodeEntities(withBreaks.replace(/<[^>]+>/g, ' '))
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t\f\v]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function collect(part: MessagePart, into: { plain: string[]; html: string[]; attachments: AttachmentInfo[] }): void {
+function collect(part: MessagePart, into: Collected): void {
   const attachmentId = part.body?.attachmentId;
-  if (attachmentId !== undefined && part.filename !== undefined && part.filename !== '') {
+  if (attachmentId !== undefined) {
+    // Any part Gmail serves by attachment id is a file, named or not.
     into.attachments.push({
       id: attachmentId,
-      filename: part.filename,
+      filename: part.filename !== undefined && part.filename !== '' ? part.filename : 'attachment',
       mimeType: part.mimeType ?? 'application/octet-stream',
       size: part.body?.size ?? 0,
     });
@@ -98,20 +67,19 @@ function collect(part: MessagePart, into: { plain: string[]; html: string[]; att
 export interface ReadMessage {
   body: string;
   attachments: AttachmentInfo[];
+  /** Whether the message has an HTML alternative, which a send would not carry. */
+  hasHtml: boolean;
 }
 
-/** The message text (plain text when the message has it, otherwise its HTML as text) and its attachments. */
+/** The message text (plain text when it has any, otherwise its HTML as text) and its attachments. */
 export function readMessage(message: GmailMessage): ReadMessage {
-  const found: { plain: string[]; html: string[]; attachments: AttachmentInfo[] } = {
-    plain: [],
-    html: [],
-    attachments: [],
-  };
+  const found: Collected = { plain: [], html: [], attachments: [] };
   if (message.payload !== undefined) {
     collect(message.payload, found);
   }
-  const body = found.plain.length > 0 ? found.plain.join('\n') : htmlToText(found.html.join('\n'));
-  return { body: body.trim(), attachments: found.attachments };
+  const plain = found.plain.join('\n');
+  const body = plain.trim() !== '' ? plain : htmlToText(found.html.join('\n'));
+  return { body: stripInvisible(body).trim(), attachments: found.attachments, hasHtml: found.html.length > 0 };
 }
 
 export function labelIdsOf(message: GmailMessage): string[] {

@@ -122,7 +122,7 @@ export async function exchangeCodeForTokens(input: {
   code: string;
   pkce_verifier: string;
   redirect_uri: string;
-  fetchImpl?: FetchImpl | undefined;
+  fetchImpl: FetchImpl | undefined;
 }): Promise<TokenExchange> {
   const response = await postForm({
     url: GOOGLE_TOKEN_URL,
@@ -160,7 +160,7 @@ export async function exchangeCodeForTokens(input: {
 export async function refreshAccessToken(input: {
   client: OAuthClient;
   refresh_token: string;
-  fetchImpl?: FetchImpl | undefined;
+  fetchImpl: FetchImpl | undefined;
 }): Promise<{ access_token: string; expires_in_seconds: number }> {
   const response = await postForm({
     url: GOOGLE_TOKEN_URL,
@@ -190,7 +190,7 @@ export async function refreshAccessToken(input: {
  * Revokes the login at Google. A token Google already rejects counts as revoked, so Disconnect still
  * clears a login that expired. Any other failure throws and the caller keeps the stored login.
  */
-export async function revokeToken(input: { token: string; fetchImpl?: FetchImpl | undefined }): Promise<void> {
+export async function revokeToken(input: { token: string; fetchImpl: FetchImpl | undefined }): Promise<void> {
   const response = await postForm({
     url: GOOGLE_REVOKE_URL,
     fetchImpl: input.fetchImpl ?? fetch,
@@ -211,7 +211,7 @@ const ProfileSchema = z.object({ emailAddress: z.string() });
 /** The signed-in Gmail address, read with a live access token. */
 export async function fetchProfileEmail(input: {
   access_token: string;
-  fetchImpl?: FetchImpl | undefined;
+  fetchImpl: FetchImpl | undefined;
 }): Promise<string> {
   const response = await fetchGoogle({
     fetchImpl: input.fetchImpl ?? fetch,

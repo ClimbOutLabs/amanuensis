@@ -1299,6 +1299,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     }
     try {
       return await gmailCapability({
+        fetchImpl: undefined,
         connections,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,

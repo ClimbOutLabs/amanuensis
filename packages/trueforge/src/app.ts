@@ -522,6 +522,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/user/settings/google',
     withAuth(
       createGoogleRouter({
+        fetchImpl: undefined,
         googleConnectionStore: deps.googleConnectionStore,
         resolveRequestContext,
         logger: deps.logger,

@@ -30,7 +30,7 @@ export interface GoogleRouterDeps {
   resolveRequestContext: ResolveRequestContext;
   logger: Logger;
   /** Replaceable so tests never reach Google. */
-  fetchImpl?: typeof fetch | undefined;
+  fetchImpl: typeof fetch | undefined;
 }
 
 const RESULT_PAGE_STYLE = 'font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem';
@@ -69,6 +69,7 @@ function toClientInput(body: {
 
 export function createGoogleRouter(deps: GoogleRouterDeps) {
   const service = new GoogleConnectService({
+    now: undefined,
     connections: deps.googleConnectionStore,
     pending: deps.googleConnectionStore,
     fetchImpl: deps.fetchImpl,

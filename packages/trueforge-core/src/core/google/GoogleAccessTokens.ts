@@ -26,8 +26,8 @@ export class GoogleAccessTokens {
   constructor(input: {
     connections: GoogleConnectionStore;
     owner: GoogleOwner;
-    now?: (() => number) | undefined;
-    fetchImpl?: typeof fetch | undefined;
+    now: (() => number) | undefined;
+    fetchImpl: typeof fetch | undefined;
   }) {
     this.#connections = input.connections;
     this.#owner = input.owner;

@@ -34,7 +34,7 @@ export interface WebSearchTurnState {
   resultUrls: Set<string>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
-  /** True once the turn read private data (mail), after which a search asks instead of running silently. */
+  /** True once the session read private data (mail), after which a search asks instead of running silently. */
   privateDataRead: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
@@ -165,4 +165,16 @@ export function unreturnedUrls(input: { values: readonly string[]; state: WebSea
     }
   }
   return unreturned;
+}
+
+/**
+ * The one place that records and answers "has this session read private data". A tool that returns the user's
+ * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
+ */
+export function markPrivateDataRead(state: WebSearchTurnState): void {
+  state.privateDataRead = true;
+}
+
+export function hasReadPrivateData(state: WebSearchTurnState): boolean {
+  return state.privateDataRead;
 }

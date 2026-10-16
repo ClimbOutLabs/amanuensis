@@ -69,8 +69,8 @@ export class GoogleConnectService {
   constructor(input: {
     connections: GoogleConnectionStore;
     pending: PendingGoogleAuthorizationStore;
-    now?: (() => Date) | undefined;
-    fetchImpl?: typeof fetch | undefined;
+    now: (() => Date) | undefined;
+    fetchImpl: typeof fetch | undefined;
   }) {
     this.#connections = input.connections;
     this.#pending = input.pending;
@@ -223,7 +223,12 @@ export class GoogleConnectService {
     if (record === null) {
       return { ok: false, reason: 'not_connected' };
     }
-    const tokens = new GoogleAccessTokens({ connections: this.#connections, owner, fetchImpl: this.#fetchImpl });
+    const tokens = new GoogleAccessTokens({
+      now: undefined,
+      connections: this.#connections,
+      owner,
+      fetchImpl: this.#fetchImpl,
+    });
     try {
       const access = await tokens.get();
       const accountEmail = await fetchProfileEmail({ access_token: access.access_token, fetchImpl: this.#fetchImpl });

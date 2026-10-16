@@ -10,7 +10,7 @@ export async function checkClientWithGoogle(input: {
   client_id: string;
   redirect_uri: string;
   scopes: readonly string[];
-  fetchImpl?: typeof fetch | undefined;
+  fetchImpl: typeof fetch | undefined;
 }): Promise<ClientProblem[]> {
   const url = buildAuthorizationUrl({
     client_id: input.client_id,
