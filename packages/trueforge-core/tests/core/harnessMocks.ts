@@ -63,10 +63,12 @@ export function makeStubPublicSandbox(
     boundRepository?: BoundRepository | undefined;
     exec?: SandboxProvider['exec'] | undefined;
     skillMounter?: ISkillMounter | undefined;
+    network?: 'none' | undefined;
   } = {},
 ): Sandbox {
   const provider: SandboxProvider = {
     type: 'test',
+    network: options.network,
     buildImage: jest.fn(),
     getImageBuildStatus: jest.fn(),
     createSandbox: jest.fn(),

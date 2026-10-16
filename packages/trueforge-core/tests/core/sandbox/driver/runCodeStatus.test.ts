@@ -43,6 +43,15 @@ describe('runCodeStatusFromReadiness', () => {
     expect(runCodeStatusFromReadiness(daemon)).toEqual({ state: 'daemon_unavailable', detail: 'docker info failed' });
   });
 
+  it('maps the sandbox slots being down to slots_unavailable with the driver text', () => {
+    expect(
+      runCodeStatusFromReadiness({ ready: false, error_code: 'slots_unavailable', error: 'slots are down' }),
+    ).toEqual({
+      state: 'slots_unavailable',
+      detail: 'slots are down',
+    });
+  });
+
   it.each(['unsupported_platform', 'kvm_unavailable'] as const)('maps %s to unsupported_platform', errorCode => {
     expect(runCodeStatusFromReadiness({ ready: false, error_code: errorCode, error: 'not here' })).toEqual({
       state: 'unsupported_platform',

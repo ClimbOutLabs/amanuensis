@@ -16,6 +16,11 @@ ENV NODE_ENV=production \
     STANDALONE=false \
     HOST=0.0.0.0
 
+# git and CA certificates: the server runs git itself for the sandbox slots, whose guests have no network.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ARG APP_VERSION
 RUN test -n "$APP_VERSION" || (echo "APP_VERSION build-arg is required" >&2 && exit 1)
 
@@ -43,14 +48,17 @@ RUN groupadd --gid 10001 trueforge \
 # must still mount persistent volumes. Without these dirs, the cwd-relative
 # storage defaults resolve under the root-owned workdir and die with EACCES at
 # first write.
-RUN mkdir -p /data/memory /data/persona-knowledge \
+RUN mkdir -p /data/memory /data/persona-knowledge /data/app \
   && chown -R 10001:10001 /data
 
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own
 # values (compose, runbook templates) override these.
+# APP_DATA_DIR keeps SQLite defaults, sandbox state and the git bridge on the data volume: the runtime user
+# has no home directory, so the default under HOME would fail with EACCES at startup.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
-  PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
+  PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
+  APP_DATA_DIR=/data/app
 
 EXPOSE 8790
 

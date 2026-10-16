@@ -6,8 +6,8 @@ import {
   literalToolNames,
   MCP_AUTO_PRELOAD_MAX_TOOLS,
   selectorsIncludeAll,
-  toolMatchesAnySelector,
   TOOL_TAG_UNCLASSIFIED,
+  toolMatchesAnySelector,
   toolRequiresApproval,
 } from './toolSelectors';
 

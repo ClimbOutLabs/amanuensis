@@ -22,7 +22,8 @@ export const LARGE_MARKDOWN_THROTTLE_MS = 100;
  * Enabling the hook immediately catches up to the current raw prefix, then coalesces subsequent
  * stream updates to one commit per `throttleMs`. Completion always bypasses the timer so the final
  * document is exact. While disabled, the hook mirrors `text` and stays ready for a monotonic
- * transition into catch-up mode.
+ * transition into catch-up mode. Changing `resetKey` (e.g. the message id) drops all reveal state
+ * so a shorter new text is shown immediately instead of being held back by the anti-rewind guard.
  */
 export function useThrottledMarkdownText(
   text: string,
@@ -30,13 +31,15 @@ export function useThrottledMarkdownText(
     isComplete,
     enabled,
     throttleMs = LARGE_MARKDOWN_THROTTLE_MS,
-  }: { isComplete: boolean; enabled: boolean; throttleMs?: number },
+    resetKey,
+  }: { isComplete: boolean; enabled: boolean; throttleMs?: number; resetKey?: string },
 ): string {
   const [committed, setCommitted] = useState(text);
   const lastCommittedRef = useRef(text);
   const lastCommitAtRef = useRef(Date.now());
   const pendingRef = useRef(text);
   const wasEnabledRef = useRef(enabled);
+  const lastResetKeyRef = useRef(resetKey);
 
   useEffect(() => {
     pendingRef.current = text;
@@ -50,6 +53,17 @@ export function useThrottledMarkdownText(
       lastCommitAtRef.current = Date.now();
       setCommitted(value);
     };
+
+    // A new reset key (e.g. a new message) discards all prior reveal state so
+    // stale text from the previous message never renders in the new bubble.
+    if (lastResetKeyRef.current !== resetKey) {
+      lastResetKeyRef.current = resetKey;
+      wasEnabledRef.current = enabled;
+      lastCommittedRef.current = text;
+      lastCommitAtRef.current = Date.now();
+      setCommitted(text);
+      return;
+    }
 
     if (!enabled) {
       wasEnabledRef.current = false;
@@ -83,7 +97,7 @@ export function useThrottledMarkdownText(
       commit(pendingRef.current);
     }, throttleMs - elapsed);
     return () => clearTimeout(id);
-  }, [text, isComplete, enabled, throttleMs]);
+  }, [text, isComplete, enabled, throttleMs, resetKey]);
 
   return enabled ? committed : text;
 }

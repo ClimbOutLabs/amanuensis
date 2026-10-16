@@ -28,7 +28,22 @@ export type UiModelEntry = ModelEntry & {
 export type UiStreamTimeout = TrueForgeApi.ModelProviderStreamTimeout;
 
 export type UiModelProvider = ModelProviderBase<UiModelEntry>;
-export type UiModelProviderCatalogEntry = ModelProviderCatalogEntry<UiModelEntry>;
+/** A catalog preset may carry the endpoint it is meant for; absent means the provider type's default. */
+export type UiModelProviderCatalogEntry = ModelProviderCatalogEntry<UiModelEntry> & { baseUrl?: string };
+
+/**
+ * A configured provider as the server lists it: `envManaged` marks one the server rewrites from its
+ * environment at startup, so the key and models are read-only here. Not yet on the port's provider type.
+ */
+export type UiConfiguredModelProvider = UiModelProvider & {
+  streamTimeout?: UiStreamTimeout;
+  envManaged?: boolean;
+};
+
+/** True for a provider the server owns through its environment (see {@link UiConfiguredModelProvider}). */
+export function isEnvManagedProvider(provider: ModelProviderBase): boolean {
+  return 'envManaged' in provider && provider.envManaged === true;
+}
 
 /** Deleting a provider row is a local DB write; it never needs the SDK's full 60s default. */
 const DELETE_MODEL_PROVIDER_TIMEOUT_SECONDS = 15;
@@ -49,9 +64,7 @@ export function toHarnessModelEntry(model: UiModelEntry): TrueForgeApi.Configure
   };
 }
 
-export function toUiModelProvider(
-  provider: TrueForgeApi.ConfiguredModelProvider,
-): UiModelProvider & { streamTimeout?: UiStreamTimeout } {
+export function toUiModelProvider(provider: TrueForgeApi.ConfiguredModelProvider): UiConfiguredModelProvider {
   const { name, manifest } = provider;
   return {
     id: name,
@@ -60,6 +73,7 @@ export function toUiModelProvider(
     ...(manifest.baseUrl === undefined ? {} : { baseUrl: manifest.baseUrl }),
     models: manifest.models.map(toUiModelEntry),
     ...(manifest.streamTimeout === undefined ? {} : { streamTimeout: manifest.streamTimeout }),
+    ...(provider.envManaged === true ? { envManaged: true } : {}),
   };
 }
 
@@ -78,6 +92,7 @@ export function toUiCatalogModelProviderEntry(
     type: provider.type,
     name: provider.type,
     ...(provider.logo === undefined ? {} : { logo: provider.logo }),
+    ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     models: provider.models.map(toUiModelEntry),
   };
 }

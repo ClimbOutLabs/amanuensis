@@ -5,6 +5,7 @@
  * the action executes; outcomes of approved or relaxed actions are written
  * after dispatch. Retention is bounded server-side (default 90 days).
  */
+import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import type { AutoDenyReason, Tier, TierDecision } from './tier';
 
@@ -88,6 +89,35 @@ export async function recordStandingTrustRun(input: {
     tool_name: input.tool_name,
     description: input.description,
     outcome: 'logged',
+    auto_deny_reason: null,
+  });
+}
+
+/**
+ * Record what became of an action an unattended run held: held ('logged'), then refused or turned
+ * down ('denied'), or approved without a later dispatch row ('approved'). An approval that still asks
+ * is recorded after dispatch like any other.
+ */
+export async function recordHeldActionAudit(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  info: InternalToolCallInfo;
+  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied'>;
+  /** What happened, in plain words, written before the action's own description. */
+  note: string;
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  await writer.record({
+    tenant_id: input.identity.tenant_id,
+    created_by: input.identity.created_by,
+    conversation_id: input.identity.conversation_id,
+    tier: input.info.tier ?? 3,
+    tool_name: input.info.original_tool_name,
+    description: `${input.note}: ${input.info.tier3_card?.plain_what ?? input.info.original_tool_name}`,
+    outcome: input.outcome,
     auto_deny_reason: null,
   });
 }

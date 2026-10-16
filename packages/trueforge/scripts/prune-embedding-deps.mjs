@@ -17,10 +17,10 @@
  *
  * Wired as this package's `postinstall`.
  */
-import { rm, readdir } from 'node:fs/promises';
 import { readFileSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Read a package.json name without throwing. */
 function manifestName(dir) {

@@ -12,7 +12,7 @@ import {
 import {
   decodeSessionEventPageToken,
   paginateSessionEventRows,
-  type SessionEventPageCursor,
+  sessionEventChainWindow,
 } from '@truefoundry/trueforge-core/agent-session/store/SessionEventPageToken';
 import {
   SessionNotFoundError,
@@ -227,45 +227,54 @@ export async function listSessionEvents(
     throw new SessionNotFoundError(input.session_id);
   }
 
-  const decodedCursor = input.page_token === undefined ? undefined : decodeSessionEventPageToken(input.page_token);
-  const lastTurnId = decodedCursor?.last_turn_id ?? input.last_turn_id ?? session.last_turn_id;
+  const cursor = input.page_token === undefined ? undefined : decodeSessionEventPageToken(input.page_token);
+  const lastTurnId = cursor?.last_turn_id ?? input.last_turn_id ?? session.last_turn_id;
   if (lastTurnId === null) {
     return { data: [], pagination: { limit } };
   }
-  const cursor: SessionEventPageCursor = {
-    last_turn_id: lastTurnId,
-    offset: decodedCursor?.offset ?? 0,
-  };
 
   const anchor = await db
     .selectFrom('turn')
     .select(['turn_id', jsonText<string[]>(sql.ref('ancestor_ids')).as('ancestor_ids')])
     .where('session_id', '=', input.session_id)
-    .where('turn_id', '=', cursor.last_turn_id)
+    .where('turn_id', '=', lastTurnId)
     .executeTakeFirst();
   if (!anchor) {
-    throw new TurnNotFoundError(cursor.last_turn_id);
+    throw new TurnNotFoundError(lastTurnId);
+  }
+  if (input.types?.length === 0) {
+    return { data: [], pagination: { limit } };
   }
 
   const chainIds = await resolveAncestorChain(db, input.session_id, {
     turn_id: anchor.turn_id,
     ancestor_ids: anchor.ancestor_ids,
   });
+  // Bind the page's chain window as a JSON array; json_each gives (key=index, value=turn_id).
+  const windowJson = JSON.stringify(sessionEventChainWindow({ chain: chainIds, cursor }));
 
-  // Bind the ancestor chain as a JSON array; json_each gives (key=index, value=turn_id).
-  const chainJson = JSON.stringify(chainIds);
-
-  const rows = await db
-    .selectFrom(sql<{ key: number; value: string }>`json_each(${chainJson})`.as('c'))
+  let query = db
+    .selectFrom(sql<{ key: number; value: string }>`json_each(${windowJson})`.as('c'))
     .innerJoin('session_event as e', join =>
       join.on('e.session_id', '=', input.session_id).on(sql<boolean>`e.turn_id = c.value`),
-    )
+    );
+  if (cursor !== undefined) {
+    query = query.where(eb =>
+      eb.or([eb(sql<string>`c.value`, '<>', cursor.turn_id), eb('e.event_id', '<', cursor.event_id)]),
+    );
+  }
+  if (input.after_event_id !== undefined) {
+    query = query.where('e.event_id', '>', input.after_event_id);
+  }
+  if (input.types !== undefined) {
+    query = query.where(sql<string>`e.event ->> 'type'`, 'in', [...input.types]);
+  }
+  const rows = await query
     .select([sql<string>`c.value`.as('turn_id'), jsonText<SessionEventItem['event']>(sql.ref('e.event')).as('event')])
     .orderBy(sql`c.key`, 'desc')
     .orderBy('e.event_id', 'desc')
     .limit(limit + 1)
-    .offset(cursor.offset)
     .execute();
 
-  return paginateSessionEventRows(rows, limit, cursor);
+  return paginateSessionEventRows(rows, { limit, last_turn_id: lastTurnId });
 }

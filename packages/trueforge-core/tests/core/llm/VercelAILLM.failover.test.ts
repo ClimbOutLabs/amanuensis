@@ -70,6 +70,37 @@ describe('VercelAILLM Token Factory failover journey', () => {
     }
   });
 
+  it('reports each request that fell over, and none that the primary answered', async () => {
+    const { server, baseUrl } = await startStubServer();
+    try {
+      const onFallback = jest.fn();
+      const down = new VercelAILLM({
+        providerConfig: providerConfig({ type: 'custom', baseUrl: 'http://127.0.0.1:1/v1', modelId: 'dead' }),
+        fallbackProviderConfig: providerConfig({ type: 'tokenfactory', baseUrl, modelId: 'stub-model' }),
+        logger: makeSilentLogger(),
+        onFallback,
+      });
+      await down.createNonStream({ messages: [{ role: 'user', content: 'hi' }] });
+      await down.createNonStream({ messages: [{ role: 'user', content: 'again' }] });
+      expect(onFallback).toHaveBeenCalledTimes(2);
+
+      const healthy = new VercelAILLM({
+        providerConfig: providerConfig({ type: 'custom', baseUrl, modelId: 'stub-model' }),
+        fallbackProviderConfig: providerConfig({
+          type: 'tokenfactory',
+          baseUrl: 'http://127.0.0.1:1/v1',
+          modelId: 'x',
+        }),
+        logger: makeSilentLogger(),
+        onFallback,
+      });
+      await healthy.createNonStream({ messages: [{ role: 'user', content: 'hi' }] });
+      expect(onFallback).toHaveBeenCalledTimes(2);
+    } finally {
+      server.close();
+    }
+  });
+
   it('still works with no fallback configured', async () => {
     const { server, baseUrl } = await startStubServer();
     try {

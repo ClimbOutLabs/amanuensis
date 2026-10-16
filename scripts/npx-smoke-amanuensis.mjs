@@ -14,6 +14,8 @@ import { platform } from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+import { standinOidcEnv, startStandinOidc } from './standin-oidc.mjs';
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win32 = platform === 'win32';
 const shell = win32 ? { shell: true } : {};
@@ -24,6 +26,8 @@ const packDir = await mkdtemp(path.join(tmpdir(), 'amanuensis-pack-'));
 const consumerDir = await mkdtemp(path.join(tmpdir(), 'amanuensis-npx-'));
 const dataDir = await mkdtemp(path.join(tmpdir(), 'amanuensis-data-'));
 let child;
+// Standalone refuses to start without login; a stand-in provider on loopback satisfies it without Docker.
+const oidc = await startStandinOidc();
 
 try {
   execFileSync('pnpm', ['--filter', 'amanuensis', 'pack', '--pack-destination', packDir], {
@@ -44,6 +48,7 @@ try {
     env: {
       ...process.env,
       HOST: host,
+      ...standinOidcEnv(oidc.issuer),
       SQLITE_PATH: path.join(dataDir, 'db.sqlite'),
       NODE_ENV: 'production',
     },
@@ -91,6 +96,7 @@ try {
       // Already gone.
     }
   }
+  await oidc.close();
   await rm(packDir, { recursive: true, force: true });
   await rm(consumerDir, { recursive: true, force: true });
   await rm(dataDir, { recursive: true, force: true });
