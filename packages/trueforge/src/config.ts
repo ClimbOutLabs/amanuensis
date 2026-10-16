@@ -2470,18 +2470,14 @@ export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn)
   }
   const fix = "Set OIDC_ALLOWED_EMAILS to the owner's email address only.";
   if (allowed.length === 0) {
-    throw new Error(
-      `Refusing to start: OIDC_ALLOWED_EMAILS must hold the email address of the owner. ${fix}`,
-    );
+    throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must hold the email address of the owner. ${fix}`);
   }
   if (allowed.length > 1) {
     throw new Error(
       `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses, but a standalone instance has exactly one account. ${fix}`,
     );
   }
-  throw new Error(
-    `Refusing to start: OIDC_ALLOWED_EMAILS must be one exact email address, not a pattern. ${fix}`,
-  );
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one exact email address, not a pattern. ${fix}`);
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
