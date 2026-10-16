@@ -85,6 +85,10 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
               - '.github/workflows/ci.yml'
+            sandbox-slot-agent:
+              - 'ops/sandbox-slot/agent/**'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
             store:
               - 'packages/trueforge/src/db/**'
               - 'packages/trueforge/tests/db/**'
@@ -116,6 +120,7 @@ jobs:
           TRUEFORGE_SDK: ${{ steps.filter.outputs['trueforge-sdk'] }}
           FRONTEND: ${{ steps.filter.outputs.frontend }}
           TRUEFORGE_UI: ${{ steps.filter.outputs['trueforge-ui'] }}
+          SANDBOX_SLOT_AGENT: ${{ steps.filter.outputs['sandbox-slot-agent'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
@@ -124,6 +129,7 @@ jobs:
           if (process.env.TRUEFORGE_SDK === 'true') changedPackages.push('trueforge-sdk');
           if (process.env.FRONTEND === 'true') changedPackages.push('frontend');
           if (process.env.TRUEFORGE_UI === 'true') changedPackages.push('trueforge-ui');
+          if (process.env.SANDBOX_SLOT_AGENT === 'true') changedPackages.push('sandbox-slot-agent');
           console.log(`list=${JSON.stringify(changedPackages)}`);
           EOF
 
@@ -247,6 +253,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Setup Go
+        if: matrix.package == 'sandbox-slot-agent'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ops/sandbox-slot/agent/go.mod
 
       - name: Test
         run: pnpm "test:${{ matrix.package }}"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# sg docker -c CMD: runs CMD as if the docker group were active.
+printf 'sg %s\n' "$*" >>"$STUB_LOG"
+[ "$1" = docker ] && [ "$2" = -c ] || exit 1
+STUB_VIA_SG=1 exec sh -c "$3"

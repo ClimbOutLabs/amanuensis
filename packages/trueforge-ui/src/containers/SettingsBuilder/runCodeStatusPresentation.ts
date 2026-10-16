@@ -35,7 +35,47 @@ function signature(result: { text: string; tone: StatusTone }): Check {
 const DOWNLOADED = download({ text: 'Downloaded', tone: 'success' });
 const VERIFIED = signature({ text: 'Verified', tone: 'success' });
 
+/** The one repair command, shown for every sandbox-slot problem. */
+const SLOTS_FIX = 'Run `aman doctor sandbox --fix` on the machine that runs Aman, then press Re-check.';
+
+/** Wording for the isolated sandbox slots, which have no Docker, image or signature to talk about. */
+function presentSlotsStatus(status: RunCodeStatus): RunCodeStatusPresentation {
+  switch (status.state) {
+    case 'ready':
+      return {
+        tone: 'success',
+        pill: 'Ready',
+        headline: 'Code execution is on',
+        summary:
+          'The assistant can run Python, Node.js and shell commands. Each command starts in a fresh, isolated sandbox with no network access.',
+        checks: [],
+      };
+    case 'isolation_refused':
+      return {
+        tone: 'failure',
+        pill: 'Off',
+        headline: 'Code execution is off: the sandbox could not prove it is safe',
+        summary:
+          'Before it runs anything, the sandbox checks its own safety limits, such as no network access and no extra privileges. One of those checks failed, so it refuses to run code.',
+        fix: SLOTS_FIX,
+        checks: [],
+      };
+    default:
+      return {
+        tone: 'failure',
+        pill: 'Off',
+        headline: 'Code execution is off: the sandbox is not running',
+        summary: 'The server could not reach the sandbox that runs code, so the assistant cannot run any.',
+        fix: SLOTS_FIX,
+        checks: [],
+      };
+  }
+}
+
 export function presentRunCodeStatus(status: RunCodeStatus): RunCodeStatusPresentation {
+  if (status.backend === 'slots') {
+    return presentSlotsStatus(status);
+  }
   switch (status.state) {
     case 'ready':
       return {
@@ -118,6 +158,8 @@ export function presentRunCodeStatus(status: RunCodeStatus): RunCodeStatusPresen
         fix: 'Update Docker and check that its security features are not disabled, then re-check.',
         checks: [DOWNLOADED, VERIFIED],
       };
+    case 'slots_unavailable':
+      return presentSlotsStatus(status);
     case 'unsupported_platform':
       return {
         tone: 'failure',

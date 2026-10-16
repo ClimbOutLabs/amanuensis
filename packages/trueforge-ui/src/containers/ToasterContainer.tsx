@@ -5,6 +5,11 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useSlot } from '../theme/SlotsProvider.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 import { EXPIRED_REQUEST_DESCRIPTION, EXPIRED_REQUEST_TITLE, isStaleApprovalError } from '../utils/staleApproval.js';
+import {
+  DAILY_BUDGET_DESCRIPTION,
+  DAILY_BUDGET_TITLE,
+  isTokenFactoryDailyCapError,
+} from '../utils/tokenFactoryBudget.js';
 
 const MAX_TOAST_DESCRIPTION_CHARS = 480;
 const MAX_VISIBLE_TOASTS = 5;
@@ -39,6 +44,9 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
 function normalizeError(error: unknown): ToastContent {
   if (isStaleApprovalError(error)) {
     return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
+  }
+  if (isTokenFactoryDailyCapError(error)) {
+    return { title: DAILY_BUDGET_TITLE, description: DAILY_BUDGET_DESCRIPTION };
   }
   if (isHttpLikeError(error)) {
     const statusCode = error.statusCode;

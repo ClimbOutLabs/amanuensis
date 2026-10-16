@@ -1,0 +1,28 @@
+# Backs each slot's workspace volume with the fixed-size disk that the slot setup (the installer, `aman doctor
+# sandbox --fix` or `pnpm sandbox:slots --fix`) creates on a Linux host, so a program that fills its workspace
+# fills only its own slot's disk. The slot setup adds it to docker-compose.slots.yml and supplies the two variables. On Docker Desktop and
+# WSL2 the VM's own disk bounds the workspaces and this file is not used. The agent refuses to run anything
+# unless the workspace it sees really is an ext4 disk of the size given here.
+x-disk-size: &disk-size
+  environment:
+    AMAN_WORKSPACE_QUOTA_BYTES: ${AMAN_SLOTS_DISK_BYTES:?run pnpm sandbox:slots}
+
+services:
+  sandbox-1: *disk-size
+  sandbox-2: *disk-size
+  sandbox-3: *disk-size
+  sandbox-4: *disk-size
+
+volumes:
+  slot_ws_1:
+    driver: local
+    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-1' }
+  slot_ws_2:
+    driver: local
+    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-2' }
+  slot_ws_3:
+    driver: local
+    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-3' }
+  slot_ws_4:
+    driver: local
+    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-4' }

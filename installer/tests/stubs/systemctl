@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Records the call; "cat" fails so a unit is never taken to exist.
+printf 'stub-systemctl %s\n' "$*" >>"$STUB_LOG"
+[ "${1:-}" != cat ] || exit 1
+exit 0

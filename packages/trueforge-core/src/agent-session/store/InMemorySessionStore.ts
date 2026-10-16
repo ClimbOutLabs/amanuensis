@@ -69,7 +69,7 @@ import { decodeOffsetPageToken, encodeOffsetPageToken } from './OffsetPageToken'
 import {
   decodeSessionEventPageToken,
   paginateSessionEventRows,
-  type SessionEventPageCursor,
+  sessionEventChainWindow,
 } from './SessionEventPageToken';
 import { decodeSessionListPageToken, paginateSessionListRows } from './SessionListPageToken';
 import {
@@ -1165,33 +1165,41 @@ export class InMemorySessionStore<
       throw new SessionNotFoundError(input.session_id);
     }
 
-    const decodedCursor = input.page_token === undefined ? undefined : decodeSessionEventPageToken(input.page_token);
-    const lastTurnId = decodedCursor?.last_turn_id ?? input.last_turn_id ?? stored.record.last_turn_id;
+    const cursor = input.page_token === undefined ? undefined : decodeSessionEventPageToken(input.page_token);
+    const lastTurnId = cursor?.last_turn_id ?? input.last_turn_id ?? stored.record.last_turn_id;
     if (lastTurnId === null) {
       return { data: [], pagination: { limit: input.limit } };
     }
-    const cursor: SessionEventPageCursor = {
-      last_turn_id: lastTurnId,
-      offset: decodedCursor?.offset ?? 0,
-    };
 
-    const anchor = this.turns.get(turnKey({ session_id: input.session_id, turn_id: cursor.last_turn_id }));
+    const anchor = this.turns.get(turnKey({ session_id: input.session_id, turn_id: lastTurnId }));
     if (!anchor) {
-      throw new TurnNotFoundError(cursor.last_turn_id);
+      throw new TurnNotFoundError(lastTurnId);
     }
-    const turnIds = this.resolveAncestorChain(input.session_id, anchor);
-    const flattened: SessionEventItem[] = [];
-    for (const turnId of [...turnIds].reverse()) {
+    const window = sessionEventChainWindow({ chain: this.resolveAncestorChain(input.session_id, anchor), cursor });
+    const types = input.types === undefined ? undefined : new Set<string>(input.types);
+    const afterEventId = input.after_event_id;
+    const keep = (turnId: string, event: PersistedTurnEvent): boolean => {
+      if (cursor?.turn_id === turnId && event.id.localeCompare(cursor.event_id) >= 0) {
+        return false;
+      }
+      if (afterEventId !== undefined && event.id.localeCompare(afterEventId) <= 0) {
+        return false;
+      }
+      return types === undefined || types.has(event.type);
+    };
+    const rows: SessionEventItem[] = [];
+    for (const turnId of [...window].reverse()) {
       const evts = this.events.get(turnKey({ session_id: input.session_id, turn_id: turnId })) ?? [];
       for (const event of [...evts].sort((a, b) => b.id.localeCompare(a.id))) {
-        flattened.push({ turn_id: turnId, event });
+        if (keep(turnId, event)) {
+          rows.push({ turn_id: turnId, event });
+        }
+      }
+      if (rows.length > input.limit) {
+        break;
       }
     }
-    const page = paginateSessionEventRows(
-      flattened.slice(cursor.offset, cursor.offset + input.limit + 1),
-      input.limit,
-      cursor,
-    );
+    const page = paginateSessionEventRows(rows, { limit: input.limit, last_turn_id: lastTurnId });
     return { data: deepCopy(page.data), pagination: page.pagination };
   }
 

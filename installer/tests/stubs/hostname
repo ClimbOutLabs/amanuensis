@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test double for `hostname`: the short name in $STUB_HOSTNAME, and nothing when unset.
+[ -n "${STUB_HOSTNAME:-}" ] || exit 1
+echo "$STUB_HOSTNAME"

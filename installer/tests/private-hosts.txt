@@ -1,0 +1,33 @@
+# Hosts and how an instance treats them over plain http, read by the installer tests (lib/network.test.sh) and by
+# packages/trueforge/tests/unit/config/config.test.ts, so both sides agree.
+#   private       always allowed over http
+#   cgnat         100.64.0.0/10: private only while Tailscale is on this computer, public (ISP carrier-grade NAT) otherwise
+#   public        never allowed over http
+#   app-private   as private, for the app only (the installer does not handle IPv6)
+#   app-public    as public, for the app only
+private localhost
+private 127.0.0.1
+private 10.1.2.3
+private 172.16.0.1
+private 172.31.255.254
+private 192.168.0.9
+private 169.254.1.1
+private spark
+private spark.local
+private spark.example.ts.net
+cgnat 100.64.0.1
+cgnat 100.101.102.103
+cgnat 100.127.255.254
+public 8.8.8.8
+public 203.0.113.9
+public 172.15.0.1
+public 172.32.0.1
+public 100.63.255.255
+public 100.128.0.1
+public 192.169.1.1
+public 0.0.0.0
+public 010.1.1.1
+public aman.example.com
+public spark.local.example.com
+app-private [::1]
+app-public [fd00::1]

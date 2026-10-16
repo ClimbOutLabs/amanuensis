@@ -29,7 +29,7 @@ export interface SentinelServices {
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
-  /** True when no person watches the session (a scheduled run), so a call that would ask is denied instead. */
+  /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
 }
 
@@ -66,12 +66,20 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
- * Services for unattended sessions: user relaxations never apply, so a Tier 2
- * action parks for approval instead of running while nobody watches, and a web
- * search the outbound guard holds back is denied instead of asked.
+ * Services with the user's Tier 2 relaxations switched off, so such an action asks. Used for every
+ * turn of a scheduled chat: its context holds what the run read, so the owner's relaxations must
+ * not apply even once they are typing. Token and grant stores stay shared with the session.
+ */
+export function withoutRelaxations(services: SentinelServices): SentinelServices {
+  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+}
+
+/**
+ * Services for one unattended turn: no relaxations, and a call that would ask is held for the
+ * owner while nobody watches.
  */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()), unattended: true };
+  return { ...withoutRelaxations(services), unattended: true };
 }
 
 /**

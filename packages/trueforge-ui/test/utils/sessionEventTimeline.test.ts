@@ -23,6 +23,7 @@ import {
   mergeOverlappingSubAgentSegments,
 } from '@/utils/sessionEventTimelineChart.js';
 import { buildSessionTurnViews } from '@/utils/sessionTurnViews.js';
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 describe('session event colors', () => {
   it('falls back to the default preset chart tokens in legend order', () => {
@@ -105,6 +106,44 @@ describe('buildSessionTimelineSegments', () => {
     const systems = segments.filter(segment => segment.title === 'turn.done');
     assert.equal(systems[0]?.endMs, 60_000);
     assert.equal(systems[1]?.endMs, 120_000);
+  });
+
+  function approvalRequired(toolCalls: TrueForgeApi.ApprovalToolCallRef[]): SessionEventItem {
+    return {
+      turnId: 't1',
+      event: {
+        type: 'tool.approval_required',
+        id: 't1-approval',
+        createdAt: '2026-01-01T00:00:30.000Z',
+        threadId: 'main',
+        toolCalls,
+      },
+    };
+  }
+
+  it('draws no approval marker for events that only list held or unsaved actions', () => {
+    const marked = (toolCalls: TrueForgeApi.ApprovalToolCallRef[]) =>
+      buildSessionTimelineSegments(
+        buildSessionTurnViews([
+          created({ turnId: 't1', createdAt: '2026-01-01T00:00:00.000Z' }),
+          approvalRequired(toolCalls),
+          done({ turnId: 't1', createdAt: '2026-01-01T00:01:00.000Z' }),
+        ]),
+      ).filter(segment => segment.type === 'approval');
+    assert.equal(
+      marked([
+        { id: 'a', sourceEventId: 'm', held: true },
+        { id: 'b', sourceEventId: 'm', notSaved: 'too_many' },
+      ]).length,
+      0,
+    );
+    assert.equal(
+      marked([
+        { id: 'a', sourceEventId: 'm', held: true },
+        { id: 'b', sourceEventId: 'm' },
+      ]).length,
+      1,
+    );
   });
 
   it('builds nested sub-agent and overlapping tool-call segments', () => {

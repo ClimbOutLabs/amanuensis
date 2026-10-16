@@ -14,6 +14,7 @@ import {
 import { Prism as PrismHighlighter } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
@@ -54,7 +55,7 @@ function SyntaxHighlighterImpl({ code, language, darkTheme, className, showLineN
   const displayCode = useMemo(() => stripTrailingNewline(code), [code]);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(code).then(() => {
+    void copyText(code).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

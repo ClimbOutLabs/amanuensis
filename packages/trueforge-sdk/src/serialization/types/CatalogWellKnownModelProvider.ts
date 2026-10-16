@@ -7,6 +7,7 @@ import { CatalogModel } from "./CatalogModel.js";
 import { CatalogWellKnownModelProviderType } from "./CatalogWellKnownModelProviderType.js";
 
 export const CatalogWellKnownModelProvider: core.serialization.ObjectSchema<serializers.CatalogWellKnownModelProvider.Raw, TrueForge.CatalogWellKnownModelProvider> = core.serialization.object({
+        "baseUrl": core.serialization.property("base_url", core.serialization.string().optional()),
         "logo": core.serialization.string().optional(),
         "models": core.serialization.list(CatalogModel),
         "type": CatalogWellKnownModelProviderType
@@ -14,6 +15,7 @@ export const CatalogWellKnownModelProvider: core.serialization.ObjectSchema<seri
 
 export declare namespace CatalogWellKnownModelProvider {
     export interface Raw {
+        base_url?: string | null;
         logo?: string | null;
         models: CatalogModel.Raw[];
         type: CatalogWellKnownModelProviderType.Raw;
