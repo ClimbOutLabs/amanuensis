@@ -523,7 +523,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   );
   app.route(
     '/api/v1/data',
-    withAuth(
+    withAdminAuth(
       createDataImportRouter({
         sessionStore: deps.sessionStore,
         personaStore: deps.personaStore,
@@ -541,7 +541,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         authorizer: deps.authorizer,
         logger: deps.logger,
       }),
-      authMiddleware,
+      adminAuthMiddleware,
     ),
   );
   app.route(

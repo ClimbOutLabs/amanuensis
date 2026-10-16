@@ -1,16 +1,18 @@
 /**
- * Data import: restores an export archive into an empty instance.
+ * Data import: restores an export archive into a fresh instance.
  *
  * The archive is read strictly (size caps, path rules, every JSON section
  * validated against a Zod schema) and cross-checked before anything is
  * written; the session restore is then replayed against an in-memory store to
- * prove it lands cleanly. Writes run in a fixed order with the database
- * transaction last, so a failure at any earlier step can be fully undone and
- * the instance is left empty for a retry: placeholder agents, folders and
- * sessions, persona knowledge files, and memory files are compensated by
- * deletion, and the remaining records (personas, personalization, spaces,
- * schedules, connectors, settings, artifacts) commit in one transaction or
- * not at all.
+ * prove it lands cleanly. Every id the archive would create is checked not to
+ * exist yet. Writes then run in a fixed order with the database transaction
+ * last: agents, folders and chats, persona knowledge files and memory files are
+ * written one by one and recorded as they succeed, so a failure undoes exactly
+ * what this run created; the remaining records (personas, personalization,
+ * spaces, schedules, connectors, settings, artifacts) commit in one
+ * transaction or not at all. A marker setting names the planned writes while
+ * they run, and the transaction removes it, so a crash is cleaned up by the
+ * next run.
  *
  * Every imported record belongs to the importing user. Ids are kept, so
  * links inside chats keep working. Schedules arrive switched off. Connectors
@@ -24,31 +26,36 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { Logger } from 'winston';
+import type { z } from 'zod';
 
-import { sanitizeZipPath } from '../dataExport/exportService';
-import type { IAgentStore } from '../db/agentStore';
+import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
+import { EXPORT_SCHEMA_VERSION, EXPORTED_GLOBAL_SETTING_KEYS } from '../dataExport/exportService';
+import { normalizeZipEntryName } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
-import type { IPersonaStore } from '../db/personaStore';
-import type { IPersonalizationStore } from '../db/personalizationStore';
-import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
-import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
-import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
-import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
-import { EMBEDDING_DIMENSIONS } from '../runtime/memory/embeddingModel';
+import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import { splitEntries, vaultEntryTimestamp, vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { newId } from '../utils/id';
+import { DataImportError } from './importError';
 import {
-  DATA_IMPORT_SCHEMA_VERSION,
-  ImportChatsFileSchema,
+  clearImportMarker,
+  compensate,
+  emptyLedger,
+  readImportMarker,
+  UnreadableImportMarkerError,
+  writeImportMarker,
+  type ImportLedger,
+} from './importLedger';
+import { assertInstanceEmpty, assertNoIdCollisions, type PreflightDeps } from './importPreflight';
+import {
+  ImportAgentsFileSchema,
   ImportConnectorsFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
@@ -58,9 +65,9 @@ import {
   ImportSessionsFileSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  type ImportAgentRecord,
   type ImportConnectorRecord,
   type ImportFolderRecord,
-  type ImportKnowledgeDocument,
   type ImportManifest,
   type ImportPersonalizationFile,
   type ImportPersonasFile,
@@ -69,41 +76,20 @@ import {
   type ImportSettingsFile,
   type ImportSpacesFile,
 } from './importSchemas';
+import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
 
-export class DataImportError extends Error {
-  readonly status: 400 | 409 | 500;
-
-  constructor(message: string, status: 400 | 409 | 500, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'DataImportError';
-    this.status = status;
-  }
-}
-
-export type MemoryImportTarget = { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: MemoryClient };
-
-export interface DataImportDeps<TTransaction> {
+export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
-  personaStore: IPersonaStore<TTransaction>;
-  personalizationStore: IPersonalizationStore<TTransaction>;
-  spaceStore: ISpaceStore<TTransaction>;
-  scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
-  agentStore: IAgentStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
-  memoryTarget: MemoryImportTarget;
   personaKnowledgeDir: string;
-  /**
-   * Embeds knowledge chunk texts for re-indexing. Returns null when the
-   * embedding model is unavailable; chunks are then stored with empty vectors
-   * so no text is lost, and search quality returns when the model loads.
-   */
-  embedKnowledgeChunks: (texts: string[]) => Promise<readonly Float32Array[] | null>;
+  /** Re-indexes persona knowledge; an import that carries knowledge refuses while the model is not ready. */
+  knowledgeEmbedder: KnowledgeEmbedder;
+  logger: Pick<Logger, 'info' | 'warn'>;
 }
 
 export interface DataImportRequest {
@@ -125,8 +111,8 @@ export interface DataImportResult {
   spaces: number;
   schedules: number;
   folders: number;
+  agents: number;
   connectors: number;
-  connectors_skipped: number;
   /** True when schedules were imported; they all arrive switched off. */
   schedules_off: boolean;
   /** Plain-words summary of what arrived and what did not. */
@@ -137,12 +123,17 @@ export interface DataImportResult {
 const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
 const MAX_ENTRIES = 100_000;
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
+const MAX_LOGGED_ISSUES = 20;
+
+/** Instance-wide settings an import may fill in; any other key in an archive is ignored. */
+const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>(EXPORTED_GLOBAL_SETTING_KEYS);
 
 const REQUIRED_SECTIONS = [
   'manifest.json',
   'chats.json',
   'sessions.json',
   'folders.json',
+  'agents.json',
   'personas.json',
   'personalization.json',
   'spaces.json',
@@ -151,11 +142,60 @@ const REQUIRED_SECTIONS = [
   'settings.json',
 ] as const;
 
-function parseSection<T>(
-  files: ReadonlyMap<string, Buffer>,
-  name: string,
-  schema: { parse: (value: unknown) => T },
-): T {
+/** `[3].turns[0].events` style location of a Zod issue; keys and indices only, never the data under them. */
+function formatIssuePath(issuePath: readonly PropertyKey[]): string {
+  let out = '';
+  for (const part of issuePath) {
+    if (typeof part === 'number') {
+      out += `[${String(part)}]`;
+    } else {
+      out += out === '' ? String(part) : `.${String(part)}`;
+    }
+  }
+  return out === '' ? 'the top level' : out;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The chat and turn ids around an issue in sessions.json, so a log line points at the damaged turn. */
+function locateSessionIds(json: unknown, issuePath: readonly PropertyKey[]): { session_id?: string; turn_id?: string } {
+  const [sessionIndex, turnsKey, turnIndex] = issuePath;
+  if (!Array.isArray(json) || typeof sessionIndex !== 'number') {
+    return {};
+  }
+  const entry: unknown = json[sessionIndex];
+  if (!isRecord(entry)) {
+    return {};
+  }
+  const located: { session_id?: string; turn_id?: string } = {};
+  const session = entry['session'];
+  if (isRecord(session) && typeof session['session_id'] === 'string') {
+    located.session_id = session['session_id'];
+  }
+  const turns = entry['turns'];
+  if (turnsKey === 'turns' && typeof turnIndex === 'number' && Array.isArray(turns)) {
+    const turnEntry: unknown = turns[turnIndex];
+    const turn = isRecord(turnEntry) ? turnEntry['turn'] : undefined;
+    if (isRecord(turn) && typeof turn['turn_id'] === 'string') {
+      located.turn_id = turn['turn_id'];
+    }
+  }
+  return located;
+}
+
+function parseSection<TSchema extends z.ZodType>({
+  files,
+  name,
+  schema,
+  logger,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  name: string;
+  schema: TSchema;
+  logger: DataImportDeps<never>['logger'];
+}): z.infer<TSchema> {
   const data = files.get(name);
   if (data === undefined) {
     throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
@@ -168,19 +208,32 @@ function parseSection<T>(
       cause,
     });
   }
-  try {
-    return schema.parse(json);
-  } catch (cause) {
-    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
-      cause,
-    });
+  const result = schema.safeParse(json);
+  if (result.success) {
+    return result.data;
   }
+  const [first] = result.error.issues;
+  const ids = first === undefined || name !== 'sessions.json' ? {} : locateSessionIds(json, first.path);
+  logger.warn('Data import rejected an export section', {
+    section: name,
+    issue_count: result.error.issues.length,
+    // Paths and issue kinds only: the archive's own values never reach the log.
+    issues: result.error.issues
+      .slice(0, MAX_LOGGED_ISSUES)
+      .map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
+    ...ids,
+  });
+  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
+  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
+    cause: result.error,
+  });
 }
 
 interface ArchiveContents {
   manifest: ImportManifest;
   sessions: ImportSessionEntry[];
   folders: ImportFolderRecord[];
+  agents: ImportAgentRecord[];
   personas: ImportPersonasFile;
   personalization: ImportPersonalizationFile;
   spaces: ImportSpacesFile;
@@ -191,7 +244,12 @@ interface ArchiveContents {
   sourceTenantId: string;
 }
 
-function loadArchive(archive: Buffer, maxBytes: number): ArchiveContents {
+function loadArchive(input: {
+  archive: Buffer;
+  maxBytes: number;
+  logger: DataImportDeps<never>['logger'];
+}): ArchiveContents {
+  const { archive, maxBytes, logger } = input;
   let entries: ZipArchiveEntry[];
   try {
     entries = readZipArchive(archive, {
@@ -211,12 +269,14 @@ function loadArchive(archive: Buffer, maxBytes: number): ArchiveContents {
       throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
     }
   }
+  const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
+    parseSection({ files, name, schema, logger });
 
-  const manifest = parseSection(files, 'manifest.json', ImportManifestSchema);
+  const manifest = section('manifest.json', ImportManifestSchema);
   if (manifest.format !== 'aman-export') {
     throw new DataImportError('This file is not an Aman data export, so nothing was imported.', 400);
   }
-  if (manifest.schema_version > DATA_IMPORT_SCHEMA_VERSION) {
+  if (manifest.schema_version > EXPORT_SCHEMA_VERSION) {
     throw new DataImportError(
       `This export was made by a newer version of Aman (format version ${String(manifest.schema_version)}). Update Aman, then import again.`,
       400,
@@ -228,35 +288,20 @@ function loadArchive(archive: Buffer, maxBytes: number): ArchiveContents {
 
   // chats.json is validated even though sessions.json is the restore source:
   // a damaged section means the archive cannot be trusted as a whole.
-  parseSection(files, 'chats.json', ImportChatsFileSchema);
-  const sessions = parseSection(files, 'sessions.json', ImportSessionsFileSchema);
-  const folders = parseSection(files, 'folders.json', ImportFoldersFileSchema);
-  const personas = parseSection(files, 'personas.json', ImportPersonasFileSchema);
-  const personalization = parseSection(files, 'personalization.json', ImportPersonalizationFileSchema);
-  const spaces = parseSection(files, 'spaces.json', ImportSpacesFileSchema);
-  const schedules = parseSection(files, 'schedules.json', ImportSchedulesFileSchema);
-  const connectors = parseSection(files, 'connectors.json', ImportConnectorsFileSchema);
-  const settings = parseSection(files, 'settings.json', ImportSettingsFileSchema);
-
-  const sourceTenantId =
-    sessions[0]?.session.tenant_id ??
-    personas[0]?.persona.tenant_id ??
-    schedules[0]?.tenant_id ??
-    folders[0]?.tenant_id ??
-    'default';
-
+  section('chats.json', CommonChatExportFileSchema);
   const contents: ArchiveContents = {
     manifest,
-    sessions,
-    folders,
-    personas,
-    personalization,
-    spaces,
-    schedules,
-    connectors,
-    settings,
+    sessions: section('sessions.json', ImportSessionsFileSchema),
+    folders: section('folders.json', ImportFoldersFileSchema),
+    agents: section('agents.json', ImportAgentsFileSchema),
+    personas: section('personas.json', ImportPersonasFileSchema),
+    personalization: section('personalization.json', ImportPersonalizationFileSchema),
+    spaces: section('spaces.json', ImportSpacesFileSchema),
+    schedules: section('schedules.json', ImportSchedulesFileSchema),
+    connectors: section('connectors.json', ImportConnectorsFileSchema),
+    settings: section('settings.json', ImportSettingsFileSchema),
     files,
-    sourceTenantId,
+    sourceTenantId: manifest.tenant_id,
   };
   validateCrossReferences(contents);
   return contents;
@@ -267,7 +312,17 @@ function damaged(detail: string): DataImportError {
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
-  const { sessions, folders, personas, spaces, schedules, connectors } = contents;
+  const { sessions, folders, agents, personas, spaces, schedules, connectors } = contents;
+
+  const agentIds = new Set<string>();
+  const agentNames = new Set<string>();
+  for (const agent of agents) {
+    if (agentIds.has(agent.id) || agentNames.has(agent.name)) {
+      throw damaged(`agent ${agent.name} appears twice.`);
+    }
+    agentIds.add(agent.id);
+    agentNames.add(agent.name);
+  }
 
   const folderIds = new Set<string>();
   for (const folder of folders) {
@@ -544,33 +599,180 @@ function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'
     pluralize(result.memories, 'memory', 'memories'),
     pluralize(result.personas, 'persona', 'personas'),
     pluralize(result.spaces, 'space', 'spaces'),
+    pluralize(result.agents, 'agent', 'agents'),
     result.schedules === 0
       ? pluralize(0, 'schedule', 'schedules')
       : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
   ];
   return (
     `Imported ${counts.join(', ')}. ` +
+    'Chats keep their dates and totals; personas, spaces, folders and schedules show the import time. ' +
     'Not imported: model keys, connector sign-ins, Always allow choices. Set those up in Settings.'
   );
 }
 
-interface ImportProgress {
-  agentIdsCreated: string[];
-  folderIds: string[];
-  sessionIds: string[];
-  knowledgePersonaIds: string[];
-  memoryFilesWritten: string[];
+interface AgentPlan {
+  /** Agents from the archive, created with their own ids. */
+  archived: ImportAgentRecord[];
+  /** Agents only referenced by name, created as stand-ins so chats and schedules keep their agent. */
+  placeholders: { id: string; name: string }[];
+  resolve: SessionRestoreContext['resolveAgent'];
 }
+
+function planAgents(contents: ArchiveContents): AgentPlan {
+  const byId = new Map<string, { id: string; name: string }>();
+  const byName = new Map<string, { id: string; name: string }>();
+  for (const agent of contents.agents) {
+    const target = { id: agent.id, name: agent.name };
+    byId.set(agent.id, target);
+    byName.set(agent.name, target);
+  }
+  const referencedNames = new Set<string>();
+  for (const schedule of contents.schedules) {
+    if (schedule.agent_name !== null) {
+      referencedNames.add(schedule.agent_name);
+    }
+  }
+  for (const entry of contents.sessions) {
+    const agent = entry.session.agent;
+    if (agent.type === 'reference' && agent.name !== null) {
+      referencedNames.add(agent.name);
+    }
+  }
+  const placeholders: AgentPlan['placeholders'] = [];
+  for (const name of referencedNames) {
+    if (!byName.has(name)) {
+      const placeholder = { id: newId(), name };
+      placeholders.push(placeholder);
+      byName.set(name, placeholder);
+    }
+  }
+  return {
+    archived: contents.agents,
+    placeholders,
+    resolve: reference => byId.get(reference.id) ?? (reference.name === null ? undefined : byName.get(reference.name)),
+  };
+}
+
+/** One memory file to write: where it goes under the target tenant, and its bytes. */
+interface PlannedMemoryFile {
+  targetPath: string;
+  bytes: Buffer;
+}
+
+/** Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here. */
+function planMarkdownMemory(
+  markdownDir: string,
+  contents: ArchiveContents,
+  input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
+): PlannedMemoryFile[] {
+  const planned: PlannedMemoryFile[] = [];
+  const knownFiles = new Set(['MEMORY.md', '.vault-tombstones.md', '.vault-sharing.json']);
+  for (const [name, data] of contents.files) {
+    if (!name.startsWith('memory/')) {
+      continue;
+    }
+    const rest = name.slice('memory/'.length);
+    const slash = rest.indexOf('/');
+    if (slash < 0) {
+      continue;
+    }
+    const sourceSeg = rest.slice(0, slash);
+    const inner = rest.slice(slash + 1);
+    const isDaily = /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(inner);
+    if (!knownFiles.has(inner) && !isDaily) {
+      continue;
+    }
+    const targetSeg = targetMemorySegment({
+      sourceSeg,
+      sourceTenantId: contents.sourceTenantId,
+      targetTenantId: input.targetTenantId,
+      personaSegBySource: input.personaSegBySource,
+    });
+    if (targetSeg === undefined) {
+      throw new DataImportError('The memory section of this export belongs to a different account.', 400);
+    }
+    let bytes = data;
+    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
+      // Tombstone entry ids embed the vault namespace segment; retarget them
+      // so edits and deletes still apply under the new tenant.
+      const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
+      bytes = Buffer.from(text, 'utf8');
+    }
+    planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
+  }
+  return planned;
+}
+
+/** Writes planned files, each created exclusively so an existing file is never replaced. */
+async function writeMarkdownMemory(files: readonly PlannedMemoryFile[]): Promise<void> {
+  for (const file of files) {
+    await mkdir(path.dirname(file.targetPath), { recursive: true });
+    await writeFile(file.targetPath, file.bytes, { flag: 'wx' });
+  }
+}
+
+/** Runs an interrupted earlier import's cleanup, so the emptiness check sees an instance the crash did not dirty. */
+async function recoverInterruptedImport<TTransaction>(deps: DataImportDeps<TTransaction>): Promise<void> {
+  let marker: Awaited<ReturnType<typeof readImportMarker>>;
+  try {
+    marker = await readImportMarker(deps.globalSettingsStore);
+  } catch (cause) {
+    if (cause instanceof UnreadableImportMarkerError) {
+      throw new DataImportError(
+        'An earlier import was interrupted and its record cannot be read, so nothing was changed. Remove this instance, create it again, then import.',
+        500,
+        { cause },
+      );
+    }
+    throw cause;
+  }
+  if (marker === undefined) {
+    return;
+  }
+  const failures = await compensate(deps, {
+    tenantId: marker.tenant_id,
+    subjectId: marker.subject_id,
+    ledger: marker.planned,
+  });
+  if (failures.length > 0) {
+    throw new DataImportError(
+      `An earlier import was interrupted and some of what it wrote could not be removed (${failures.slice(0, 5).join(', ')}). Nothing was changed; run the import again to retry the cleanup.`,
+      500,
+    );
+  }
+  await clearImportMarker(deps.globalSettingsStore);
+  deps.logger.info('Removed the leftovers of an interrupted data import', { started_at: marker.started_at });
+}
+
+/** Imports for one tenant never overlap: a second run would read the first run's marker as a crash. */
+const importsInFlight = new Set<string>();
 
 export async function runDataImport<TTransaction>(
   deps: DataImportDeps<TTransaction>,
   request: DataImportRequest,
 ): Promise<DataImportResult> {
-  const { tenantId, subjectId } = request.subject;
+  const { tenantId } = request.subject;
   if (request.archive.byteLength > request.maxBytes) {
     throw new DataImportError('The file is larger than the import limit, so nothing was imported.', 400);
   }
-  const contents = loadArchive(request.archive, request.maxBytes);
+  if (importsInFlight.has(tenantId)) {
+    throw new DataImportError('Another import is already running on this instance. Nothing was changed.', 409);
+  }
+  importsInFlight.add(tenantId);
+  try {
+    return await importArchive(deps, request);
+  } finally {
+    importsInFlight.delete(tenantId);
+  }
+}
+
+async function importArchive<TTransaction>(
+  deps: DataImportDeps<TTransaction>,
+  request: DataImportRequest,
+): Promise<DataImportResult> {
+  const { tenantId, subjectId } = request.subject;
+  const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, connectors, settings } = contents;
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
@@ -579,60 +781,64 @@ export async function runDataImport<TTransaction>(
   };
   const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
 
-  // --- Agent resolution plan (reads only) ---
-  const referencedAgentNames = new Set<string>();
-  for (const schedule of schedules) {
-    if (schedule.agent_name !== null) {
-      referencedAgentNames.add(schedule.agent_name);
-    }
-  }
-  for (const entry of sessions) {
-    if (entry.session.agent.type === 'reference' && entry.session.agent.name !== null) {
-      referencedAgentNames.add(entry.session.agent.name);
-    }
-  }
-  const agentIdByName = new Map<string, string>();
-  for (const name of referencedAgentNames) {
-    const existing = await deps.agentStore.getAgent({ tenant_id: tenantId, name });
-    if (existing !== undefined) {
-      agentIdByName.set(name, existing.id);
-    }
-  }
-  // Schedules whose record carries no agent name resolve by their exported
-  // agent id instead; that only works when the target already has that agent.
-  const scheduleAgentByScheduleId = new Map<string, { agentId: string; agentName: string }>();
-  for (const schedule of schedules) {
-    if (schedule.agent_name !== null) {
-      continue;
-    }
-    const byId = await deps.agentStore.getAgent({ tenant_id: tenantId, id: schedule.agent_id });
-    if (byId === undefined) {
-      throw new DataImportError(
-        'This export has a schedule whose agent is missing, so nothing was imported. Recreate the export and try again.',
-        400,
-      );
-    }
-    scheduleAgentByScheduleId.set(schedule.id, { agentId: byId.id, agentName: byId.name });
-  }
-
-  // --- Emptiness check ---
+  // --- Reads only: nothing is written until every check below has passed. ---
+  await recoverInterruptedImport(deps);
   await assertInstanceEmpty(deps, { tenantId, subjectId, scope });
 
-  // --- Memory plan (parsed before any writes) ---
-  const personaSegBySource = new Map<string, string>();
-  for (const { persona } of personas) {
-    const wire = `persona:${persona.display_name}`;
-    personaSegBySource.set(
-      vaultFilesystemNamespace(contents.sourceTenantId, wire),
-      vaultFilesystemNamespace(tenantId, wire),
+  const agentPlan = planAgents(contents);
+  await assertNoIdCollisions(deps, {
+    tenantId,
+    subjectId,
+    ids: {
+      sessionIds: sessions.map(entry => entry.session.session_id),
+      folderIds: folders.map(folder => folder.folder_id),
+      personas: personas.map(entry => entry.persona),
+      spaceIds: spaces.map(entry => entry.space.id),
+      scheduleIds: schedules.map(schedule => schedule.id),
+      agents: [...agentPlan.archived, ...agentPlan.placeholders],
+    },
+  });
+
+  const knowledgePlan = personas.flatMap(({ persona, knowledge }) =>
+    knowledge.documents.length === 0
+      ? []
+      : [
+          {
+            personaId: persona.id,
+            documents: knowledge.documents,
+            dbPath: personaKnowledgeLocation({
+              knowledgeDir: deps.personaKnowledgeDir,
+              tenantId,
+              personaId: persona.id,
+            }).dbPath,
+          },
+        ],
+  );
+  for (const library of knowledgePlan) {
+    if (existsSync(library.dbPath)) {
+      throw new DataImportError(
+        `A knowledge library for persona ${library.personaId} already exists on this instance, so the import was refused and nothing was changed.`,
+        409,
+      );
+    }
+  }
+  const hasKnowledgeText = knowledgePlan.some(library =>
+    library.documents.some(document => document.chunks.length > 0),
+  );
+  if (hasKnowledgeText && !(await deps.knowledgeEmbedder.ensureReady())) {
+    throw new DataImportError(
+      'The knowledge index is still downloading, retry in a few minutes. Nothing was imported.',
+      503,
     );
   }
+
+  const personaSegBySource = new Map<string, string>();
   const personaWireBySourceSeg = new Map<string, string>();
   for (const { persona } of personas) {
-    personaWireBySourceSeg.set(
-      vaultFilesystemNamespace(contents.sourceTenantId, `persona:${persona.display_name}`),
-      `persona:${persona.display_name}`,
-    );
+    const wire = `persona:${persona.display_name}`;
+    const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
+    personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
+    personaWireBySourceSeg.set(sourceSeg, wire);
   }
   const memoryNamespaces = parseMemoryNamespaces(contents.files);
   for (const namespace of memoryNamespaces) {
@@ -650,9 +856,33 @@ export async function runDataImport<TTransaction>(
     }
   }
   const memoryCount = countMemories(memoryNamespaces);
+  const plannedMemoryFiles =
+    deps.memoryTarget.kind === 'markdown'
+      ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
+      : [];
+  for (const file of plannedMemoryFiles) {
+    if (existsSync(file.targetPath)) {
+      throw new DataImportError(
+        'A memory file from this export already exists on this instance, so the import was refused and nothing was changed.',
+        409,
+      );
+    }
+  }
 
-  // --- Replay the session restore in memory: proves the decomposition lands before real writes begin. ---
-  const restoreContext: SessionRestoreContext = { tenantId, subject: importerSubject, agentIdByName };
+  // Replay the session restore in memory: proves the decomposition lands before real writes begin.
+  const restoreContext: SessionRestoreContext = {
+    tenantId,
+    subject: importerSubject,
+    resolveAgent: agentPlan.resolve,
+  };
+  for (const schedule of schedules) {
+    if (agentPlan.resolve({ id: schedule.agent_id, name: schedule.agent_name }) === undefined) {
+      throw new DataImportError(
+        'A schedule in this export names an agent that is not in the export, so nothing was imported.',
+        400,
+      );
+    }
+  }
   try {
     const replayStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
     for (const folder of folders) {
@@ -675,23 +905,40 @@ export async function runDataImport<TTransaction>(
     );
   }
 
-  const progress: ImportProgress = {
-    agentIdsCreated: [],
-    folderIds: [],
+  // --- Writes. The marker names everything planned before the first one lands. ---
+  const planned: ImportLedger = {
+    agentIds: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
+    folderIds: folders.map(folder => folder.folder_id),
     sessionIds: sessions.map(entry => entry.session.session_id),
-    knowledgePersonaIds: [],
-    memoryFilesWritten: [],
+    knowledgeDbPaths: knowledgePlan.map(library => library.dbPath),
+    memoryFiles: plannedMemoryFiles.map(file => file.targetPath),
   };
+  await writeImportMarker(deps.globalSettingsStore, {
+    started_at: new Date().toISOString(),
+    tenant_id: tenantId,
+    subject_id: subjectId,
+    planned,
+  });
+  const created = emptyLedger();
 
   try {
-    // --- Placeholder agents for referenced names the target does not have. ---
-    for (const name of referencedAgentNames) {
-      if (agentIdByName.has(name)) {
-        continue;
-      }
-      const created = await deps.agentStore.createAgent({
+    for (const agent of agentPlan.archived) {
+      await deps.agentStore.createAgent({
+        id: agent.id,
         tenant_id: tenantId,
-        name,
+        name: agent.name,
+        description: agent.description,
+        manifest: agent.manifest,
+        external_id: agent.external_id,
+        created_by_subject: importerSubject,
+      });
+      created.agentIds.push(agent.id);
+    }
+    for (const placeholder of agentPlan.placeholders) {
+      await deps.agentStore.createAgent({
+        id: placeholder.id,
+        tenant_id: tenantId,
+        name: placeholder.name,
         description:
           'Created by data import so imported schedules and chats keep their agent name. Set the model and instructions before use.',
         manifest: AgentSpecSchema.parse({
@@ -701,11 +948,9 @@ export async function runDataImport<TTransaction>(
         external_id: null,
         created_by_subject: importerSubject,
       });
-      agentIdByName.set(name, created.id);
-      progress.agentIdsCreated.push(created.id);
+      created.agentIds.push(placeholder.id);
     }
 
-    // --- Folders and sessions. ---
     for (const folder of folders) {
       await deps.sessionStore.createSessionFolder({
         tenant_id: tenantId,
@@ -713,25 +958,26 @@ export async function runDataImport<TTransaction>(
         created_by: subjectId,
         name: folder.name,
       });
-      progress.folderIds.push(folder.folder_id);
+      created.folderIds.push(folder.folder_id);
     }
-    await restoreSessions(deps.sessionStore, restoreContext, sessions);
+    await restoreSessions(
+      deps.sessionStore,
+      { ...restoreContext, onSessionCreated: sessionId => created.sessionIds.push(sessionId) },
+      sessions,
+    );
 
-    // --- Persona knowledge libraries, re-indexed with fresh embeddings. ---
-    for (const { persona, knowledge } of personas) {
-      if (knowledge.documents.length === 0) {
-        continue;
-      }
-      await importPersonaKnowledge(deps, { tenantId, personaId: persona.id, documents: knowledge.documents });
-      progress.knowledgePersonaIds.push(persona.id);
-    }
-
-    // --- Memory: verbatim files for the Markdown backend, retains for a client backend. ---
-    if (deps.memoryTarget.kind === 'markdown') {
-      progress.memoryFilesWritten = await writeMarkdownMemory(deps.memoryTarget.markdownDir, contents, {
-        targetTenantId: tenantId,
-        personaSegBySource,
+    for (const library of knowledgePlan) {
+      await writePersonaKnowledge({
+        knowledgeDir: deps.personaKnowledgeDir,
+        tenantId,
+        personaId: library.personaId,
+        documents: library.documents,
+        embedder: deps.knowledgeEmbedder,
       });
+    }
+
+    if (deps.memoryTarget.kind === 'markdown') {
+      await writeMarkdownMemory(plannedMemoryFiles);
     } else if (memoryNamespaces.length > 0) {
       const items = buildRetainItems(memoryNamespaces, {
         exportedAt: manifest.exported_at,
@@ -752,11 +998,8 @@ export async function runDataImport<TTransaction>(
       }
     }
 
-    // --- Everything else commits in one transaction. ---
+    // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
-    let connectorsSkipped = 0;
-    const existingServers = await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined });
-    const existingNames = new Set(existingServers.map(server => server.name));
     await deps.withTransaction(async tx => {
       for (const { persona } of personas) {
         await deps.personaStore.createPersona(
@@ -775,6 +1018,7 @@ export async function runDataImport<TTransaction>(
       }
 
       if (personalization !== null) {
+        // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
         await deps.personalizationStore.upsertProfile(
           {
             tenant_id: tenantId,
@@ -787,7 +1031,6 @@ export async function runDataImport<TTransaction>(
             learned_profile: personalization.learned_profile,
             learning_enabled: personalization.learning_enabled,
             updated_by: subjectId,
-            expected_revision: null,
           },
           tx,
         );
@@ -834,20 +1077,16 @@ export async function runDataImport<TTransaction>(
       }
 
       for (const schedule of schedules) {
-        const resolved =
-          schedule.agent_name !== null
-            ? { agentId: agentIdByName.get(schedule.agent_name), agentName: schedule.agent_name }
-            : scheduleAgentByScheduleId.get(schedule.id);
-        const resolvedAgentId = resolved?.agentId;
-        if (resolved === undefined || resolvedAgentId === undefined) {
+        const agent = agentPlan.resolve({ id: schedule.agent_id, name: schedule.agent_name });
+        if (agent === undefined) {
           throw new DataImportError('A schedule in this export names an agent that could not be restored.', 400);
         }
         await deps.scheduleStore.createScheduleAndRun(
           {
             id: schedule.id,
             tenant_id: tenantId,
-            agent_id: resolvedAgentId,
-            agent_name: resolved.agentName,
+            agent_id: agent.id,
+            agent_name: agent.name,
             name: schedule.name,
             manifest: { ...schedule.manifest, status: 'paused' },
             created_by_subject: importerSubject,
@@ -858,10 +1097,6 @@ export async function runDataImport<TTransaction>(
       }
 
       for (const connector of connectors) {
-        if (existingNames.has(connector.name)) {
-          connectorsSkipped += 1;
-          continue;
-        }
         await deps.mcpServerStore.createServer(
           {
             tenant_id: tenantId,
@@ -874,8 +1109,14 @@ export async function runDataImport<TTransaction>(
         connectorsImported += 1;
       }
 
-      for (const setting of settings.global) {
-        await deps.globalSettingsStore.setSetting({ key: setting.key, value: setting.value }, tx);
+      for (const setting of settings.instance) {
+        if (!IMPORTABLE_GLOBAL_SETTING_KEYS.has(setting.key)) {
+          continue;
+        }
+        // The instance's own value wins: the old deployment's default model may not exist here.
+        if ((await deps.globalSettingsStore.getSetting({ key: setting.key }, tx)) === undefined) {
+          await deps.globalSettingsStore.setSetting({ key: setting.key, value: setting.value }, tx);
+        }
       }
       await deps.sentinelSettingsStore.patch(
         {
@@ -897,7 +1138,7 @@ export async function runDataImport<TTransaction>(
             path: artifact.path,
           };
           if (artifact.status === 'stored') {
-            const blobName = `files/${sanitizeZipPath(artifact.session_id)}/${sanitizeZipPath(artifact.path)}`;
+            const blobName = normalizeZipEntryName(`files/${artifact.session_id}/${artifact.path}`);
             const blob = contents.files.get(blobName);
             if (blob !== undefined) {
               await deps.turnArtifactStore.recordStoredArtifact(
@@ -930,6 +1171,8 @@ export async function runDataImport<TTransaction>(
           }
         }
       }
+
+      await clearImportMarker(deps.globalSettingsStore, tx);
     });
 
     const result: Omit<DataImportResult, 'summary'> = {
@@ -939,13 +1182,26 @@ export async function runDataImport<TTransaction>(
       spaces: spaces.length,
       schedules: schedules.length,
       folders: folders.length,
+      agents: agentPlan.archived.length,
       connectors: connectorsImported,
-      connectors_skipped: connectorsSkipped,
       schedules_off: schedules.length > 0,
     };
     return { ...result, summary: buildSummary(result) };
   } catch (cause) {
-    await compensateImport(deps, { tenantId, subjectId, progress });
+    // Files are removed by their planned paths (checked absent beforehand); ids only by what this run created.
+    const failures = await compensate(deps, {
+      tenantId,
+      subjectId,
+      ledger: { ...created, knowledgeDbPaths: planned.knowledgeDbPaths, memoryFiles: planned.memoryFiles },
+    });
+    if (failures.length > 0) {
+      throw new DataImportError(
+        `The import failed and some of what it wrote could not be removed (${failures.slice(0, 5).join(', ')}). Run the import again to retry the cleanup.`,
+        500,
+        { cause },
+      );
+    }
+    await clearImportMarker(deps.globalSettingsStore).catch(() => undefined);
     if (cause instanceof DataImportError) {
       throw cause;
     }
@@ -954,271 +1210,5 @@ export async function runDataImport<TTransaction>(
       500,
       { cause },
     );
-  }
-}
-
-async function assertInstanceEmpty<TTransaction>(
-  deps: DataImportDeps<TTransaction>,
-  input: {
-    tenantId: string;
-    subjectId: string;
-    scope: { created_by_subject_id: string; agent_ids: readonly string[] };
-  },
-): Promise<void> {
-  const { tenantId, subjectId, scope } = input;
-  const refuse = (): never => {
-    throw new DataImportError(
-      'This instance already has data, so the import was refused. Data imports only run into an empty instance, so nothing was changed.',
-      409,
-    );
-  };
-
-  const sessionPage = await deps.sessionStore.listSessions({
-    tenant_id: tenantId,
-    limit: 1,
-    page_token: undefined,
-    order: 'asc',
-    start_timestamp: undefined,
-    end_timestamp: undefined,
-    agent_id: undefined,
-    created_by_or_agent_ids: scope,
-    metadata: undefined,
-    source_type: undefined,
-    source_id: undefined,
-  });
-  if (sessionPage.data.length > 0) {
-    refuse();
-  }
-  const personaList = await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: subjectId });
-  if (personaList.length > 0) {
-    refuse();
-  }
-  const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
-  if (profile !== undefined) {
-    refuse();
-  }
-  const spaceList = await deps.spaceStore.listSpaces({
-    tenant_id: tenantId,
-    created_by: subjectId,
-    status: undefined,
-    limit: 1,
-    offset: 0,
-  });
-  if (spaceList.length > 0) {
-    refuse();
-  }
-  const schedulePage = await deps.scheduleStore.listSchedules({
-    tenant_id: tenantId,
-    limit: 1,
-    page_token: undefined,
-    agent_names: undefined,
-    created_by_or_agent_ids: scope,
-  });
-  if (schedulePage.data.length > 0) {
-    refuse();
-  }
-
-  if (deps.memoryTarget.kind === 'markdown') {
-    if (await markdownMemoryHasContent(deps.memoryTarget.markdownDir, tenantId)) {
-      refuse();
-    }
-  } else {
-    const outcome = await deps.memoryTarget.client.listEntries({ namespace: '', timeoutMs: MEMORY_RETAIN_TIMEOUT_MS });
-    if (!outcome.ok) {
-      throw new DataImportError('The memory store could not be read, so the import cannot run.', 500);
-    }
-    if (outcome.entries.length > 0) {
-      refuse();
-    }
-  }
-}
-
-/** True when the target tenant's Markdown vault already holds any memory content. */
-async function markdownMemoryHasContent(markdownDir: string, tenantId: string): Promise<boolean> {
-  if (!existsSync(markdownDir)) {
-    return false;
-  }
-  const tenantSeg = vaultFilesystemNamespace(tenantId, undefined);
-  const dirNames = (await readdir(markdownDir, { withFileTypes: true }))
-    .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
-    .filter(name => name === tenantSeg || name.startsWith(`${tenantSeg}__`));
-  for (const dirName of dirNames) {
-    const dirPath = path.join(markdownDir, dirName);
-    const memoryMd = path.join(dirPath, 'MEMORY.md');
-    if (existsSync(memoryMd) && (await readFile(memoryMd, 'utf8')).trim().length > 0) {
-      return true;
-    }
-    if (existsSync(path.join(dirPath, '.vault-tombstones.md'))) {
-      return true;
-    }
-    const dailyDir = path.join(dirPath, 'memory');
-    if (existsSync(dailyDir)) {
-      const dailyFiles = (await readdir(dailyDir, { withFileTypes: true })).filter(
-        entry => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name),
-      );
-      if (dailyFiles.length > 0) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function importPersonaKnowledge<TTransaction>(
-  deps: DataImportDeps<TTransaction>,
-  input: {
-    tenantId: string;
-    personaId: string;
-    documents: ImportKnowledgeDocument[];
-  },
-): Promise<void> {
-  await ensurePersonaKnowledgeRoot({ knowledgeDir: deps.personaKnowledgeDir, tenantId: input.tenantId });
-  const location = personaKnowledgeLocation({
-    knowledgeDir: deps.personaKnowledgeDir,
-    tenantId: input.tenantId,
-    personaId: input.personaId,
-  });
-  const repository = openPersonaKnowledgeRepository({ dbPath: location.dbPath, dimensions: EMBEDDING_DIMENSIONS });
-  try {
-    // One embedding pass per library: every chunk text, in document order.
-    const sortedDocuments = input.documents.map(document => ({
-      document,
-      chunks: [...document.chunks].sort((a, b) => a.chunk_index - b.chunk_index),
-    }));
-    const allTexts = sortedDocuments.flatMap(entry => entry.chunks.map(chunk => chunk.text));
-    const embeddings = allTexts.length === 0 ? [] : await deps.embedKnowledgeChunks(allTexts);
-    let cursor = 0;
-    for (const { document, chunks } of sortedDocuments) {
-      const created = repository.createDocument({
-        title: document.title,
-        titleExplicit: document.title_explicit,
-        source_kind: document.source_kind,
-        source_label: document.source_label,
-        source_url: document.source_url,
-      });
-      if (chunks.length > 0) {
-        repository.setDocumentChunks({
-          documentId: created.id,
-          chunks: chunks.map(chunk => {
-            const embedding = embeddings?.[cursor] ?? new Float32Array(EMBEDDING_DIMENSIONS);
-            cursor += 1;
-            return { text: chunk.text, embedding };
-          }),
-        });
-      }
-      if (document.status === 'failed') {
-        repository.updateDocumentStatus({
-          documentId: created.id,
-          status: 'failed',
-          statusMessage: document.status_message,
-        });
-      } else {
-        repository.updateDocumentStatus({ documentId: created.id, status: 'ready', statusMessage: null });
-      }
-    }
-  } finally {
-    repository.close();
-  }
-}
-
-/** Writes the archive's memory/ files into the Markdown vault under the target tenant's segments. */
-async function writeMarkdownMemory(
-  markdownDir: string,
-  contents: ArchiveContents,
-  input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
-): Promise<string[]> {
-  const written: string[] = [];
-  const knownFiles = new Set(['MEMORY.md', '.vault-tombstones.md', '.vault-sharing.json']);
-  for (const [name, data] of contents.files) {
-    if (!name.startsWith('memory/')) {
-      continue;
-    }
-    const rest = name.slice('memory/'.length);
-    const slash = rest.indexOf('/');
-    if (slash < 0) {
-      continue;
-    }
-    const sourceSeg = rest.slice(0, slash);
-    const inner = rest.slice(slash + 1);
-    const isDaily = /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(inner);
-    if (!knownFiles.has(inner) && !isDaily) {
-      continue;
-    }
-    const targetSeg = targetMemorySegment({
-      sourceSeg,
-      sourceTenantId: contents.sourceTenantId,
-      targetTenantId: input.targetTenantId,
-      personaSegBySource: input.personaSegBySource,
-    });
-    if (targetSeg === undefined) {
-      throw new DataImportError('The memory section of this export belongs to a different account.', 400);
-    }
-    let bytes = data;
-    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
-      // Tombstone entry ids embed the vault namespace segment; retarget them
-      // so edits and deletes still apply under the new tenant.
-      const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
-      bytes = Buffer.from(text, 'utf8');
-    }
-    const targetPath = path.join(markdownDir, targetSeg, inner);
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, bytes);
-    written.push(targetPath);
-  }
-  return written;
-}
-
-/**
- * Best-effort undo for the write phases that run before the database
- * transaction. Each step swallows its own failure so one stuck item cannot
- * block the rest of the cleanup.
- */
-async function compensateImport<TTransaction>(
-  deps: DataImportDeps<TTransaction>,
-  input: { tenantId: string; subjectId: string; progress: ImportProgress },
-): Promise<void> {
-  const { tenantId, subjectId, progress } = input;
-  for (const sessionId of progress.sessionIds) {
-    try {
-      await deps.sessionStore.deleteSession({ tenant_id: tenantId, session_id: sessionId });
-    } catch {
-      // Cleanup is best effort; the original error is what the caller sees.
-    }
-  }
-  for (const folderId of progress.folderIds) {
-    try {
-      await deps.sessionStore.deleteSessionFolder({ tenant_id: tenantId, folder_id: folderId, created_by: subjectId });
-    } catch {
-      // Best effort, as above.
-    }
-  }
-  for (const personaId of progress.knowledgePersonaIds) {
-    try {
-      const location = personaKnowledgeLocation({
-        knowledgeDir: deps.personaKnowledgeDir,
-        tenantId,
-        personaId,
-      });
-      await rm(location.dbPath, { force: true });
-      await rm(`${location.dbPath}-wal`, { force: true });
-      await rm(`${location.dbPath}-shm`, { force: true });
-    } catch {
-      // Best effort, as above.
-    }
-  }
-  for (const filePath of progress.memoryFilesWritten) {
-    try {
-      await rm(filePath, { force: true });
-    } catch {
-      // Best effort, as above.
-    }
-  }
-  for (const agentId of progress.agentIdsCreated) {
-    try {
-      await deps.agentStore.deleteAgent({ tenant_id: tenantId, id: agentId });
-    } catch {
-      // Best effort, as above.
-    }
   }
 }

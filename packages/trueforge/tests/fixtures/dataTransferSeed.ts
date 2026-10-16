@@ -47,6 +47,42 @@ export const SEED_IDS = {
   agentName: 'reporter',
 } as const;
 
+/**
+ * The dates and totals the seeded chats are given after creation, so a
+ * round trip can prove they come back instead of being re-stamped "now".
+ */
+export const SEED_HISTORY = {
+  [SEED_IDS.sessionMain]: {
+    created_at: '2026-09-01T08:00:00.000Z',
+    updated_at: '2026-09-03T18:30:00.000Z',
+    last_activity_timestamp_ms: Date.parse('2026-09-03T18:30:00.000Z'),
+    metrics: { total_duration_ms: 91_000, total_turns: 3, total_cost_in_usd: 0.42 },
+    turns: {
+      'session-1-turn-1': { created_at: '2026-09-01T08:00:05.000Z', updated_at: '2026-09-01T08:00:40.000Z' },
+      'session-1-turn-2': { created_at: '2026-09-02T09:00:00.000Z', updated_at: '2026-09-02T09:00:30.000Z' },
+      'session-1-turn-3': { created_at: '2026-09-03T18:29:00.000Z', updated_at: '2026-09-03T18:30:00.000Z' },
+    },
+  },
+  [SEED_IDS.sessionScheduled]: {
+    created_at: '2026-09-10T06:00:00.000Z',
+    updated_at: '2026-09-10T06:01:00.000Z',
+    last_activity_timestamp_ms: Date.parse('2026-09-10T06:01:00.000Z'),
+    metrics: { total_duration_ms: 20_000, total_turns: 1 },
+    turns: {
+      'session-2-turn-1': { created_at: '2026-09-10T06:00:10.000Z', updated_at: '2026-09-10T06:01:00.000Z' },
+    },
+  },
+  [SEED_IDS.sessionRunning]: {
+    created_at: '2026-09-12T12:00:00.000Z',
+    updated_at: '2026-09-12T12:00:05.000Z',
+    last_activity_timestamp_ms: Date.parse('2026-09-12T12:00:05.000Z'),
+    metrics: { total_duration_ms: 0, total_turns: 1 },
+    turns: {
+      'session-3-turn-1': { created_at: '2026-09-12T12:00:01.000Z', updated_at: '2026-09-12T12:00:05.000Z' },
+    },
+  },
+} as const;
+
 export const SEED_MEMORY = {
   curated: '# About\n\nPrefers dark mode and short answers.',
   keptEntryTimestamp: '2026-10-01T09:00:00.000Z',
@@ -350,6 +386,23 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     events: [makeTurnCreatedEvent('session-3-turn-1'), makeModelMessageEvent()],
   });
 
+  // Backdate the chats the way a real archive's dates differ from "now".
+  for (const [sessionId, history] of Object.entries(SEED_HISTORY)) {
+    await stores.sessionStore.stampImportedSession({
+      tenant_id: tenantId,
+      session_id: sessionId,
+      created_at: new Date(history.created_at),
+      updated_at: new Date(history.updated_at),
+      last_activity_timestamp_ms: history.last_activity_timestamp_ms,
+      metrics: history.metrics,
+      turns: Object.entries(history.turns).map(([turnId, turn]) => ({
+        turn_id: turnId,
+        created_at: new Date(turn.created_at),
+        updated_at: new Date(turn.updated_at),
+      })),
+    });
+  }
+
   await stores.personaStore.createPersona({
     tenant_id: tenantId,
     created_by: userId,
@@ -486,8 +539,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     }),
   });
 
-  await stores.globalSettingsStore.setSetting({ key: 'ui.theme', value: 'denim' });
-  await stores.globalSettingsStore.setSetting({ key: 'ui.density', value: 'cozy' });
+  await stores.globalSettingsStore.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });
   await stores.sentinelSettingsStore.patch({
     tenant_id: tenantId,
     created_by: userId,

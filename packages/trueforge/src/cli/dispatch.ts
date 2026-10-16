@@ -3,6 +3,7 @@ import type { Command } from './command';
 import { demoSeed } from './demoSeed';
 import { doctor } from './doctor';
 import { hashPassword } from './hashPassword';
+import { importData } from './importData';
 import { UsageError, type CliIo } from './io';
 
 const COMMANDS: Readonly<Record<string, Command>> = {
@@ -10,6 +11,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   backup,
   doctor,
   'demo-seed': demoSeed,
+  'import-data': importData,
 };
 
 const USAGE = `Usage: aman <command> [options]
@@ -19,6 +21,7 @@ Commands:
   backup          Copy the database, memory and persona knowledge to --target
   doctor          Check this instance and print the results
   demo-seed       Seed one synthetic demo world (needs DEMO_MODE=true); --reset removes it
+  import-data     Restore a data export (--in <file.zip>) into this fresh instance
 
 JSON goes to stdout, messages to stderr. Exit codes: 0 ok, 1 failure, 2 usage.
 `;

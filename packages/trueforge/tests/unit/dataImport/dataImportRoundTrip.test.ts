@@ -11,11 +11,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
 
 import type { Transaction } from 'kysely';
+import { createLogger } from 'winston';
 
-import { runDataExport, type DataExportDeps } from '../../../src/dataExport/exportService';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
@@ -44,21 +43,11 @@ import type { Database as SqliteDatabase } from '../../../src/db/sqlite/types';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { createPostgresTestDatabase } from '../../db/postgres/testDatabase';
-import { SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
+import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
+import { SEED_HISTORY, SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 const TENANT = 'default';
-
-class CollectingWritable extends Writable {
-  private readonly chunks: Buffer[] = [];
-  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-    this.chunks.push(Buffer.from(chunk));
-    callback();
-  }
-  buffer(): Buffer {
-    return Buffer.concat(this.chunks);
-  }
-}
 
 type SqliteTx = Transaction<SqliteDatabase>;
 type PgTx = Transaction<PgDatabase>;
@@ -132,33 +121,8 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
   };
 }
 
-async function exportArchive<Tx>(instance: Instance<Tx>, userId: string): Promise<Buffer> {
-  const deps: DataExportDeps<Tx> = {
-    sessionStore: instance.stores.sessionStore,
-    personaStore: instance.stores.personaStore,
-    personalizationStore: instance.stores.personalizationStore,
-    spaceStore: instance.stores.spaceStore,
-    scheduleStore: instance.stores.scheduleStore,
-    globalSettingsStore: instance.stores.globalSettingsStore,
-    sentinelSettingsStore: instance.stores.sentinelSettingsStore,
-    turnArtifactStore: instance.stores.turnArtifactStore,
-    mcpServerStore: instance.stores.mcpServerStore,
-    memorySource: { kind: 'markdown', markdownDir: instance.memoryDir },
-    personaKnowledgeDir: instance.knowledgeDir,
-  };
-  const sink = new CollectingWritable();
-  await runDataExport(
-    deps,
-    {
-      subject: { tenantId: TENANT, subjectId: userId, agentIds: [], includeUploads: true },
-      secrets: [],
-      exportedAt: new Date('2026-10-16T12:00:00.000Z'),
-      appVersion: '0.0.0-test',
-      maxBytes: 1024 * 1024 * 1024,
-    },
-    sink,
-  );
-  return sink.buffer();
+function exportArchive<Tx>(instance: Instance<Tx>, userId: string): Promise<Buffer> {
+  return exportInstanceArchive({ instance, tenantId: TENANT, subjectId: userId });
 }
 
 async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId: string): Promise<void> {
@@ -176,7 +140,11 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     withTransaction: instance.withTransaction,
     memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,
-    embedKnowledgeChunks: (texts: string[]) => Promise.resolve(texts.map(() => new Float32Array(EMBEDDING_DIMENSIONS))),
+    knowledgeEmbedder: {
+      ensureReady: () => Promise.resolve(true),
+      embedPassages: texts => Promise.resolve(texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5))),
+    },
+    logger: createLogger({ silent: true }),
   };
   const result = await runDataImport(deps, {
     archive,
@@ -184,7 +152,24 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     maxBytes: 1024 * 1024 * 1024,
   });
   expect(result.chats).toBe(3);
+  expect(result.agents).toBe(1);
   expect(result.schedules_off).toBe(true);
+}
+
+/** The chats come back with the dates and totals they had on the source, not the import time. */
+async function expectChatHistoryRestored<Tx>(instance: Instance<Tx>): Promise<void> {
+  for (const [sessionId, history] of Object.entries(SEED_HISTORY)) {
+    const session = await instance.stores.sessionStore.getSession({ tenant_id: TENANT, session_id: sessionId });
+    expect(session?.created_at.toISOString()).toBe(history.created_at);
+    expect(session?.updated_at.toISOString()).toBe(history.updated_at);
+    expect(session?.last_activity_timestamp_ms).toBe(history.last_activity_timestamp_ms);
+    expect(session?.metrics).toEqual(history.metrics);
+    for (const [turnId, dates] of Object.entries(history.turns)) {
+      const turn = await instance.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId });
+      expect(turn?.created_at.toISOString()).toBe(dates.created_at);
+      expect(turn?.updated_at.toISOString()).toBe(dates.updated_at);
+    }
+  }
 }
 
 // --- Export comparison with the allowed differences normalized away. ---
@@ -208,15 +193,8 @@ function normalizeValue(value: unknown, key: string | undefined): unknown {
   if (key !== undefined && DATE_KEYS.has(key) && (typeof value === 'string' || typeof value === 'number')) {
     return '<date>';
   }
-  if (key === 'total_duration_ms') {
-    // Folded by the store from its own turn timeline; restarts on import.
-    return '<duration>';
-  }
   if (key === 'created_by' || key === 'updated_by' || key === 'subject_id' || key === 'subject_display_name') {
     return typeof value === 'string' ? '<owner>' : value;
-  }
-  if (key === 'agent_id') {
-    return '<agent>';
   }
   if (Array.isArray(value)) {
     return value.map(item => normalizeValue(item, undefined));
@@ -225,9 +203,6 @@ function normalizeValue(value: unknown, key: string | undefined): unknown {
     const out: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
       out[childKey] = normalizeValue(childValue, childKey);
-    }
-    if (out['type'] === 'reference' && typeof out['id'] === 'string' && 'name' in out) {
-      out['id'] = '<agent>';
     }
     return out;
   }
@@ -304,14 +279,19 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     );
   }
   if (name === 'settings.json' && isRecord(normalized)) {
-    const global = normalized['global'] as Record<string, unknown>[];
-    normalized['global'] = sortBy(global, setting => String(setting['key']));
+    const instanceSettings = normalized['instance'] as Record<string, unknown>[];
+    normalized['instance'] = sortBy(instanceSettings, setting => String(setting['key']));
     return normalized;
+  }
+  if (name === 'agents.json' && Array.isArray(normalized)) {
+    // Ids are kept on import, so they are compared as they are.
+    return sortBy(normalized as Record<string, unknown>[], agent => String(agent['name']));
   }
   if (name === 'manifest.json' && isRecord(normalized)) {
     return {
       format: normalized['format'],
       schema_version: normalized['schema_version'],
+      tenant_id: normalized['tenant_id'],
       include_uploads: normalized['include_uploads'],
     };
   }
@@ -361,6 +341,7 @@ describePg('data export/import cross-store round trips', () => {
       });
       const first = await exportArchive(source, 'alice');
       await importArchive(target, first, 'bob');
+      await expectChatHistoryRestored(target);
       // Imported schedules are off on the Postgres side too.
       const schedules = await target.stores.scheduleStore.listSchedules({
         tenant_id: TENANT,
@@ -395,6 +376,7 @@ describePg('data export/import cross-store round trips', () => {
       });
       const first = await exportArchive(source, 'alice');
       await importArchive(target, first, 'bob');
+      await expectChatHistoryRestored(target);
       const schedules = await target.stores.scheduleStore.listSchedules({
         tenant_id: TENANT,
         limit: 10,

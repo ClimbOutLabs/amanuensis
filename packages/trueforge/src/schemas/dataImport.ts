@@ -8,12 +8,8 @@ export const ImportDataResultSchema = z
     spaces: z.number().int().nonnegative().describe('Spaces imported.'),
     schedules: z.number().int().nonnegative().describe('Schedules imported; all arrive switched off.'),
     folders: z.number().int().nonnegative().describe('Chat folders imported.'),
+    agents: z.number().int().nonnegative().describe('Agents imported with their original ids.'),
     connectors: z.number().int().nonnegative().describe('Connectors imported, without credentials.'),
-    connectors_skipped: z
-      .number()
-      .int()
-      .nonnegative()
-      .describe('Connectors skipped because a connector with the same name already exists.'),
     schedules_off: z
       .boolean()
       .describe('True when schedules were imported; imported schedules are always off until turned on.'),

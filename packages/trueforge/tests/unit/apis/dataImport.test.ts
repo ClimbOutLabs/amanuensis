@@ -2,7 +2,6 @@ import { HTTPException } from 'hono/http-exception';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
 
 import type { Transaction } from 'kysely';
 import type { Authenticator } from '../../../src/auth/authenticator';
@@ -22,12 +21,12 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import type { Database } from '../../../src/db/sqlite/types';
 import { resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import { SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
 const IMPORT_PATH = '/api/v1/data/import';
-const EXPORT_PATH = '/api/v1/data/export';
 
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
@@ -38,27 +37,12 @@ const headerAuthenticator: Authenticator = {
     const context: RequestContext = {
       tenant_id: TENANT_ID,
       subject: { id: user, type: 'user', display_name: user },
-      roles: [],
+      roles: c.req.header('x-test-admin') === 'yes' ? ['admin'] : [],
       user_credential: null,
     };
     return Promise.resolve(context);
   },
 };
-
-function asUser(user: string): RequestInit {
-  return { headers: { 'x-test-user': user } };
-}
-
-class CollectingWritable extends Writable {
-  private readonly chunks: Buffer[] = [];
-  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-    this.chunks.push(Buffer.from(chunk));
-    callback();
-  }
-  buffer(): Buffer {
-    return Buffer.concat(this.chunks);
-  }
-}
 
 async function repack(archive: Buffer, mutate: (entries: Map<string, Buffer>) => void): Promise<Buffer> {
   const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
@@ -119,9 +103,21 @@ describe('Data import route', () => {
       memoryDir: sourceMemoryDir,
       knowledgeDir: sourceKnowledgeDir,
     });
-    const exportResponse = await sourceServer.request(`${EXPORT_PATH}?include_uploads=true`, asUser('alice'));
-    expect(exportResponse.status).toBe(200);
-    archive = Buffer.from(await exportResponse.arrayBuffer());
+    const exported = await exportInstanceArchive({
+      instance: { stores, memoryDir: sourceMemoryDir, knowledgeDir: sourceKnowledgeDir },
+      tenantId: TENANT_ID,
+      subjectId: 'alice',
+    });
+    // The embedding model is not available to unit tests; the service tests cover knowledge.
+    archive = await repack(exported, entries => {
+      const personas = JSON.parse(entries.get('personas.json')?.toString('utf8') ?? '[]') as {
+        knowledge: { documents: unknown[] };
+      }[];
+      for (const entry of personas) {
+        entry.knowledge.documents = [];
+      }
+      entries.set('personas.json', Buffer.from(JSON.stringify(personas)));
+    });
 
     configuration.MEMORY_MARKDOWN_DIR = targetMemoryDir;
     configuration.PERSONA_KNOWLEDGE_DIR = targetKnowledgeDir;
@@ -138,10 +134,17 @@ describe('Data import route', () => {
     await rm(scratchDir, { recursive: true, force: true });
   });
 
-  function postImport(user: string | undefined, body: Buffer): Promise<Response> {
-    const headers: Record<string, string> = { 'content-type': 'application/zip' };
+  function postImport(
+    user: string | undefined,
+    body: Buffer,
+    options: { admin?: boolean; contentType?: string } = {},
+  ): Promise<Response> {
+    const headers: Record<string, string> = { 'content-type': options.contentType ?? 'application/zip' };
     if (user !== undefined) {
       headers['x-test-user'] = user;
+    }
+    if (options.admin ?? true) {
+      headers['x-test-admin'] = 'yes';
     }
     return targetServer.request(IMPORT_PATH, { method: 'POST', headers, body });
   }
@@ -149,6 +152,16 @@ describe('Data import route', () => {
   it('requires authentication', async () => {
     const response = await postImport(undefined, archive);
     expect(response.status).toBe(401);
+  });
+
+  it('is for administrators only', async () => {
+    const response = await postImport('member', archive, { admin: false });
+    expect(response.status).toBe(403);
+  });
+
+  it('wants the archive sent as application/zip', async () => {
+    const response = await postImport('carol', archive, { contentType: 'application/json' });
+    expect(response.status).toBe(415);
   });
 
   it('imports the archive for the signed-in user and reports the summary', async () => {
@@ -171,7 +184,9 @@ describe('Data import route', () => {
     expect(body.data.spaces).toBe(1);
     expect(body.data.schedules).toBe(2);
     expect(body.data.schedules_off).toBe(true);
-    expect(body.data.summary).toContain('Imported 3 chats, 3 memories, 2 personas, 1 space, 2 schedules (off).');
+    expect(body.data.summary).toContain(
+      'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
+    );
     expect(body.data.summary).toContain('Not imported: model keys, connector sign-ins, Always allow choices.');
 
     // Everything landed owned by bob with ids kept, schedules off, and the
@@ -194,7 +209,7 @@ describe('Data import route', () => {
     const response = await postImport('bob', archive);
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: { message: string } };
-    expect(body.error.message).toContain('already has data');
+    expect(body.error.message).toContain('already has');
   });
 
   it('refuses a body that is not an export archive', async () => {

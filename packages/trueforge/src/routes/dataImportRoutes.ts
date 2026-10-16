@@ -10,7 +10,7 @@ export const importDataRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Import my data',
   description:
-    'Imports an export archive into an empty instance. Everything in the archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.',
+    'Admin only. Imports an export archive into a fresh instance. The archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.',
   'x-fern-sdk-group-name': ['data'],
   'x-fern-sdk-method-name': 'import_data',
   request: {
@@ -33,13 +33,26 @@ export const importDataRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Authentication required.',
     },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Admin access required.',
+    },
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'This instance already has data; imports only run into an empty instance.',
+      description:
+        'This instance already has data, or an import is already running; imports only run into a fresh instance.',
     },
     413: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The file is larger than the import limit.',
+    },
+    415: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The request is not application/zip.',
+    },
+    503: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The knowledge index is still downloading; retry in a few minutes.',
     },
   },
 });

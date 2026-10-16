@@ -7,6 +7,7 @@
  * then replaces with the importing user's identity.
  */
 import {
+  AgentSpecSchema,
   CreatedBySubjectSchema,
   SessionAgentSchema,
   SessionMetadataSchema,
@@ -26,7 +27,7 @@ import { LLMToolMessageSchema } from '@truefoundry/trueforge-core/core/llm/LLMTy
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
-import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
+import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
 import { KnowledgeDocumentStatusSchema, KnowledgeSourceKindSchema } from '../schemas/personaKnowledge';
@@ -34,22 +35,23 @@ import { ScheduleManifestSchema } from '../schemas/schedule';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
 
-export const DATA_IMPORT_SCHEMA_VERSION = 1;
-
 export const ImportManifestSchema = z.object({
   format: z.string(),
   schema_version: z.number().int(),
   exported_at: z.string(),
   app_version: z.string(),
+  /** The tenant the exported records were written under; memory vault names embed it. */
+  tenant_id: z.string().min(1),
   include_uploads: z.boolean(),
 });
 export type ImportManifest = z.infer<typeof ImportManifestSchema>;
 
-export const ImportChatsFileSchema = CommonChatExportFileSchema;
-
 /** Every durable event shape this build can persist: built-in events plus the host's passthrough events. */
 export const ImportEventSchema = SessionEventWithPassthroughSchema;
 export type ImportEvent = z.infer<typeof ImportEventSchema>;
+
+/** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
+const ArchivedInstantSchema = z.iso.datetime({ offset: true });
 
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -99,11 +101,12 @@ export const ImportTurnRecordSchema = z.object({
   snapshot: z.object({
     threads: z.record(z.string(), ImportThreadSnapshotSchema),
     mcp_servers: z.record(z.string(), ImportMcpServerSnapshotSchema).nullable(),
-    sandbox_info: z.looseObject({ sandbox_id: z.string() }).nullable(),
+    // Sandbox handles belong to the source deployment; the export leaves them out.
+    sandbox_info: z.looseObject({ sandbox_id: z.string() }).nullish(),
   }),
   custom: z.unknown(),
-  created_at: z.string(),
-  updated_at: z.string(),
+  created_at: ArchivedInstantSchema,
+  updated_at: ArchivedInstantSchema,
 });
 export type ImportTurnRecord = z.infer<typeof ImportTurnRecordSchema>;
 
@@ -124,8 +127,8 @@ export const ImportSessionRecordSchema = z.object({
   repository_id: z.string().nullable(),
   workspace_cwd: z.string().nullable(),
   last_turn_id: z.string().nullable(),
-  created_at: z.string(),
-  updated_at: z.string(),
+  created_at: ArchivedInstantSchema,
+  updated_at: ArchivedInstantSchema,
   last_activity_timestamp_ms: z.number(),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
@@ -163,6 +166,19 @@ export const ImportFolderRecordSchema = z.object({
 });
 export type ImportFolderRecord = z.infer<typeof ImportFolderRecordSchema>;
 export const ImportFoldersFileSchema = z.array(ImportFolderRecordSchema);
+
+export const ImportAgentRecordSchema = z.object({
+  id: z.string().min(1),
+  name: NameSchema,
+  description: z.string(),
+  manifest: AgentSpecSchema,
+  external_id: z.string().nullable(),
+  created_by_subject: CreatedBySubjectSchema,
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ImportAgentRecord = z.infer<typeof ImportAgentRecordSchema>;
+export const ImportAgentsFileSchema = z.array(ImportAgentRecordSchema);
 
 export const ImportPersonaRecordSchema = z.object({
   tenant_id: z.string(),
@@ -265,7 +281,8 @@ export type ImportConnectorRecord = z.infer<typeof ImportConnectorRecordSchema>;
 export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 
 export const ImportSettingsFileSchema = z.object({
-  global: z.array(z.object({ key: z.string().min(1), value: z.string() })),
+  /** Instance-wide toggles; only present for an administrator's export. */
+  instance: z.array(z.object({ key: z.string().min(1), value: z.string() })),
   permission_settings: SentinelUserSettingsSchema,
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;

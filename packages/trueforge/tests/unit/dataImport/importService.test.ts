@@ -2,20 +2,17 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
 
-import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { sql, type Transaction } from 'kysely';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
-import { runDataExport, type DataExportDeps } from '../../../src/dataExport/exportService';
+import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
-import {
-  DataImportError,
-  runDataImport,
-  type DataImportDeps,
-  type MemoryImportTarget,
-} from '../../../src/dataImport/importService';
+import { DataImportError } from '../../../src/dataImport/importError';
+import { IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
+import type { MemoryImportTarget } from '../../../src/dataImport/importPreflight';
+import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
+import type { KnowledgeEmbedder } from '../../../src/dataImport/knowledgeImport';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -34,24 +31,20 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
-import { McpServerManifestSchema, resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
-import { SEED_IDS, SEED_MEMORY, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
+import { resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
+import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
+import {
+  SEED_HISTORY,
+  SEED_IDS,
+  SEED_MEMORY,
+  seedRichInstance,
+  type DataTransferSeedStores,
+} from '../../fixtures/dataTransferSeed';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(120_000);
 
 const TENANT = 'default';
-
-class CollectingWritable extends Writable {
-  private readonly chunks: Buffer[] = [];
-  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-    this.chunks.push(Buffer.from(chunk));
-    callback();
-  }
-  buffer(): Buffer {
-    return Buffer.concat(this.chunks);
-  }
-}
 
 type Tx = Transaction<Database>;
 
@@ -62,6 +55,8 @@ interface Instance {
   memoryDir: string;
   knowledgeDir: string;
   embeddedTexts: string[];
+  embedder: KnowledgeEmbedder;
+  logger: { info: jest.Mock; warn: jest.Mock };
   close: () => Promise<void>;
 }
 
@@ -81,33 +76,26 @@ async function makeInstance(label: string): Promise<Instance> {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
+  const embeddedTexts: string[] = [];
   return {
     dir,
     stores,
     db,
     memoryDir: join(dir, 'memory'),
     knowledgeDir: join(dir, 'knowledge'),
-    embeddedTexts: [],
+    embeddedTexts,
+    embedder: {
+      ensureReady: () => Promise.resolve(true),
+      embedPassages: texts => {
+        embeddedTexts.push(...texts);
+        return Promise.resolve(texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5)));
+      },
+    },
+    logger: { info: jest.fn(), warn: jest.fn() },
     close: async () => {
       await db.destroy();
       await rm(dir, { recursive: true, force: true });
     },
-  };
-}
-
-function exportDeps(instance: Instance): DataExportDeps<Tx> {
-  return {
-    sessionStore: instance.stores.sessionStore,
-    personaStore: instance.stores.personaStore,
-    personalizationStore: instance.stores.personalizationStore,
-    spaceStore: instance.stores.spaceStore,
-    scheduleStore: instance.stores.scheduleStore,
-    globalSettingsStore: instance.stores.globalSettingsStore,
-    sentinelSettingsStore: instance.stores.sentinelSettingsStore,
-    turnArtifactStore: instance.stores.turnArtifactStore,
-    mcpServerStore: instance.stores.mcpServerStore,
-    memorySource: { kind: 'markdown', markdownDir: instance.memoryDir },
-    personaKnowledgeDir: instance.knowledgeDir,
   };
 }
 
@@ -126,27 +114,13 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     withTransaction: callback => instance.db.transaction().execute(callback),
     memoryTarget: memoryTarget ?? { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,
-    embedKnowledgeChunks: (texts: string[]) => {
-      instance.embeddedTexts.push(...texts);
-      return Promise.resolve(texts.map(() => new Float32Array(EMBEDDING_DIMENSIONS)));
-    },
+    knowledgeEmbedder: instance.embedder,
+    logger: instance.logger,
   };
 }
 
-async function exportArchive(instance: Instance, includeUploads = true): Promise<Buffer> {
-  const sink = new CollectingWritable();
-  await runDataExport(
-    exportDeps(instance),
-    {
-      subject: { tenantId: TENANT, subjectId: 'alice', agentIds: [], includeUploads },
-      secrets: [],
-      exportedAt: new Date('2026-10-16T12:00:00.000Z'),
-      appVersion: '0.0.0-test',
-      maxBytes: 1024 * 1024 * 1024,
-    },
-    sink,
-  );
-  return sink.buffer();
+function exportArchive(instance: Instance, includeUploads = true): Promise<Buffer> {
+  return exportInstanceArchive({ instance, tenantId: TENANT, subjectId: 'alice', includeUploads });
 }
 
 function importRequest(archive: Buffer, userId = 'bob', maxBytes = 1024 * 1024 * 1024) {
@@ -199,10 +173,11 @@ describe('runDataImport', () => {
       expect(result.schedules).toBe(2);
       expect(result.folders).toBe(1);
       expect(result.connectors).toBe(3);
-      expect(result.connectors_skipped).toBe(0);
+      expect(result.agents).toBe(1);
       expect(result.schedules_off).toBe(true);
       expect(result.summary).toBe(
-        'Imported 3 chats, 3 memories, 2 personas, 1 space, 2 schedules (off). ' +
+        'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off). ' +
+          'Chats keep their dates and totals; personas, spaces, folders and schedules show the import time. ' +
           'Not imported: model keys, connector sign-ins, Always allow choices. Set those up in Settings.',
       );
 
@@ -249,11 +224,15 @@ describe('runDataImport', () => {
         { id: 'item-2', text: 'Reserve hotel', done: false },
       ]);
 
-      // The schedule-born chat now points at a placeholder agent owned by bob.
-      const placeholder = await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
-      expect(placeholder?.created_by_subject.subject_id).toBe('bob');
+      // The agent arrives from agents.json with its own id, now owned by bob, and the schedule-born chat points at it.
+      const sourceAgent = await source.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
+      const importedAgent = await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
+      expect(importedAgent?.id).toBe(sourceAgent?.id);
+      expect(importedAgent?.description).toBe('Writes the digest.');
+      expect(importedAgent?.manifest).toEqual(sourceAgent?.manifest);
+      expect(importedAgent?.created_by_subject.subject_id).toBe('bob');
       const scheduled = sessions.data.find(session => session.session_id === SEED_IDS.sessionScheduled);
-      expect(scheduled?.agent).toEqual({ type: 'reference', id: placeholder?.id, name: SEED_IDS.agentName });
+      expect(scheduled?.agent).toEqual({ type: 'reference', id: sourceAgent?.id, name: SEED_IDS.agentName });
       expect(scheduled?.source).toEqual({ type: 'schedule', id: SEED_IDS.scheduleDaily, run_id: 'run-1' });
 
       // The turn that was running at export time lands cancelled as abandoned.
@@ -269,7 +248,7 @@ describe('runDataImport', () => {
       expect(daily?.status).toBe('paused');
       expect(daily?.manifest.status).toBe('paused');
       expect(daily?.created_by_subject.subject_id).toBe('bob');
-      expect(daily?.agent_id).toBe(placeholder?.id);
+      expect(daily?.agent_id).toBe(sourceAgent?.id);
       const pendingRun = await target.stores.scheduleStore.getScheduledRunFor({
         tenant_id: TENANT,
         schedule_id: SEED_IDS.scheduleDaily,
@@ -352,7 +331,10 @@ describe('runDataImport', () => {
       });
       expect([revision1?.body, revision2?.body]).toEqual(['Draft one.', 'Draft two.']);
 
-      expect((await target.stores.globalSettingsStore.getSetting({ key: 'ui.theme' }))?.value).toBe('denim');
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'tool_output_screen_enabled' }))?.value).toBe(
+        'true',
+      );
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
       const sentinel = await target.stores.sentinelSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
       expect(sentinel.offline_mode).toBe(true);
       expect(sentinel.tier2_auto_allow).toEqual(['file_write']);
@@ -395,7 +377,7 @@ describe('runDataImport', () => {
       );
       expect(error).toBeInstanceOf(DataImportError);
       expect(error).toMatchObject({ status: 409 });
-      expect(error instanceof Error && error.message).toContain('already has data');
+      expect(error instanceof Error && error.message).toContain('already has chats');
     } finally {
       await source.close();
       await target.close();
@@ -512,33 +494,6 @@ describe('runDataImport', () => {
     }
   });
 
-  it('keeps an existing connector and counts it skipped', async () => {
-    const { source, archive } = await seededArchive();
-    const target = await makeInstance('target-connector');
-    try {
-      await target.stores.mcpServerStore.createServer({
-        tenant_id: TENANT,
-        name: 'plain-connector',
-        first_party: false,
-        manifest: McpServerManifestSchema.parse({
-          type: 'remote',
-          name: 'plain-connector',
-          description: 'Already here.',
-          url: 'https://existing.example.com/mcp',
-        }),
-      });
-      const result = await runDataImport(importDeps(target), importRequest(archive));
-      expect(result.connectors).toBe(2);
-      expect(result.connectors_skipped).toBe(1);
-      const servers = await target.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
-      const kept = servers.find(server => server.name === 'plain-connector');
-      expect(kept?.manifest).toMatchObject({ url: 'https://existing.example.com/mcp' });
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-
   it('imports artifacts as skipped when the files were not included in the export', async () => {
     const { source, archive } = await seededArchive(false);
     const target = await makeInstance('target-artifacts');
@@ -551,6 +506,324 @@ describe('runDataImport', () => {
       });
       expect(artifacts).toHaveLength(1);
       expect(artifacts[0]).toMatchObject({ path: 'notes.txt', status: 'skipped_missing' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+async function sourceAgentManifest(source: Instance) {
+  const agent = await source.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
+  if (agent === undefined) {
+    throw new Error('The seeded agent is missing.');
+  }
+  return agent.manifest;
+}
+
+async function chatsOf(instance: Instance, userId: string) {
+  const page = await instance.stores.sessionStore.listSessions({
+    tenant_id: TENANT,
+    limit: 50,
+    page_token: undefined,
+    order: 'asc',
+    start_timestamp: undefined,
+    end_timestamp: undefined,
+    agent_id: undefined,
+    created_by_or_agent_ids: { created_by_subject_id: userId, agent_ids: [] },
+    metadata: undefined,
+    source_type: undefined,
+    source_id: undefined,
+  });
+  return page.data;
+}
+
+async function importError(instance: Instance, archive: Buffer, deps = importDeps(instance)): Promise<unknown> {
+  return runDataImport(deps, importRequest(archive)).catch((caught: unknown) => caught);
+}
+
+describe('runDataImport keeps what the archive recorded', () => {
+  it('restores chat and turn dates, totals and last activity instead of stamping now', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-dates');
+    try {
+      const startedAt = Date.now();
+      await runDataImport(importDeps(target), importRequest(archive));
+      for (const [sessionId, history] of Object.entries(SEED_HISTORY)) {
+        const session = await target.stores.sessionStore.getSession({ tenant_id: TENANT, session_id: sessionId });
+        expect(session?.created_at.toISOString()).toBe(history.created_at);
+        expect(session?.updated_at.toISOString()).toBe(history.updated_at);
+        expect(session?.last_activity_timestamp_ms).toBe(history.last_activity_timestamp_ms);
+        expect(session?.metrics).toEqual(history.metrics);
+        expect(history.last_activity_timestamp_ms).toBeLessThan(startedAt);
+        for (const [turnId, dates] of Object.entries(history.turns)) {
+          const turn = await target.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId });
+          expect(turn?.created_at.toISOString()).toBe(dates.created_at);
+          expect(turn?.updated_at.toISOString()).toBe(dates.updated_at);
+        }
+      }
+      // Newest chats list first again, as they did on the source.
+      const newestFirst = await target.stores.sessionStore.listSessions({
+        tenant_id: TENANT,
+        limit: 10,
+        page_token: undefined,
+        order: 'desc',
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        agent_id: undefined,
+        created_by_or_agent_ids: { created_by_subject_id: 'bob', agent_ids: [] },
+        metadata: undefined,
+        source_type: undefined,
+        source_id: undefined,
+      });
+      expect(newestFirst.data.map(session => session.session_id)).toEqual([
+        SEED_IDS.sessionRunning,
+        SEED_IDS.sessionScheduled,
+        SEED_IDS.sessionMain,
+      ]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('creates a stand-in agent only for names that agents.json does not carry', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-standin');
+    try {
+      const withoutAgents = await repack(archive, entries => {
+        entries.set('agents.json', Buffer.from('[]'));
+      });
+      const result = await runDataImport(importDeps(target), importRequest(withoutAgents));
+      expect(result.agents).toBe(0);
+      const standIn = await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
+      const sourceAgent = await source.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
+      expect(standIn).toBeDefined();
+      expect(standIn?.id).not.toBe(sourceAgent?.id);
+      expect(standIn?.created_by_subject.subject_id).toBe('bob');
+      const daily = await target.stores.scheduleStore.getSchedule({ tenant_id: TENANT, id: SEED_IDS.scheduleDaily });
+      expect(daily?.agent_id).toBe(standIn?.id);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('fills instance settings the target has not set and keeps the ones it has', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-settings');
+    try {
+      await target.stores.globalSettingsStore.setSetting({ key: 'tool_output_screen_enabled', value: 'false' });
+      await runDataImport(importDeps(target), importRequest(archive));
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'tool_output_screen_enabled' }))?.value).toBe(
+        'false',
+      );
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
+        'false',
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport refuses an instance that is not fresh', () => {
+  it('names every kind of data it finds', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-notfresh');
+    try {
+      await seedRichInstance({
+        stores: target.stores,
+        tenantId: TENANT,
+        userId: 'bob',
+        memoryDir: target.memoryDir,
+        knowledgeDir: target.knowledgeDir,
+      });
+      const error = await importError(target, archive);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error).toMatchObject({ status: 409 });
+      const message = error instanceof Error ? error.message : '';
+      for (const kind of [
+        'chats',
+        'folders',
+        'personas',
+        'a personalization profile',
+        'spaces',
+        'schedules',
+        'agents',
+        'connectors',
+        'memories',
+      ]) {
+        expect(message).toContain(kind);
+      }
+      expect(message).toContain('remove this instance, create it again');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('accepts the empty profile the app creates on first sign-in and replaces it', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-pristine');
+    try {
+      await target.stores.personalizationStore.upsertProfile({
+        tenant_id: TENANT,
+        created_by: 'bob',
+        assistant_name: null,
+        assistant_identity: null,
+        voice_guidance: null,
+        user_profile: null,
+        pinned_preferences: [],
+        learned_profile: null,
+        learning_enabled: true,
+        updated_by: 'bob',
+      });
+      await runDataImport(importDeps(target), importRequest(archive));
+      const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(profile?.assistant_name).toBe('Aman');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses a profile someone filled in', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-filled');
+    try {
+      await target.stores.personalizationStore.upsertProfile({
+        tenant_id: TENANT,
+        created_by: 'bob',
+        assistant_name: 'Mine',
+        assistant_identity: null,
+        voice_guidance: null,
+        user_profile: null,
+        pinned_preferences: [],
+        learned_profile: null,
+        learning_enabled: true,
+        updated_by: 'bob',
+      });
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('a personalization profile');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses when a chat id is already taken by someone else, and leaves that chat alone', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-idclash');
+    try {
+      await target.stores.sessionStore.createSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionScheduled,
+        created_by_subject: { subject_id: 'carol', subject_type: 'user', subject_display_name: 'carol' },
+        agent: { type: 'inline', spec: await sourceAgentManifest(source) },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain(`chat ${SEED_IDS.sessionScheduled}`);
+      const survivor = await target.stores.sessionStore.getSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionScheduled,
+      });
+      expect(survivor?.created_by_subject.subject_id).toBe('carol');
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+      expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses when a persona knowledge file already exists and does not touch it', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-knowledge-exists');
+    try {
+      const dbPath = personaKnowledgeLocation({
+        knowledgeDir: target.knowledgeDir,
+        tenantId: TENANT,
+        personaId: SEED_IDS.personaResearcher,
+      }).dbPath;
+      await mkdir(join(target.knowledgeDir, TENANT), { recursive: true });
+      await writeFile(dbPath, 'not an import', 'utf8');
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(await readFile(dbPath, 'utf8')).toBe('not an import');
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport knowledge needs the embedding model', () => {
+  it('says to retry while the model is not ready and writes nothing', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-model');
+    try {
+      const deps = {
+        ...importDeps(target),
+        knowledgeEmbedder: {
+          ensureReady: () => Promise.resolve(false),
+          embedPassages: () => Promise.reject(new Error('never called')),
+        },
+      };
+      const error = await importError(target, archive, deps);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error).toMatchObject({ status: 503 });
+      expect(error instanceof Error && error.message).toContain('still downloading, retry in a few minutes');
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+      expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
+      expect(existsSync(target.knowledgeDir)).toBe(false);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+
+      // Once the model is ready the same archive imports, with real vectors rather than zeros.
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.personas).toBe(2);
+      expect(target.embeddedTexts).toHaveLength(3);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reports damage by location only', () => {
+  it('puts the Zod path in the error and the log, never the value', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-zod');
+    try {
+      const warn = target.logger.warn;
+      const broken = await repack(archive, entries => {
+        const sessions = JSON.parse(entries.get('sessions.json')?.toString('utf8') ?? '[]') as {
+          session: { created_at: string };
+        }[];
+        const first = sessions[0];
+        if (first !== undefined) {
+          first.session.created_at = 'private-value-123';
+        }
+        entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+      });
+      const error = await importError(target, broken);
+      expect(error).toMatchObject({ status: 400 });
+      const message = error instanceof Error ? error.message : '';
+      expect(message).toContain('sessions.json');
+      expect(message).toContain('[0].session.created_at');
+      expect(message).not.toContain('private-value-123');
+      expect(warn).toHaveBeenCalledTimes(1);
+      const fields: unknown = warn.mock.calls[0]?.[1];
+      expect(JSON.stringify(fields)).not.toContain('private-value-123');
+      expect(fields).toMatchObject({ section: 'sessions.json', session_id: 'session-1' });
     } finally {
       await source.close();
       await target.close();
@@ -665,6 +938,84 @@ describe('runDataImport failure handling', () => {
     }
   });
 
+  it("removes only what it created: another account's chat survives a failed import", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-bystander');
+    try {
+      await target.stores.sessionStore.createSession({
+        tenant_id: 'other',
+        session_id: 'bystander-chat',
+        created_by_subject: { subject_id: 'dave', subject_type: 'user', subject_display_name: 'dave' },
+        agent: { type: 'inline', spec: await sourceAgentManifest(source) },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
+        target.db,
+      );
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 500 });
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+      const bystander = await target.stores.sessionStore.getSession({
+        tenant_id: 'other',
+        session_id: 'bystander-chat',
+      });
+      expect(bystander?.created_by_subject.subject_id).toBe('dave');
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('cleans up after an interrupted import on the next run', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-crash');
+    try {
+      await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
+        target.db,
+      );
+      // Cleanup that cannot run is what an interrupted process looks like to the next run.
+      const stuckStore = new Proxy(target.stores.sessionStore, {
+        get: (store, property, receiver) =>
+          property === 'deleteSession'
+            ? () => Promise.reject(new Error('stuck'))
+            : Reflect.get(store, property, receiver),
+      });
+      const error = await importError(target, archive, { ...importDeps(target), sessionStore: stuckStore });
+      expect(error).toMatchObject({ status: 500 });
+      expect(error instanceof Error && error.message).toContain('could not be removed');
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeDefined();
+
+      await sql`DROP TRIGGER import_fail_space_update`.execute(target.db);
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.chats).toBe(3);
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('does not run two imports at once', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-parallel');
+    try {
+      const results = await Promise.all([importError(target, archive), importError(target, archive)]);
+      const refusals = results.filter(result => result instanceof DataImportError);
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toMatchObject({ status: 409 });
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('imports memory into a client backend, applying tombstones', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-client-memory');
@@ -756,19 +1107,12 @@ describe('runDataImport at scale', () => {
           },
         });
       }
-      const sink = new CollectingWritable();
-      await runDataExport(
-        { ...exportDeps(source), sessionStore: inMemory },
-        {
-          subject: { tenantId: TENANT, subjectId: 'alice', agentIds: [], includeUploads: false },
-          secrets: [],
-          exportedAt: new Date('2026-10-16T12:00:00.000Z'),
-          appVersion: '0.0.0-test',
-          maxBytes: 1024 * 1024 * 1024,
-        },
-        sink,
-      );
-      const archive = sink.buffer();
+      const archive = await exportInstanceArchive({
+        instance: { ...source, stores: { ...source.stores, sessionStore: inMemory } },
+        tenantId: TENANT,
+        subjectId: 'alice',
+        includeUploads: false,
+      });
 
       const rssBefore = process.memoryUsage().rss;
       const startedAt = Date.now();

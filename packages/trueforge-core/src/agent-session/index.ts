@@ -120,6 +120,7 @@ export type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,

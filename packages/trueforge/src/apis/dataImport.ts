@@ -1,8 +1,9 @@
 /**
- * POST /api/v1/data/import: restores an export archive into an empty instance.
+ * POST /api/v1/data/import: restores an export archive into a fresh instance.
  *
- * The signed-in user becomes the owner of everything imported. One audit row
- * is recorded per completed import (who and when, never content).
+ * Administrators only. The signed-in user becomes the owner of everything
+ * imported. One audit row is recorded per completed import (who and when,
+ * never content).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
@@ -13,7 +14,9 @@ import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import { resolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import { DataImportError, runDataImport, type MemoryImportTarget } from '../dataImport/importService';
+import { DataImportError } from '../dataImport/importError';
+import type { MemoryImportTarget } from '../dataImport/importPreflight';
+import { runDataImport } from '../dataImport/importService';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
@@ -34,7 +37,7 @@ import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { resolveManagedAgentIds } from './agentAccess';
 
-export interface DataImportDeps<TTransaction> {
+export interface DataImportRouterDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   personaStore: IPersonaStore<TTransaction>;
   personalizationStore: IPersonalizationStore<TTransaction>;
@@ -50,6 +53,10 @@ export interface DataImportDeps<TTransaction> {
   withTransaction: WithTransaction<TTransaction>;
   authorizer: Authorizer;
   logger: Logger;
+}
+
+function isZipContentType(header: string | undefined): boolean {
+  return header?.split(';')[0]?.trim().toLowerCase() === 'application/zip';
 }
 
 /** Reads the request body as bytes, refusing as soon as the running total passes the cap. */
@@ -80,7 +87,7 @@ async function readBodyWithCap(c: Context, maxBytes: number): Promise<Buffer> {
 
 /** The import target is the install's own default memory backend, whatever the export came from. */
 async function resolveMemoryTarget<TTransaction>(
-  deps: DataImportDeps<TTransaction>,
+  deps: DataImportRouterDeps<TTransaction>,
   c: Context,
   input: { tenantId: string; subjectId: string },
 ): Promise<MemoryImportTarget> {
@@ -110,7 +117,7 @@ async function resolveMemoryTarget<TTransaction>(
   return { kind: 'client', client };
 }
 
-export function createDataImportRouter<TTransaction>(deps: DataImportDeps<TTransaction>): OpenAPIHono {
+export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<TTransaction>): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(importDataRoute, async c => {
@@ -119,6 +126,9 @@ export function createDataImportRouter<TTransaction>(deps: DataImportDeps<TTrans
     const subjectId = requestContext.subject.id;
     const maxBytes = configuration.DATA_IMPORT_MAX_BYTES;
 
+    if (!isZipContentType(c.req.header('content-type'))) {
+      throw new HTTPException(415, { message: 'Send the export as a zip file with Content-Type application/zip.' });
+    }
     const archive = await readBodyWithCap(c, maxBytes);
     const agentStore = deps.resolveAgentStore(c);
     const managedAgentIds = await resolveManagedAgentIds({
@@ -128,20 +138,12 @@ export function createDataImportRouter<TTransaction>(deps: DataImportDeps<TTrans
     });
     const memoryTarget = await resolveMemoryTarget(deps, c, { tenantId, subjectId });
 
-    const embeddingModel = getSharedEmbeddingModel({
+    const knowledgeEmbedder = getSharedEmbeddingModel({
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       log: (message: string) => {
         deps.logger.info(message);
       },
     });
-    const embedKnowledgeChunks = async (texts: string[]): Promise<readonly Float32Array[] | null> => {
-      const ready = await embeddingModel.ensureReady();
-      if (!ready) {
-        return null;
-      }
-      const vectors = await embeddingModel.embedPassages(texts);
-      return vectors.map(vector => Float32Array.from(vector));
-    };
 
     try {
       const result = await runDataImport(
@@ -159,7 +161,8 @@ export function createDataImportRouter<TTransaction>(deps: DataImportDeps<TTrans
           withTransaction: deps.withTransaction,
           memoryTarget,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-          embedKnowledgeChunks,
+          knowledgeEmbedder,
+          logger: deps.logger,
         },
         {
           archive,
@@ -197,6 +200,11 @@ export function createDataImportRouter<TTransaction>(deps: DataImportDeps<TTrans
       return c.json({ data: result }, 200);
     } catch (error) {
       if (error instanceof DataImportError) {
+        deps.logger.warn('Data import did not complete', {
+          subject_id: subjectId,
+          tenant_id: tenantId,
+          status: error.status,
+        });
         throw new HTTPException(error.status, { message: error.message, cause: error });
       }
       deps.logger.error('Data import failed', {

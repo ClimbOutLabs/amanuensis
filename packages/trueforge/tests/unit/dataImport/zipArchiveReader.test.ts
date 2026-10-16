@@ -1,7 +1,7 @@
 import { Writable } from 'node:stream';
-import { deflateRawSync } from 'node:zlib';
+import { crc32, deflateRawSync } from 'node:zlib';
 
-import { IncrementalCrc32, ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
+import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { readZipArchive, ZipArchiveError } from '../../../src/dataImport/zipArchiveReader';
 
 class CollectingWritable extends Writable {
@@ -35,9 +35,7 @@ function buildZip(entries: TestEntry[], options?: { endRecord?: { totalEntries?:
     const nameBytes = Buffer.from(entry.name, 'utf8');
     const method = entry.method ?? 0;
     const compressed = method === 8 ? deflateRawSync(entry.data) : entry.data;
-    const crc = new IncrementalCrc32();
-    crc.update(entry.data);
-    const crcValue = entry.crcOverride ?? crc.digest();
+    const crcValue = entry.crcOverride ?? crc32(entry.data);
     const declaredSize = entry.declaredSizeOverride ?? entry.data.length;
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);

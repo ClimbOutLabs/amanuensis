@@ -10,7 +10,9 @@
  * with an overwrite after creation. Turns are terminated immediately after
  * creation, in export order, so the next turn's predecessor is never still
  * running. A turn that was still running at export time cannot resume, so it
- * is imported as cancelled with the `abandoned` reason.
+ * is imported as cancelled with the `abandoned` reason. The store stamps "now"
+ * on everything it creates, so each session ends with an import-only write
+ * that puts the archived dates and totals back.
  */
 import {
   CancellationReason,
@@ -67,19 +69,18 @@ export interface SessionRestoreContext {
   tenantId: string;
   /** The importing user; every restored session is created by this subject. */
   subject: CreatedBySubject;
-  /** Agent name to agent id in the target instance, for reference bindings and schedules. */
-  agentIdByName: ReadonlyMap<string, string>;
+  /** Resolves an exported agent reference to the agent in the target instance, or undefined when there is none. */
+  resolveAgent: (reference: { id: string; name: string | null }) => { id: string; name: string } | undefined;
+  /** Called right after a session is created, so the caller can undo exactly what it created. */
+  onSessionCreated?: (sessionId: string) => void;
 }
 
-function resolveAgentBinding(agent: SessionAgent, agentIdByName: ReadonlyMap<string, string>): SessionAgent {
-  if (agent.type === 'inline' || agent.name === null) {
+function resolveAgentBinding(agent: SessionAgent, resolveAgent: SessionRestoreContext['resolveAgent']): SessionAgent {
+  if (agent.type === 'inline') {
     return agent;
   }
-  const resolvedId = agentIdByName.get(agent.name);
-  if (resolvedId === undefined) {
-    return agent;
-  }
-  return { type: 'reference', id: resolvedId, name: agent.name };
+  const resolved = resolveAgent({ id: agent.id, name: agent.name });
+  return resolved === undefined ? agent : { type: 'reference', id: resolved.id, name: resolved.name };
 }
 
 function sameMessage(left: ContextMessage, right: ContextMessage): boolean {
@@ -180,7 +181,7 @@ async function restoreTurn(
       created_at: new Date(turn.created_at),
       updated_at: new Date(turn.updated_at),
     },
-    sandbox_info: turn.snapshot.sandbox_info,
+    sandbox_info: turn.snapshot.sandbox_info ?? null,
     approval_grants: isFirstTurn ? session.approval_grants : [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: retainedThreadIds,
@@ -301,12 +302,13 @@ export async function restoreSessions(
       tenant_id: context.tenantId,
       session_id: session.session_id,
       created_by_subject: context.subject,
-      agent: resolveAgentBinding(session.agent, context.agentIdByName),
+      agent: resolveAgentBinding(session.agent, context.resolveAgent),
       external_id: session.external_id,
       metadata: session.metadata,
       source: session.source,
       custom: null,
     });
+    context.onSessionCreated?.(session.session_id);
     if (session.folder_id !== null) {
       await store.setSessionFolder({
         tenant_id: context.tenantId,
@@ -344,5 +346,19 @@ export async function restoreSessions(
         items: checklist.items,
       });
     }
+
+    await store.stampImportedSession({
+      tenant_id: context.tenantId,
+      session_id: session.session_id,
+      created_at: new Date(session.created_at),
+      updated_at: new Date(session.updated_at),
+      last_activity_timestamp_ms: session.last_activity_timestamp_ms,
+      metrics: session.metrics,
+      turns: entry.turns.map(({ turn }) => ({
+        turn_id: turn.turn_id,
+        created_at: new Date(turn.created_at),
+        updated_at: new Date(turn.updated_at),
+      })),
+    });
   }
 }

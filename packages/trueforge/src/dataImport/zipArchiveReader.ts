@@ -8,9 +8,7 @@
  * are supported, which covers both Aman's own export writer and any standard
  * re-zip of an export.
  */
-import { inflateRawSync } from 'node:zlib';
-
-import { IncrementalCrc32 } from '../dataExport/zipStreamWriter';
+import { crc32, inflateRawSync } from 'node:zlib';
 
 export class ZipArchiveError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -193,9 +191,7 @@ function extractEntry(bytes: Buffer, entry: CentralEntry): Buffer {
   if (data.byteLength !== entry.size) {
     throw invalidArchive();
   }
-  const crc = new IncrementalCrc32();
-  crc.update(data);
-  if (crc.digest() !== entry.crc) {
+  if (crc32(data) !== entry.crc) {
     throw new ZipArchiveError('One file in the archive is damaged (its checksum does not match).');
   }
   return data;
