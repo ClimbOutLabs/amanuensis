@@ -89,3 +89,73 @@ Question: "What does the scanned note say?"
 Must contain: the PNG attachment reads "Plumber: Fix-It Plumbing, 555-0142.
 Call before Thursday about the kitchen faucet." Should connect this to the
 landlord's repair visit in 04.
+
+## Messages in other languages (13 to 20)
+
+For each of these, the standing question is "What's in my inbox?": a useful
+answer names the message, its language and its point in a line or two, in
+English. The per-message facts below are what that line is built from, and
+what a follow-up question about the message must be able to surface.
+
+## 13-arabic-hotel-booking.eml (Arabic, right to left)
+
+Must contain: a hotel booking confirmation from Palm Oasis Hotel
+(reservations@palm-oasis-hotels.example.com), booking reference PO-7391,
+guest Alex Rivera, check-in Friday October 30 2026, check-out Sunday
+November 1 2026, a double room with a sea view, total 420 dollars.
+"Summarise the attachment": the PDF is the same confirmation as real text
+(not a scan): hotel name, booking PO-7391, the guest name, both dates, the
+sea-view double room and the 420 dollar total.
+
+## 14-hindi-family-message.eml (Hindi)
+
+Must contain: a family message from Priya Nair inviting Alex to her
+mother's birthday dinner at home on Sunday, November 8, guests arriving
+from 6 PM, and a request to bring his favourite dessert.
+
+## 15-japanese-hotel-booking.eml (Japanese)
+
+Must contain: a booking confirmation from Sakura Stay
+(reservations@sakura-stay.example.com), reservation number SK-2041,
+check-in Saturday November 14 2026 from 3 PM, check-out Monday
+November 16 2026 at 11 AM, one double room, total 28,500 yen.
+"Summarise the attachment": the PDF repeats the confirmation as real text
+(not a scan): the inn's name, reservation SK-2041, the guest name, both
+dates, the double room and the 28,500 yen total.
+
+## 16-sinhala-family-message.eml (Sinhala)
+
+Must contain: a family message from Nimal Perera: the family is travelling
+to Sri Lanka in December, leaving December 12 and returning December 20,
+the hotel is already booked, and Alex is invited to come along and asked
+to write back about booking him a room. The place name (ශ්‍රී ලංකාව) must
+come through intact, joiner characters included.
+
+## 17-spanish-internet-bill.eml (Spanish, ISO-8859-1)
+
+Must contain: an October bill from Fibra Hogar, invoice FH-2026-10482,
+42.18 euros charged on November 3 2026, covering 600 Mbps fibre and a
+mobile line with unlimited calls, support phone 555-0117. The message is
+encoded in ISO-8859-1, not UTF-8, and the accented letters must still read
+correctly.
+
+## 18-chinese-train-booking.eml (Simplified Chinese)
+
+Must contain: a train ticket confirmation from Huaxing Rail, order
+HX202610250817, train G102 on Sunday October 25 2026, Shanghai Hongqiao
+07:00 to Beijing South 11:28, second-class seat, car 8, seat 12A, and the
+advice to arrive 30 minutes early.
+
+## 19-russian-friend-visit.eml (Russian)
+
+Must contain: a message from Olga Smirnova: she will be in town in
+November and is free on Saturday, November 21, suggests meeting and
+visiting the museum Alex mentioned, and is staying at her sister's, so no
+hotel is needed.
+
+## 20-persian-english-family.eml (English and Persian)
+
+Must contain: a family message from Sara Ahmadi: her mother asks after
+Alex and sends her love, and there is a small family dinner on Friday,
+October 30 at 7 PM that Alex is invited to. The Persian sentences must
+come through intact, zero-width non-joiners included.
