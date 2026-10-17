@@ -140,6 +140,59 @@ describe('checkHeldReplay', () => {
     });
   });
 
+  describe('git remotes seen when the call was held', () => {
+    const remotes = (url: string) => ({
+      remotes: [{ name: 'origin', url }],
+      summary: `origin is ${url}`,
+    });
+    const shown = remotes('https://github.com/o/r.git');
+
+    it('lets the replay run when the remotes are unchanged', async () => {
+      const { tokens, heldToken, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        git_remote_precondition: shown,
+      });
+      await expect(
+        checkHeldReplay({
+          held: { ...heldInfo, git_remote_precondition: shown },
+          fresh,
+          tokens,
+          scope: SCOPE,
+        }),
+      ).resolves.toEqual({ ok: true, approval_token_id: heldToken.token_id });
+    });
+
+    it.each([
+      ['repointed', remotes('https://github.com/attacker/x.git')],
+      ['no longer observed', undefined],
+    ])('refuses the replay when the remote is %s', async (_name, now) => {
+      const { tokens, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        ...(now === undefined ? {} : { git_remote_precondition: now }),
+      });
+      await expect(
+        checkHeldReplay({ held: { ...heldInfo, git_remote_precondition: shown }, fresh, tokens, scope: SCOPE }),
+      ).resolves.toEqual({ ok: false, reason: 'changed' });
+    });
+
+    it('refuses a replay that now has a remote the owner was never shown', async () => {
+      const { tokens, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        git_remote_precondition: shown,
+      });
+      await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
+        ok: false,
+        reason: 'changed',
+      });
+    });
+  });
+
   it('refuses after the hold ran out', async () => {
     const { tokens, freshToken, heldInfo } = await held({ expiresAt: new Date(Date.now() - 1).toISOString() });
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });

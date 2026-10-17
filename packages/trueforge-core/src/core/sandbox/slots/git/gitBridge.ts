@@ -224,6 +224,7 @@ export class GitBridge {
       const cloned = await this.hostGit({
         args: ['clone', '--bare', '--quiet', ...bounded, '--', this.contact(repo.canonical), repoPath],
         token: input.token,
+        repository: repo.slug,
         network: true,
         cwd: scratch,
         input,
@@ -249,6 +250,7 @@ export class GitBridge {
       const init = await this.hostGit({
         args: ['init', '--bare', '--quiet', '--template=', repoPath],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: scratch,
         input,
@@ -270,6 +272,7 @@ export class GitBridge {
           ...(noTags ? [] : ['+refs/tags/*:refs/tags/*']),
         ],
         token: input.token,
+        repository: repo.slug,
         network: true,
         cwd: repoPath,
         input,
@@ -371,7 +374,14 @@ export class GitBridge {
     }
     const args = input.plan.args.map(token => (token === url ? this.contact(repo.canonical) : token));
     const listed = await this.withScratch(input, scratch =>
-      this.hostGit({ args: ['ls-remote', ...args], token: input.token, network: true, cwd: scratch, input }),
+      this.hostGit({
+        args: ['ls-remote', ...args],
+        token: input.token,
+        repository: repo.slug,
+        network: true,
+        cwd: scratch,
+        input,
+      }),
     );
     return listed.exitCode === 0 ? ok(listed.stdout.toString('utf8')) : failed(`fatal: ${hostFailure(listed.stderr)}`);
   }
@@ -610,6 +620,7 @@ export class GitBridge {
             `refs/aman/incoming:refs/heads/${approved.branch}`,
           ],
           token: input.token,
+          repository: approved.repository,
           network: true,
           cwd: join(scratch, 'v.git'),
           input,
@@ -682,6 +693,7 @@ export class GitBridge {
     const init = await this.hostGit({
       args: ['init', '--bare', '--quiet', '--template=', repoPath],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: input.scratch,
       input: input.input,
@@ -701,6 +713,7 @@ export class GitBridge {
         `+refs/heads/${preview.branch}:refs/aman/remote`,
       ],
       token: input.input.token,
+      repository: preview.repository,
       network: true,
       cwd: repoPath,
       input: input.input,
@@ -718,6 +731,7 @@ export class GitBridge {
       const head = await this.hostGit({
         args: ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', remoteUrl, '+HEAD:refs/aman/default'],
         token: input.input.token,
+        repository: preview.repository,
         network: true,
         cwd: repoPath,
         input: input.input,
@@ -738,6 +752,7 @@ export class GitBridge {
         `+${expectedRef}:refs/aman/incoming`,
       ],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -754,6 +769,7 @@ export class GitBridge {
       await this.hostGit({
         args: ['rev-parse', '--verify', 'refs/aman/incoming^{commit}'],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: repoPath,
         input: input.input,
@@ -771,6 +787,7 @@ export class GitBridge {
         await this.hostGit({
           args: ['rev-parse', '--verify', 'refs/aman/remote^{commit}'],
           token: undefined,
+          repository: undefined,
           network: false,
           cwd: repoPath,
           input: input.input,
@@ -781,6 +798,7 @@ export class GitBridge {
       const ancestor = await this.hostGit({
         args: ['merge-base', '--is-ancestor', 'refs/aman/remote', 'refs/aman/incoming'],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: repoPath,
         input: input.input,
@@ -796,6 +814,7 @@ export class GitBridge {
     const list = await this.hostGit({
       args: ['rev-list', '--reverse', ...range],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -827,6 +846,7 @@ export class GitBridge {
         ...range,
       ],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -912,6 +932,8 @@ export class GitBridge {
   private async hostGit(input: {
     args: readonly string[];
     token: string | null | undefined;
+    /** The one GitHub repository (owner/name) the token may be offered to. */
+    repository: string | undefined;
     network: boolean;
     cwd: string | undefined;
     input: Pick<RunInput, 'timeoutSeconds' | 'signal'>;
@@ -920,6 +942,7 @@ export class GitBridge {
     const invocation = buildHostGitInvocation({
       gitArguments: input.args,
       token,
+      credentialRepositories: input.repository === undefined ? [] : [input.repository],
       networkEntries: input.network ? this.options.networkEntries : gitLocalImportHardeningConfigEntries(),
       extraEntries: gitObjectCheckConfigEntries(),
       networkEnv: input.network ? this.options.networkEnv : undefined,
