@@ -155,19 +155,23 @@ export function runCompletedTurnEventStoreContractSuite(params: {
     const store = params.createStore();
     await seedDoneTurn(store);
     const before = (await listEvents(store)).data.length;
-    const { result } = sendReceiptEvent('evt_bad_receipt');
-    const withoutId = {
-      outcome: result.outcome,
-      sent_at: result.sent_at,
-      check_code: result.check_code,
-      message: result.message,
+    const complete = sendReceiptEvent('evt_bad_receipt');
+    const { result } = complete;
+    const malformed = {
+      ...complete,
+      result: {
+        outcome: result.outcome,
+        sent_at: result.sent_at,
+        check_code: result.check_code,
+        message: result.message,
+      },
     };
 
     await expect(
       params.appendWidened({
         session_id: SESSION_ID,
         turn_id: TURN_ID,
-        events: [{ ...sendReceiptEvent('evt_bad_receipt'), result: withoutId }],
+        events: [malformed],
       }),
     ).rejects.toThrow(/aman\.email\.send_receipt is not a valid passthrough audit event/);
 
