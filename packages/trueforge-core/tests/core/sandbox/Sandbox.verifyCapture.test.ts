@@ -4,17 +4,29 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions/context';
-import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
-import { SANDBOX_EXEC_TOOL_NAME, Sandbox, type BoundRepository } from '../../../src/core/sandbox/Sandbox';
+import {
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from '../../../src/core/sandbox/provider/Provider';
+import {
+  Sandbox,
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_WRITE_FILE_TOOL_NAME,
+  type BoundRepository,
+} from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
@@ -60,12 +72,24 @@ function repoFixture(): Fixture {
   return { root, repo, marker, script, pinnedDir, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-function realProvider(fixture: Fixture, seen: SandboxExecParams[], shellPath?: string): SandboxProvider {
+const TRUSTED_PATH_PREFIX = withTrustedPath('');
+
+function realProvider(
+  fixture: Fixture,
+  seen: SandboxExecParams[],
+  paths: { shellPath?: string; trustedPath?: string } = {},
+): SandboxProvider {
+  const { shellPath, trustedPath } = paths;
   const exec = (params: SandboxExecParams): Promise<ExecResult> => {
     seen.push(params);
+    // Stands in for a host whose fixed system PATH directories hold a different set of programs.
+    const command =
+      trustedPath === undefined
+        ? params.command
+        : params.command.replace(TRUSTED_PATH_PREFIX, `PATH='${trustedPath}'; export PATH; `);
     try {
       // Older git binaries (before 2.48) lack --include-root-refs; the ref list is not under test here.
-      const out = execFileSync('sh', ['-c', params.command.replace(' --include-root-refs', '')], {
+      const out = execFileSync('sh', ['-c', command.replace(' --include-root-refs', '')], {
         cwd: params.cwd ?? fixture.repo,
         env: { ...process.env, ...(shellPath === undefined ? {} : { PATH: shellPath }), ...params.env },
         encoding: 'utf8',
@@ -93,7 +117,11 @@ function realProvider(fixture: Fixture, seen: SandboxExecParams[], shellPath?: s
     getSkillsDir: sandboxId => `${sandboxId}/skills`,
     getSkillDownloaderPath: sandboxId => `${sandboxId}/git_downloader.py`,
     downloadFile: jest.fn(),
-    uploadFile: jest.fn().mockResolvedValue(undefined),
+    uploadFile: params => {
+      mkdirSync(dirname(params.remotePath), { recursive: true });
+      writeFileSync(params.remotePath, params.content);
+      return Promise.resolve();
+    },
     createCodeModeTransport: jest.fn(),
   };
 }
@@ -121,21 +149,56 @@ function boundSandbox(fixture: Fixture, provider: SandboxProvider): Sandbox {
   });
 }
 
-async function run(input: { sandbox: Sandbox; fixture: Fixture; command: string; purpose: 'inspect' | 'verify' }) {
-  const result = await input.sandbox.callTool({
-    name: SANDBOX_EXEC_TOOL_NAME,
-    arguments: {
-      intent: 'check the tree',
-      purpose: input.purpose,
-      command: input.command,
-      cwd: input.fixture.repo,
+async function run(input: {
+  sandbox: Sandbox;
+  fixture: Fixture;
+  command: string;
+  purpose: 'inspect' | 'verify' | 'execute';
+  approved?: boolean;
+}) {
+  const result = await input.sandbox.callTool(
+    {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: {
+        intent: 'check the tree',
+        purpose: input.purpose,
+        command: input.command,
+        cwd: input.fixture.repo,
+      },
     },
-  });
+    input.approved === true ? { status: 'allow', scope: 'once' } : undefined,
+  );
+  return toolText(result);
+}
+
+function toolText(result: Awaited<ReturnType<Sandbox['callTool']>>): { isError: boolean; text: string } {
   if (!isCallToolResponseResult(result)) {
     throw new Error('expected a tool result, not an approval request');
   }
   const content = result.result.content[0];
   return { isError: result.result.isError === true, text: content?.type === 'text' ? content.text : '' };
+}
+
+async function writeNewFile(input: { sandbox: Sandbox; fixture: Fixture; path: string; content: string }) {
+  return toolText(
+    await input.sandbox.callTool(
+      {
+        name: SANDBOX_WRITE_FILE_TOOL_NAME,
+        arguments: { intent: 'add a file', cwd: input.fixture.repo, path: input.path, content: input.content },
+      },
+      { status: 'allow', scope: 'once' },
+    ),
+  );
+}
+
+const CHANGED_STATE = 'changed Git-visible repository state';
+
+/** A project check outside the repository that, as a side effect, changes the checkout. */
+function projectCheck(input: { fixture: Fixture; name: string; body: string }): string {
+  const path = join(input.fixture.root, input.name);
+  writeFileSync(path, `#!/bin/sh\n${input.body}\n`);
+  chmodSync(path, 0o755);
+  return path;
 }
 
 const PROGRAM_CONFIGS: { name: string; setup: (fixture: Fixture) => void }[] = [
@@ -169,7 +232,7 @@ describe('verification state capture in a bound repository', () => {
     }
   });
 
-  test('every git call the capture makes runs hardened and by absolute path', async () => {
+  test('every git call the capture makes runs hardened on the trusted PATH and never diffs the worktree', async () => {
     const fixture = repoFixture();
     try {
       const seen: SandboxExecParams[] = [];
@@ -180,13 +243,114 @@ describe('verification state capture in a bound repository', () => {
         purpose: 'verify',
       });
       expect(result.isError).toBe(false);
-      const diffs = seen.filter(params => /\bdiff\b/u.test(params.command));
-      expect(diffs.length).toBeGreaterThan(0);
-      for (const params of diffs) {
-        expect(params.command).toContain(`${fixture.pinnedDir}/git`);
-        expect(params.command).toContain('core.fsmonitor=false');
-        expect(params.env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+      const captureReads = seen.filter(params => params.command.includes('git ls-files'));
+      expect(captureReads.length).toBeGreaterThan(0);
+      for (const params of captureReads) {
+        expect(params.command.startsWith(TRUSTED_PATH_PREFIX)).toBe(true);
+        expect(params.env).toMatchObject({
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_KEY_1: 'core.fsmonitor',
+          GIT_CONFIG_VALUE_1: 'false',
+        });
       }
+      expect(seen.some(params => /\bgit diff\b/u.test(params.command))).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('everyday local git settings do not block verify, execute or write_file, and changes are still caught', async () => {
+    const fixture = repoFixture();
+    try {
+      git(fixture.repo, ['config', 'core.hooksPath', '.husky']);
+      git(fixture.repo, ['config', 'gc.auto', '0']);
+      git(fixture.repo, ['config', 'remote.origin.gh-resolved', 'base']);
+      git(fixture.repo, ['config', 'branch.main.vscode-merge-base', 'origin/main']);
+      const sandbox = boundSandbox(fixture, realProvider(fixture, []));
+
+      const clean = await run({ sandbox, fixture, command: 'test -f f.txt', purpose: 'verify', approved: true });
+      expect(clean).toMatchObject({ isError: false });
+      const executed = await run({ sandbox, fixture, command: 'true', purpose: 'execute', approved: true });
+      expect(executed).toMatchObject({ isError: false });
+      const written = await writeNewFile({ sandbox, fixture, path: 'added-by-tool.txt', content: 'new\n' });
+      expect(written.isError).toBe(false);
+      expect(readFileSync(join(fixture.repo, 'added-by-tool.txt'), 'utf8')).toBe('new\n');
+
+      const tracked = await run({
+        sandbox,
+        fixture,
+        command: projectCheck({ fixture, name: 'check-tracked', body: ': > f.txt' }),
+        purpose: 'verify',
+        approved: true,
+      });
+      expect(tracked.isError).toBe(true);
+      expect(tracked.text).toContain(CHANGED_STATE);
+      const untracked = await run({
+        sandbox,
+        fixture,
+        command: projectCheck({ fixture, name: 'check-untracked', body: ': > untracked.txt' }),
+        purpose: 'verify',
+        approved: true,
+      });
+      expect(untracked.isError).toBe(true);
+      expect(untracked.text).toContain(CHANGED_STATE);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a configured clean filter is never run by the capture and does not refuse the call', async () => {
+    const fixture = repoFixture();
+    try {
+      PROGRAM_CONFIGS[1]?.setup(fixture);
+      git(fixture.repo, ['add', '.gitattributes']);
+      rmSync(fixture.marker, { force: true });
+      const sandbox = boundSandbox(fixture, realProvider(fixture, []));
+
+      const clean = await run({ sandbox, fixture, command: 'test -f f.txt', purpose: 'verify', approved: true });
+      expect(clean).toMatchObject({ isError: false });
+      const changed = await run({
+        sandbox,
+        fixture,
+        command: projectCheck({ fixture, name: 'check-tracked', body: ': > f.txt' }),
+        purpose: 'verify',
+        approved: true,
+      });
+      expect(changed.text).toContain(CHANGED_STATE);
+      expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('host bookkeeping finds python3 in any trusted PATH directory', async () => {
+    const fixture = repoFixture();
+    try {
+      // A host whose usable python3 lives only in a /usr/local/bin-style directory.
+      const localBin = join(fixture.root, 'local-bin');
+      const systemBin = join(fixture.root, 'system-bin');
+      mkdirSync(localBin);
+      mkdirSync(systemBin);
+      const realPython = realpathSync(execFileSync('sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim());
+      writeFileSync(
+        join(localBin, 'python3'),
+        `#!/bin/sh\necho python3 >> '${fixture.marker}'\nexec '${realPython}' "$@"\n`,
+      );
+      chmodSync(join(localBin, 'python3'), 0o755);
+      for (const dir of ['/usr/bin', '/bin']) {
+        for (const name of readdirSync(dir)) {
+          if (!name.startsWith('python') && !existsSync(join(systemBin, name))) {
+            symlinkSync(join(dir, name), join(systemBin, name));
+          }
+        }
+      }
+      const sandbox = boundSandbox(fixture, realProvider(fixture, [], { trustedPath: `${localBin}:${systemBin}` }));
+
+      const written = await writeNewFile({ sandbox, fixture, path: 'from-local-python.txt', content: 'ok\n' });
+      expect(written.isError).toBe(false);
+      expect(readFileSync(join(fixture.repo, 'from-local-python.txt'), 'utf8')).toBe('ok\n');
+      expect(readFileSync(fixture.marker, 'utf8')).toContain('python3');
     } finally {
       fixture.cleanup();
     }
@@ -207,7 +371,7 @@ describe('verification state capture in a bound repository', () => {
     }
   });
 
-  test('host bookkeeping never runs a program planted ahead of the pinned PATH', async () => {
+  test('host bookkeeping never runs a program planted on the sandbox PATH', async () => {
     const fixture = repoFixture();
     try {
       const planted = join(fixture.root, 'planted');
@@ -217,7 +381,10 @@ describe('verification state capture in a bound repository', () => {
         chmodSync(join(planted, program), 0o755);
       }
       const result = await run({
-        sandbox: boundSandbox(fixture, realProvider(fixture, [], `${planted}:${process.env['PATH'] ?? ''}`)),
+        sandbox: boundSandbox(
+          fixture,
+          realProvider(fixture, [], { shellPath: `${planted}:${process.env['PATH'] ?? ''}` }),
+        ),
         fixture,
         command: 'git status',
         purpose: 'verify',

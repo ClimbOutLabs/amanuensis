@@ -21,10 +21,11 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeAgentSpec, mintTestTurnId } from '../../agent-session/testHelpers';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../sandbox/fakeTrackedState';
 import { realCommandExec } from '../sandbox/realCommandExec';
-import { withUnpinnedCommands } from '../sandbox/unpinnedExec';
 
 const execFileAsync = promisify(execFile);
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
 
 const GIT_FIXTURE_ENVIRONMENT_KEYS_TO_REMOVE = new Set([
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -109,7 +110,7 @@ function makeBoundSandbox(options: {
     buildImage: jest.fn(),
     getImageBuildStatus: jest.fn(),
     createSandbox,
-    exec: realCommandExec(withUnpinnedCommands(options.exec)),
+    exec: realCommandExec(options.exec),
     acknowledgeWorkspaceTermination: jest.fn(() => Promise.resolve()),
     executeVerifiedWorkspaceCommit: () =>
       Promise.resolve({ status: 'indeterminate', result: { success: false, error: 'not used by this fixture' } }),
@@ -164,9 +165,8 @@ function quotedGitConfigCommand(...args: string[]): string {
 }
 
 function captureScriptFromCommand(command: string): { flags: string[]; script: string } {
-  const isolatedPrefix =
-    /^'\/usr\/bin\/env' -i 'PATH=[^']*' 'HOME=\/nonexistent' '(?:[^']*\/)?python3' -I -S -E -c /u.exec(command)?.[0];
-  const prefix = isolatedPrefix ?? 'python3 -c ';
+  const isolatedPrefix = 'env -i PATH="$PATH" HOME=/nonexistent python3 -I -S -E -c ';
+  const prefix = command.startsWith(isolatedPrefix) ? isolatedPrefix : 'python3 -c ';
   if (!command.startsWith(prefix)) {
     throw new Error(`Expected abnormal-handoff Python command, received: ${command}`);
   }
@@ -189,7 +189,7 @@ function captureScriptFromCommand(command: string): { flags: string[]; script: s
     script += "'";
     offset += 3;
   }
-  return { flags: isolatedPrefix === undefined ? [] : ['-I', '-S', '-E'], script };
+  return { flags: prefix === isolatedPrefix ? ['-I', '-S', '-E'] : [], script };
 }
 
 function pythonExecutable(): string {
@@ -407,7 +407,7 @@ describe('abnormal handoffs', () => {
           return { success: true, response: { exitCode: 0, result: 'mutation complete' } };
         });
       }
-      if (params.command.includes('python3')) {
+      if (params.command.includes('python3 ')) {
         evidenceStarted = true;
         steps.push('evidence_captured');
         return Promise.resolve({
@@ -415,7 +415,10 @@ describe('abnormal handoffs', () => {
           response: { exitCode: 0, result: boundedEvidenceCaptureOutput() },
         });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox } = makeBoundSandbox({ exec, existingSandboxId: 'v1:test:serialized-handoff' });
     const mutation = sandbox.callTool(
@@ -461,13 +464,16 @@ describe('abnormal handoffs', () => {
           response: { exitCode: 0, result: 'mutation complete' },
         }));
       }
-      if (params.command.includes('python3')) {
+      if (params.command.includes('python3 ')) {
         return Promise.resolve({
           success: true,
           response: { exitCode: 0, result: boundedEvidenceCaptureOutput() },
         });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox } = makeBoundSandbox({ exec, existingSandboxId: 'v1:test:timed-handoff-lock' });
     const mutation = sandbox.callTool(
@@ -493,16 +499,12 @@ describe('abnormal handoffs', () => {
         repository: { branch: null, head_sha: null, changed_files: [] },
         verification_receipt: { status: 'not_available' },
       });
-      expect(
-        exec.mock.calls.filter(call => call[0].command.includes('python3') && call[0].command.includes(' -c ')),
-      ).toHaveLength(0);
+      expect(exec.mock.calls.filter(call => call[0].command.startsWith('python3 -c '))).toHaveLength(0);
 
       releaseMutation.resolve();
       await mutation;
       await Promise.resolve();
-      expect(
-        exec.mock.calls.filter(call => call[0].command.includes('python3') && call[0].command.includes(' -c ')),
-      ).toHaveLength(0);
+      expect(exec.mock.calls.filter(call => call[0].command.startsWith('python3 -c '))).toHaveLength(0);
     } finally {
       releaseMutation.resolve();
       jest.useRealTimers();
@@ -558,7 +560,10 @@ describe('abnormal handoffs', () => {
       if (params.command === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo' } });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox, provider, workspaceVerificationCoordinator } = makeBoundSandbox({
       exec,
@@ -623,12 +628,11 @@ describe('abnormal handoffs', () => {
       "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'":
         'HEAD\u00000123456789abcdef\u0000refs/heads/codex/handoff\u0000',
       'git ls-files -v -z': 'H src/verified.ts\u0000',
-      'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-      'git diff --binary --no-ext-diff --no-textconv --no-color --': '',
+      ...fakeTrackedState([]),
       'git ls-files --others --exclude-standard -z': '',
     };
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.includes('python3')) {
+      if (params.command.includes('python3 ')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -698,7 +702,7 @@ describe('abnormal handoffs', () => {
         success: true,
         response: {
           exitCode: 0,
-          result: params.command.includes('python3')
+          result: params.command.includes('python3 ')
             ? boundedEvidenceCaptureOutput()
             : (repositoryResult[params.command] ?? 'ok'),
         },

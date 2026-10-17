@@ -7,7 +7,6 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
 import { realCommandExec } from './realCommandExec';
-import { withUnpinnedCommands } from './unpinnedExec';
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
 const TOKEN = ['ghp', 'SyntheticTokenForTestsOnly0123456789'].join('_');
@@ -39,7 +38,7 @@ function isBrokered(params: SandboxExecParams): boolean {
 }
 
 function makeProvider(input: { recorder: Recorder; localConfig?: string }): SandboxProvider {
-  const exec = withUnpinnedCommands((params: SandboxExecParams): Promise<ExecResult> => {
+  const exec = (params: SandboxExecParams): Promise<ExecResult> => {
     input.recorder.execs.push(params);
     const result = isProbe(params)
       ? (input.localConfig ?? SAFE_LOCAL_CONFIG)
@@ -53,7 +52,7 @@ function makeProvider(input: { recorder: Recorder; localConfig?: string }): Sand
               ? '11 .git\n12 /work/repo/.git'
               : '';
     return Promise.resolve({ success: true, response: { exitCode: 0, result } });
-  });
+  };
   return {
     type: 'local',
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),

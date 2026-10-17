@@ -51,12 +51,13 @@ import {
 import { SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
 import { REQUESTED_SKILLS_FILE_NAME, SkillMounter, type GitSkill } from '../../../src/core/sandbox/skills/SkillMounter';
 import { structuredEditObservationForTargets } from '../../../src/core/sandbox/structuredEditPrecondition';
+import { GIT_INDEX_ENTRIES_COMMAND, TRACKED_WORKTREE_COMMAND } from '../../../src/core/sandbox/workspaceStateCapture';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { fakeTrackedState } from './fakeTrackedState';
 import { realCommandExec } from './realCommandExec';
-import { CLEAN_REPOSITORY_CONFIG, isRepositoryConfigProbe, unpinHostCommand } from './unpinnedExec';
 
 function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -87,13 +88,21 @@ const DEFAULT_CHECKOUT_ID = implementationPlanCheckoutId({
 const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 
+const APP_INDEX_SHA = '1'.repeat(40);
+const APP_WORKTREE_SHA = '2'.repeat(40);
+const APP_CHANGED_LISTING =
+  fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: '3'.repeat(40) }])[
+    TRACKED_WORKTREE_COMMAND
+  ] ?? '';
+
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
+
 const BASE_GIT_STATE_RESULTS: Readonly<Record<string, string>> = {
   'git rev-parse --show-toplevel': '/repo',
   'git rev-parse --abbrev-ref HEAD': 'feature/reliable-agent',
   'git rev-parse HEAD': '0123456789abcdef',
   [GIT_TRACKED_PATH_TAGS_COMMAND]: 'H src/app.ts\0',
-  'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-  'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts',
+  ...fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: APP_WORKTREE_SHA }]),
   'git ls-files --others --exclude-standard -z': '',
 };
 
@@ -121,12 +130,12 @@ function makeVerificationExec(input: {
 
 function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider {
   const { exec: overrideExec, ...providerOverrides } = overrides;
-  const exec = async (pinnedParams: SandboxExecParams): Promise<ExecResult> => {
-    const params = { ...pinnedParams, command: unpinHostCommand(pinnedParams.command) };
-    if (isRepositoryConfigProbe(params.command)) {
-      return CLEAN_REPOSITORY_CONFIG;
-    }
+  const exec = async (params: SandboxExecParams): Promise<ExecResult> => {
     const result = overrideExec === undefined ? await readyExec() : await overrideExec(params);
+    const emptyTrackedState = EMPTY_TRACKED_STATE[params.command];
+    if (emptyTrackedState !== undefined && result.success && result.response.result === 'ok') {
+      return { success: true, response: { ...result.response, result: emptyTrackedState } };
+    }
     if (
       params.command === BOUND_REPOSITORY_STATE_COMMAND &&
       result.success &&
@@ -3171,16 +3180,11 @@ describe('Sandbox provider-owned paths', () => {
   it.each([
     {
       name: 'tracked worktree',
-      afterState: {
-        'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts\n+changed',
-      },
+      afterState: { [TRACKED_WORKTREE_COMMAND]: APP_CHANGED_LISTING },
     },
     {
       name: 'staged index',
-      afterState: {
-        'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --':
-          'diff --git a/src/app.ts b/src/app.ts\n+staged',
-      },
+      afterState: { [GIT_INDEX_ENTRIES_COMMAND]: `100644 ${'4'.repeat(40)} 0\tsrc/app.ts\0` },
     },
     { name: 'HEAD', afterState: { 'git rev-parse HEAD': 'fedcba9876543210' } },
     {
@@ -3354,8 +3358,8 @@ describe('Sandbox provider-owned paths', () => {
           jest.setSystemTime(new Date(Date.now() + 91_000));
         }
         const result =
-          params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-            ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+          params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+            ? APP_CHANGED_LISTING
             : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
         return Promise.resolve({ success: true, response: { exitCode: 0, result } });
       });
@@ -3457,8 +3461,8 @@ describe('Sandbox provider-owned paths', () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
       if (params.command === 'touch src/app.ts') trackedChanged = true;
       const result =
-        params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-          ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+        params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+          ? APP_CHANGED_LISTING
           : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
       return Promise.resolve({ success: true, response: { exitCode: 0, result } });
     });

@@ -3,7 +3,6 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../sr
 import { SANDBOX_EXEC_TOOL_NAME, SANDBOX_REPLACE_TEXT_TOOL_NAME, Sandbox } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
-import { withUnpinnedCommands } from './unpinnedExec';
 
 function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -30,7 +29,6 @@ function makeProvider(
     uploadFile: jest.fn().mockResolvedValue(undefined),
     createCodeModeTransport: jest.fn(),
     ...overrides,
-    exec: withUnpinnedCommands(overrides.exec),
   };
 }
 

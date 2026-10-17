@@ -13,21 +13,23 @@ import {
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { fakeTrackedState } from './fakeTrackedState';
 import { realCommandExec } from './realCommandExec';
-import { withUnpinnedCommands } from './unpinnedExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result } });
 }
 
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
+
 function boundWorkspaceExec(params: SandboxExecParams): Promise<ExecResult> {
   return params.command.startsWith('realpath -e --') || params.command === 'git rev-parse --show-toplevel'
     ? readyExec('/repo\n')
-    : readyExec();
+    : readyExec(EMPTY_TRACKED_STATE[params.command]);
 }
 
 function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider {
-  const exec = withUnpinnedCommands(overrides.exec ?? (() => readyExec()));
+  const exec = overrides.exec ?? (() => readyExec());
   return {
     type: 'test',
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),

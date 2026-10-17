@@ -1,5 +1,5 @@
 import {
-  GIT_HARDENING_ENV,
+  gitConfigEntriesEnv,
   gitHardeningConfigEntries,
   gitNetworkHardeningConfigEntries,
   type GitConfigEntry,
@@ -287,20 +287,14 @@ const CREDENTIAL_HELPER = `!f() { test "$1" = get && printf 'username=x-access-t
 
 /** Config passed as env pairs so no argv carries it; system and global files are ignored. */
 function gitConfigEnv(input: { entries: readonly GitConfigEntry[] }): Record<string, string> {
-  const env: Record<string, string> = {
-    ...GIT_HARDENING_ENV,
+  return {
+    ...gitConfigEntriesEnv(input.entries),
     ...PINNED_HOME_ENV,
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '',
     GIT_EDITOR: 'true',
     GIT_MERGE_AUTOEDIT: 'no',
-    GIT_CONFIG_COUNT: String(input.entries.length),
   };
-  input.entries.forEach(([key, value], index) => {
-    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
-    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
-  });
-  return env;
 }
 
 function hardeningEntries(workspaceRoot: string | undefined): GitConfigEntry[] {
