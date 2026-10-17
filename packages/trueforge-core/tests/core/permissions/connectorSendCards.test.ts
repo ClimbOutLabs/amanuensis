@@ -179,7 +179,8 @@ describe('attachments and refusal wording', () => {
   });
 
   test.each([
-    [mailCall('reply_all', { messageId: 'm1' }), 'every recipient named'],
+    [mailCall('reply_all', { messageId: 'm1' }), 'Reply on the same message'],
+    [mailCall('send_message', { draftId: 'd1', to: ['a@example.com'] }), 'Write the message out in full'],
     [mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }), 'Name each recipient'],
     [
       mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }),
@@ -244,11 +245,35 @@ describe('attachment file data on the card', () => {
     expect(first.card?.outbound_text).not.toBe(second.card?.outbound_text);
   });
 
+  test('a text file sent as base64 is decoded and shown in full', async () => {
+    const text = `${'private note '.repeat(300)}END-OF-NOTE`;
+    const decision = await sendWith({
+      attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from(text).toString('base64') }],
+    });
+    expect(decision.card?.outbound_text).toContain('END-OF-NOTE');
+    expect(decision.card?.outbound_text).not.toContain('fingerprint');
+  });
+
+  test('a binary file keeps its type from a data URL, and text after a binary header is not shown as text', async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('secret '.repeat(500))]);
+    const decision = await sendWith({
+      attachments: [{ filename: 'a.png', content: `data:image/png;base64,${png.toString('base64')}` }],
+    });
+    expect(decision.card?.outbound_text).toContain('file data, image/png, about 3 KB, fingerprint');
+  });
+
+  test('only file data keys under exact attachment keys are summarised', async () => {
+    const hex = 'ab'.repeat(40);
+    expectRefused(await sendWith({ notAttachment: [{ content: blob(4) }] }));
+    const decision = await sendWith({ attachments: [{ filename: hex, note: hex }] });
+    expect(decision.card?.outbound_text).toContain(hex);
+    expect(decision.card?.outbound_text).not.toContain('fingerprint');
+  });
+
   test.each([
     ['contentBytes under attachments', { attachments: [{ name: 'a.bin', contentBytes: blob(3) }] }],
     ['file_attachments', { file_attachments: [{ filename: 'a.bin', content: blob(3) }] }],
     ['a nested message.attachments', { message: { attachments: [{ filename: 'a.bin', file_data: blob(3) }] } }],
-    ['a bare base64 string', { attachments: [blob(3)] }],
   ])('%s is summarised, not counted as text', async (_label, extra) => {
     const decision = await sendWith(extra);
     expect(decision.auto_deny).toBeNull();
@@ -277,9 +302,23 @@ describe('replies must name every recipient in To', () => {
     ['an empty to list', { threadId: 't1', to: [], cc: ['a@example.com'], body: 'ok' }],
     ['an empty to string', { threadId: 't1', to: '', bcc: 'a@example.com', body: 'ok' }],
     ['a blank to entry', { threadId: 't1', to: ['  '], cc: ['a@example.com'], body: 'ok' }],
+    ['an empty-string entry', { threadId: 't1', to: [''], cc: ['a@example.com'], body: 'ok' }],
+    ['a whitespace to string', { threadId: 't1', to: '  ', cc: 'a@example.com', body: 'ok' }],
+    ['a null to', { threadId: 't1', to: null, cc: ['a@example.com'], body: 'ok' }],
+    ['an empty to object', { threadId: 't1', to: [{}], cc: ['a@example.com'], body: 'ok' }],
+    ['a to nested under message', { message: { to: ['a@example.com'] }, cc: ['b@example.com'] }],
   ])('refuses a reply with %s', async (_label, params) => {
     expectRefused(await classify(mailCall('reply_to_thread', params)));
     expectRefused(await classify(mailCall('reply', params)));
+    expectRefused(await classify(mailCall('replyToMessage', params)));
+    expectRefused(await classify(mailCall('reply_email', params)));
+  });
+
+  test.each([
+    ['forward', { messageId: 'm1', cc: ['a@example.com'] }],
+    ['reply_to_thread', { threadId: 't1', cc: ['a@example.com'] }],
+  ])('refuses %s with cc only', async (name, params) => {
+    expectRefused(await classify(mailCall(name, params)));
   });
 
   test('cards a reply whose to is named', async () => {
@@ -301,6 +340,12 @@ describe('hidden sends in other spellings', () => {
     ['reply', { messageId: 'm1', mode: 'reply_all', to: ['a@example.com'] }],
     ['replyall', { messageId: 'm1', to: ['a@example.com'] }],
     ['replyAll', { messageId: 'm1', to: ['a@example.com'] }],
+    ['respond_all', { messageId: 'm1', to: ['a@example.com'] }],
+    ['send_message', { draft: 'd1', to: ['shown@example.com'] }],
+    ['send_message', { message: { draft: { id: 'd1' } }, to: ['shown@example.com'] }],
+    ['send_message', { useDraft: true, to: ['shown@example.com'] }],
+    ['deliver', { draftId: 'd1' }],
+    ['drafts.send', { draftId: 'd1' }],
     ['drafts_send', { draftId: 'd1' }],
     ['send', { draftId: 'd1' }],
     ['dispatch', { draftId: 'd1' }],

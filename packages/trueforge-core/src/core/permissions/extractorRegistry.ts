@@ -270,55 +270,74 @@ function keyDisplay(key: string): string {
   return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
 }
 
-const BASE64_PREFIX = /^data:[^,]*;base64,/;
-const BASE64_BLOB = /^[A-Za-z0-9+/]{64,}={0,2}$/;
+const BASE64_DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
+const BASE64_BLOB = /^[A-Za-z0-9+/]+={0,2}$/;
+const ATTACHMENT_KEY_SET = new Set(
+  ['attachment', 'attachments', 'file_attachment', 'file_attachments'].map(normalizeKey),
+);
+const FILE_DATA_KEY_SET = new Set(
+  ['content', 'data', 'bytes', 'content_bytes', 'file_data', 'base64', 'raw'].map(normalizeKey),
+);
 const ATTACHMENT_MAX_DEPTH = 6;
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000e-\u001f]/;
 
 function isAttachmentKey(key: string): boolean {
-  const normalized = normalizeKey(key);
-  return normalized.endsWith('attachment') || normalized.endsWith('attachments');
-}
-
-function base64Body(value: string): string {
-  return value.replace(BASE64_PREFIX, '').replace(/[\r\n]/g, '');
-}
-
-/** True for a string that is real base64 data, so its encoded bytes are what leaves, not readable text. */
-function isBase64Blob(value: string): boolean {
-  const body = base64Body(value);
-  return BASE64_BLOB.test(body) && body.length % 4 === 0 && Buffer.from(body, 'base64').toString('base64') === body;
+  return ATTACHMENT_KEY_SET.has(normalizeKey(key));
 }
 
 function sizeLabel(bytes: number): string {
   return bytes < 1024 ? `${String(bytes)} bytes` : `about ${String(Math.round(bytes / 1024))} KB`;
 }
 
-function blobSummary(value: string): string {
-  const body = base64Body(value);
+/**
+ * Long base64 file data under an attachment: readable text is decoded and shown, anything else becomes its
+ * type, size and a short fingerprint. Short values and non-base64 strings are returned unchanged.
+ */
+function decodeFileData(value: string): string {
+  if (value.length <= OUTBOUND_VALUE_MAX_CHARS) {
+    return value;
+  }
+  const mime = BASE64_DATA_URL.exec(value)?.[1] ?? '';
+  const body = value.replace(BASE64_DATA_URL, '').replace(/[\r\n]/g, '');
+  const bytes = Buffer.from(body, 'base64');
+  if (!BASE64_BLOB.test(body) || body.length % 4 !== 0 || bytes.toString('base64') !== body) {
+    return value;
+  }
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    if (!CONTROL_CHARACTERS.test(text)) {
+      return text;
+    }
+  } catch {
+    // Not UTF-8 text: summarised below.
+  }
   const fingerprint = createHash('sha256').update(body).digest('hex').slice(0, 12);
-  return `(file data, ${sizeLabel(Buffer.from(body, 'base64').length)}, fingerprint ${fingerprint})`;
+  return `(file data, ${mime === '' ? '' : `${mime}, `}${sizeLabel(bytes.length)}, fingerprint ${fingerprint})`;
 }
 
-/** Replaces base64 file data under an attachment with its size and fingerprint; readable text stays as it is. */
-function summarizeFileData(value: unknown, depth = 0): unknown {
-  if (typeof value === 'string') {
-    return isBase64Blob(value) ? blobSummary(value) : value;
-  }
+function summarizeAttachment(value: unknown, depth = 0): unknown {
   if (depth > ATTACHMENT_MAX_DEPTH) {
     return value;
   }
   if (Array.isArray(value)) {
-    return value.map(item => summarizeFileData(item, depth + 1));
+    return value.map(item => summarizeAttachment(item, depth + 1));
   }
   if (!isRecord(value)) {
     return value;
   }
-  return Object.fromEntries(Object.entries(value).map(([key, field]) => [key, summarizeFileData(field, depth + 1)]));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      key,
+      FILE_DATA_KEY_SET.has(normalizeKey(key)) && typeof field === 'string'
+        ? decodeFileData(field)
+        : summarizeAttachment(field, depth + 1),
+    ]),
+  );
 }
 
 /**
- * File data is bound into the approval but not printed: the card gives each file's size and a fingerprint,
- * so a large attachment never counts against the length a send may have. Text is never hidden this way.
+ * File data is bound into the approval but only summarised on the card when it is binary, so a large
+ * attachment never counts against the length a send may have. Readable text is always shown.
  */
 function withAttachmentSummaries(value: unknown, depth = 0): unknown {
   if (depth > ATTACHMENT_MAX_DEPTH) {
@@ -333,7 +352,7 @@ function withAttachmentSummaries(value: unknown, depth = 0): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => [
       key,
-      isAttachmentKey(key) ? summarizeFileData(field) : withAttachmentSummaries(field, depth + 1),
+      isAttachmentKey(key) ? summarizeAttachment(field) : withAttachmentSummaries(field, depth + 1),
     ]),
   );
 }
@@ -344,7 +363,7 @@ function renderOutboundLines(
 ): { lines: string[]; truncated: boolean } {
   let truncated = false;
   const lines = Object.entries(params).map(([key, value]) => {
-    const shownValue = isAttachmentKey(key) ? summarizeFileData(value) : withAttachmentSummaries(value);
+    const shownValue = isAttachmentKey(key) ? summarizeAttachment(value) : withAttachmentSummaries(value);
     const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
     const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
     truncated ||= rest > 0;
@@ -525,7 +544,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: words => hasPhrase(words, 'forward'),
-    sends: 'recipient',
+    sends: 'to',
     describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -596,11 +615,12 @@ export interface ExtractionResult {
 }
 
 /** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
-const HIDDEN_SEND_PHRASES = ['reply_all', 'replyall', 'reply_to_all', 'replytoall', 'send_draft', 'senddraft'];
+const REPLY_ALL_PHRASES = ['reply_all', 'replyall', 'reply_to_all', 'replytoall', 'respond_all', 'respondall'];
+const DRAFT_SEND_PHRASES = ['send_draft', 'senddraft'];
 /** Whole words that make a tool a send even when no recipient is named. */
-const SEND_NAME_WORDS = ['send', 'dispatch', 'deliver', 'reply', 'forward', 'publish', 'post', 'submit'];
+const SEND_NAME_WORDS = ['send', 'dispatch', 'deliver', 'reply', 'respond', 'forward', 'submit'];
 
-const REPLY_ALL_KEY_SET = new Set(['reply_all', 'reply_to_all'].map(normalizeKey));
+const REPLY_ALL_KEY_SET = new Set(['reply_all', 'reply_to_all', 'respond_all'].map(normalizeKey));
 
 function isTruthyFlag(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -644,20 +664,37 @@ function hasArgument(input: {
   );
 }
 
-/** A send that names a stored draft or asks to reply to everyone fills in its audience or text after approval. */
-function hasHiddenSendArgument(params: Record<string, unknown>): boolean {
+/** The call names a stored draft, whose recipients and text are filled in after approval. */
+function hasDraftReference(params: Record<string, unknown>): boolean {
+  return hasArgument({ value: params, matchKey: key => key.includes('draft'), test: isDraftReference });
+}
+
+/** The call asks for the reply to go to everyone on the thread, which is filled in after approval. */
+function hasReplyAllArgument(params: Record<string, unknown>): boolean {
   return (
-    hasArgument({ value: params, matchKey: key => key.includes('draft'), test: isDraftReference }) ||
     hasArgument({ value: params, matchKey: key => REPLY_ALL_KEY_SET.has(key), test: isTruthyFlag }) ||
     hasArgument({ value: params, matchKey: () => true, test: isReplyAllMode })
   );
 }
 
-/** True when the top-level `to` holds at least one non-empty recipient. */
+function addressStrings(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.trim() === '' ? [] : [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(addressStrings);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  return Object.entries(value)
+    .filter(([key]) => ADDRESS_FIELD_SET.has(normalizeKey(key)))
+    .flatMap(([, field]) => addressStrings(field));
+}
+
+/** True when the top-level `to` resolves to at least one non-empty address. */
 function namesToRecipient(params: Record<string, unknown>): boolean {
-  return nestedRecipientValues(
-    Object.fromEntries(Object.entries(params).filter(([key]) => normalizeKey(key) === 'to')),
-  ).some(value => value.trim() !== '');
+  return Object.entries(params).some(([key, value]) => normalizeKey(key) === 'to' && addressStrings(value).length > 0);
 }
 
 interface IncompleteSend {
@@ -676,12 +713,18 @@ function incompleteSend(input: {
   fields: ExtractedCardFields;
   truncated: boolean;
 }): IncompleteSend | null {
-  if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES) || (input.sends && hasHiddenSendArgument(input.params))) {
+  if (hasPhrase(input.words, ...REPLY_ALL_PHRASES) || (input.sends && hasReplyAllArgument(input.params))) {
     return {
       model_message:
-        'This tool sends to recipients or content that are filled in after approval, so the card cannot show them. Read the message first, then send it with every recipient named in `to` and `cc` and its full text written out.',
-      owner_message:
-        'Nothing was sent: it fills in who gets it after approval. Ask for a new message naming each person.',
+        'Replying to everyone fills in the recipients after approval, so the card cannot show them. Reply on the same message with every person who should get it named in `to`.',
+      owner_message: 'Nothing was sent: replying to everyone is not shown in full. Ask for each person to be named.',
+    };
+  }
+  if (hasPhrase(input.words, ...DRAFT_SEND_PHRASES) || (input.sends && hasDraftReference(input.params))) {
+    return {
+      model_message:
+        'A saved draft is sent with recipients and text that are filled in after approval, so the card cannot show them. Write the message out in full with every recipient named in `to`.',
+      owner_message: 'Nothing was sent: a saved draft cannot be shown in full. Ask for the message to be written out.',
     };
   }
   if (input.sends && input.truncated) {
@@ -740,7 +783,7 @@ export function extractCardFields(input: {
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
   const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
-  const hiddenArgument = hasHiddenSendArgument(input.canonical_params);
+  const hiddenArgument = hasDraftReference(input.canonical_params) || hasReplyAllArgument(input.canonical_params);
   const sends =
     externalService ||
     family?.sends !== undefined ||
