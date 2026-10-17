@@ -33,6 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
+export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
