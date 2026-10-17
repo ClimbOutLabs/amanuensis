@@ -17,6 +17,7 @@ import {
 } from '../../../src/core/sandbox/structuredEditPrecondition';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { realCommandExec } from './realCommandExec';
 
 function makeProvider(input: {
   stale: boolean;
@@ -30,7 +31,7 @@ function makeProvider(input: {
   let observationCount = 0;
   const mutationCalls: string[] = [];
   const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-    if (params.command.startsWith('python3 -c ')) {
+    if (params.command.startsWith('python3 -I -S -c ')) {
       observationCount += 1;
       if (
         input.observationFailure !== undefined &&
@@ -50,7 +51,7 @@ function makeProvider(input: {
         },
       });
     }
-    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
       mutationCalls.push(params.command);
       return Promise.resolve({ success: true, response: { exitCode: 0, result: input.observation } });
     }
@@ -64,7 +65,7 @@ function makeProvider(input: {
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
+    exec: realCommandExec(exec),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -159,7 +160,7 @@ function makeRootSensitiveProvider(input: {
         },
       });
     }
-    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
       mutationCalls.push(params.command);
       return Promise.resolve({ success: true, response: { exitCode: 0, result: 'replaced' } });
     }
@@ -173,7 +174,7 @@ function makeRootSensitiveProvider(input: {
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
+    exec: realCommandExec(exec),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -559,7 +560,7 @@ describe('structured edit preconditions', () => {
       buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-      exec,
+      exec: realCommandExec(exec),
       acknowledgeWorkspaceTermination: () => Promise.resolve(),
       executeVerifiedWorkspaceCommit: async params => ({
         status: 'completed',
