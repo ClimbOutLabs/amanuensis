@@ -63,6 +63,7 @@ import {
   searchHoldCardText,
   SERVER_SECRET_REASON,
 } from './searchHoldText';
+import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
@@ -103,7 +104,9 @@ import {
 import {
   hasReadPrivateData,
   markPrivateDataRead,
+  namesHostAtFetchLimit,
   SEARCH_SILENT_REASON,
+  SILENT_FETCHES_PER_HOST,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
   type SearchAskReason,
@@ -1408,6 +1411,13 @@ async function classifySearchProviderTool(input: {
       'this chat read your email or calendar, and a search could carry it out',
     );
   }
+  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
+  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read something private, like a key or a secrets file, and a search could carry it out',
+    );
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
@@ -1416,6 +1426,12 @@ async function classifySearchProviderTool(input: {
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
     return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+  }
+  if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
+    return held(
+      'mcp_search_host_limit',
+      `this turn already fetched ${String(SILENT_FETCHES_PER_HOST)} pages from that site without asking`,
+    );
   }
   return tier1Decision({
     reason: SEARCH_SILENT_REASON,
@@ -1511,6 +1527,22 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   };
 }
 
+function demoRefusal(reason_detail: string): TierDecision {
+  return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
+}
+
+/**
+ * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance
+ * refuses every connector call that is not declared read-only. Only Aman's own Gmail tools check recipients.
+ */
+function demoRefusesConnector(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+  return (
+    input.ctx.services.demoSendAllowlist !== null &&
+    input.action.tool_type === 'mcp' &&
+    input.action.mcp_hints.read_only_hint !== true
+  );
+}
+
 /**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
@@ -1540,6 +1572,18 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
       reason_detail: 'Scheduled runs can read your email but never draft or send it.',
       sensitive_read: false,
     });
+  }
+  const draft = action.mail_draft;
+  if (
+    action.tool_name === SEND_DRAFT_TOOL_NAME &&
+    ctx.services.demoSendAllowlist !== null &&
+    (draft === undefined ||
+      !recipientsAllowed({
+        allowlist: ctx.services.demoSendAllowlist,
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+      }))
+  ) {
+    return demoRefusal(DEMO_SEND_REFUSAL);
   }
   const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
   if (card === null) {
@@ -1626,6 +1670,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   // A send whose card would hide a recipient, hidden characters or cut content is refused: approval must cover all of it.
   if (extraction.incomplete_send !== null) {
+    // A demo refuses the call whatever the message holds, so it says so rather than ask for a fuller one.
+    if (demoRefusesConnector({ action, ctx })) {
+      return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+    }
     return autoDenyDecision({
       reason: 'incomplete_send_card',
       reason_detail: extraction.incomplete_send.model_message,
@@ -1640,6 +1688,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     if (searchDecision !== undefined) {
       return searchDecision;
     }
+  }
+
+  if (demoRefusesConnector({ action, ctx })) {
+    return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
@@ -1977,6 +2029,9 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
+  if (decision.sensitive_read && decision.auto_deny === null) {
+    ctx.services.private_reads.markPrivateDataRead(ctx);
+  }
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

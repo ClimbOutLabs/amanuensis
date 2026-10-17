@@ -22,7 +22,7 @@ Gmail support built into Aman. The user connects their own Google account in Set
 
 **Testing or Published.** A project left in Testing signs the user out every 7 days. The panel offers both choices in plain words and never assumes the user will publish. When Google stops accepting the sign-in, Aman shows Reconnect needed, pauses mail, and keeps everything else working.
 
-**Settings routes are for the browser only.** Agents, sandboxes, and API clients cannot call them. A cross-site form cannot start a test or a disconnect. On a demo instance every Google route except the status read is refused and no mail tools are mounted.
+**Settings routes are for the browser only.** Agents, sandboxes, and API clients cannot call them. A cross-site form cannot start a test or a disconnect. On a demo instance the owner connects one named Google account (`DEMO_GOOGLE_ACCOUNT`) before visitors arrive; any other account is refused, and with no account named nothing can be connected. A demo consent asks for every feature. Once a working connection for that account with every feature is saved, the panel cannot reconnect or disconnect it; until then the named account can connect again to add what is missing. A login Google stopped accepting can be reconnected, but only with the named account. Mail tools are mounted, drafts work, and a send is allowed only to the addresses in `DEMO_SEND_ALLOWLIST`; the demo refuses sends it cannot fully check, including every connector action that is not declared read-only.
 
 **Disconnect never gets stuck.** Aman asks Google to revoke its access, then deletes the saved sign-in. If Google does not confirm, the sign-in is still deleted and the user is told how to remove access in their Google account settings.
 
