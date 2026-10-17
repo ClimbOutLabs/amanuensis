@@ -114,16 +114,11 @@ function HtmlArtifactPreviewWrapper({
 
     async function fetchAndPrepare() {
       try {
-        // First trigger the download (this logs the action)
-        await onDownloadArtifact(artifact.path, artifact.name);
-
-        // Then fetch the file blob
+        // Display only: saving to the user's device waits for an explicit download click.
+        const fileBlob = await onFetchFile(artifact.path);
         if (isMounted) {
-          const fileBlob = await onFetchFile(artifact.path);
-          if (isMounted) {
-            setBlob(fileBlob);
-            setError(null);
-          }
+          setBlob(fileBlob);
+          setError(null);
         }
       } catch (err) {
         if (isMounted) {
@@ -137,7 +132,7 @@ function HtmlArtifactPreviewWrapper({
     return () => {
       isMounted = false;
     };
-  }, [artifact, onDownloadArtifact, onFetchFile]);
+  }, [artifact, onFetchFile]);
 
   if (error) {
     return (
@@ -150,7 +145,17 @@ function HtmlArtifactPreviewWrapper({
   if (!blob) return null;
 
   return (
-    <HtmlArtifactPreview content={blob} filename={artifact.name} onFetchRelatedFile={onFetchFile} readOnly={readOnly} />
+    <HtmlArtifactPreview
+      content={blob}
+      filename={artifact.name}
+      onFetchRelatedFile={onFetchFile}
+      onDownload={() => {
+        onDownloadArtifact(artifact.path, artifact.name).catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Failed to download HTML artifact');
+        });
+      }}
+      readOnly={readOnly}
+    />
   );
 }
 
