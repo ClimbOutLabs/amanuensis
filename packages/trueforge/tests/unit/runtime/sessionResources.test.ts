@@ -7,7 +7,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import { McpConnectionError, type VercelAIProviderConfig } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
@@ -887,9 +887,11 @@ describe('resolveSandboxProvider local fallback', () => {
     setCachedLocalSandboxSupport(undefined);
   });
 
-  it('prepares the private per-chat sandbox folder so the first code run in a new chat can start', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'aman-sandbox-root-'));
+  it('does no disk work, so a chat that never runs code still replies when the folder cannot be made', async () => {
+    const scratch = await mkdtemp(join(tmpdir(), 'aman-sandbox-root-'));
     const sockets = await mkdtemp(join(tmpdir(), 'aman-sockets-'));
+    const blocker = join(scratch, 'not-a-folder');
+    await writeFile(blocker, 'x');
     if (!configuration.STANDALONE) {
       throw new Error('expected the standalone test configuration');
     }
@@ -897,7 +899,7 @@ describe('resolveSandboxProvider local fallback', () => {
       root: configuration.LOCAL_SANDBOX_ROOT_PARENT,
       sockets: configuration.CODE_MODE_SOCKET_PARENT,
     };
-    configuration.LOCAL_SANDBOX_ROOT_PARENT = root;
+    configuration.LOCAL_SANDBOX_ROOT_PARENT = blocker;
     configuration.CODE_MODE_SOCKET_PARENT = sockets;
     try {
       const db = createSqliteDb(':memory:');
@@ -909,21 +911,19 @@ describe('resolveSandboxProvider local fallback', () => {
         python: '/usr/bin/python3',
       });
 
-      const provider = await resolveSandboxProvider({
-        tenant_id: TENANT_ID,
-        store: new SqliteSandboxProviderStore(db),
-        logger: createLogger({ silent: true }),
-        sessionId: 'sess_new_chat',
-      });
-
-      expect(provider).toBeDefined();
-      const folder = await stat(join(root, 'sess_new_chat'));
-      expect(folder.isDirectory()).toBe(true);
-      expect(folder.mode & 0o777).toBe(0o700);
+      await expect(
+        resolveSandboxProvider({
+          tenant_id: TENANT_ID,
+          store: new SqliteSandboxProviderStore(db),
+          logger: createLogger({ silent: true }),
+          sessionId: 'sess_new_chat',
+        }),
+      ).resolves.toBeDefined();
+      await expect(readdir(scratch)).resolves.toEqual(['not-a-folder']);
     } finally {
       configuration.LOCAL_SANDBOX_ROOT_PARENT = original.root;
       configuration.CODE_MODE_SOCKET_PARENT = original.sockets;
-      await rm(root, { recursive: true, force: true });
+      await rm(scratch, { recursive: true, force: true });
       await rm(sockets, { recursive: true, force: true });
     }
   });
