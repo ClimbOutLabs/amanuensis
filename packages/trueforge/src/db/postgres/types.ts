@@ -247,6 +247,9 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Stored connector id and configuration digest the grant was chosen under; empty on pre-existing rows. */
+  mcp_server_id: string;
+  connector_fingerprint: string;
   created_at: Date;
 }
 

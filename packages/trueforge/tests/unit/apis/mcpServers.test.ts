@@ -1,3 +1,4 @@
+import type { ConnectorIdentity } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
 import { createCatalogRouter } from '../../../src/apis/catalog';
 import { createMcpServersRouter, createSettingsMcpServersRouter } from '../../../src/apis/mcpServers';
@@ -16,6 +17,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
+import { connectorIdentity } from '../../../src/mcp/connectorIdentity';
 import {
   INERT_ASK_MEMORY_TOOL,
   INERT_ECHO_TOOL,
@@ -1878,7 +1880,16 @@ describe('mcp-servers routers', () => {
       description: 'Notes connector used by the grant tests.',
     };
 
-    function grantFor(input: { created_by: string; tool_name: string }) {
+    /** The connector as stored right now, which is what a grant chosen on a fresh card is bound to. */
+    async function liveConnector() {
+      const record = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: notesBody.name });
+      if (record === undefined) {
+        throw new Error('connector missing');
+      }
+      return connectorIdentity(record);
+    }
+
+    function grantFor(input: { created_by: string; tool_name: string; connector: ConnectorIdentity }) {
       return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
     }
 
@@ -1892,10 +1903,11 @@ describe('mcp-servers routers', () => {
     beforeEach(async () => {
       const put = await settingsRouter.request('/', putInit(wrapManifest(notesBody)));
       expect(put.status).toBe(200);
+      const connector = await liveConnector();
       await toolGrantStore.recordToolGrant(
-        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note' }),
+        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note', connector }),
       );
-      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }));
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note', connector }));
     });
 
     afterEach(async () => {
@@ -1903,7 +1915,9 @@ describe('mcp-servers routers', () => {
     });
 
     it("lists only the caller's grants", async () => {
-      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'list_notes' }));
+      await toolGrantStore.recordToolGrant(
+        grantFor({ created_by: OTHER_USER, tool_name: 'list_notes', connector: await liveConnector() }),
+      );
       expect(await listedGrants()).toEqual(['lookup_note']);
     });
 
@@ -1914,9 +1928,11 @@ describe('mcp-servers routers', () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({});
       expect(await listedGrants()).toEqual([]);
-      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
-        true,
-      );
+      expect(
+        await toolGrantStore.hasToolGrant(
+          grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note', connector: await liveConnector() }),
+        ),
+      ).toBe(true);
     });
 
     it('404s for an unknown connector', async () => {
@@ -1927,6 +1943,7 @@ describe('mcp-servers routers', () => {
     });
 
     it('drops the grants of every user when the connector URL changes, but not on an unrelated edit', async () => {
+      const original = await liveConnector();
       const described = await settingsRouter.request(
         '/',
         putInit(wrapManifest({ ...notesBody, description: 'Same server, new words.' })),
@@ -1940,16 +1957,45 @@ describe('mcp-servers routers', () => {
       );
       expect(moved.status).toBe(200);
       expect(await listedGrants()).toEqual([]);
-      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
-        false,
+      for (const connector of [original, await liveConnector()]) {
+        expect(
+          await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note', connector })),
+        ).toBe(false);
+      }
+    });
+
+    it('drops the grants of every user when the credentials on the same URL change', async () => {
+      const withHeader = (token: string) => ({
+        ...notesBody,
+        auth: { type: 'header' as const, headers: { Authorization: token } },
+      });
+      const first = await settingsRouter.request('/', putInit(wrapManifest(withHeader('Bearer first'))));
+      expect(first.status).toBe(200);
+      const connector = await liveConnector();
+      await toolGrantStore.recordToolGrant(
+        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note', connector }),
       );
+      expect(await listedGrants()).toEqual(['lookup_note']);
+
+      const rotated = await settingsRouter.request('/', putInit(wrapManifest(withHeader('Bearer second'))));
+      expect(rotated.status).toBe(200);
+
+      expect(await listedGrants()).toEqual([]);
+      expect(
+        await toolGrantStore.hasToolGrant(
+          grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note', connector }),
+        ),
+      ).toBe(false);
     });
 
     it('drops the grants of every user when the connector is deleted', async () => {
+      const original = await liveConnector();
       const response = await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
       expect(response.status).toBe(200);
       for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
-        expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+        expect(
+          await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note', connector: original })),
+        ).toBe(false);
       }
     });
   });

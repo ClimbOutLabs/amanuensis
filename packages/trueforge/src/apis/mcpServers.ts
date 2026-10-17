@@ -26,6 +26,7 @@ import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
+import { connectorIdentity } from '../mcp/connectorIdentity';
 import { firstPartyAfterSave } from '../mcp/firstParty';
 import {
   authorizeMcpServerRoute,
@@ -702,8 +703,11 @@ export function createSettingsMcpServersRouter<TTransaction>(
           await deps.tokenStore.deleteTokensForServer({ id: saved.id }, transaction);
           await deps.tokenStore.deletePendingAuthorizationsForServer({ id: saved.id }, transaction);
         }
-        if (existing !== undefined && existing.manifest.url !== manifest.url) {
-          // A new URL is a different server: Always allow was granted to the old one's tools.
+        if (
+          existing !== undefined &&
+          connectorIdentity(existing).fingerprint !== connectorIdentity(saved).fingerprint
+        ) {
+          // A new URL or new credentials make this a different server to the one Always allow was granted for.
           await deps.toolGrantStore.revokeServerToolGrants(
             { tenant_id: requestContext.tenant_id, mcp_server_name: manifest.name },
             transaction,
@@ -943,6 +947,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       tenant_id: requestContext.tenant_id,
       created_by: requestContext.subject.id,
       mcp_server_name: name,
+      connector: connectorIdentity(record),
     });
     return c.json({ data }, 200);
   };

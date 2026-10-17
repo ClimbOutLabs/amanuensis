@@ -23,6 +23,7 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
+const CONNECTOR = { id: 'srv_notes', fingerprint: 'fp-1' };
 
 function makeToolSet(params: {
   tools: ToolSchema[];
@@ -43,6 +44,7 @@ function makeToolSet(params: {
     name: SERVER_NAME,
     id: SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
+    connector: CONNECTOR,
     headers: {},
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
@@ -99,6 +101,7 @@ function servicesWithGrants(toolNames: string[]): SentinelServices {
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
+      connector: CONNECTOR,
     });
   }
   return services;

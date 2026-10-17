@@ -1,6 +1,7 @@
 import type { Logger } from 'winston';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ILLM } from '../core/llm/ILLM';
+import type { ConnectorIdentity } from '../core/llm/LLMTypes';
 import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
@@ -118,6 +119,8 @@ export class TurnResourceResolver<
        */
       mcp: (name: string) => Promise<{
         url: string;
+        /** Stored connector id and digest of its URL and auth settings; standing tool grants need it. */
+        connector?: ConnectorIdentity | undefined;
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: { tools: readonly string[] } | undefined;
@@ -351,7 +354,7 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party, search_provider } = await this.deps.mcp(entry.name);
+            const { url, connector, headers, first_party, search_provider } = await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
@@ -362,6 +365,7 @@ export class TurnResourceResolver<
               id: entry.name,
               name: entry.name,
               url,
+              connector,
               headers: headers ?? {},
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,

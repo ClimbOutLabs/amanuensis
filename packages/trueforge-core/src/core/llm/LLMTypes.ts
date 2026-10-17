@@ -88,11 +88,25 @@ export const MapsHostsSchema = z
   })
   .describe('Configured maps upstream URLs for the approval card destination.');
 
+export const ConnectorIdentitySchema = z
+  .object({
+    id: z.string().describe('Stored connector id.'),
+    fingerprint: z.string().describe('Digest of the connector URL and auth configuration.'),
+  })
+  .describe(
+    'Identity of a configured connector: its id and a digest of the URL and auth settings it was approved under.',
+  );
+
+export type ConnectorIdentity = z.infer<typeof ConnectorIdentitySchema>;
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
   mcp_server_name: z.string().describe('Configured MCP server name (empty for system tools).'),
   original_tool_name: z.string().describe('Original tool name before any remapping.'),
+  mcp_connector: ConnectorIdentitySchema.optional().describe(
+    'Host-derived identity of the connector this call goes to, as of the approval card. Never model-authored or client supplied.',
+  ),
   is_approval_required: z.boolean().optional().describe('Whether this tool call requires human approval.'),
   is_deferred: z.boolean().optional().describe('Whether the tool was loaded via deferred discovery.'),
   mint_tool_name: z

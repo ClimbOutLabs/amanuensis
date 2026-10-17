@@ -417,6 +417,7 @@ function createTurnResolver(deps: {
         }
         return {
           url: connection.url,
+          connector: connection.connector,
           headers: withGatewayMetadataHeaders({
             headers: connection.headers,
             metadataHeaders,

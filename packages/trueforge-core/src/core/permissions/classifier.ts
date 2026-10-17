@@ -13,7 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import type { MapsHosts } from '../llm/LLMTypes';
+import type { ConnectorIdentity, MapsHosts } from '../llm/LLMTypes';
 import {
   actionIdFor,
   approvalTokenExpiry,
@@ -102,6 +102,8 @@ export interface SentinelAction {
   mcp_server_name?: string | undefined;
   /** Connector's server id; with `mcp_server_host` it is bound into the approval token. */
   mcp_server_id?: string | undefined;
+  /** Connector id and configuration digest; a standing tool grant applies only to this exact pair. */
+  mcp_connector?: ConnectorIdentity | undefined;
   /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
   mcp_server_host?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
@@ -1454,11 +1456,13 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     }
     if (
       action.mcp_server_name !== undefined &&
+      action.mcp_connector !== undefined &&
       (await services.tool_grants.hasToolGrant({
         tenant_id: ctx.tenant_id,
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
+        connector: action.mcp_connector,
       }))
     ) {
       return tier1Decision({

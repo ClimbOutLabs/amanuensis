@@ -312,7 +312,8 @@ const ConnectorDetails = ({
               Always allowed <span className="font-normal text-text-secondary">· {grantedTools.length}</span>
             </h5>
             <p className="mb-2 text-xs text-text-secondary">
-              These tools run without asking first. Safety checks can still ask before a call.
+              These tools run without asking first, for this connector as it is set up now. Changing its address or
+              sign-in clears them, and each tool asks again. Safety checks can still ask before a call.
             </p>
             <ul className="overflow-hidden rounded-xl border border-border bg-card-bg">
               {grantedTools.map(toolName => (

@@ -6,14 +6,23 @@ import type { IMcpToolGrantStore } from '../../src/db/mcpToolGrantStore';
 
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+const connector = { id: 'srv-notes', fingerprint: 'fp-original' };
+
 const grant = {
   tenant_id: 'tenant-a',
   created_by: 'user-a',
   mcp_server_name: 'notes',
   tool_name: 'lookup_note',
+  connector,
 };
 
-export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantStore): void {
+/** Inserts a grant as it was stored before connector identity was recorded. */
+type SeedLegacyGrant = (key: typeof grant) => Promise<void>;
+
+export function runMcpToolGrantStoreContractSuite(
+  getStore: () => IMcpToolGrantStore,
+  seedLegacyGrant: SeedLegacyGrant,
+): void {
   it('reports no grant until one is recorded', async () => {
     const store = getStore();
     expect(await store.hasToolGrant(grant)).toBe(false);
@@ -55,6 +64,42 @@ export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantS
     expect(await store.hasToolGrant(grant)).toBe(false);
     expect((await store.listToolGrants(grant)).map(row => row.tool_name)).toEqual(['list_notes']);
     await expect(store.revokeToolGrant(grant)).resolves.toBeUndefined();
+  });
+
+  it('no longer applies once the connector was repointed or re-credentialed, or is another connector', async () => {
+    const store = getStore();
+    await store.recordToolGrant(grant);
+
+    const changed = { ...grant, connector: { ...connector, fingerprint: 'fp-changed' } };
+    expect(await store.hasToolGrant(changed)).toBe(false);
+    expect(await store.hasToolGrant({ ...grant, connector: { ...connector, id: 'srv-other' } })).toBe(false);
+    expect(await store.listToolGrants(changed)).toEqual([]);
+    expect(await store.hasToolGrant(grant)).toBe(true);
+    expect((await store.listToolGrants(grant)).map(row => row.tool_name)).toEqual(['lookup_note']);
+  });
+
+  it('choosing Always allow again under a changed connector replaces the old grant', async () => {
+    const store = getStore();
+    await store.recordToolGrant(grant);
+    const changed = { ...grant, connector: { ...connector, fingerprint: 'fp-changed' } };
+
+    await store.recordToolGrant(changed);
+
+    expect(await store.hasToolGrant(changed)).toBe(true);
+    expect(await store.hasToolGrant(grant)).toBe(false);
+    expect(await store.listToolGrants(changed)).toHaveLength(1);
+  });
+
+  it('keeps a grant from before connector identity was recorded, tied to the connector that first uses it', async () => {
+    const store = getStore();
+    await seedLegacyGrant(grant);
+
+    expect((await store.listToolGrants(grant)).map(row => row.tool_name)).toEqual(['lookup_note']);
+    expect(await store.hasToolGrant(grant)).toBe(true);
+
+    const changed = { ...grant, connector: { ...connector, fingerprint: 'fp-changed' } };
+    expect(await store.hasToolGrant(changed)).toBe(false);
+    expect(await store.listToolGrants(changed)).toEqual([]);
   });
 
   it('revoking the grants of a connector removes them for every user and only for that connector', async () => {

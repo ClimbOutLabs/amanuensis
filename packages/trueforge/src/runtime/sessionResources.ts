@@ -1,5 +1,5 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
-import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { ConnectorIdentity, SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import {
   DockerDriver,
   McpConnectionError,
@@ -31,6 +31,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { connectorIdentity } from '../mcp/connectorIdentity';
 import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
@@ -44,6 +45,8 @@ import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 
 export interface McpConnection {
   url: string;
+  /** The stored connector and the URL and auth settings a standing tool grant would be bound to. */
+  connector: ConnectorIdentity;
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
@@ -498,6 +501,7 @@ export async function getMcpConnection({
   if (needsLiveAuth && isMcpServerWithAuthStore(store)) {
     return {
       url: record.manifest.url,
+      connector: connectorIdentity(record),
       headers: store.resolveInvokeHeaders({ record, userRef }),
       first_party: firstParty,
       search_provider: searchProvider,
@@ -506,6 +510,7 @@ export async function getMcpConnection({
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
     return {
       url: record.manifest.url,
+      connector: connectorIdentity(record),
       headers: dcrHeadersResolver({
         record,
         tokenStore,
@@ -519,6 +524,7 @@ export async function getMcpConnection({
   }
   return {
     url: record.manifest.url,
+    connector: connectorIdentity(record),
     headers: resolveManifestRequestHeaders(record.manifest),
     first_party: firstParty,
     search_provider: searchProvider,

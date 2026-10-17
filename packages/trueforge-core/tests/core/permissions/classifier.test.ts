@@ -447,7 +447,14 @@ class RevocableGrantStore implements ToolGrantStore {
   private readonly grants = new Set<string>();
 
   private static id(key: ToolGrantKey): string {
-    return JSON.stringify([key.tenant_id, key.created_by, key.mcp_server_name, key.tool_name]);
+    return JSON.stringify([
+      key.tenant_id,
+      key.created_by,
+      key.mcp_server_name,
+      key.tool_name,
+      key.connector.id,
+      key.connector.fingerprint,
+    ]);
   }
 
   hasToolGrant(key: ToolGrantKey): Promise<boolean> {
@@ -471,11 +478,13 @@ describe('classifyTier connector tools and standing grants', () => {
     created_by: 'u1',
     mcp_server_name: 'notes',
     tool_name: 'lookup_record',
+    connector: { id: 'srv_notes', fingerprint: 'fp-1' },
   };
 
   function connectorAction(input?: {
     tool_name?: string;
     mcp_server_name?: string;
+    mcp_connector?: SentinelAction['mcp_connector'];
     mcp_hints?: SentinelAction['mcp_hints'];
     canonical_params?: Record<string, unknown>;
   }): SentinelAction {
@@ -484,6 +493,7 @@ describe('classifyTier connector tools and standing grants', () => {
       canonical_params: input?.canonical_params ?? { id: '1' },
       tool_type: 'mcp',
       mcp_server_name: input?.mcp_server_name ?? grantKey.mcp_server_name,
+      mcp_connector: input?.mcp_connector ?? grantKey.connector,
       mcp_hints: input?.mcp_hints ?? closedWorldRead,
     };
   }
@@ -505,6 +515,20 @@ describe('classifyTier connector tools and standing grants', () => {
     const decision = await classifyTier(connectorAction(), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
+  });
+
+  test('a standing grant no longer applies once the connector was repointed or re-credentialed', async () => {
+    const { services } = grantedServices();
+    for (const connector of [
+      { id: 'srv_notes', fingerprint: 'fp-2' },
+      { id: 'srv_other', fingerprint: 'fp-1' },
+    ]) {
+      const decision = await classifyTier(connectorAction({ mcp_connector: connector }), makeCtx({ services }));
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    }
+    const unidentified = await classifyTier({ ...connectorAction(), mcp_connector: undefined }, makeCtx({ services }));
+    expect(unidentified.tier).toBe(3);
   });
 
   test('an unannotated connector tool asks', async () => {

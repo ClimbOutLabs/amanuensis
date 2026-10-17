@@ -2,7 +2,7 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from 'winston';
 import { McpConnectionError } from '../errors';
 import type { MCPServerInitInfo } from '../events/schema';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { ConnectorIdentity, InternalToolCallInfo } from '../llm/LLMTypes';
 import { hostFromUrl } from '../permissions/extractorRegistry';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../tracing/NoopAgentTracing';
@@ -61,6 +61,7 @@ export class RemoteMCP implements ToolSource {
 
   private readonly url: string;
   readonly serverHost: string | undefined;
+  readonly connector: ConnectorIdentity | undefined;
   private readonly headers: RemoteMcpHeaders;
   private readonly signal: AbortSignal;
   private readonly logger: Logger;
@@ -88,6 +89,7 @@ export class RemoteMCP implements ToolSource {
     id: string;
     description?: string | undefined;
     url: string;
+    connector?: ConnectorIdentity | undefined;
     headers: RemoteMcpHeaders;
     logger: Logger;
     tracing?: AgentTracing | undefined;
@@ -104,6 +106,7 @@ export class RemoteMCP implements ToolSource {
     this.description = params.description;
     this.url = params.url;
     this.serverHost = hostFromUrl(params.url) ?? undefined;
+    this.connector = params.connector;
     this.headers = params.headers;
     this.signal = params.signal;
     this.sessionId = params.sessionId;
