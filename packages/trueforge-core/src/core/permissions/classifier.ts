@@ -57,13 +57,13 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
-import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
   SERVER_SECRET_REASON,
 } from './searchHoldText';
+import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
