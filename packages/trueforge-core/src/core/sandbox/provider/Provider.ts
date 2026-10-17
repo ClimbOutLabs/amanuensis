@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
+import type { GitRemotePrecondition } from '../gitRemoteObservation';
 
 /** Command executed in sandbox — exitCode may be non-zero but the infra call succeeded. */
 export interface ExecSuccessResult {
@@ -51,6 +52,8 @@ export interface SandboxExecParams {
   timeoutSeconds?: number | undefined;
   /** Shared Git-metadata boundary for workspace commands on a persisted sandbox. */
   workspaceLock?: WorkspaceExecutionLock | undefined;
+  /** The repositories the user approved for this network git command; host-carried git offers its token to no other. */
+  approvedGitRemotes?: GitRemotePrecondition | undefined;
 }
 
 export interface WorkspaceExecutionLock {
