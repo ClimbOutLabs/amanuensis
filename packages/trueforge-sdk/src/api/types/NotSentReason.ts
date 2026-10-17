@@ -6,6 +6,8 @@ export const NotSentReason = {
         NeedsOkAgain: "needs_ok_again",
         CannotSend: "cannot_send",
         GmailRefused: "gmail_refused",
+        ReconnectGoogle: "reconnect_google",
+        RateLimited: "rate_limited",
         Unconfirmed: "unconfirmed"
     } as const;
 export type NotSentReason = typeof NotSentReason[keyof typeof NotSentReason];
