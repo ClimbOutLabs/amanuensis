@@ -151,16 +151,4 @@ describe('buildDemoWorld content', () => {
     );
     expect(noteBody(world, 'short-term-rental')).toContain('Rua da Emenda 45, 1200-169 Lisboa, in Chiado');
   });
-
-  it('pre-bakes a walk from the rental to the GP', () => {
-    const { briefing } = worldOn(MONDAY);
-
-    expect(briefing.routeArguments).toEqual({
-      from_place: 'Rua da Emenda 45, 1200-169 Lisboa',
-      to_place: 'R. de São Bernardo 92, Lisboa',
-    });
-    expect(briefing.routeResult.route_geometry.length).toBeGreaterThan(10);
-    expect(briefing.finalText).toContain('22-minute walk');
-    expect(briefing.finalText).toContain('penicillin');
-  });
 });

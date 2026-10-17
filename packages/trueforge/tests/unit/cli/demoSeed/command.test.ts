@@ -10,7 +10,6 @@ const SEED_REPORT: SeedReport = {
   profile: 'created',
   agent: 'created',
   schedule: 'created',
-  briefing: 'created',
   spaces: { created: 1, updated: 0, unchanged: 0 },
   knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 0 },
   memory: { created: 22, updated: 0, unchanged: 0, removed: 0 },
@@ -20,7 +19,6 @@ const RESET_REPORT: ResetReport = {
   profile: 1,
   agent: 1,
   schedule: 1,
-  sessions: 1,
   spaces: 1,
   memory: 22,
 };

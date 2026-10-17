@@ -1,4 +1,3 @@
-import { Sessions } from '@truefoundry/trueforge-core/agent-session';
 import { dayInZone, parseIsoDay } from '../../../../src/cli/demoSeed/calendar';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
 import {
@@ -39,23 +38,6 @@ async function vault(stores: TestStores) {
   return outcome.entries;
 }
 
-async function sessionsOf(stores: TestStores, userId: string) {
-  const { data } = await stores.sessionStore.listSessions({
-    tenant_id: TENANT_ID,
-    limit: 100,
-    page_token: undefined,
-    order: undefined,
-    start_timestamp: undefined,
-    end_timestamp: undefined,
-    agent_id: undefined,
-    created_by_or_agent_ids: { created_by_subject_id: userId, agent_ids: [] },
-    metadata: undefined,
-    source_type: undefined,
-    source_id: undefined,
-  });
-  return data;
-}
-
 async function spaceBody(stores: TestStores, spaceId: string): Promise<string | undefined> {
   return (await stores.spaceStore.getSpace({ ...owner, space_id: spaceId }))?.body;
 }
@@ -73,7 +55,7 @@ describe('demo seed against the real stores', () => {
     await world.teardown();
   });
 
-  it('seeds the personas, memory, Tasks space, Morning brief schedule and a finished route chat', async () => {
+  it('seeds the personas, memory, Tasks space and Morning brief schedule', async () => {
     const report = await seed(stores, DAY_ONE);
 
     expect(report).toMatchObject({
@@ -81,7 +63,6 @@ describe('demo seed against the real stores', () => {
       profile: 'created',
       agent: 'created',
       schedule: 'created',
-      briefing: 'created',
       spaces: { created: 1, updated: 0, unchanged: 0 },
       knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 0 },
       memory: { created: NOTE_COUNT, updated: 0, unchanged: 0, removed: 0 },
@@ -106,26 +87,6 @@ describe('demo seed against the real stores', () => {
     });
     expect(schedules.map(schedule => schedule.name)).toEqual([DEMO_SCHEDULE_NAME]);
     expect(schedules[0]?.manifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon' });
-
-    const [session] = await sessionsOf(stores, USER_ID);
-    expect(session?.title).toBe('From home to the GP');
-    expect(session?.metadata).toMatchObject({ [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-26' });
-    const handle = await new Sessions({ sessionStore: stores.sessionStore }).get({
-      tenant_id: TENANT_ID,
-      session_id: session?.session_id ?? '',
-    });
-    const events = await handle?.listEvents({ limit: 100 });
-    // Newest first.
-    expect(events?.data.map(item => item.event.type).reverse()).toEqual([
-      'turn.created',
-      'aman.memory.recall',
-      'model.message',
-      'tool.response.v2',
-      'model.message',
-      'turn.done',
-    ]);
-    const turns = await handle?.listTurns({ limit: 10 });
-    expect(turns?.data[0]?.state.status).toBe('done');
   });
 
   it('saves the Tasks space the assistant can read', async () => {
@@ -169,23 +130,10 @@ describe('demo seed against the real stores', () => {
     expect(report.knowledge.still_indexing).toBe(11);
   });
 
-  it('recalls the GP shortlist into the pre-baked route chat from the seeded memory', async () => {
-    await seed(stores, DAY_ONE);
-    const [session] = await sessionsOf(stores, USER_ID);
-    const handle = await new Sessions({ sessionStore: stores.sessionStore }).get({
-      tenant_id: TENANT_ID,
-      session_id: session?.session_id ?? '',
-    });
-    const events = await handle?.listEvents({ limit: 100 });
-    const recall = events?.data.find(item => item.event.type === 'aman.memory.recall')?.event;
-    expect(JSON.stringify(recall)).toContain('Brightwater Family Clinic');
-  });
-
   it('is idempotent: a second run on the same day changes nothing', async () => {
     await seed(stores, DAY_ONE);
     const before = {
       vault: await vault(stores),
-      sessions: await sessionsOf(stores, USER_ID),
     };
 
     const report = await seed(stores, DAY_ONE);
@@ -195,15 +143,11 @@ describe('demo seed against the real stores', () => {
       profile: 'unchanged',
       agent: 'unchanged',
       schedule: 'unchanged',
-      briefing: 'unchanged',
       spaces: { created: 0, updated: 0, unchanged: 1 },
       knowledge: { created: 0, unchanged: 11, removed: 0 },
       memory: { created: 0, updated: 0, unchanged: NOTE_COUNT, removed: 0 },
     });
     expect(await vault(stores)).toEqual(before.vault);
-    expect((await sessionsOf(stores, USER_ID)).map(session => session.session_id)).toEqual(
-      before.sessions.map(session => session.session_id),
-    );
     expect(await stores.personaStore.listPersonas(owner)).toHaveLength(2);
     expect(world.queued).toHaveLength(11);
   });
@@ -219,14 +163,14 @@ describe('demo seed against the real stores', () => {
       purpose: tasks?.purpose ?? 'Tasks',
       status: 'active',
       format: 'markdown',
-      body: 'Edited by the assistant.',
+      body: `${tasks?.body ?? ''}\nEdited by the assistant.`,
       expected_revision: tasks?.revision ?? 0,
       expected_aggregate_revision: aggregate.revision,
     });
 
     await seed(stores, DAY_ONE);
 
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toBe('Edited by the assistant.');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Edited by the assistant.');
   });
 
   it('moves the dated content forward on the next day without duplicating anything', async () => {
@@ -236,14 +180,10 @@ describe('demo seed against the real stores', () => {
 
     // Only the meetup note carries a date.
     expect(report.memory).toEqual({ created: 0, updated: 1, unchanged: NOTE_COUNT - 1, removed: 0 });
-    expect(report.briefing).toBe('updated');
     expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
     expect(report.knowledge).toMatchObject({ created: 0, unchanged: 11, removed: 0 });
     expect(await vault(stores)).toHaveLength(NOTE_COUNT);
     expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Nov 4, 10:00');
-    const sessions = await sessionsOf(stores, USER_ID);
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0]?.metadata['demo_seed_day']).toBe('2026-11-02');
   });
 
   it('seeds a rehearsal day that is not the real today', async () => {
@@ -255,8 +195,6 @@ describe('demo seed against the real stores', () => {
 
     await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });
 
-    const [session] = await sessionsOf(stores, USER_ID);
-    expect(session?.metadata['demo_seed_day']).toBe('2026-10-26');
     expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 28, 10:00');
   });
 
@@ -322,14 +260,6 @@ describe('demo seed against the real stores', () => {
           transaction,
         ),
       );
-      await new Sessions({ sessionStore: stores.sessionStore }).create({
-        tenant_id: TENANT_ID,
-        session_id: 'real-session',
-        created_by_subject: { subject_id: USER_ID, subject_type: 'user', subject_display_name: USER_ID },
-        agent: { type: 'inline', spec: worldFor(DAY_ONE).agentSpec },
-        external_id: null,
-        metadata: { topic: 'mine' },
-      });
       await stores.spaceStore.createSpace({
         ...real,
         id: 'real-space',
@@ -358,7 +288,6 @@ describe('demo seed against the real stores', () => {
         profile: 1,
         agent: 1,
         schedule: 1,
-        sessions: 1,
         spaces: 1,
         memory: NOTE_COUNT,
       });
@@ -377,7 +306,6 @@ describe('demo seed against the real stores', () => {
         created_by_or_agent_ids: undefined,
       });
       expect(schedules.map(schedule => schedule.name)).toEqual(['real-schedule']);
-      expect((await sessionsOf(stores, USER_ID)).map(session => session.session_id)).toEqual(['real-session']);
       expect(
         (await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 })).map(space => space.id),
       ).toEqual(['real-space']);
@@ -415,7 +343,6 @@ describe('demo seed against the real stores', () => {
         profile: 0,
         agent: 0,
         schedule: 0,
-        sessions: 0,
         spaces: 0,
         memory: 0,
       });

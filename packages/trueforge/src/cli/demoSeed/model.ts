@@ -29,24 +29,6 @@ export interface DemoSpace {
   content: SpaceContent;
 }
 
-/** What the pre-baked briefing chat shows, in the order the turn runs. */
-export interface DemoBriefing {
-  title: string;
-  userText: string;
-  /** The assistant's line before it calls the route tool. */
-  routeIntro: string;
-  routeArguments: { from_place: string; to_place: string };
-  routeResult: {
-    from: { resolved_name: string; lat: number; lng: number };
-    to: { resolved_name: string; lat: number; lng: number };
-    distance_km: number;
-    duration_min: number;
-    route_geometry: string;
-    attribution: string;
-  };
-  finalText: string;
-}
-
 export interface DemoWorld {
   /** The seeded day (`YYYY-MM-DD` in the user's zone); a changed day means the dated content is stale. */
   day: string;
@@ -57,5 +39,4 @@ export interface DemoWorld {
   agentDescription: string;
   agentSpec: AgentSpec;
   scheduleManifest: ScheduleManifest;
-  briefing: DemoBriefing;
 }

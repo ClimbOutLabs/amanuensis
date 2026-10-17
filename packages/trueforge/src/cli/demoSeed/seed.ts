@@ -1,33 +1,22 @@
-import {
-  Sessions,
-  type CreatedBySubject,
-  type ISessionStore,
-  type SessionRecord,
-} from '@truefoundry/trueforge-core/agent-session';
+import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import { ulid } from 'ulid';
 import type { IAgentStore } from '../../db/agentStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../../db/personaStore';
 import type { IScheduleStore } from '../../db/scheduleStore';
-import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ISpaceStore } from '../../db/spaceStore';
 import type { WithTransaction } from '../../db/transaction';
-import { formatMemoryBlock } from '../../runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
-import { seedBriefingTurn } from './briefing';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
 import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME } from './world';
 
 const MEMORY_TIMEOUT_MS = 10_000;
-const MEMORY_RECALL_BUDGET_TOKENS = 2048;
 /** Indexing a library embeds every passage on the CPU; a first run may also load the search model. */
 const KNOWLEDGE_SETTLE_TIMEOUT_MS = 180_000;
 const SHARED_VAULT = 'default';
 const PAGE_SIZE = 100;
-/** Session metadata pair every seeded session carries; reset finds them by it. */
-const SESSION_MARKER: Record<string, string> = { [DEMO_MARKER]: 'true' };
 const SEED_DAY_KEY = 'demo_seed_day';
 const NOTE_MARKER_LINE = new RegExp(`^> ${DEMO_MARKER}:([a-z0-9-]+)$`);
 
@@ -37,7 +26,6 @@ export interface DemoSeedStores<TTransaction> {
   personalizationStore: IPersonalizationStore<TTransaction>;
   agentStore: IAgentStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   spaceStore: ISpaceStore<TTransaction>;
   knowledge: DemoKnowledgeLibrary;
   memory: MemoryClient;
@@ -57,7 +45,6 @@ export interface SeedReport {
   profile: SeedOutcome;
   agent: SeedOutcome;
   schedule: SeedOutcome;
-  briefing: SeedOutcome;
   spaces: { created: number; updated: number; unchanged: number };
   /** `still_indexing` counts documents not ready when the wait ended; the server finishes them on its next start. */
   knowledge: { created: number; unchanged: number; removed: number; still_indexing: number };
@@ -69,7 +56,6 @@ export interface ResetReport {
   profile: number;
   agent: number;
   schedule: number;
-  sessions: number;
   spaces: number;
   memory: number;
 }
@@ -432,39 +418,41 @@ async function seedSchedule<TTransaction>({
 }
 
 /**
- * The Tasks space. On the day they were seeded they are left as they are, because
- * the assistant keeps them current (a ticked task); on a later day they are rewritten from the world.
+ * The Tasks space. A space stamped with today's seed day is left as it is, because the assistant keeps it
+ * current (a ticked task); a space from an earlier day, or one that lost its stamp, is rewritten.
  */
 async function seedSpaces<TTransaction>({
   stores,
   scope,
   spaces,
-  sameDay,
+  day,
 }: {
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
   spaces: DemoSpace[];
-  sameDay: boolean;
+  day: string;
 }): Promise<SeedReport['spaces']> {
   const report = { created: 0, updated: 0, unchanged: 0 };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
+  const stamp = `> ${SEED_DAY_KEY}:${day}`;
   for (const space of spaces) {
+    const content = { ...space.content, body: `${space.content.body}\n\n${stamp}` };
     const existing = await stores.spaceStore.getSpace({ ...owner, space_id: space.id });
     const aggregate = await stores.spaceStore.getAggregate(owner);
     if (existing === undefined) {
       await stores.spaceStore.createSpace({
         ...owner,
-        ...space.content,
+        ...content,
         id: space.id,
         expected_aggregate_revision: aggregate.revision,
       });
       report.created += 1;
-    } else if (sameDay || isSameSpaceContent({ stored: existing, wanted: space.content })) {
+    } else if (existing.body.includes(stamp) || isSameSpaceContent({ stored: existing, wanted: content })) {
       report.unchanged += 1;
     } else {
       await stores.spaceStore.updateSpace({
         ...owner,
-        ...space.content,
+        ...content,
         space_id: space.id,
         expected_revision: existing.revision,
         expected_aggregate_revision: aggregate.revision,
@@ -491,85 +479,6 @@ function isSameSpaceContent({
   );
 }
 
-async function listSyntheticSessions<TTransaction>({
-  stores,
-  scope,
-}: {
-  stores: DemoSeedStores<TTransaction>;
-  scope: DemoSeedScope;
-}) {
-  const { data } = await stores.sessionStore.listSessions({
-    tenant_id: scope.tenantId,
-    limit: PAGE_SIZE,
-    page_token: undefined,
-    order: undefined,
-    start_timestamp: undefined,
-    end_timestamp: undefined,
-    agent_id: undefined,
-    created_by_or_agent_ids: { created_by_subject_id: scope.userId, agent_ids: [] },
-    metadata: SESSION_MARKER,
-    source_type: undefined,
-    source_id: undefined,
-  });
-  return data;
-}
-
-async function seedBriefing<TTransaction>({
-  stores,
-  scope,
-  world,
-  existing,
-  now,
-}: {
-  stores: DemoSeedStores<TTransaction>;
-  scope: DemoSeedScope;
-  world: DemoWorld;
-  existing: SessionRecord[];
-  now: Date;
-}): Promise<SeedOutcome> {
-  if (existing.length > 0 && existing.every(session => session.metadata[SEED_DAY_KEY] === world.day)) {
-    return 'unchanged';
-  }
-  // The briefing quotes the week's dates, so a new day replaces it rather than leaving a stale one behind.
-  for (const session of existing) {
-    await stores.sessionStore.deleteSession({ tenant_id: scope.tenantId, session_id: session.session_id });
-  }
-
-  const recalled = await stores.memory.recall({
-    query: world.briefing.userText,
-    maxTokens: MEMORY_RECALL_BUDGET_TOKENS,
-    queryTimestamp: now.toISOString(),
-    entityTokens: 0,
-    timeoutMs: MEMORY_TIMEOUT_MS,
-  });
-  if (!recalled.ok) {
-    throw new Error(`Could not recall the demo memory for the briefing: ${recalled.reason}`);
-  }
-  const block = formatMemoryBlock({
-    results: recalled.results,
-    entities: [],
-    budgetTokens: MEMORY_RECALL_BUDGET_TOKENS,
-  });
-
-  const sessions = new Sessions<SessionCustom, TurnCustom>({ sessionStore: stores.sessionStore });
-  const session = await sessions.create({
-    tenant_id: scope.tenantId,
-    session_id: ulid().toLowerCase(),
-    created_by_subject: subjectFor(scope.userId),
-    agent: { type: 'inline', spec: world.agentSpec },
-    external_id: null,
-    metadata: { ...SESSION_MARKER, [SEED_DAY_KEY]: world.day },
-  });
-  await seedBriefingTurn({
-    store: stores.sessionStore,
-    sessionId: session.session_id,
-    briefing: world.briefing,
-    memoryBlock: block,
-    now,
-  });
-  return existing.length > 0 ? 'updated' : 'created';
-}
-
 /** Writes (or refreshes) one synthetic world. Safe to run again: unchanged records are left alone. */
 export async function seedDemoWorld<TTransaction>({
   stores,
@@ -582,17 +491,13 @@ export async function seedDemoWorld<TTransaction>({
   world: DemoWorld;
   now: Date;
 }): Promise<SeedReport> {
-  const earlier = await listSyntheticSessions({ stores, scope });
-  const sameDay = earlier.length > 0 && earlier.every(session => session.metadata[SEED_DAY_KEY] === world.day);
-
   const memory = await seedMemory({ memory: stores.memory, notes: world.notes, now });
   const { personas, knowledge } = await seedPersonas({ stores, scope, world });
   const profile = await seedProfile({ stores, scope, world });
   const agent = await seedAgent({ stores, scope, world });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
-  const spaces = await seedSpaces({ stores, scope, spaces: world.spaces, sameDay });
-  const briefing = await seedBriefing({ stores, scope, world, existing: earlier, now });
-  return { personas, profile, agent: agent.outcome, schedule, briefing, spaces, knowledge, memory };
+  const spaces = await seedSpaces({ stores, scope, spaces: world.spaces, day: world.day });
+  return { personas, profile, agent: agent.outcome, schedule, spaces, knowledge, memory };
 }
 
 /** Removes only what carries the synthetic marker; everything the user made themselves stays. */
@@ -608,16 +513,10 @@ export async function resetDemoWorld<TTransaction>({
     profile: 0,
     agent: 0,
     schedule: 0,
-    sessions: 0,
     spaces: 0,
     memory: 0,
   };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
-
-  for (const session of await listSyntheticSessions({ stores, scope })) {
-    await stores.sessionStore.deleteSession({ tenant_id: scope.tenantId, session_id: session.session_id });
-    report.sessions += 1;
-  }
 
   const schedule = await findSchedule({ stores, scope });
   if (schedule?.created_by_subject.subject_id === scope.userId) {

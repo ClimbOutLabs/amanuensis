@@ -72,18 +72,12 @@ export function parseIsoDay(text: string): CalendarDay | undefined {
 
 /** Calendar labels for the days around a seed day, by offset from it. */
 export interface DayLabels {
-  day(offset: number): CalendarDay;
-  iso(offset: number): string;
   /** `Tuesday` */
   weekday(offset: number): string;
-  /** `Tue` */
-  shortWeekday(offset: number): string;
   /** `Oct 27` */
   monthDay(offset: number): string;
   /** `Tuesday, October 27` */
   long(offset: number): string;
-  /** `Wednesday, October 28, 2026` */
-  longWithYear(offset: number): string;
 }
 
 function formatUtcNoon({ day, options }: { day: CalendarDay; options: Intl.DateTimeFormatOptions }): string {
@@ -95,13 +89,8 @@ function formatUtcNoon({ day, options }: { day: CalendarDay; options: Intl.DateT
 export function dayLabels(today: CalendarDay): DayLabels {
   const at = (offset: number): CalendarDay => addDays({ day: today, days: offset });
   return {
-    day: at,
-    iso: offset => isoDay(at(offset)),
     weekday: offset => formatUtcNoon({ day: at(offset), options: { weekday: 'long' } }),
-    shortWeekday: offset => formatUtcNoon({ day: at(offset), options: { weekday: 'short' } }),
     monthDay: offset => formatUtcNoon({ day: at(offset), options: { month: 'short', day: 'numeric' } }),
     long: offset => longDayLabel(at(offset)),
-    longWithYear: offset =>
-      formatUtcNoon({ day: at(offset), options: { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } }),
   };
 }

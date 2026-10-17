@@ -7,8 +7,7 @@ import { mayaMemoryNotes } from './maya/memories';
 import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
 import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
-import type { DemoBriefing, DemoNote, DemoSpace, DemoWorld } from './model';
-import { encodePolyline, type LatLng } from './polyline';
+import type { DemoNote, DemoSpace, DemoWorld } from './model';
 
 /** Provenance stamped on every seeded record; reset removes exactly the records that carry it. */
 export const DEMO_MARKER = 'demo_synthetic';
@@ -26,26 +25,11 @@ export const DEFAULT_DEMO_USER = 'judge@example.com';
 /** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
 export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
 
-/** The walk from Maya's rental to the GP clinic, the pre-baked chat's route. */
-const FROM_POINT: LatLng = { lat: 38.7105, lng: -9.1445 };
-const TO_POINT: LatLng = { lat: 38.714655, lng: -9.153937 };
-const ROUTE_WAYPOINTS: readonly LatLng[] = [
-  FROM_POINT,
-  { lat: 38.711, lng: -9.1475 },
-  { lat: 38.7125, lng: -9.1505 },
-  { lat: 38.7138, lng: -9.1525 },
-  TO_POINT,
-];
-const ROUTE_DISTANCE_KM = 1.6;
-/** The route tool reports a road route, so the brief gives the walking time itself. */
-const ROUTE_DURATION_MIN = 5;
-const WALK_MINUTES = 22;
-
 export interface DemoWorldInput {
   /** "Today" in the user's zone: every date in the world is an offset from this day. */
   today: CalendarDay;
   timeZone: string;
-  /** Fully qualified `provider/model` for the personas and the briefing agent. */
+  /** Fully qualified `provider/model` for the personas and the agent. */
   modelName: string;
 }
 
@@ -72,29 +56,6 @@ function buildNotes(days: DayLabels): DemoNote[] {
       body: `Maya needs a regular English-speaking GP. Shortlist: ${GP_CLINIC.name} (${GP_CLINIC.address}, open ${GP_CLINIC.hours}) is the first choice and ${BACKUP_CLINIC.name} (${BACKUP_CLINIC.address}) the backup. ${VISA_CLINIC.name} is already booked for her visa medical, so do not suggest it as a GP.`,
     },
   ];
-}
-
-function buildBriefing(): DemoBriefing {
-  return {
-    title: 'From home to the GP',
-    userText: `How far is it from home to ${GP_CLINIC.name}? I would like to walk.`,
-    routeIntro: 'Let me map the walk to the clinic.',
-    routeArguments: { from_place: HOME.address, to_place: GP_CLINIC.address },
-    routeResult: {
-      from: { resolved_name: `${HOME.address}, Portugal`, ...FROM_POINT },
-      to: { resolved_name: `${GP_CLINIC.address}, Portugal`, ...TO_POINT },
-      distance_km: ROUTE_DISTANCE_KM,
-      duration_min: ROUTE_DURATION_MIN,
-      route_geometry: encodePolyline(ROUTE_WAYPOINTS),
-      attribution: '© OpenStreetMap contributors',
-    },
-    finalText: [
-      `${GP_CLINIC.name} is about ${String(ROUTE_DISTANCE_KM)} km from your place in ${HOME.area}, roughly a ${String(WALK_MINUTES)}-minute walk with some uphill, so take it slowly given your asthma.`,
-      '',
-      `- It is open ${GP_CLINIC.hours}.`,
-      '- Your first appointment is already booked. Mention your penicillin allergy when you arrive.',
-    ].join('\n'),
-  };
 }
 
 /** Everything the seed writes, derived from "today" in the user's zone so the dates stay relative. */
@@ -145,6 +106,5 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       timezone: input.timeZone,
       status: 'active',
     }),
-    briefing: buildBriefing(),
   };
 }

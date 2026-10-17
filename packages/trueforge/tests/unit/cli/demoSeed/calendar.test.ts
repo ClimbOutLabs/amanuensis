@@ -48,13 +48,9 @@ describe('dayLabels', () => {
   const labels = dayLabels({ year: 2026, month: 10, day: 26 });
 
   it('names the days around the seed day by offset', () => {
-    expect(labels.iso(0)).toBe('2026-10-26');
     expect(labels.weekday(0)).toBe('Monday');
-    expect(labels.shortWeekday(1)).toBe('Tue');
     expect(labels.monthDay(1)).toBe('Oct 27');
     expect(labels.long(2)).toBe('Wednesday, October 28');
-    expect(labels.longWithYear(2)).toBe('Wednesday, October 28, 2026');
     expect(labels.monthDay(10)).toBe('Nov 5');
-    expect(labels.iso(-8)).toBe('2026-10-18');
   });
 });

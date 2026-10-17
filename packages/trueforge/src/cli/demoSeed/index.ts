@@ -8,8 +8,7 @@ import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
 
 Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
-two personas with knowledge libraries, memory notes, a Tasks space, a Morning brief schedule and a finished
-route chat. Her email and calendar are not seeded here; they live in her connected Google account. Every
+two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected Google account. Every
 record is marked demo_synthetic. Dates are relative to "today" in the user's time zone, so any day gives a
 coherent week. Re-running it on the same day keeps the Tasks space as it is; --reset removes the synthetic
 records. Needs DEMO_MODE=true.
@@ -18,7 +17,7 @@ records. Needs DEMO_MODE=true.
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
   --today <day>        Treat this day as "today", for rehearsing on a fixed day (default: the real today)
-  --model <p/model>    Model for the personas and briefing agent (default: first configured model)
+  --model <p/model>    Model for the personas and agent (default: first configured model)
 `;
 
 export interface DemoSeedDeps {
