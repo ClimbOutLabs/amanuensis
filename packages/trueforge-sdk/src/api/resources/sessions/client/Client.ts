@@ -489,10 +489,12 @@ export class SessionsClient {
      *     await client.sessions.listEvents("session_id")
      */
     public async listEvents(session_id: string, request: TrueForge.ListEventsSessionsRequest = {}, requestOptions?: SessionsClient.RequestOptions): Promise<core.Page<TrueForge.SessionEventItem, TrueForge.ListSessionEventsResponse>> {
-        const list = core.HttpResponsePromise.interceptFunction(async (request: TrueForge.ListEventsSessionsRequest): Promise<core.WithRawResponse<TrueForge.ListSessionEventsResponse>> => { const { pageToken, lastTurnId, limit = 100 } = request; const _queryParams: Record<string, unknown> = {
+        const list = core.HttpResponsePromise.interceptFunction(async (request: TrueForge.ListEventsSessionsRequest): Promise<core.WithRawResponse<TrueForge.ListSessionEventsResponse>> => { const { pageToken, lastTurnId, limit = 100, types, afterEventId } = request; const _queryParams: Record<string, unknown> = {
             page_token: pageToken,
             last_turn_id: lastTurnId,
-            limit
+            limit,
+            types: Array.isArray(types) ? types.map(item => serializers.SessionEventType.jsonOrThrow(item, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true })) : types != null ? serializers.SessionEventType.jsonOrThrow(types, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true }) : undefined,
+            after_event_id: afterEventId
         }; const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest(); let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers); const _response = await (this._options.fetcher ?? core.fetcher)({
             url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/sessions/${core.url.encodePathParam(session_id)}/events`),
             method: "GET",
