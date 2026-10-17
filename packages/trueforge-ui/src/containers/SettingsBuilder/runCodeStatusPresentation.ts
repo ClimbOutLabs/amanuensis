@@ -1,7 +1,7 @@
 import {
+  SANDBOX_DISABLED_FIX,
   SANDBOX_DISABLED_HEADLINE,
   SANDBOX_DISABLED_SUMMARY,
-  sandboxDisabledFix,
 } from '@truefoundry/trueforge-core/core/sandbox/driver/sandboxDisabledText';
 
 import type { RunCodeStatus } from '@/components/RunCodeStatusContext.js';
@@ -62,7 +62,7 @@ function presentSlotsStatus(status: RunCodeStatus): RunCodeStatusPresentation {
         pill: 'Off',
         headline: SANDBOX_DISABLED_HEADLINE,
         summary: SANDBOX_DISABLED_SUMMARY,
-        fix: sandboxDisabledFix({ instance: status.instance }),
+        fix: `${SANDBOX_DISABLED_FIX} Then press Re-check.`,
         checks: [],
       };
     case 'isolation_refused':

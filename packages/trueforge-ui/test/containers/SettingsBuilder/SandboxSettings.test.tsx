@@ -132,14 +132,9 @@ const SLOT_STATES: {
     fix: /aman doctor sandbox --fix/,
   },
   {
-    status: { state: 'disabled', backend: 'slots', instance: 'main' },
-    headline: 'Code execution is off for this instance',
-    fix: /\.\/installer\/install\.sh --name main` again on the computer where Aman is installed to turn it on, then press Re-check\./,
-  },
-  {
     status: { state: 'disabled', backend: 'slots' },
     headline: 'Code execution is off for this instance',
-    fix: /--name your instance`/,
+    fix: /Run `aman doctor sandbox --fix` on the computer where Aman is installed\. Then press Re-check\./,
   },
 ];
 

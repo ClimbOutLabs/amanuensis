@@ -36,7 +36,12 @@ import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
-import { createSlotSandboxProvider, slotsBackendEnabled, slotSocketPaths } from '../sandbox/slotBackend';
+import {
+  createSlotSandboxProvider,
+  sandboxDisabledByInstaller,
+  slotsBackendEnabled,
+  slotSocketPaths,
+} from '../sandbox/slotBackend';
 import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../schemas/mcpServer';
 import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
@@ -648,8 +653,8 @@ export function getSharedRunCodeService(logger: Logger): RunCodeService {
     const runCodeLogger = logger.child({ module: 'run-code' });
     const driver = slotsBackendEnabled()
       ? new SlotDriver({ socketPaths: slotSocketPaths(), logger: runCodeLogger, now: undefined, sleepMs: undefined })
-      : configuration.INSTALLER_INSTANCE !== '' && configuration.SANDBOX_IMAGE.trim() === ''
-        ? new DisabledDriver(configuration.INSTALLER_INSTANCE)
+      : sandboxDisabledByInstaller()
+        ? new DisabledDriver()
         : new DockerDriver(
             {
               image: configuration.SANDBOX_IMAGE,

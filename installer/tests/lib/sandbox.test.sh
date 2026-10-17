@@ -251,6 +251,7 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   install_machine
   local compose
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$compose" "INSTALLER_INSTANCE: 'main'"
   assert_contains "$compose" "SANDBOX_BACKEND: slots"
   assert_contains "$compose" "SANDBOX_SLOTS: '4'"
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
@@ -510,6 +511,19 @@ test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
   sandbox_drop
 }
 
+test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how() {
+  t_begin "a plain re-run without --name keeps an instance installed with --no-sandbox off and tells how to turn it on"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  assert_flat_contains "$OUT" "To turn it on later, run aman doctor sandbox --fix."
+  sandbox_drop
+}
+
 test_no_sandbox_flag_leaves_a_sandboxed_instance_alone() {
   t_begin "--no-sandbox on an instance that has the sandbox changes nothing and says so"
   sandbox_new
@@ -649,6 +663,7 @@ test_instance_add_without_the_sandbox
 test_remove_stops_the_slots
 test_existing_instance_without_wiring_gets_it
 test_rerun_turns_the_sandbox_on_and_keeps_the_data
+test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how
 test_no_sandbox_flag_leaves_a_sandboxed_instance_alone
 test_rerun_with_no_sandbox_keeps_it_off
 test_upgrade_refreshes_the_setup_and_image

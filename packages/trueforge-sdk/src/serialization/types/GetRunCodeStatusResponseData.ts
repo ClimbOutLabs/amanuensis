@@ -9,7 +9,6 @@ import { GetRunCodeStatusResponseDataState } from "./GetRunCodeStatusResponseDat
 export const GetRunCodeStatusResponseData: core.serialization.ObjectSchema<serializers.GetRunCodeStatusResponseData.Raw, TrueForge.GetRunCodeStatusResponseData> = core.serialization.object({
         "backend": GetRunCodeStatusResponseDataBackend.optional(),
         "detail": core.serialization.string().optional(),
-        "instance": core.serialization.string().optional(),
         "state": GetRunCodeStatusResponseDataState
     });
 
@@ -17,7 +16,6 @@ export declare namespace GetRunCodeStatusResponseData {
     export interface Raw {
         backend?: GetRunCodeStatusResponseDataBackend.Raw | null;
         detail?: string | null;
-        instance?: string | null;
         state: GetRunCodeStatusResponseDataState.Raw;
     }
 }

@@ -254,7 +254,7 @@ print_plan() {
   if sandbox_needed; then
     ui_hint "Run code (Python, shell, files) runs in a sandbox."
   else
-    ui_hint "Run code stays off (installed with --no-sandbox)."
+    ui_hint "Run code stays off (installed with --no-sandbox). To turn it on later, run aman doctor sandbox --fix."
   fi
 }
 

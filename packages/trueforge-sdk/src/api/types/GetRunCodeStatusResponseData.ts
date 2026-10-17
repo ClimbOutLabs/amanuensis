@@ -7,8 +7,6 @@ export interface GetRunCodeStatusResponseData {
     backend?: TrueForge.GetRunCodeStatusResponseDataBackend;
     /** Technical detail from the sandbox check. Absent when the state says it all. */
     detail?: string;
-    /** Installer instance name, present for the disabled state when the server knows it. */
-    instance?: string;
     /** Whether run_code can execute code, or the reason it cannot. */
     state: TrueForge.GetRunCodeStatusResponseDataState;
 }

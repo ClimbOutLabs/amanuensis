@@ -1262,14 +1262,16 @@ sandbox_off_instances() {
 
 # --fix for instances without the sandbox: the installer turns it on and keeps the data. Returns 1 if any failed.
 turn_on_sandbox() { # names...
-  local name installer rc=0
+  local name installer rc=0 yes_flag=()
+  if [ "$UI_ASSUME_YES" = 1 ]; then yes_flag=(--yes); fi
   if ! installer=$(checkout_installer); then
     fail_no_installer
     return 1
   fi
   for name in "$@"; do
     if ui_confirm "Turn on the sandbox for instance $name and restart it? Its data is kept." y; then
-      bash "$installer" --home "$AMAN_HOME" --yes --name "$name" || rc=1
+      # Without --yes the installer shows its own plan, which includes any update, and asks.
+      bash "$installer" --home "$AMAN_HOME" ${yes_flag[@]+"${yes_flag[@]}"} --name "$name" || rc=1
     else
       rc=1
     fi
@@ -1324,7 +1326,7 @@ doctor_sandbox() {
   done < <(sandbox_off_instances)
   if [ "${#off[@]}" -gt 0 ]; then
     for name in "${off[@]}"; do
-      ui_warn "Instance $name was installed without the sandbox, so running code and reading PDFs are off. To turn it on: ./installer/install.sh --name $name"
+      ui_warn "Instance $name was installed without the sandbox, so running code and reading PDFs are off." "Run aman doctor sandbox --fix"
     done
     if [ "$fix" = 1 ]; then
       turn_on_sandbox "${off[@]}" || failed=1

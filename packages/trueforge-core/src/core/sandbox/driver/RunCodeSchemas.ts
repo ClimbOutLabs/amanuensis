@@ -134,10 +134,6 @@ export const RunCodeStatusSchema = z.object({
     .enum(RUN_CODE_BACKENDS)
     .optional()
     .describe('Which backend runs code: docker, or the isolated sandbox slots.'),
-  instance: z
-    .string()
-    .optional()
-    .describe('Installer instance name, present for the disabled state when the server knows it.'),
 });
 
 export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;

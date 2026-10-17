@@ -1883,8 +1883,9 @@ describe('sandbox settings that are incomplete', () => {
     assert.equal(result.code, 1);
     assert.match(
       result.stdout.replace(/\s+/g, ' '),
-      /Instance main was installed without the sandbox, so running code and reading PDFs are off\. To turn it on: \.\/installer\/install\.sh --name main/,
+      /Instance main was installed without the sandbox, so running code and reading PDFs are off\. Next: Run aman doctor sandbox --fix/,
     );
+    assert.doesNotMatch(result.stdout, /install\.sh --name/);
     assert.doesNotMatch(result.stdout, /sandbox tools are not installed/);
   });
 
@@ -1899,5 +1900,17 @@ describe('sandbox settings that are incomplete', () => {
     const fixed = world.shim(['doctor', 'sandbox', '--fix', '--yes']);
     assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
     assert.ok(world.calls().some(line => line.includes(`install.sh --home ${world.home} --yes --name main`)));
+  });
+
+  it('--fix without --yes lets the installer show its own plan and ask', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix'], { input: 'y\n' });
+    const install = world.calls().find(line => line.includes('install.sh --home'));
+    assert.ok(install, fixed.stdout + fixed.stderr);
+    assert.ok(install.includes('--name main'));
+    assert.ok(!install.includes('--yes'), install);
   });
 });
