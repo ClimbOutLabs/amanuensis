@@ -1,0 +1,21 @@
+{
+  "files": [
+    { "file": "01-flight-confirmation.eml", "language": "English" },
+    { "file": "02-gp-appointment-confirmation.eml", "language": "English" },
+    { "file": "03-portuguese-electricity-bill.eml", "language": "Portuguese" },
+    { "file": "04-portuguese-landlord-repair.eml", "language": "Portuguese" },
+    { "file": "06-package-delivery.eml", "language": "English" },
+    { "file": "07-dinner-plans.eml", "language": "English" },
+    { "file": "08-camera-order-ready.eml", "language": "English" },
+    { "file": "09-phishing-warning.eml", "language": "English" },
+    { "file": "10a-trip-plan.eml", "language": "English" },
+    { "file": "10b-trip-plan-reply.eml", "language": "English" },
+    { "file": "10c-trip-plan-change.eml", "language": "English" },
+    { "file": "11-calendar-invite.eml", "language": "English" },
+    { "file": "12-scanned-note.eml", "language": "English" },
+    { "file": "21-portuguese-class-homework.eml", "language": "Portuguese" },
+    { "file": "22-portuguese-bakery-order.eml", "language": "Portuguese" },
+    { "file": "23-spanish-lunch-invite.eml", "language": "Spanish" },
+    { "file": "24-english-photo-walk-itinerary.eml", "language": "English" }
+  ]
+}

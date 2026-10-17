@@ -12,6 +12,10 @@
 // embedded 5x7 bitmap font and a hand-rolled PNG encoder, so the script
 // needs only Node.js and no extra dependencies.
 //
+// Fixtures 21 to 24 and the Portuguese 03 and 04 are the demo additions
+// for Maya in Lisbon. Their .docx attachments are built here as a stored
+// (uncompressed) zip of XML parts.
+//
 // Fixtures 13 to 20 are mail in other languages and scripts. Two of them
 // attach PDFs whose Arabic and Japanese text is set in embedded subset
 // fonts (subsets of Noto Sans Arabic and Noto Sans CJK, both SIL Open Font
@@ -37,14 +41,14 @@ function pdfEscape(text) {
 }
 
 function makeTextPdf(title, lines) {
-  // Build a minimal one-page text PDF. All input must be ASCII.
+  // Build a minimal one-page text PDF. Text must fit Latin-1 (WinAnsi), enough for Portuguese.
   const contentParts = [];
   let y = 740;
   for (const line of lines) {
     contentParts.push(`BT /F1 11 Tf 72 ${y} Td (${pdfEscape(line)}) Tj ET`);
     y -= 15;
   }
-  const content = Buffer.from(contentParts.join('\n'), 'ascii');
+  const content = Buffer.from(contentParts.join('\n'), 'latin1');
   const objects = [
     Buffer.from('<< /Type /Catalog /Pages 2 0 R >>', 'ascii'),
     Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>', 'ascii'),
@@ -58,7 +62,7 @@ function makeTextPdf(title, lines) {
       content,
       Buffer.from('\nendstream', 'ascii'),
     ]),
-    Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', 'ascii'),
+    Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>', 'ascii'),
     Buffer.from(`<< /Title (${pdfEscape(title)}) /Producer (fixture-generator) >>`, 'ascii'),
   ];
   const parts = [Buffer.from('%PDF-1.4\n', 'ascii')];
@@ -1244,7 +1248,150 @@ function emlWithAttachments({ from, to, date, subject, msgid, body, attachments,
   return crlfJoin(head);
 }
 
-const OWNER = 'Alex Rivera <alex.rivera@example.com>';
+// ---------------------------------------------------------------------------
+// Minimal .docx (a zip of XML parts, written uncompressed so output is stable)
+// ---------------------------------------------------------------------------
+
+function xmlEscape(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function makeZip(entries) {
+  // Stored entries only, with a fixed DOS timestamp (2026-10-18 00:00).
+  const dosDate = ((2026 - 1980) << 9) | (10 << 5) | 18;
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const { name, data } of entries) {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(dosDate, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    local.writeUInt16LE(0, 28);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(dosDate, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, data);
+    centrals.push(central, nameBytes);
+    offset += local.length + nameBytes.length + data.length;
+  }
+  const centralSize = centrals.reduce((total, part) => total + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+function docxParagraph({ text, style }) {
+  const props = style === undefined ? '' : `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>`;
+  return `<w:p>${props}<w:r><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function docxTable(rows) {
+  const cell = (text, bold) =>
+    `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p><w:r>${
+      bold ? '<w:rPr><w:b/></w:rPr>' : ''
+    }<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p></w:tc>`;
+  const body = rows.map((row, index) => `<w:tr>${row.map(text => cell(text, index === 0)).join('')}</w:tr>`).join('');
+  return (
+    '<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/></w:tblPr>' +
+    `<w:tblGrid>${rows[0].map(() => '<w:gridCol/>').join('')}</w:tblGrid>${body}</w:tbl>`
+  );
+}
+
+function makeDocx({ title, creator, blocks }) {
+  const bodyXml = blocks
+    .map(block => (block.table === undefined ? docxParagraph(block) : docxTable(block.table)))
+    .join('');
+  const heading = (id, name, size) =>
+    `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/>` +
+    `<w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="80"/></w:pPr>` +
+    `<w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr></w:style>`;
+  const files = [
+    {
+      name: '[Content_Types].xml',
+      xml:
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+        '</Types>',
+    },
+    {
+      name: '_rels/.rels',
+      xml:
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
+        '</Relationships>',
+    },
+    {
+      name: 'docProps/core.xml',
+      xml:
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" ' +
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+        `<dc:title>${xmlEscape(title)}</dc:title><dc:creator>${xmlEscape(creator)}</dc:creator>` +
+        '<dcterms:created xsi:type="dcterms:W3CDTF">2026-10-18T15:00:00Z</dcterms:created>' +
+        '</cp:coreProperties>',
+    },
+    {
+      name: 'word/styles.xml',
+      xml:
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        `<w:styles xmlns:w="${W_NS}">` +
+        '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>' +
+        '<w:rPr><w:sz w:val="22"/></w:rPr></w:style>' +
+        heading('Title', 'Title', 40) +
+        heading('Heading1', 'heading 1', 30) +
+        heading('Heading2', 'heading 2', 26) +
+        '<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders>' +
+        ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
+          .map(side => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`)
+          .join('') +
+        '</w:tblBorders></w:tblPr></w:style></w:styles>',
+    },
+    {
+      name: 'word/document.xml',
+      xml:
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        `<w:document xmlns:w="${W_NS}"><w:body>${bodyXml}` +
+        '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:body></w:document>',
+    },
+  ];
+  return makeZip(files.map(({ name, xml }) => ({ name, data: Buffer.from(xml, 'utf8') })));
+}
+
+const OWNER = 'Maya Hollis <maya.hollis@example.com>';
 
 function buildMessages() {
   const messages = {};
@@ -1254,15 +1401,15 @@ function buildMessages() {
     'SKYWARD AIR - ITINERARY',
     'Booking reference: XK7Q2P',
     '',
-    'Passenger: Alex Rivera',
+    'Passenger: Maya Hollis',
     'Flight: SW 214',
-    'San Francisco (SFO) -> New York (JFK)',
-    'Saturday, October 24, 2026',
-    'Departure: 08:05 AM PDT',
-    'Arrival: 04:32 PM EDT',
+    'Lisbon (LIS) -> Porto (OPO)',
+    'Saturday, November 7, 2026',
+    'Departure: 08:05 AM WET',
+    'Arrival: 08:55 AM WET',
     'Seat: 14A, Economy',
     '',
-    'Please arrive 2 hours before departure.',
+    'Please arrive 90 minutes before departure.',
   ]);
   const flightIcs = Buffer.from(
     crlfJoin([
@@ -1271,12 +1418,12 @@ function buildMessages() {
       'PRODID:-//Example Fixtures//Flight//EN',
       'BEGIN:VEVENT',
       'UID:sw214-xk7q2p@skyward-air.example.com',
-      'DTSTAMP:20261012T161422Z',
-      'DTSTART:20261024T150500Z',
-      'DTEND:20261024T203200Z',
-      'SUMMARY:SW 214: San Francisco to New York',
+      'DTSTAMP:20261014T081422Z',
+      'DTSTART:20261107T080500Z',
+      'DTEND:20261107T085500Z',
+      'SUMMARY:SW 214: Lisbon to Porto',
       'DESCRIPTION:Booking XK7Q2P\\, seat 14A',
-      'LOCATION:San Francisco International Airport (SFO)',
+      'LOCATION:Lisbon Airport (LIS)',
       'END:VEVENT',
       'END:VCALENDAR',
       '',
@@ -1286,21 +1433,21 @@ function buildMessages() {
   messages['01-flight-confirmation.eml'] = emlWithAttachments({
     from: 'Skyward Air <bookings@skyward-air.example.com>',
     to: OWNER,
-    date: 'Mon, 12 Oct 2026 09:14:22 -0700',
+    date: 'Wed, 14 Oct 2026 09:14:22 +0100',
     subject: 'Your booking is confirmed: Skyward Air XK7Q2P',
     msgid: '<xk7q2p-confirmation@skyward-air.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
       'Your booking is confirmed. Booking reference: XK7Q2P',
       '',
       '  Flight:    SW 214 (Skyward Air)',
-      '  From:      San Francisco (SFO)',
-      '  To:        New York (JFK)',
-      '  Date:      Saturday, October 24, 2026',
-      '  Departs:   08:05 AM PDT',
-      '  Arrives:   04:32 PM EDT',
-      '  Passenger: Alex Rivera',
+      '  From:      Lisbon (LIS)',
+      '  To:        Porto (OPO)',
+      '  Date:      Saturday, November 7, 2026',
+      '  Departs:   08:05 AM WET',
+      '  Arrives:   08:55 AM WET',
+      '  Passenger: Maya Hollis',
       '  Seat:      14A (Economy)',
       '',
       'Your itinerary is attached as a PDF, and a calendar file is',
@@ -1315,100 +1462,137 @@ function buildMessages() {
     ],
   });
 
-  // 02: dentist reminder
-  messages['02-dentist-reminder.eml'] = emlSimple({
-    from: 'Bright Smile Dental <reminders@bright-smile-dental.example.org>',
+  // 02: GP appointment confirmation (the date matches the demo world's calendar)
+  messages['02-gp-appointment-confirmation.eml'] = emlSimple({
+    from: 'Brightwater Family Clinic <appointments@brightwater-clinic.example.org>',
     to: OWNER,
-    date: 'Fri, 09 Oct 2026 10:00:05 -0700',
-    subject: 'Reminder: dental cleaning on Thursday, October 22 at 2:30 PM',
-    msgid: '<reminder-20261022@bright-smile-dental.example.org>',
+    date: 'Wed, 14 Oct 2026 10:00:05 +0100',
+    subject: 'Appointment confirmed: Thursday, October 22 at 09:30',
+    msgid: '<appt-20261022@brightwater-clinic.example.org>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
-      'This is a reminder of your upcoming appointment:',
+      'Your first appointment is confirmed:',
       '',
-      '  What:     Dental cleaning',
-      '  When:     Thursday, October 22, 2026 at 2:30 PM',
-      '  Where:    Bright Smile Dental, 456 Example Avenue, Suite 12',
-      '  Dentist:  Dr. Emily Chen',
+      '  What:     New patient check-up',
+      '  When:     Thursday, October 22, 2026 at 09:30',
+      '  Where:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
+      '  Doctor:   Dra. Helena Rocha',
+      '',
+      'Please bring a photo ID, your insurance card and a list of',
+      'your medications and allergies. Arrive 10 minutes early.',
       '',
       'Need to reschedule? Use this link:',
-      'https://www.example.com/reschedule/9f2k7q',
+      'https://www.example.com/reschedule/bw4k9q',
       '',
-      'Please arrive 10 minutes early.',
-      '- Bright Smile Dental',
+      '- Brightwater Family Clinic',
     ]),
   });
 
-  // 03: utility bill with PDF
-  const billPdf = makeTextPdf('Bill Oct 2026', [
-    'METRO POWER & LIGHT - BILL',
-    'Account: 88214470',
-    'Billing period: Sep 5, 2026 - Oct 4, 2026',
+  // 03: electricity bill in European Portuguese, with a PDF
+  const billPdf = makeTextPdf('Fatura FT 2026/118842', [
+    'LUZ DO TEJO ENERGIA - FATURA DE ELETRICIDADE',
+    'Fatura n.º FT 2026/118842',
+    'Período de faturação: 1 a 30 de setembro de 2026',
     '',
-    'Usage: 612 kWh',
-    'Amount due: $184.62',
-    'Due date: November 5, 2026',
+    'Cliente: Maya Hollis',
+    'Consumo: 214 kWh',
+    'Valor a pagar: 38,47 euros',
+    'Pagar até: 30 de outubro de 2026',
     '',
-    'Pay at https://www.example.com/pay',
+    'Pagamento por Multibanco:',
+    'Entidade 21302, referência 482 193 077',
   ]);
-  messages['03-utility-bill.eml'] = emlWithAttachments({
-    from: 'Metro Power & Light <billing@metro-power-utility.example.net>',
+  messages['03-portuguese-electricity-bill.eml'] = emlI18n({
+    from: formatSender({ name: 'Luz do Tejo Energia', address: 'faturacao@luz-do-tejo.example.net' }),
     to: OWNER,
-    date: 'Mon, 05 Oct 2026 08:30:11 -0700',
-    subject: 'Your October bill is ready: $184.62 due November 5',
-    msgid: '<bill-202610@metro-power-utility.example.net>',
-    body: crlfJoin([
-      'Hi Alex,',
+    date: 'Mon, 12 Oct 2026 08:30:11 +0100',
+    subject: 'A sua fatura de eletricidade de setembro já está disponível',
+    msgid: '<fatura-202609@luz-do-tejo.example.net>',
+    body: [
+      'Olá, Maya,',
       '',
-      'Your October 2026 bill is ready.',
+      'A sua fatura de eletricidade de setembro já está disponível.',
       '',
-      '  Account:   88214470',
-      '  Amount:    $184.62',
-      '  Due date:  November 5, 2026',
-      '  Usage:     612 kWh',
+      '  Fatura: FT 2026/118842',
+      '  Período: 1 a 30 de setembro de 2026',
+      '  Consumo: 214 kWh',
+      '  Valor a pagar: 38,47 euros',
+      '  Pagar até: 30 de outubro de 2026',
       '',
-      'A detailed statement is attached as a PDF.',
+      'Pode pagar por Multibanco com a entidade 21302 e a referência',
+      '482 193 077. A fatura em PDF segue em anexo.',
       '',
-      '- Metro Power & Light',
-    ]),
-    attachments: [{ filename: 'bill.pdf', mime: 'application/pdf', data: billPdf }],
+      'Obrigado,',
+      'Luz do Tejo Energia',
+    ].join('\n'),
+    attachments: [{ filename: 'fatura-setembro.pdf', mime: 'application/pdf', data: billPdf }],
   });
 
-  // 04: landlord repair visit
-  messages['04-landlord-repair.eml'] = emlSimple({
-    from: 'Maria Santos <maria.santos@example.com>',
+  // 04: landlord repair visit, in European Portuguese, with a .docx repair notice
+  const repairNoticeDocx = makeDocx({
+    title: 'Aviso de reparação',
+    creator: 'Teresa Matos',
+    blocks: [
+      { text: 'Aviso de reparação', style: 'Title' },
+      { text: 'Apartamento arrendado no Chiado, Lisboa. Inquilina: Maya Hollis.' },
+      { text: 'Trabalho previsto', style: 'Heading1' },
+      { text: 'Reparação da torneira da cozinha, que pinga há duas semanas.' },
+      { text: 'Visita do canalizador', style: 'Heading1' },
+      {
+        table: [
+          ['Campo', 'Detalhe'],
+          ['Data', 'segunda-feira, 26 de outubro de 2026'],
+          ['Horário', 'das 9h00 às 12h00'],
+          ['Trabalho', 'Reparar a torneira da cozinha'],
+          ['Presença', 'É necessário estar alguém em casa'],
+        ],
+      },
+      { text: 'Notas', style: 'Heading1' },
+      { text: 'Se a torneira piorar antes da visita, feche a torneira de segurança debaixo do lava-loiça.' },
+    ],
+  });
+  messages['04-portuguese-landlord-repair.eml'] = emlI18n({
+    from: formatSender({ name: 'Teresa Matos', address: 'teresa.matos@example.com' }),
     to: OWNER,
-    date: 'Sat, 10 Oct 2026 14:22:40 -0700',
-    subject: 'Kitchen faucet repair visit',
-    msgid: '<faucet-visit@maria.santos.example.com>',
-    body: crlfJoin([
-      'Hi Alex,',
+    date: 'Fri, 16 Oct 2026 14:22:40 +0100',
+    subject: 'Reparação da torneira da cozinha: visita do canalizador',
+    msgid: '<torneira-visita@teresa.matos.example.com>',
+    body: [
+      'Olá, Maya,',
       '',
-      'The plumber can come by on Thursday, October 15 between',
-      '9:00 AM and 12:00 PM to fix the kitchen faucet.',
+      'O canalizador pode passar na segunda-feira, 26 de outubro,',
+      'entre as 9h e as 12h, para arranjar a torneira da cozinha.',
       '',
-      'Could you confirm that works for you? Someone needs to be',
-      'home to let him in.',
+      'Pode confirmar se lhe dá jeito? É preciso estar alguém em casa',
+      'para lhe abrir a porta. Segue em anexo o aviso de reparação com',
+      'os detalhes da visita.',
       '',
-      'Thanks,',
-      'Maria',
-    ]),
+      'Obrigada,',
+      'Teresa Matos',
+    ].join('\n'),
+    attachments: [
+      {
+        filename: 'aviso-de-reparacao.docx',
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        data: repairNoticeDocx,
+      },
+    ],
   });
 
   // 05: school newsletter with three dated events
   messages['05-school-newsletter.eml'] = emlSimple({
     from: 'Maple Grove Elementary <newsletter@maple-grove-school.example.org>',
     to: OWNER,
-    date: 'Mon, 12 Oct 2026 07:00:00 -0700',
-    subject: 'Maple Grove Weekly: October 12',
-    msgid: '<weekly-20261012@maple-grove-school.example.org>',
+    date: 'Fri, 16 Oct 2026 07:00:00 +0200',
+    subject: 'Maple Grove Weekly: October 16',
+    msgid: '<weekly-20261016@maple-grove-school.example.org>',
     body: crlfJoin([
-      'Maple Grove Weekly - October 12, 2026',
+      'Maple Grove Weekly - October 16, 2026',
       '',
       'Upcoming events:',
       '',
-      '1. Fall Fair - Sunday, October 18, 10:00 AM to 2:00 PM',
+      '1. Fall Fair - Sunday, October 25, 10:00 AM to 2:00 PM',
       '   on the school field. Games, food stalls, and a bake sale.',
       '',
       '2. Parent-teacher conferences - Friday and Saturday,',
@@ -1421,21 +1605,21 @@ function buildMessages() {
     ]),
   });
 
-  // 06: package delivery notice
+  // 06: package delivery notice (her boxes from Austin)
   messages['06-package-delivery.eml'] = emlSimple({
     from: 'SwiftParcel <tracking@swiftparcel.example.com>',
     to: OWNER,
-    date: 'Sun, 11 Oct 2026 18:45:33 -0700',
-    subject: 'Your package arrives Tuesday, October 13',
+    date: 'Sat, 17 Oct 2026 18:45:33 +0100',
+    subject: 'Your package arrives Tuesday, October 20',
     msgid: '<spx-884102-7719@swiftparcel.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
       'Good news: your package is on its way.',
       '',
       '  Tracking:  SPX-884102-7719',
-      '  Arriving:  Tuesday, October 13, 2026',
-      '  Shipped:   Portland, OR',
+      '  Arriving:  Tuesday, October 20, 2026',
+      '  Shipped:   Austin, TX',
       '',
       'Track it here: https://www.example.com/track/SPX-884102-7719',
       '',
@@ -1445,66 +1629,66 @@ function buildMessages() {
 
   // 07: dinner plans with two date options
   messages['07-dinner-plans.eml'] = emlSimple({
-    from: 'Jordan Lee <jordan.lee@example.com>',
+    from: 'Rui Carvalho <rui.carvalho@example.com>',
     to: OWNER,
-    date: 'Fri, 09 Oct 2026 19:03:17 -0700',
+    date: 'Fri, 16 Oct 2026 19:03:17 +0100',
     subject: 'Dinner next week?',
-    msgid: '<dinner-oct@jordan.lee.example.com>',
+    msgid: '<dinner-oct@rui.carvalho.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
-      'Want to grab dinner next week? I was thinking of The Copper',
-      'Kettle downtown. Two options:',
+      'Want to grab dinner next week? I know a small tasca in',
+      'Mouraria, the Tasca da Rosa, with fado on some nights. Two',
+      'options:',
       '',
-      '  - Friday, October 16 at 7:00 PM',
-      '  - Saturday, October 17 at 7:00 PM',
+      '  - Wednesday, October 21 at 8:00 PM',
+      '  - Friday, October 23 at 8:00 PM',
       '',
       'Let me know which works, or suggest another day.',
       '',
-      'Jordan',
+      'Rui',
     ]),
   });
 
-  // 08: receipt with CSV attachment
-  const receiptCsv = Buffer.from(
+  // 08: camera order ready for pickup, with a CSV order summary
+  const orderCsv = Buffer.from(
     [
-      'item,quantity,unit_price,total',
-      'Whole wheat bread,2,3.49,6.98',
-      'Free-range eggs (dozen),1,5.29,5.29',
-      'Whole milk (gallon),1,4.19,4.19',
-      'Bananas (bunch),2,1.29,2.58',
-      'Chicken breast (lb),3,6.99,20.97',
-      'Orange juice (64 oz),1,4.49,4.49',
-      'Paper towels (pack),1,3.33,3.33',
+      'item,quantity,status',
+      'Fujifilm XF 23mm f/2 lens,1,ready for pickup',
+      'Lens cap 43mm,1,ready for pickup',
+      'Microfiber cloth,1,ready for pickup',
       '',
     ].join('\n'),
     'utf-8',
   );
-  messages['08-receipt.eml'] = emlWithAttachments({
-    from: 'Corner Market <receipts@corner-market.example.net>',
+  messages['08-camera-order-ready.eml'] = emlWithAttachments({
+    from: 'Objectiva Foto <encomendas@objectiva-foto.example.com>',
     to: OWNER,
-    date: 'Sat, 10 Oct 2026 12:15:44 -0700',
-    subject: 'Your receipt from Corner Market',
-    msgid: '<receipt-20261010@corner-market.example.net>',
+    date: 'Thu, 15 Oct 2026 12:15:44 +0100',
+    subject: 'Your order OF-2026-10482 is ready for pickup',
+    msgid: '<order-of-2026-10482@objectiva-foto.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
-      'Thanks for shopping with us on October 10, 2026.',
+      'Your order is ready for pickup at our shop.',
       '',
-      '  Total: $47.83',
+      '  Order:    OF-2026-10482',
+      '  Pickup:   Tuesday to Saturday, 10:00 to 19:00',
+      '  Held for: 7 days',
       '',
-      'An itemized list is attached as a CSV file.',
+      'Please bring the order number and a photo ID. The items are',
+      'listed in the attached CSV file.',
       '',
-      '- Corner Market',
+      '- Objectiva Foto',
     ]),
-    attachments: [{ filename: 'receipt.csv', mime: 'text/csv', data: receiptCsv }],
+    attachments: [{ filename: 'order.csv', mime: 'text/csv', data: orderCsv }],
   });
 
   // 09: phishing-style message (flag, do not act)
   messages['09-phishing-warning.eml'] = emlSimple({
     from: '"Account Security" <security-alert@amaz0n-verify.example.com>',
     to: OWNER,
-    date: 'Sun, 11 Oct 2026 03:17:29 -0700',
+    date: 'Sun, 18 Oct 2026 03:17:29 +0100',
     subject: 'URGENT: Verify your password within 24 hours',
     msgid: '<urgent-verify-9912@amaz0n-verify.example.com>',
     body: crlfJoin([
@@ -1515,7 +1699,7 @@ function buildMessages() {
       'unless you verify now.',
       '',
       'Click here to verify your password:',
-      'http://amaz0n-verify.example.com/login?user=alex.rivera',
+      'http://amaz0n-verify.example.com/login?user=maya.hollis',
       '',
       'Enter your password on the page to keep your account active.',
       '',
@@ -1527,15 +1711,15 @@ function buildMessages() {
   messages['10a-trip-plan.eml'] = emlSimple({
     from: 'Sam Patel <sam.patel@example.com>',
     to: OWNER,
-    date: 'Wed, 07 Oct 2026 11:00:00 -0700',
+    date: 'Tue, 13 Oct 2026 11:00:00 +0100',
     subject: 'Weekend hiking trip',
-    msgid: '<hike-oct17@sam.patel.example.com>',
+    msgid: '<hike-oct25@sam.patel.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
-      'Want to do a hike on Saturday, October 17? I was thinking',
-      'Pine Ridge Trail - it is about 6 miles round trip with great',
-      'views. We could start around 8 AM.',
+      'Want to do a hike on Sunday, October 25? I was thinking the',
+      'coastal path near Cabo da Roca - it is about 9 km with great',
+      'views. We could start around 8:30 AM.',
       '',
       'Let me know what you think.',
       '',
@@ -1545,42 +1729,43 @@ function buildMessages() {
   messages['10b-trip-plan-reply.eml'] = emlSimple({
     from: OWNER,
     to: 'Sam Patel <sam.patel@example.com>',
-    date: 'Wed, 07 Oct 2026 15:30:00 -0700',
+    date: 'Tue, 13 Oct 2026 15:30:00 +0100',
     subject: 'Re: Weekend hiking trip',
-    msgid: '<re-hike-oct17@alex.rivera.example.com>',
+    msgid: '<re-hike-oct25@maya.hollis.example.com>',
     body: crlfJoin([
       'Hi Sam,',
       '',
-      'Sounds great. Pine Ridge Trail on Saturday the 17th works',
-      'for me. 8 AM start is fine - want me to bring anything?',
+      'Sounds great. The Cabo da Roca coastal path on Sunday the',
+      '25th works for me. 8:30 AM start is fine - want me to bring',
+      'anything?',
       '',
-      'Alex',
+      'Maya',
     ]),
-    extraHeaders: ['In-Reply-To: <hike-oct17@sam.patel.example.com>', 'References: <hike-oct17@sam.patel.example.com>'],
+    extraHeaders: ['In-Reply-To: <hike-oct25@sam.patel.example.com>', 'References: <hike-oct25@sam.patel.example.com>'],
   });
   messages['10c-trip-plan-change.eml'] = emlSimple({
     from: 'Sam Patel <sam.patel@example.com>',
     to: OWNER,
-    date: 'Fri, 09 Oct 2026 09:12:00 -0700',
+    date: 'Thu, 15 Oct 2026 09:12:00 +0100',
     subject: 'Re: Weekend hiking trip',
-    msgid: '<re2-hike-oct17@sam.patel.example.com>',
+    msgid: '<re2-hike-oct25@sam.patel.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
-      'Change of plans: Pine Ridge Trail is closed for maintenance',
-      "this weekend. Let's do Cedar Lake Loop instead - it is a",
-      'similar distance. Meet at 8:00 AM at the Cedar Lake',
-      'trailhead parking lot.',
+      'Change of plans: the Cabo da Roca path is closed for',
+      "maintenance that weekend. Let's do the Monsanto Forest Park",
+      'loop instead - it is a similar distance. Meet at 8:30 AM at',
+      'the Monsanto viewpoint car park.',
       '',
       'Sam',
     ]),
     extraHeaders: [
-      'In-Reply-To: <re-hike-oct17@alex.rivera.example.com>',
-      'References: <hike-oct17@sam.patel.example.com> <re-hike-oct17@alex.rivera.example.com>',
+      'In-Reply-To: <re-hike-oct25@maya.hollis.example.com>',
+      'References: <hike-oct25@sam.patel.example.com> <re-hike-oct25@maya.hollis.example.com>',
     ],
   });
 
-  // 11: calendar invite with ICS
+  // 11: calendar invite with ICS (her US team works on Central time)
   const inviteIcs = Buffer.from(
     crlfJoin([
       'BEGIN:VCALENDAR',
@@ -1588,15 +1773,15 @@ function buildMessages() {
       'PRODID:-//Example Fixtures//Invite//EN',
       'METHOD:REQUEST',
       'BEGIN:VEVENT',
-      'UID:q4-planning-20261014@priya.nair.example.com',
-      'DTSTAMP:20261012T150000Z',
-      'DTSTART:20261014T170000Z',
-      'DTEND:20261014T180000Z',
-      'SUMMARY:Q4 Planning Session',
-      'DESCRIPTION:Quarterly planning with the team.',
-      'LOCATION:Conference Room B',
+      'UID:q4-design-review-20261021@priya.nair.example.com',
+      'DTSTAMP:20261016T130000Z',
+      'DTSTART:20261021T160000Z',
+      'DTEND:20261021T170000Z',
+      'SUMMARY:Q4 Design Review',
+      'DESCRIPTION:Quarterly design review with the team.',
+      'LOCATION:Video call',
       'ORGANIZER;CN=Priya Nair:mailto:priya.nair@example.com',
-      'ATTENDEE;CN=Alex Rivera:mailto:alex.rivera@example.com',
+      'ATTENDEE;CN=Maya Hollis:mailto:maya.hollis@example.com',
       'END:VEVENT',
       'END:VCALENDAR',
       '',
@@ -1606,18 +1791,18 @@ function buildMessages() {
   messages['11-calendar-invite.eml'] = emlWithAttachments({
     from: 'Priya Nair <priya.nair@example.com>',
     to: OWNER,
-    date: 'Mon, 12 Oct 2026 08:00:00 -0700',
-    subject: 'Invitation: Q4 Planning Session @ Wed Oct 14, 2026 10:00 AM - 11:00 AM (PDT)',
-    msgid: '<q4-planning-invite@priya.nair.example.com>',
+    date: 'Fri, 16 Oct 2026 08:00:00 -0500',
+    subject: 'Invitation: Q4 Design Review @ Wed Oct 21, 2026 11:00 AM - 12:00 PM (CDT)',
+    msgid: '<q4-design-review-invite@priya.nair.example.com>',
     body: crlfJoin([
-      'Hi Alex,',
+      'Hi Maya,',
       '',
       'You are invited to:',
       '',
-      '  Q4 Planning Session',
-      '  Wednesday, October 14, 2026',
-      '  10:00 AM - 11:00 AM PDT',
-      '  Conference Room B / https://www.example.com/meet/q4planning',
+      '  Q4 Design Review',
+      '  Wednesday, October 21, 2026',
+      '  11:00 AM - 12:00 PM CDT (5:00 - 6:00 PM in Lisbon)',
+      '  Video call / https://www.example.com/meet/q4review',
       '',
       'Agenda is attached as a calendar invite.',
       '',
@@ -1767,13 +1952,13 @@ function buildMessages() {
   messages['17-spanish-internet-bill.eml'] = emlI18n({
     from: 'Fibra Hogar <facturacion@fibra-hogar.example.net>',
     to: OWNER,
-    date: 'Tue, 06 Oct 2026 07:45:00 -0700',
+    date: 'Tue, 13 Oct 2026 07:45:00 +0200',
     subject: 'Tu factura de octubre está lista',
     msgid: '<factura-fh-2026-10482@fibra-hogar.example.net>',
     charset: 'ISO-8859-1',
     bufferEncoding: 'latin1',
     body: [
-      'Hola, Alex:',
+      'Hola, Maya:',
       '',
       'Tu factura de octubre ya está disponible.',
       '',
@@ -1799,7 +1984,7 @@ function buildMessages() {
     subject: '订票成功: 10月25日 G102 次列车',
     msgid: '<order-hx202610250817@huaxing-rail.example.com>',
     body: [
-      '尊敬的 Rivera 先生,您好:',
+      '尊敬的 Hollis 先生,您好:',
       '',
       '您的车票已预订成功,详情如下:',
       '',
@@ -1848,7 +2033,7 @@ function buildMessages() {
     subject: 'Dinner on Friday, October 30',
     msgid: '<family-dinner-oct30@sara.ahmadi.example.com>',
     body: [
-      'Hi Alex,',
+      'Hi Maya,',
       '',
       'It has been too long. مادرم همیشه ازت می‌پرسد و می‌گوید سلام',
       'برسان. She keeps asking about you and sends her love.',
@@ -1866,19 +2051,144 @@ function buildMessages() {
   });
 
   // 12: scanned note as PNG
-  const notePng = makeNotePng([
-    'Plumber: Fix-It Plumbing, 555-0142.',
-    'Call before Thursday about the',
-    'kitchen faucet.',
-  ]);
+  const notePng = makeNotePng(['Plumber: Fix-It Plumbing, 555-0142.', 'Call before Monday about the', 'kitchen tap.']);
   messages['12-scanned-note.eml'] = emlWithAttachments({
     from: OWNER,
     to: OWNER,
-    date: 'Sun, 11 Oct 2026 20:05:00 -0700',
+    date: 'Sun, 18 Oct 2026 20:05:00 +0100',
     subject: 'Scanned note: plumber contact',
-    msgid: '<scanned-note-001@alex.rivera.example.com>',
-    body: crlfJoin(['Scanned from my desk - keeping a copy here.', '', '- Alex']),
+    msgid: '<scanned-note-001@maya.hollis.example.com>',
+    body: crlfJoin(['Scanned from my desk - keeping a copy here.', '', '- Maya']),
     attachments: [{ filename: 'note.png', mime: 'image/png', data: notePng }],
+  });
+
+  // 21: Portuguese class homework, in simple European Portuguese
+  messages['21-portuguese-class-homework.eml'] = emlI18n({
+    from: formatSender({ name: 'Marta Figueiredo', address: 'marta.figueiredo@example.net' }),
+    to: OWNER,
+    date: 'Mon, 12 Oct 2026 18:10:00 +0100',
+    subject: 'TPC da semana 3: descreva o seu bairro',
+    msgid: '<tpc-semana-3@marta.figueiredo.example.net>',
+    body: [
+      'Olá, Maya!',
+      '',
+      'Obrigada pela participação na aula de hoje. O trabalho de casa',
+      'desta semana é simples:',
+      '',
+      '  - Escreva cinco frases sobre o seu bairro.',
+      '  - Diga onde mora e o que há perto de casa.',
+      '  - Diga como vai para o centro.',
+      '',
+      'Envie as frases por e-mail até quarta-feira, 21 de outubro,',
+      'antes da aula das 18h30. Se tiver dúvidas, pergunte na aula.',
+      '',
+      'Até quarta!',
+      'Marta Figueiredo',
+    ].join('\n'),
+  });
+
+  // 22: bakery order confirmation in Brazilian Portuguese
+  messages['22-portuguese-bakery-order.eml'] = emlI18n({
+    from: formatSender({ name: 'Padaria Pão de Mel', address: 'pedidos@padaria-pao-de-mel.example.net' }),
+    to: OWNER,
+    date: 'Fri, 16 Oct 2026 17:35:00 +0100',
+    subject: 'Seu pedido PM-2048 está confirmado',
+    msgid: '<pedido-pm-2048@padaria-pao-de-mel.example.net>',
+    body: [
+      'Olá, Maya!',
+      '',
+      'Recebemos o seu pedido e já estamos preparando tudo.',
+      '',
+      '  Pedido: PM-2048',
+      '  Itens: 12 pastéis de nata e 1 bolo de laranja',
+      '  Total: 27,50 euros (pagamento na retirada)',
+      '  Retirada: sábado, 24 de outubro, entre 9h e 11h',
+      '',
+      'Pode retirar na nossa loja no Chiado. Se precisar mudar o',
+      'horário, é só responder a este e-mail ou ligar para 555-0163.',
+      '',
+      'Obrigada pela preferência!',
+      'Padaria Pão de Mel',
+    ].join('\n'),
+  });
+
+  // 23: lunch invitation from a friend in Madrid, in Spanish
+  messages['23-spanish-lunch-invite.eml'] = emlI18n({
+    from: formatSender({ name: 'Lucía Navarro', address: 'lucia.navarro@example.com' }),
+    to: OWNER,
+    date: 'Sat, 17 Oct 2026 11:20:00 +0200',
+    subject: '¿Comemos juntas el jueves 29?',
+    msgid: '<comida-jueves-29@lucia.navarro.example.com>',
+    body: [
+      'Hola, Maya:',
+      '',
+      '¿Qué tal la vida en Lisboa? Tengo muchas ganas de saber cómo',
+      'te va con el portugués y con la casa nueva.',
+      '',
+      'Voy a estar en Lisboa por trabajo del 28 al 30 de octubre y me',
+      'encantaría verte. ¿Te apetece que comamos juntas? Tengo dos',
+      'opciones:',
+      '',
+      '  - el jueves 29 de octubre a las 14:00',
+      '  - el viernes 30 de octubre a las 13:30',
+      '',
+      'Dime cuál te viene mejor y reservo mesa en algún sitio',
+      'tranquilo cerca de donde vivas. Si prefieres otro día, dímelo',
+      'y lo busco.',
+      '',
+      'Un abrazo fuerte,',
+      'Lucía',
+    ].join('\n'),
+  });
+
+  // 24: English email with a minimal .docx itinerary draft
+  const itineraryDocx = makeDocx({
+    title: 'Old Lisbon photo walks: draft itinerary',
+    creator: 'Rui Carvalho',
+    blocks: [
+      { text: 'Old Lisbon photo walks: draft itinerary', style: 'Title' },
+      { text: 'Draft for Maya. Times follow the light, so they may move by a few minutes.' },
+      { text: 'Alfama at sunrise', style: 'Heading1' },
+      { text: 'Empty alleys in the first hour of light. Wear shoes with grip: the steps are steep.' },
+      { text: 'Miradouro da Graça at golden hour', style: 'Heading1' },
+      { text: 'Sunset over the castle. Arrive early to claim a spot at the railing.' },
+      { text: 'Belém at golden hour', style: 'Heading1' },
+      { text: 'Flat and open, with long light along the river.' },
+      { text: 'Schedule', style: 'Heading2' },
+      {
+        table: [
+          ['Date', 'Place', 'Light'],
+          ['Fri, Oct 23', 'Alfama', 'Sunrise'],
+          ['Sat, Oct 24', 'Miradouro da Graça', 'Golden hour'],
+          ['Sat, Oct 31', 'Belém', 'Golden hour'],
+        ],
+      },
+    ],
+  });
+  messages['24-english-photo-walk-itinerary.eml'] = emlWithAttachments({
+    from: 'Rui Carvalho <rui.carvalho@example.com>',
+    to: OWNER,
+    date: 'Sun, 18 Oct 2026 17:05:00 +0100',
+    subject: 'Old Lisbon photo walks: draft itinerary',
+    msgid: '<photo-walks-draft@rui.carvalho.example.com>',
+    body: crlfJoin([
+      'Hi Maya,',
+      '',
+      'I put together a first draft of the three photo walks for your',
+      'Old Lisbon series and attached it as a Word file.',
+      '',
+      'Can you look at the dates and tell me what you think? If they',
+      'work, I will join you for the Alfama sunrise.',
+      '',
+      'Rui',
+    ]),
+    attachments: [
+      {
+        filename: 'Old Lisbon photo walks - draft itinerary.docx',
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        data: itineraryDocx,
+      },
+    ],
   });
 
   return messages;

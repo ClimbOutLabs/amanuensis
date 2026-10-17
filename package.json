@@ -70,6 +70,8 @@
     "test:private-data": "node scripts/check-no-private-data.mjs",
     "generate-test-mailbox": "node test-fixtures/assistant-mailbox/generate-fixtures.mjs",
     "send-test-mailbox": "node scripts/send-test-mailbox.mjs",
+    "demo:import-mailbox": "node scripts/import-demo-mailbox.mjs",
+    "test:test-mailbox": "node --test tests/assistant-mailbox-fixtures.test.mjs tests/import-demo-mailbox.test.mjs",
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs",
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs installer/tests/qr.test.mjs installer/tests/pki.test.mjs",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
