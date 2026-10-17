@@ -5,6 +5,7 @@ export type AgentStepPart = {
   type: PartState['type'];
   text?: string;
   toolName?: string;
+  toolCallId?: string;
 };
 
 /** A contiguous run of parts folded into agent internals; `end` is exclusive. */
@@ -60,7 +61,12 @@ function collectRuns({ parts, folded }: { parts: readonly AgentStepPart[]; folde
  * substantive text before a tool call stays in the main flow. The trailing text run is the final
  * answer, held back while streaming until it is long enough to not flicker out of the steps.
  */
-export function computeAgentStepsSplit(parts: readonly AgentStepPart[], isRunning: boolean): AgentStepsSplitResult {
+export function computeAgentStepsSplit(
+  parts: readonly AgentStepPart[],
+  isRunning: boolean,
+  /** Parts that stay in the main flow whatever their kind, like a send receipt the person must be able to read. */
+  keepVisible?: (part: AgentStepPart) => boolean,
+): AgentStepsSplitResult {
   let trailingStart = parts.length;
   while (trailingStart > 0 && parts[trailingStart - 1]?.type === 'text') trailingStart--;
 
@@ -70,14 +76,17 @@ export function computeAgentStepsSplit(parts: readonly AgentStepPart[], isRunnin
   // Pure-text responses are always the final answer and must stream directly, not be held back.
   const hasAgentStepsBeforeTrailing = parts
     .slice(0, trailingStart)
-    .some(part => (part.type === 'tool-call' && !isMapsCall(part)) || part.type === 'reasoning');
+    .some(
+      part =>
+        (part.type === 'tool-call' && !isMapsCall(part) && keepVisible?.(part) !== true) || part.type === 'reasoning',
+    );
 
   const finalConfirmed =
     trailingChars > 0 && (!isRunning || trailingChars >= FINAL_HOLDBACK_CHARS || !hasAgentStepsBeforeTrailing);
 
   const folded = parts.map((part, index) => {
     if (index >= trailingStart) return !finalConfirmed;
-    if (isMapsCall(part)) return false;
+    if (isMapsCall(part) || keepVisible?.(part) === true) return false;
     return part.type !== 'text' || isShortNarration(part.text ?? '');
   });
 

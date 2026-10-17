@@ -956,7 +956,9 @@ describe('ToolCallContainer', () => {
 
     function renderSend() {
       return render(
-        <RuntimeHarness messages={[{ role: 'assistant', content: [sendCall('call-1')] }]}>
+        <RuntimeHarness
+          messages={[{ role: 'assistant', content: [sendCall('call-1'), { type: 'text', text: 'Done.' }] }]}
+        >
           <SentinelStateProvider>
             <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
           </SentinelStateProvider>
@@ -977,7 +979,9 @@ describe('ToolCallContainer', () => {
           message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
         }),
       );
-      expect(await screen.findByText('Sent at 09:12, exactly as approved')).toBeInTheDocument();
+      const proof = await screen.findByText('Sent at 09:12, exactly as approved');
+      // The receipt is the proof the person came for, so it never folds into the collapsed agent details.
+      expect(proof.closest('[hidden]')).toBeNull();
       expect(screen.getByText('Subject: Lease')).toBeInTheDocument();
       expect(screen.getByText('Check code', { exact: false })).toHaveTextContent('Check code A7F39C');
     });

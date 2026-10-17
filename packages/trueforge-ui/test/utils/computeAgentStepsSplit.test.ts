@@ -123,4 +123,15 @@ describe('computeAgentStepsSplit', () => {
     expect(result.runs).toEqual([]);
     expect(result.hasFinal).toBe(true);
   });
+
+  it('keeps a part the caller asks for in the main flow, and does not count it as a step', () => {
+    const parts = [tool(), { type: 'tool-call' as const, toolCallId: 'send-1' }, text('Done.')];
+    const result = computeAgentStepsSplit(parts, false, part => part.toolCallId === 'send-1');
+    expect(result.runs).toEqual([run(0, 1, { tools: 1 })]);
+  });
+
+  it('folds the same part when the caller keeps nothing', () => {
+    const parts = [tool(), { type: 'tool-call' as const, toolCallId: 'send-1' }, text('Done.')];
+    expect(computeAgentStepsSplit(parts, false, () => false).runs).toEqual([run(0, 2, { tools: 2 })]);
+  });
 });
