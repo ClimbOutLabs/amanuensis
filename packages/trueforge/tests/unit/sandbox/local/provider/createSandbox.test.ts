@@ -48,6 +48,7 @@ describeUnix('LocalSandboxProvider.createSandbox per-chat folder', () => {
       protocolError: undefined,
       timedOut: false,
       signal: undefined,
+      childPid: undefined,
     });
   });
 
