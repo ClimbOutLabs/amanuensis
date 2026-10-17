@@ -293,8 +293,11 @@ function hostNoteTag(kind: PendingHostNoteKind, signature: string): string {
   return `[ref:${hostNoteMarker(kind, signature)}]`;
 }
 
+/** Breaks any internal-tag delimiter inside untrusted text so it cannot close the tag early. */
+const INTERNAL_TAG_DELIMITER = /<(?=\s*\/?\s*tfy-internal)/gi;
+
 export function internalSystemTag(m: string): string {
-  return SYSTEM_TAG_START + m + SYSTEM_TAG_END;
+  return SYSTEM_TAG_START + m.replace(INTERNAL_TAG_DELIMITER, '&lt;') + SYSTEM_TAG_END;
 }
 
 /**

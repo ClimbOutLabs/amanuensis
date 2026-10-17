@@ -1,7 +1,7 @@
 import type { ChatCompletionContentPart, ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { createDocumentExtractionBudget, type DocumentFileProgress } from '../../documents/documentExtraction';
-import type { AgentCapability, CapabilityState } from '../capabilities/AgentCapability';
+import type { AgentCapability, CapabilityState, UntrustedTextScreen } from '../capabilities/AgentCapability';
 import type {
   AgentContextProcessorOutput,
   AgentContextProcessorOverwriteContext,
@@ -223,6 +223,7 @@ import {
   type AgentInputUserMessage,
   type DocumentIngestionProgress,
   type StagedDocumentFile,
+  type TextContentPart,
 } from './UserInputMessage';
 
 const DEFAULT_ITERATION_LIMIT = 25;
@@ -1412,6 +1413,7 @@ export class AgentThread {
   // stale current-date section.
   private instructionDateUtc: string | undefined;
   private toolResponseProcessors: ToolResponseProcessor[];
+  private untrustedTextScreens: readonly UntrustedTextScreen[];
   private instructionBuilders: readonly ((builder: InstructionBuilder) => void)[];
   private systemToolSets: readonly IToolSet[];
   private deferredTool?: DeferredTool | undefined;
@@ -1553,6 +1555,7 @@ export class AgentThread {
     this.preEphemeralLLMContextProcessors = capabilities.flatMap(c => c.preLLMEphemeralProcessors ?? []);
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
     this.toolResponseProcessors = capabilities.flatMap(c => c.toolResponseProcessors ?? []);
+    this.untrustedTextScreens = capabilities.flatMap(c => c.untrustedTextScreens ?? []);
     this.instructionBuilders = capabilities.flatMap(c => c.instructionBuilders ?? []);
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
@@ -2619,6 +2622,24 @@ export class AgentThread {
     return this.convertedTools;
   }
 
+  /** Text read out of an uploaded file goes through the same screen as other untrusted text before the model sees it. */
+  private async screenIngestedText(input: {
+    part: TextContentPart;
+    file: { filename: string; path: string };
+    signal: AbortSignal | undefined;
+  }): Promise<TextContentPart> {
+    for (const screen of this.untrustedTextScreens) {
+      const decision = await screen.screenText({ text: input.part.text, signal: input.signal });
+      if (decision.action === 'withheld') {
+        return buildIngestionUnavailableNote(
+          input.file,
+          'its text was withheld by the safety screen, so it was not read',
+        );
+      }
+    }
+    return input.part;
+  }
+
   /**
    * Pre-model extraction of staged documents. Runs once per turn before the first LLM call when
    * documents were uploaded. Yields progress events (started, finished/failed/cancelled per file)
@@ -2751,7 +2772,13 @@ export class AgentThread {
           },
           this.threadId,
         );
-        extractedTextParts.push(buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document));
+        extractedTextParts.push(
+          await this.screenIngestedText({
+            part: buildIngestedDocumentTextPart({ filename: file.filename, path: file.path }, document),
+            file: { filename: file.filename, path: file.path },
+            signal,
+          }),
+        );
       } else {
         const issue = document.issue ?? 'Extraction produced no text';
         yield buildDocumentIngestionEvent(

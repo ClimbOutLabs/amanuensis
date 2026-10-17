@@ -4,6 +4,7 @@ import { migrateToLatest } from '../../db/migratePostgres';
 import { PostgresAgentStore } from '../../db/postgres/agent-store/PostgresAgentStore';
 import { createDb } from '../../db/postgres/client';
 import { PostgresGlobalSettingsStore } from '../../db/postgres/global-settings-store/PostgresGlobalSettingsStore';
+import { PostgresGoogleConnectionStore } from '../../db/postgres/google-connection-store/PostgresGoogleConnectionStore';
 import { PostgresMcpServerStore } from '../../db/postgres/mcp-server-store/PostgresMcpServerStore';
 import { PostgresModelProviderStore } from '../../db/postgres/model-provider-store/PostgresModelProviderStore';
 import { PostgresPersonaStore } from '../../db/postgres/persona-store/PostgresPersonaStore';
@@ -54,6 +55,7 @@ export async function openPostgresStores(options: {
     sandboxProviderStore: new PostgresSandboxProviderStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
     tokenStore: new PostgresOAuthTokenStore(db),
+    googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     close: () => db.destroy(),
   };

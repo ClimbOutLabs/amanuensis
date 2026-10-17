@@ -542,6 +542,8 @@ export interface SandboxProvider {
   getGitCredentialsPath(sandboxId: string): string;
   /** Directory for user-uploaded files (absolute, or cwd-relative when the provider has no global FS). */
   getFileUploadsDir(sandboxId: string): string;
+  /** Directory for the private copies made while a document is read, when it must differ from the uploads directory (a provider whose ordinary reads are size-limited). */
+  getDocumentSnapshotDir?(sandboxId: string): string;
   /** Directory where skill mounts are materialized. */
   getSkillsDir(sandboxId: string): string;
   /** Path the skill downloader script is written to before it runs. */

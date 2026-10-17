@@ -38,6 +38,7 @@ import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentSto
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -110,6 +111,7 @@ function buildApp(input: {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
+  const googleConnectionStore = new SqliteGoogleConnectionStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
   const outboundSecrets = createOutboundSecretSource({
     configured: () => [],
@@ -117,6 +119,7 @@ function buildApp(input: {
     sandboxProviders: sandboxProviderStore,
     mcpServers: mcpServerStore,
     tokens: tokenStore,
+    googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
@@ -133,6 +136,7 @@ function buildApp(input: {
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),

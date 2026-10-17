@@ -19,6 +19,7 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_guard',
   'mcp_search_limit',
   'mcp_search_unreturned_url',
+  'mcp_search_after_private_read',
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
@@ -41,6 +42,8 @@ export interface WebSearchTurnState {
   resultUrls: Set<string>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
+  /** True once the session read private data (mail), after which a search asks instead of running silently. */
+  privateDataRead: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -50,6 +53,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     silentSearches: 0,
     resultUrls: new Set(),
     sentText: '',
+    privateDataRead: false,
     admission: Promise.resolve(),
   };
 }
@@ -169,4 +173,16 @@ export function unreturnedUrls(input: { values: readonly string[]; state: WebSea
     }
   }
   return unreturned;
+}
+
+/**
+ * The one place that records and answers "has this session read private data". A tool that returns the user's
+ * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
+ */
+export function markPrivateDataRead(state: WebSearchTurnState): void {
+  state.privateDataRead = true;
+}
+
+export function hasReadPrivateData(state: WebSearchTurnState): boolean {
+  return state.privateDataRead;
 }
