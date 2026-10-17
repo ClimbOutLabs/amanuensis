@@ -1,3 +1,5 @@
+export * as firstRunGuide from "./firstRunGuide/index.js";
+export * from "./firstRunGuide/client/requests/index.js";
 export * as mcpServers from "./mcpServers/index.js";
 export * from "./mcpServers/client/requests/index.js";
 export * as memoryScreens from "./memoryScreens/index.js";

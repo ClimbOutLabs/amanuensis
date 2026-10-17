@@ -1344,10 +1344,12 @@ Replaces the authenticated user’s profile and advances its revision only when 
 ```typescript
 await client.personalization.createOrUpdateProfile({
     profile: {
+        addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
+        userName: "Sam Rivera",
         userProfile: "Prefers local-first tools and plain English.",
         voiceGuidance: "Warm, direct, and concise."
     }
@@ -6862,6 +6864,127 @@ await client.memory.vault.delete("entry_id");
 <dd>
 
 **requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings FirstRunGuide
+<details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">get</a>() -> TrueForge.GetFirstRunGuideResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether the owner has dismissed the first-run checklist. Not dismissed until the owner says so.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.firstRunGuide.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `FirstRunGuideClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetFirstRunGuideResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists whether the first-run checklist is dismissed. The response carries the stored state.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.firstRunGuide.createOrUpdate({
+    dismissed: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateFirstRunGuideRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `FirstRunGuideClient.RequestOptions`
 
 </dd>
 </dl>

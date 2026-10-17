@@ -3,6 +3,7 @@
 import type { BaseClientOptions } from "../../../../BaseClient.js";
 import { normalizeClientOptionsWithAuth, type NormalizedClientOptionsWithAuth } from "../../../../BaseClient.js";
 import * as core from "../../../../core/index.js";
+import { FirstRunGuideClient } from "../resources/firstRunGuide/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
@@ -18,6 +19,7 @@ export declare namespace SettingsClient {
 
 export class SettingsClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<SettingsClient.Options>;
+    protected _firstRunGuide: FirstRunGuideClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
     protected _memoryScreens: MemoryScreensClient | undefined;
     protected _memorySummarize: MemorySummarizeClient | undefined;
@@ -30,6 +32,10 @@ export class SettingsClient {
     constructor(options: SettingsClient.Options) {
 
         this._options = normalizeClientOptionsWithAuth(options);
+    }
+
+    public get firstRunGuide(): FirstRunGuideClient {
+        return (this._firstRunGuide ??= new FirstRunGuideClient(this._options));
     }
 
     public get mcpServers(): McpServersClient {
