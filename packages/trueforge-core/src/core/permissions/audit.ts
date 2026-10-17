@@ -7,6 +7,13 @@
  */
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
+import {
+  isSearchHoldCardText,
+  savedSearchHoldReason,
+  SEARCH_HELD_REASON,
+  SEARCH_SERVER_FALLBACK,
+  searchHoldAuditText,
+} from './searchHoldText';
 import type { AutoDenyReason, Tier, TierDecision } from './tier';
 
 /** Recorded outcome, per tier. */
@@ -94,6 +101,26 @@ export async function recordStandingTrustRun(input: {
 }
 
 /**
+ * Audit row text for a call that asked. Any search provider call, or a card shaped like a held
+ * search, is described without its query, including calls stored before audit_description existed.
+ */
+export function heldCallAuditText(
+  info: Pick<InternalToolCallInfo, 'original_tool_name' | 'audit_description' | 'search_provider_call' | 'tier3_card'>,
+): string {
+  if (info.audit_description !== undefined) {
+    return info.audit_description;
+  }
+  const card = info.tier3_card ?? null;
+  if (info.search_provider_call === true || (card !== null && isSearchHoldCardText(card.plain_what))) {
+    return searchHoldAuditText({
+      server: card?.destination ?? SEARCH_SERVER_FALLBACK,
+      why: savedSearchHoldReason(card?.why_asked_again ?? null) ?? SEARCH_HELD_REASON,
+    });
+  }
+  return card?.plain_what ?? info.original_tool_name;
+}
+
+/**
  * Record what became of an action an unattended run held: held ('logged'), then refused or turned
  * down ('denied'), or approved without a later dispatch row ('approved'). An approval that still asks
  * is recorded after dispatch like any other.
@@ -116,7 +143,7 @@ export async function recordHeldActionAudit(input: {
     conversation_id: input.identity.conversation_id,
     tier: input.info.tier ?? 3,
     tool_name: input.info.original_tool_name,
-    description: `${input.note}: ${input.info.audit_description ?? input.info.tier3_card?.plain_what ?? input.info.original_tool_name}`,
+    description: `${input.note}: ${heldCallAuditText(input.info)}`,
     outcome: input.outcome,
     auto_deny_reason: null,
   });

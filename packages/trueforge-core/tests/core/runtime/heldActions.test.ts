@@ -600,3 +600,103 @@ describe('audit rows for a held web search', () => {
     expect(descriptions(h).at(-1)).toContain('searches are set to ask');
   });
 });
+
+describe('audit rows for a web search held before its audit text was stored', () => {
+  const key = 'wsk-live-synthetic000111222333';
+  const cardNumber = '4111 1111 1111 1111';
+  const query = `how do I rotate ${key} safely, refund to ${cardNumber}`;
+  const savedReasons = ['Held for approval: it contains a secret this server holds.', null] as const;
+
+  // A hold stored by the earlier release: the query in plain_what, the reason in why_asked_again,
+  // and no audit_description.
+  function savedByEarlierRelease(
+    context: ReturnType<typeof heldContext>,
+    whyAskedAgain: string | null,
+  ): ReturnType<typeof heldContext> {
+    return context.map(message => {
+      if (!('role' in message) || message.role !== 'assistant' || message.tool_calls === undefined) {
+        return message;
+      }
+      return {
+        ...message,
+        tool_calls: message.tool_calls.map(call => {
+          const card = call.tool_info.tier3_card;
+          if (call.id !== 'call-search' || card === null || card === undefined) {
+            return call;
+          }
+          const info = {
+            ...call.tool_info,
+            tier3_card: {
+              ...card,
+              plain_what: `Search the web through mail for: ${query}`,
+              why_asked_again: whyAskedAgain,
+            },
+          };
+          delete info.audit_description;
+          return { ...call, tool_info: info };
+        }),
+      };
+    });
+  }
+
+  function answer(status: 'allow' | 'deny') {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: 'call-search',
+      approval: { status },
+    };
+  }
+
+  function expectNoCaughtText(h: Harness): void {
+    const rows = JSON.stringify(h.audit.map(record => record.description));
+    expect(rows).not.toContain(key);
+    expect(rows).not.toContain(cardNumber);
+    expect(rows).not.toContain('rotate');
+  }
+
+  const cases = savedReasons.flatMap(why => (['allow', 'deny'] as const).map(status => [status, why] as const));
+
+  it.each(cases)('answered %s in an attended chat (saved reason %s)', async (status, why) => {
+    const h = makeHarness(
+      [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
+      {
+        searchProvider: true,
+        secrets: [key],
+      },
+    );
+    const { orchestrator, thread } = h.build({ unattended: false });
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }] });
+    const replay = h.build({
+      unattended: false,
+      context: savedByEarlierRelease(heldContext(thread), why),
+      stopAfterToolResponse: true,
+    });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+
+    expect(h.audit.length).toBeGreaterThanOrEqual(1);
+    expectNoCaughtText(h);
+    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. Held because');
+  });
+
+  it.each(cases)('answered %s after a scheduled run held it (saved reason %s)', async (status, why) => {
+    const h = makeHarness(
+      [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
+      {
+        searchProvider: true,
+        secrets: [key],
+      },
+    );
+    const { thread } = await runBrief(h);
+    const replay = h.build({
+      unattended: false,
+      context: savedByEarlierRelease(heldContext(thread), why),
+      stopAfterToolResponse: true,
+    });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+
+    expect(h.audit.length).toBeGreaterThanOrEqual(2);
+    expectNoCaughtText(h);
+    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. Held because');
+  });
+});

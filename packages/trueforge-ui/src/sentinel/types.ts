@@ -13,7 +13,11 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
-import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import {
+  heldBecause,
+  savedSearchHoldReason,
+  SERVER_SECRET_REASON,
+} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -206,17 +210,15 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
   return record[snake] === true || record[camel] === true;
 }
 
-const LEGACY_HOLD_PREFIX = 'Held for approval: ';
-const LEGACY_KEY_HOLD = `${LEGACY_HOLD_PREFIX}it contains a secret this server holds.`;
 const SEARCH_QUERY_MARKER = ' for: ';
 
 // Search cards saved before the hold reason moved into plain_what: the reason was filed as
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
-  const reason = card.why_asked_again;
-  if (reason === null || !reason.startsWith(LEGACY_HOLD_PREFIX)) return card;
-  if (reason === LEGACY_KEY_HOLD) {
+  const because = savedSearchHoldReason(card.why_asked_again);
+  if (because === undefined) return card;
+  if (because === SERVER_SECRET_REASON) {
     const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
@@ -226,7 +228,6 @@ function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
       outbound_text: null,
     };
   }
-  const because = reason.slice(LEGACY_HOLD_PREFIX.length).replace(/\.$/, '');
   return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
 }
 

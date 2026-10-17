@@ -30,6 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { heldCallAuditText } from '../permissions/audit';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
@@ -1815,7 +1816,7 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: info.audit_description ?? info.tier3_card?.plain_what ?? info.original_tool_name,
+        description: heldCallAuditText(info),
         outcome,
         auto_deny_reason: null,
       });

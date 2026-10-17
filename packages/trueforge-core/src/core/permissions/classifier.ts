@@ -47,7 +47,12 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
-import { searchHoldAuditText, searchHoldCardText, SERVER_SECRET_REASON } from './searchHoldText';
+import {
+  SEARCH_SERVER_FALLBACK,
+  searchHoldAuditText,
+  searchHoldCardText,
+  SERVER_SECRET_REASON,
+} from './searchHoldText';
 import {
   hashArgv,
   matchAllowlist,
@@ -1216,7 +1221,7 @@ async function holdSearchCall(input: {
     input.queryText.length > SEARCH_CARD_TEXT_MAX
       ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
       : input.queryText;
-  const server = action.mcp_server_name ?? 'the search provider';
+  const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
   const decision = tier3Decision({
     card: {
       plain_what: searchHoldCardText({ server, query: shown, why: input.why }),
