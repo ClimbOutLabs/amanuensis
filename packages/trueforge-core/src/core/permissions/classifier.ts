@@ -76,8 +76,8 @@ import {
   sha256FileContent,
   splitCompoundSegments,
   splitWordsLenient,
-  writeTargetTouchesCommandSearchPath,
   writeTargetTouchesGitControl,
+  writeTargetTouchesSandboxTools,
   type FileDigest,
   type PathResolution,
   type TrackedExecutableScope,
@@ -1054,13 +1054,13 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  // A program written to a command search directory is found by name ahead of the system programs.
-  if (writeTargetTouchesCommandSearchPath({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
+  // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
+  if (writeTargetTouchesSandboxTools({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
     return tier3Decision({
       card: {
-        plain_what: `Write \`${target}\`, a folder the sandbox looks in to find programs.`,
+        plain_what: `Write \`${target}\`, in a folder the sandbox uses for its own tools.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'A program saved there can run in place of a trusted one.',
+        cannot_be_undone: 'A file saved there can run in place of a trusted program.',
         why_asked_again: null,
         destination: null,
         recipient: null,
@@ -1070,8 +1070,8 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         destination_host: null,
         outbound_truncated: false,
       },
-      reason: 'command_path_write',
-      reason_detail: 'Writes into folders on the sandbox command path always require approval.',
+      reason: 'sandbox_tool_write',
+      reason_detail: 'Writes into the sandbox tool folders always require approval.',
       sensitive_read: false,
       approval_token_id: await mintPlainToken({
         ctx,

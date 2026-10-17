@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
@@ -7,7 +7,7 @@ import {
   createSentinelHostContext,
   defaultSentinelServices,
 } from '../../../../../../trueforge-core/src/core/permissions/context';
-import { SANDBOX_EXEC_TOOL_NAME, Sandbox } from '../../../../../../trueforge-core/src/core/sandbox/Sandbox';
+import { Sandbox, SANDBOX_EXEC_TOOL_NAME } from '../../../../../../trueforge-core/src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../../../../trueforge-core/src/core/tracing/NoopAgentTracing';
 import { LocalSandboxProvider } from '../../../../../src/sandbox/local/provider/LocalSandboxProvider';
 
@@ -70,6 +70,8 @@ describe('allowlisted commands run the program that was classified (real LocalSa
   async function plant(relativePath: string, marker: string): Promise<void> {
     const target = join(sandboxId, relativePath);
     await mkdir(join(target, '..'), { recursive: true });
+    // Replace the entry itself: the venv's python entries are links to the host interpreter, which a write would follow.
+    await rm(target, { force: true });
     await writeFile(target, `#!/bin/sh\necho ${PLANTED_OUTPUT}\necho "$@" >> '${marker}'\n`);
     await chmod(target, 0o755);
   }
@@ -93,6 +95,11 @@ describe('allowlisted commands run the program that was classified (real LocalSa
     ['nice ls hello.txt', '.venv/bin/nice', 'hello.txt'],
     ['ls hello.txt', '.venv/bin/flock', 'hello.txt'],
     ['ls hello.txt', 'mcp-client/bin/sh', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/git', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/mkdir', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/rm', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/python', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/python3', 'hello.txt'],
   ])('a planted program cannot stand in for the safe `%s`', async (command, plantedAt, realOutput) => {
     const marker = join(sandboxId, 'planted-ran');
     await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
@@ -102,9 +109,22 @@ describe('allowlisted commands run the program that was classified (real LocalSa
     expect(outcome.asksForApproval).toBe(false);
     expect(outcome.text).toContain(realOutput);
     expect(outcome.text).not.toContain(PLANTED_OUTPUT);
-    // Host bookkeeping may still call a bare name; the user's command and its operand must never reach it.
-    const calls = (await exists(marker)) ? await readFile(marker, 'utf8') : '';
-    expect(calls).not.toContain('hello.txt');
+    // Neither the command nor host bookkeeping may reach a planted program.
+    expect(await exists(marker)).toBe(false);
+  });
+
+  test.each(['zz.pth', 'sitecustomize.py'])('a planted Python startup file `%s` never runs', async name => {
+    const marker = join(sandboxId, 'startup-ran');
+    await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
+    const lib = join(sandboxId, '.venv', 'lib');
+    const [pythonDir] = await readdir(lib);
+    const body = `import os\nopen(${JSON.stringify(marker)}, 'a').write('ran')\n`;
+    const content = name.endsWith('.pth') ? `import os; open(${JSON.stringify(marker)}, 'a').write('ran')\n` : body;
+    await writeFile(join(lib, pythonDir ?? '', 'site-packages', name), content);
+    const outcome = await run('ls hello.txt');
+    expect(outcome.asksForApproval).toBe(false);
+    expect(outcome.text).toContain('hello.txt');
+    expect(await exists(marker)).toBe(false);
   });
 
   test('the real program still runs silently and its output is returned', async () => {

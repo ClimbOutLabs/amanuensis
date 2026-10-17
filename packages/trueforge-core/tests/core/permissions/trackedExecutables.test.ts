@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
-  isCommandSearchPath,
   isGitControlPath,
+  isSandboxToolPath,
   observeShellCreatedFiles,
   skipWrapperPrefix,
   writeTargetTouchesGitControl,
@@ -113,12 +113,18 @@ describe('isGitControlPath', () => {
   });
 });
 
-describe('isCommandSearchPath', () => {
-  test.each(['.venv/bin/flock', 'mcp-client/bin/x', 'a/.VENV/bin/sh', '/ws/.venv/bin/cat'])('flags %s', p => {
-    expect(isCommandSearchPath(p)).toBe(true);
+describe('isSandboxToolPath', () => {
+  test.each([
+    '.venv/bin/flock',
+    'mcp-client/x',
+    'a/.VENV/lib/site-packages/zz.pth',
+    '/ws/.venv/pyvenv.cfg',
+    'mcp-client/',
+  ])('flags %s', p => {
+    expect(isSandboxToolPath(p)).toBe(true);
   });
-  test.each(['.venv/lib/x.py', 'bin/ls', 'mcp-client/readme.md', '.venv/bin', 'src/venv/bin/x'])('allows %s', p => {
-    expect(isCommandSearchPath(p)).toBe(false);
+  test.each(['bin/ls', 'src/venv/bin/x', 'mcp-client.md', 'docs/mcp-clients/a.md'])('allows %s', p => {
+    expect(isSandboxToolPath(p)).toBe(false);
   });
 });
 

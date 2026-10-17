@@ -190,22 +190,14 @@ export function isGitControlPath(p: string): boolean {
   });
 }
 
-const COMMAND_SEARCH_DIRS: readonly (readonly [string, string])[] = [
-  ['.venv', 'bin'],
-  ['mcp-client', 'bin'],
-];
+const SANDBOX_TOOL_DIRS = new Set(['.venv', 'mcp-client']);
 
 /**
- * True when a path lies in a directory the sandbox puts on its command search path (`.venv/bin`,
- * `mcp-client/bin`). A file written there is found by name ahead of the system programs.
+ * True when a path lies in the sandbox's own tool folders (`.venv`, `mcp-client`). Programs and Python
+ * startup files saved there are run by the host and by the sandbox shell, so the whole tree is protected.
  */
-export function isCommandSearchPath(p: string): boolean {
-  const names = p.split(/[\\/]+/u).map(component => component.replace(/[. ]+$/u, '').toLowerCase());
-  return names.some(
-    (name, index) =>
-      COMMAND_SEARCH_DIRS.some(([dir, child]) => name === dir.replace(/[. ]+$/u, '') && names[index + 1] === child) &&
-      index + 2 < names.length,
-  );
+export function isSandboxToolPath(p: string): boolean {
+  return p.split(/[\\/]+/u).some(component => SANDBOX_TOOL_DIRS.has(component.replace(/[. ]+$/u, '').toLowerCase()));
 }
 
 function writeTargetMatches(input: {
@@ -238,13 +230,13 @@ export function writeTargetTouchesGitControl(input: {
   return writeTargetMatches({ ...input, matches: isGitControlPath });
 }
 
-/** True when a write target is, or resolves through symlinks to, a command search directory. */
-export function writeTargetTouchesCommandSearchPath(input: {
+/** True when a write target is, or resolves through symlinks to, the sandbox's tool folders. */
+export function writeTargetTouchesSandboxTools(input: {
   p: string;
   cwd: string;
   resolution?: PathResolution | undefined;
 }): boolean {
-  return writeTargetMatches({ ...input, matches: isCommandSearchPath });
+  return writeTargetMatches({ ...input, matches: isSandboxToolPath });
 }
 
 /** A dangling symlink cannot be resolved, so its destination is unknown: fail closed. */

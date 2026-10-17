@@ -487,20 +487,27 @@ describe('Suite B - workspace containment escapes', () => {
     }
   });
 
-  test('writes into folders on the sandbox command path are Tier 3', async () => {
+  test('writes into the sandbox tool folders are Tier 3', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     try {
-      for (const dir of ['.venv/bin', 'mcp-client/bin', 'sub/.venv/bin', '.venv/lib']) {
+      for (const dir of ['.venv/bin', 'mcp-client/bin', 'sub/.venv/bin', '.venv/lib/site-packages', 'src']) {
         mkdirSync(join(ws, dir), { recursive: true });
       }
       const ctx = makeCtx({ workspace_cwd: ws });
       for (const tool of ['write_file', 'replace_text']) {
-        for (const path of ['.venv/bin/flock', 'mcp-client/bin/sh', 'sub/.venv/bin/cat']) {
+        for (const path of [
+          '.venv/bin/flock',
+          'mcp-client/bin/sh',
+          'sub/.venv/bin/cat',
+          '.venv/lib/site-packages/zz.pth',
+          '.venv/pyvenv.cfg',
+          'mcp-client/sitecustomize.py',
+        ]) {
           const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
           expect(decision.tier).toBe(3);
-          expect(decision.reason).toBe('command_path_write');
+          expect(decision.reason).toBe('sandbox_tool_write');
         }
-        expect((await classifyTier(action(tool, { path: '.venv/lib/x.py', content: 'x' }), ctx)).tier).toBe(2);
+        expect((await classifyTier(action(tool, { path: 'src/x.py', content: 'x' }), ctx)).tier).toBe(2);
       }
     } finally {
       rmSync(ws, { recursive: true, force: true });

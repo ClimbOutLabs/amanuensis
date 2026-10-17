@@ -98,6 +98,11 @@ const WRAPPER_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/
 
 const WRAPPER_PATH_SETUP = ['tf_user_path="$PATH"', `PATH=${shellEscape(WRAPPER_PATH)}`, 'export tf_user_path PATH'];
 
+/** Host-authored commands run on the fixed system PATH, never the workspace-led sandbox PATH. */
+export function withTrustedPath(command: string): string {
+  return `PATH=${shellEscape(WRAPPER_PATH)}; export PATH; ${command}`;
+}
+
 const RESTORE_USER_PATH = 'PATH="$tf_user_path"; export PATH; ';
 
 function gitPathCommand(workspaceRoot: string, path: string): string {
@@ -327,7 +332,7 @@ export function verifiedWorkspaceCommitCommand(input: {
   workspaceRoot: string;
   receipt: WorkspaceVerificationReceipt;
 }): string {
-  return `python3 -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
+  return `python3 -I -S -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
     JSON.stringify({ command: input.command, workspace_root: input.workspaceRoot, receipt: input.receipt }),
   )}`;
 }

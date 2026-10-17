@@ -30,7 +30,7 @@ import {
 import { throwIfSignalAborted } from '@truefoundry/trueforge-core/core/util/abort';
 import { execFile } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -71,6 +71,20 @@ const VENV_PYDANTIC_PIN = 'pydantic>=2.0.0,<3.0.0';
 
 /** Command names resolved via `command -v` (PATH from sandbox policy). */
 const SHELL_CANDIDATES = ['bash', 'sh'] as const;
+async function venvHasPydantic(venvDir: string): Promise<boolean> {
+  for (const lib of ['lib', 'lib64']) {
+    const entries = await readdir(join(venvDir, lib)).catch(() => []);
+    if (
+      entries.some(
+        entry => entry.startsWith('python') && existsSync(join(venvDir, lib, entry, 'site-packages', 'pydantic')),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const PYTHON_CANDIDATES = ['python3', 'python'] as const;
 
 export type { LocalSandboxPlatform };
@@ -556,21 +570,9 @@ export class LocalSandboxProvider implements SandboxProvider {
       }
     }
 
-    const relPython = join(SANDBOX_VENV_DIR, 'bin', 'python');
     const relPip = join(SANDBOX_VENV_DIR, 'bin', 'pip');
-    const check = await runSupervisorSession({
-      sandboxRootPath,
-      platform: this.support.platform,
-      shell: this.support.shell,
-      command: `${shellEscape(relPython)} -c ${shellEscape('import pydantic')}`,
-      signal,
-      timeoutMs: SUPPORT_PROBE_TIMEOUT_MS,
-    });
-    throwIfSignalAborted(signal);
-    if (check.protocolError !== undefined) {
-      throw new Error(`Sandbox venv pydantic check failed: ${check.protocolError}`);
-    }
-    if (check.exitCode === 0) {
+    // Read the venv's files instead of running its python: a program saved there would otherwise run on every exec.
+    if (await venvHasPydantic(venvDir)) {
       return;
     }
 
