@@ -83,6 +83,17 @@ pr_body*
 # in temp dirs by design; never commit these if a build drops them at the root.
 sbom-*.spdx.json
 requirements.hashed.txt
+
+# Copied from the repo root by each package's prepack (scripts/copy-license-files.mjs)
+packages/amanuensis/LICENSE
+packages/amanuensis/NOTICE
+packages/trueforge/LICENSE
+packages/trueforge/NOTICE
+packages/trueforge-core/LICENSE
+packages/trueforge-core/NOTICE
+packages/trueforge-sdk/LICENSE
+packages/trueforge-sdk/NOTICE
+
 # Toolchain archives that `pnpm sandbox:slots --add` downloads for the sandbox image, and which packs are chosen.
 ops/sandbox-slot/packs/archives/*
 !ops/sandbox-slot/packs/archives/.gitkeep

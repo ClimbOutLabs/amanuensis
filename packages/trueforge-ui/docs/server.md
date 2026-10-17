@@ -41,13 +41,12 @@ for draft). This package owns the host-facing `Server` façade and adapters.
 
 ## Interfaces (target)
 
-Chat types are imported from `truefoundry-gateway-sdk` (agents + API).
-`AgentSpec` is gateway SDK (`TruefoundryGatewayApi.AgentSpec`), re-exported by
-`@truefoundry/assistant-ui-runtime`. Builder catalog types are **SDK-minimal**
-(fields this UI reads); hosts keep extras typed with `T extends Base`.
+Chat types are imported from `@truefoundry/assistant-ui-runtime`. Builder catalog
+types are **SDK-minimal** (fields this UI reads); hosts keep extras typed with
+`T extends Base`.
 
 ```ts
-import type { AgentSession, AgentDraftSession, Turn, TurnStreamData } from 'truefoundry-gateway-sdk/agents';
+import type { AgentSession, AgentDraftSession, Turn, TurnStreamData } from '@truefoundry/assistant-ui-runtime';
 import type {
   AgentSpec,
   TurnInputItem,
@@ -60,8 +59,8 @@ import type {
   ListTurnsResponse,
   ListSessionEventsResponse,
   ListSessionsOrder,
-} from 'truefoundry-gateway-sdk';
-import type { Page, BinaryResponse } from 'truefoundry-gateway-sdk/core'; // or equivalent core export
+} from '@truefoundry/assistant-ui-runtime';
+import type { Page, BinaryResponse } from '@truefoundry/assistant-ui-runtime';
 
 type PageParams = {
   limit?: number;
@@ -131,7 +130,7 @@ interface AgentChatServer {
 
 /**
  * Builder catalog + persist.
- * Not in truefoundry-gateway-sdk — host/BFF provides these.
+ * Not part of the runtime; the host/BFF provides these.
  * Like MUI Table: bases declare what the SDK needs; T extends Base keeps host extras typed.
  */
 interface AgentBuilderServer<
@@ -291,8 +290,7 @@ Thread list uses `id`, `title?`, `updatedAt`. Draft title falls back to
 
 ### `AgentSpec` (complete)
 
-Source of truth: `truefoundry-gateway-sdk` → `TruefoundryGatewayApi.AgentSpec`  
-Re-exported by: `@truefoundry/assistant-ui-runtime`
+Source of truth: `@truefoundry/assistant-ui-runtime`
 
 ```ts
 interface AgentSpec {
