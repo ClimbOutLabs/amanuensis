@@ -58,7 +58,7 @@ $NEW_PASSWORD
   assert_eq "$(dex_env | grep -c '^DEX_USER_PASSWORD_HASH=')" 1 "one hash line"
   assert_contains "$(dex_env)" "# >>> managed by the installer"
   assert_mode "$AMAN_HOME/instances/main/dex.env" 600
-  assert_eq "$(ls "$AMAN_HOME/instances/main" | grep -c 'dex.env.')" 0 "no temporary copy is left behind"
+  assert_eq "$(dir_names "$AMAN_HOME/instances/main" | tr ' ' '\n' | grep -c '^dex.env.')" 0 "no temporary copy is left behind"
   sandbox_drop
 }
 
