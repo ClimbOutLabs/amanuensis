@@ -14,6 +14,8 @@ Let the user designate one connector as their search provider. Its search tool t
 
 Parallel's free keyless hosted MCP (`search.parallel.ai/mcp`) is the default search provider and ships as a catalog preset. Any other connector can hold the role instead. A one-time data migration designates a connector saved before the setting existed when it matches a search preset by endpoint and none of the tenant's connectors carries any explicit `search_provider` value; an explicit `false` is the record of "turned off". A designated connector with no stored `search_tools` uses its preset's list at run time.
 
+The server offers that preset once per instance at startup, with a persisted marker (`default_search_provider_seeded` in global settings). A new instance gets it added and designated; an existing instance with no search provider gets it on its first start after the update. The marker is written whether or not anything was added, so a user who removes the connector keeps it removed, and an instance where any connector carries an explicit `search_provider` value, or one already sits on the preset's address, counts as having chosen. Searches run without asking through the existing per-user `search_without_asking` default. TrueFoundry mode does not seed: it lists MCP servers from TrueFoundry. The preset is the catalog entry flagged `search_provider` that needs no key. Every root thread of a chat or scheduled turn is offered the designated provider's tools even when its spec lists no connector, so the first search needs no Add-ons choice.
+
 Everything is enforced by the server (classifier, tool executor, host state). Nothing depends on the model behaving.
 
 ## Design Decisions
@@ -64,7 +66,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 - Server-held secrets are read only to compare against outgoing text. They are never logged, never sent to the model, and never placed in an audit row or a card.
 - The audit row for a silent search stores the query text, which the guard has already cleared. The audit row for any held search, approved or denied, in a chat or a scheduled run, stores only the connector and the reason it was held, never the query, because a held query may contain the very secret the guard caught. Audit rows are kept and never expire.
 - An approval card for a held query shows the text to the user who owns the session, so they can see what the model tried to send. When the guard caught one of this computer's keys, the card names that and shows the query with the key masked (first and last two characters, or nothing for a short key); if the key cannot be located in the text, the whole query is hidden. This holds when searches are set to Ask too. The tool call's Request block shows the same masked text, before and after the answer. Cards saved before this change are masked when read. The model's own tool call is kept as written in the stored turn, because approving the card runs it; every surface that displays it uses the masked text.
-- Parallel's keyless endpoint sees the query and the server's IP. Users who object can pick another provider or switch searches to Ask.
+- Parallel's keyless endpoint sees the query and the server's IP. Users who object can pick another provider or switch searches to Ask. The Web searches setting and the docs say so in one line.
 - The per-turn URL set and silent count are in-memory host state, dropped with the turn.
 
 ## Testing
