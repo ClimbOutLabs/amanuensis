@@ -89,6 +89,43 @@ describe('turn-scoped tool-call reliability', () => {
     });
   });
 
+  it('tells the owner in plain words when a send is refused because its card cannot show everything', async () => {
+    const base = assistantCall({ id: 'send-call', name: 'reply', arguments: {} });
+    const [call] = base.tool_calls ?? [];
+    if (call === undefined) {
+      throw new Error('expected a tool call');
+    }
+    const refused: InternalEnrichedAssistantMessage = {
+      ...base,
+      tool_calls: [
+        {
+          ...call,
+          tool_info: {
+            ...call.tool_info,
+            tier_reason: 'incomplete_send_card',
+            pre_dispatch_failure: { kind: 'policy_blocked', message: 'Auto-denied: name each recipient.' },
+          },
+        },
+      ],
+    };
+
+    const result = await executeToolCalls({
+      assistantMessage: refused,
+      toolMapping: new Map([['reply', { toolSet: toolSet({ name: 'mail', resultText: 'must not run' }), originalToolName: 'reply' }]]),
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    expect(result.toolCallResults[0]).toMatchObject({
+      disposition: 'policy_blocked',
+      remediation: {
+        reason_code: 'tool_policy_blocked',
+        message: expect.stringContaining('Nothing was sent'),
+      },
+    });
+  });
+
   it('records a typed pre-dispatch setup failure as never run', async () => {
     const unavailable = toolSet({ name: 'unavailable', resultText: 'must not run' });
     jest
