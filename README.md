@@ -35,7 +35,7 @@ Amanuensis (Aman) is a private, local-first AI workbench built on the TrueForge 
 - 🧠 **Your choice of model** — configurable providers, including OpenAI-compatible endpoints and fully local Ollama; model roles assign separate models to conversation and auxiliary work.
 - 🔌 **MCP connectors** — header or OAuth authentication, tool approvals, and per-chat capability selection.
 - 📦 **Reusable skills and subagents** — `SKILL.md` instruction packs, dynamic subagents, and generative UI that renders interactive results instead of plain text.
-- 💻 **Sandboxed execution** — on-demand code and file execution through the Daytona adapter; standalone mode also supports a built-in local adapter on macOS and Linux hosts.
+- 💻 **Sealed sandbox** — code Aman writes runs in a sealed sandbox with no internet access, a fresh one for every run. If the sandbox isn't available, code doesn't run. See [sandboxing](docs/sandbox.mdx).
 - 👤 **Personalization** — personas and an inspectable personalization profile.
 - 🗄️ **Long-term memory** — on by default as local Markdown files: the model retains what matters from each chat and recalls it in later ones, with bounded recall and auditable recall events. Self-hosted Hindsight banks remain available as an experimental opt-in.
 
@@ -50,7 +50,7 @@ flowchart TB
     Runtime["Agent runtime<br/>tool orchestration · approvals · sessions<br/>(packages/trueforge-core)"]
     Models["Model providers<br/>OpenAI-compatible · Ollama"]
     MCP["MCP connectors<br/>header / OAuth auth"]
-    Sandbox["Sandbox<br/>Daytona · local adapter"]
+    Sandbox["Sealed sandbox"]
     Memory["Memory<br/>Markdown files (local)"]
     Storage[("Storage<br/>SQLite in standalone<br/>Postgres + Redis hosted")]
 

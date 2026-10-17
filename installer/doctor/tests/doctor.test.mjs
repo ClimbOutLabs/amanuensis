@@ -822,6 +822,7 @@ describe('instance service health', () => {
 });
 
 describe('doctor sandbox', () => {
+  const NOT_READY = "Code won't run until the sandbox is ready. Run: aman doctor sandbox --fix";
   const sandboxCalls = () =>
     world.calls().filter(line => line.startsWith('node ') && !line.startsWith('node --version'));
 
@@ -850,6 +851,7 @@ describe('doctor sandbox', () => {
     const result = world.shim(['doctor', 'sandbox']);
     assert.equal(result.code, 1);
     assert.ok(!world.calls().some(line => line.includes('--only run_code')));
+    assert.ok(result.stdout.replace(/\s+/g, ' ').includes(NOT_READY), result.stdout);
   });
 
   it('fails with the fix when the app cannot use the slots', () => {
@@ -863,6 +865,7 @@ describe('doctor sandbox', () => {
     assert.equal(result.code, 1);
     assert.match(result.stdout, /x The sandbox slots are not running/);
     assert.match(result.stdout, /Next: Run `aman doctor sandbox --fix`/);
+    assert.ok(result.stdout.replace(/\s+/g, ' ').includes(NOT_READY), result.stdout);
   });
 
   it('fails when the app container is not running', () => {

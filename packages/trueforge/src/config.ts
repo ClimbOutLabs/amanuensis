@@ -319,12 +319,12 @@ function parseIsolationDriver(options: {
   throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
 }
 
-/** Where `run_code` and the shell tools execute: Docker containers, or the gVisor sandbox slots. */
+/** Where `run_code` and the shell tools execute: the gVisor sandbox slots, or the legacy Docker containers. */
 export type SandboxBackend = 'docker' | 'slots';
 
 function parseSandboxBackend(options: { envKey: string; raw: string | undefined }): SandboxBackend {
   if (options.raw === undefined || options.raw.trim() === '') {
-    return 'docker';
+    return 'slots';
   }
   const value = options.raw.trim().toLowerCase();
   if (value === 'docker' || value === 'slots') {
@@ -978,15 +978,17 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
   /**
-   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'docker'; 'slots' sends run_code and the
-   * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
+   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'slots': run_code and the shell and file
+   * tools go to the gVisor sandbox slots, which ignore SANDBOX_IMAGE and the cosign key. 'docker' is the
+   * legacy backend, kept only as a developer opt-in until it is removed; it is never a fallback for slots.
    */
   SANDBOX_BACKEND: SandboxBackend;
   /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
   SANDBOX_SLOTS: number;
   /**
    * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
-   * Required when SANDBOX_BACKEND=slots.
+   * Required when SANDBOX_BACKEND=slots is set explicitly. Left blank under the default, the server still
+   * starts and reports the sandbox as not running, so code does not run.
    */
   SANDBOX_SLOTS_DIR: string;
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
@@ -2503,7 +2505,8 @@ if (isTrueFoundryModeEnabled(configuration)) {
 // configured image gets the full fail-closed validation.
 const runCodeConfigured = configuration.SANDBOX_BACKEND === 'docker' && configuration.SANDBOX_IMAGE.trim() !== '';
 if (configuration.SANDBOX_BACKEND === 'slots') {
-  if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
+  const backendSetExplicitly = (getEnv('SANDBOX_BACKEND') ?? '').trim() !== '';
+  if (backendSetExplicitly && configuration.SANDBOX_SLOTS_DIR.trim() === '') {
     throw new Error('SANDBOX_SLOTS_DIR is required when SANDBOX_BACKEND=slots: it holds the slot control directories.');
   }
   if (configuration.SANDBOX_SLOTS > SANDBOX_MAX_SLOTS) {

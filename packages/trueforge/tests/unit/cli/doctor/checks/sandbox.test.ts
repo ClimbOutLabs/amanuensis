@@ -8,6 +8,14 @@ describe('run_code', () => {
     const check = await checkRunCode({ deps: fakeDeps({ env: {} }), timeoutMs: 1000 });
     expect(check).toMatchObject({ id: 'run_code', state: 'off' });
     expect(check.detail).toContain('installed without the sandbox');
+    expect(check.detail).not.toContain('run_code');
+  });
+
+  it('is off, in plain words, when the older developer sandbox is chosen', async () => {
+    const check = await checkRunCode({ deps: fakeDeps({ env: { SANDBOX_BACKEND: 'docker' } }), timeoutMs: 1000 });
+    expect(check).toMatchObject({ id: 'run_code', state: 'off' });
+    expect(check.detail).toContain('older developer sandbox');
+    expect(check.detail).not.toMatch(/docker|run_code/i);
   });
 
   it('asks the slots by their control sockets, the way the app does, and is ok when they are ready', async () => {
@@ -21,6 +29,9 @@ describe('run_code', () => {
     });
     const check = await checkRunCode({ deps, timeoutMs: 1000 });
     expect(check).toMatchObject({ id: 'run_code', state: 'ok' });
+    expect(check.detail).toContain(
+      "Code Aman writes runs in a sealed sandbox with no internet access, a fresh one for every run. If the sandbox isn't available, code doesn't run.",
+    );
     expect(asked).toEqual([
       [
         '/run/aman-slots/1/agent.sock',

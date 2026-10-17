@@ -9,11 +9,9 @@ import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
-const IMAGE = 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@sha256:' + 'a'.repeat(64);
-
 const limits = {
   isolation_driver: 'docker',
-  image: IMAGE,
+  image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@sha256:' + 'a'.repeat(64),
   default_timeout_seconds: 60,
   max_timeout_seconds: 600,
   memory_mb: 2048,
@@ -63,96 +61,89 @@ function cardOf(name: string) {
   return within(card);
 }
 
-const STATES: Array<{ status: RunCodeStatus; headline: string; fix: RegExp | null; pill: string }> = [
-  { status: { state: 'ready' }, headline: 'Code execution is on', fix: null, pill: 'Ready' },
-  {
-    status: { state: 'not_configured' },
-    headline: 'Code execution is off: no sandbox image is configured',
-    fix: /Ask whoever runs this server/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'docker_unavailable' },
-    headline: 'Code execution is off: Docker is not available to the server',
-    fix: /Docker socket/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'daemon_unavailable', detail: 'docker info failed' },
-    headline: 'Code execution is off: Docker is not responding',
-    fix: /Start or restart the Docker daemon/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'image_missing' },
-    headline: 'Sandbox image not downloaded yet',
-    fix: /run some code/,
-    pill: 'Setting up',
-  },
-  {
-    status: { state: 'signature_unverified', detail: 'cosign signature verification failed' },
-    headline: "Code execution is off: the sandbox image's signature could not be verified",
-    fix: /Restart the server with internet access/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'image_unavailable', detail: 'digest mismatch' },
-    headline: 'Code execution is off: the sandbox image does not match this release',
-    fix: /exact image for this release/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'isolation_refused', detail: 'canary refused' },
-    headline: 'Code execution is off: the sandbox could not apply its safety limits',
-    fix: /Update Docker/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'unsupported_platform', detail: 'needs Linux' },
-    headline: "Code execution is off: this server's system is not supported",
-    fix: /Run the server on Linux/,
-    pill: 'Off',
-  },
-];
+const SENTENCE =
+  "Code Aman writes runs in a sealed sandbox with no internet access, a fresh one for every run. If the sandbox isn't available, code doesn't run.";
+const FIX = /aman doctor sandbox --fix/;
 
 const SLOT_STATES: {
   status: RunCodeStatus;
   headline: string;
   fix: RegExp | undefined;
+  pill: string;
 }[] = [
-  { status: { state: 'ready', backend: 'slots' }, headline: 'Code execution is on', fix: undefined },
+  { status: { state: 'ready', backend: 'slots' }, headline: 'Sealed sandbox: ready', fix: undefined, pill: 'Ready' },
   {
     status: { state: 'slots_unavailable', backend: 'slots', detail: 'The sandbox slots are not running.' },
-    headline: 'Code execution is off: the sandbox is not running',
-    fix: /aman doctor sandbox --fix/,
+    headline: 'Sealed sandbox: not running',
+    fix: FIX,
+    pill: 'Off',
   },
   {
     status: { state: 'isolation_refused', backend: 'slots', detail: 'apparmor: wrong profile' },
-    headline: 'Code execution is off: the sandbox could not prove it is safe',
-    fix: /aman doctor sandbox --fix/,
+    headline: 'Sealed sandbox: failed its safety check',
+    fix: FIX,
+    pill: 'Off',
   },
 ];
+
+const LEGACY_STATES = [
+  'not_configured',
+  'docker_unavailable',
+  'daemon_unavailable',
+  'image_missing',
+  'signature_unverified',
+  'image_unavailable',
+  'isolation_refused',
+  'unsupported_platform',
+] as const;
+
+const JARGON = /docker|daemon|socket|seccomp|signature|image|cosign|tier \d/i;
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('SandboxSettings on the sandbox slots', () => {
-  it.each(SLOT_STATES)(
-    'words the $status.state state without Docker, images or signatures',
-    async ({ status, headline, fix }) => {
-      renderPage({ getRunCodeStatus: async () => status });
+describe('SandboxSettings', () => {
+  it('opens with the one sentence about the sandbox', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }) });
 
-      await screen.findByText(headline);
-      const page = document.body.textContent ?? '';
-      expect(page).not.toMatch(/docker|image|signature/i);
-      expect(screen.getByText(/isolated sandboxes with no network access/)).toBeInTheDocument();
-      if (fix !== undefined) {
-        expect(cardOf('Status').getByText(fix)).toBeInTheDocument();
-      }
-      expect(screen.queryByRole('heading', { name: 'Image' })).not.toBeInTheDocument();
-    },
-  );
+    expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
+    expect(screen.getByText(SENTENCE)).toBeInTheDocument();
+    await screen.findByText('Sealed sandbox: ready');
+  });
+
+  it.each(SLOT_STATES)('words the $status.state state in plain language', async ({ status, headline, fix, pill }) => {
+    renderPage({ getRunCodeStatus: async () => status });
+
+    await screen.findByText(headline);
+    const card = cardOf('Status');
+    expect(card.getByRole('status')).toHaveTextContent(pill);
+    const visible = (document.body.textContent ?? '').replace(
+      card.getByText('Technical details').parentElement?.textContent ?? '',
+      '',
+    );
+    expect(visible).not.toMatch(JARGON);
+    if (fix === undefined) {
+      expect(card.queryByText('What to do')).not.toBeInTheDocument();
+    } else {
+      expect(card.getByText('What to do')).toBeInTheDocument();
+      expect(card.getByText(fix)).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('heading', { name: 'Image' })).not.toBeInTheDocument();
+  });
+
+  it.each(LEGACY_STATES)('words the developer-only %s state without Docker terms', async state => {
+    renderPage({ getRunCodeStatus: async () => ({ state, backend: 'docker', detail: 'x' }) });
+
+    await screen.findByText('Sealed sandbox: not ready');
+    const card = cardOf('Status');
+    expect(card.getByText(FIX)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Image' })).not.toBeInTheDocument();
+    expect(card.getByRole('status')).toHaveTextContent('Off');
+    const advice = card.getByText('What to do').parentElement;
+    expect(advice?.textContent).not.toMatch(JARGON);
+    expect(card.getByText('Technical details')).toBeInTheDocument();
+  });
 
   it('keeps the technical detail under Technical details', async () => {
     renderPage({
@@ -162,98 +153,19 @@ describe('SandboxSettings on the sandbox slots', () => {
         detail: 'apparmor: wrong profile',
       }),
     });
-    await screen.findByText('Code execution is off: the sandbox could not prove it is safe');
+    await screen.findByText('Sealed sandbox: failed its safety check');
     expect(screen.getByText('apparmor: wrong profile')).toBeInTheDocument();
-  });
-});
-
-describe('SandboxSettings', () => {
-  it('names the page and says what the sandbox is for', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
-
-    expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
-    expect(screen.getByText(/isolated sandbox with no network access/)).toBeInTheDocument();
-    await screen.findByText('Code execution is on');
-    expect(screen.getByText(/isolated Docker container with no network access/)).toBeInTheDocument();
-  });
-
-  it.each(STATES)('explains the $status.state state in plain language', async ({ status, headline, fix, pill }) => {
-    renderPage({ getRunCodeStatus: async () => status });
-
-    await screen.findByText(headline);
-    const card = cardOf('Status');
-    expect(card.getByRole('status')).toHaveTextContent(pill);
-    if (fix === null) {
-      expect(card.queryByText('What to do')).not.toBeInTheDocument();
-    } else {
-      expect(card.getByText('What to do')).toBeInTheDocument();
-      expect(card.getByText(fix)).toBeInTheDocument();
-    }
-    expect(card.getByText('Technical details')).toBeInTheDocument();
-    if (status.detail === undefined) {
-      expect(card.queryByText('Details:')).not.toBeInTheDocument();
-    } else {
-      expect(card.getByText(status.detail)).toBeInTheDocument();
-    }
-    expect(screen.queryByText(/unavailable\.$/)).not.toBeInTheDocument();
-  });
-
-  it('shows the short image name and the checks that follow from the state', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'signature_unverified', detail: 'bad signature' }) });
-
-    await screen.findByRole('heading', { name: 'Image' });
-    const image = cardOf('Image');
-    expect(image.getByText('amanuensis-sandbox 0.1.0')).toBeInTheDocument();
-    expect(image.queryByText(IMAGE)).not.toBeInTheDocument();
-    expect(image.getByText('Downloaded')).toBeInTheDocument();
-    expect(image.getByText('Not verified')).toBeInTheDocument();
-    // The full reference with its digest lives under Technical details.
-    expect(cardOf('Status').getByText(IMAGE)).toBeInTheDocument();
-  });
-
-  it.each(['docker_unavailable', 'daemon_unavailable', 'unsupported_platform'] as const)(
-    'keeps only the version when %s makes the download and signature checks meaningless',
-    async state => {
-      renderPage({ getRunCodeStatus: async () => ({ state, detail: 'x' }) });
-
-      await screen.findByRole('heading', { name: 'Image' });
-      const image = cardOf('Image');
-      expect(image.getByText('Version')).toBeInTheDocument();
-      expect(image.queryByText('Download')).not.toBeInTheDocument();
-      expect(image.queryByText('Signature')).not.toBeInTheDocument();
-    },
-  );
-
-  it('says there is no image when the server has none configured', async () => {
-    renderPage({
-      getRunCodeStatus: async () => ({ state: 'not_configured' }),
-      sandboxIsolation: { ...limits, image: '' },
-    });
-
-    await screen.findByRole('heading', { name: 'Image' });
-    const image = cardOf('Image');
-    expect(image.getByText('Not configured')).toBeInTheDocument();
-    expect(image.queryByText('Version')).not.toBeInTheDocument();
-  });
-
-  it('keeps server setting names out of the advice and under Technical details', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'signature_unverified', detail: 'x' }) });
-
-    await screen.findByText(/signature could not be verified/);
-    const card = cardOf('Status');
-    expect(card.getByText('What to do').parentElement).not.toHaveTextContent('SANDBOX_');
-    expect(card.getByText('SANDBOX_COSIGN_PUBLIC_KEY_PATH')).toBeInTheDocument();
   });
 
   it('says when the status was last checked', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }) });
 
     expect(await screen.findByText('Last checked just now')).toBeInTheDocument();
   });
 
   it('ages the last-checked time as the clock moves on', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }) });
     expect(await screen.findByText('Last checked just now')).toBeInTheDocument();
 
     await act(async () => {
@@ -264,9 +176,9 @@ describe('SandboxSettings', () => {
   });
 
   it('lists the limits that matter: time, memory, disk and network off', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }) });
 
-    await screen.findByText('Code execution is on');
+    await screen.findByText('Sealed sandbox: ready');
     const card = cardOf('Limits for each run');
     await waitFor(() => {
       expect(card.getByText('1 min by default, at most 10 min')).toBeInTheDocument();
@@ -277,24 +189,24 @@ describe('SandboxSettings', () => {
   });
 
   it('keeps showing the status when the server did not report its limits', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }), sandboxIsolation: null });
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }), sandboxIsolation: null });
 
-    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(await screen.findByText('Sealed sandbox: ready')).toBeInTheDocument();
     expect(screen.getByText(/did not report its limits/)).toBeInTheDocument();
   });
 
   it('checks again when Re-check is pressed', async () => {
     const getRunCodeStatus = vi
       .fn<() => Promise<RunCodeStatus>>()
-      .mockResolvedValueOnce({ state: 'docker_unavailable' })
-      .mockResolvedValueOnce({ state: 'ready' });
+      .mockResolvedValueOnce({ state: 'slots_unavailable', backend: 'slots' })
+      .mockResolvedValueOnce({ state: 'ready', backend: 'slots' });
     renderPage({ getRunCodeStatus });
 
-    expect(await screen.findByText(/Docker is not available to the server/)).toBeInTheDocument();
+    expect(await screen.findByText('Sealed sandbox: not running')).toBeInTheDocument();
 
     fireEvent.click(cardOf('Status').getByRole('button', { name: 'Re-check' }));
 
-    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(await screen.findByText('Sealed sandbox: ready')).toBeInTheDocument();
     expect(getRunCodeStatus).toHaveBeenCalledTimes(2);
   });
 
@@ -302,7 +214,7 @@ describe('SandboxSettings', () => {
     const getRunCodeStatus = vi
       .fn<() => Promise<RunCodeStatus>>()
       .mockRejectedValueOnce(new Error('Request failed (502).'))
-      .mockResolvedValueOnce({ state: 'ready' });
+      .mockResolvedValueOnce({ state: 'ready', backend: 'slots' });
     renderPage({ getRunCodeStatus });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not check the sandbox status');
@@ -311,11 +223,11 @@ describe('SandboxSettings', () => {
     );
     expect(screen.getByRole('alert')).not.toHaveTextContent('502');
     expect(cardOf('Status').getByText('Request failed (502).')).toBeInTheDocument();
-    expect(screen.queryByText('Code execution is on')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sealed sandbox: ready')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(await screen.findByText('Sealed sandbox: ready')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -326,8 +238,8 @@ describe('SandboxSettings', () => {
   });
 
   it('no longer offers sandbox providers or a runtime upgrade', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
-    await screen.findByText('Code execution is on');
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready', backend: 'slots' }) });
+    await screen.findByText('Sealed sandbox: ready');
 
     expect(screen.queryByText(/provider/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /upgrade/i })).not.toBeInTheDocument();

@@ -1,26 +1,33 @@
-import { SLOT_FIX_COMMAND, slotSocketPathsIn } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_PROMISE, SLOT_FIX_COMMAND, slotSocketPathsIn } from '@truefoundry/trueforge-core/core';
 import type { DoctorDeps } from '../deps';
 import { describeNetworkError } from '../redact';
 import { failCheck, offCheck, okCheck, type Check } from '../schemas';
 
 const DEFAULT_SLOTS = 4;
 
-/** run_code through the app's own slot driver: ready only when a slot proves every safety limit to it. */
+/** Code runs through the app's own slot driver: ready only when a slot proves every safety limit to it. */
 export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
   const id = 'run_code';
-  if (deps.env['SANDBOX_BACKEND'] !== 'slots') {
+  const backend = deps.env['SANDBOX_BACKEND']?.trim() ?? '';
+  const dir = deps.env['SANDBOX_SLOTS_DIR']?.trim() ?? '';
+  if (backend === 'docker') {
     return offCheck({
       id,
-      detail: 'run_code is off: this instance was installed without the sandbox, so the assistant cannot run code.',
+      detail: 'This instance is set to an older developer sandbox, which this check does not cover.',
     });
   }
-  const dir = deps.env['SANDBOX_SLOTS_DIR']?.trim() ?? '';
+  if (backend === '' && dir === '') {
+    return offCheck({
+      id,
+      detail: "Code won't run: this instance was installed without the sandbox.",
+    });
+  }
   const configured = deps.env['SANDBOX_SLOTS']?.trim();
   const count = configured === undefined || configured === '' ? DEFAULT_SLOTS : Number(configured);
   if (dir === '' || !Number.isInteger(count) || count < 1) {
     return failCheck({
       id,
-      detail: 'The sandbox settings of this instance are incomplete (SANDBOX_SLOTS_DIR or SANDBOX_SLOTS).',
+      detail: "The sandbox settings of this instance are incomplete, so code won't run.",
       fix: 'Run aman doctor sandbox --fix',
     });
   }
@@ -29,7 +36,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
     if (readiness.ready) {
       return okCheck({
         id,
-        detail: 'run_code is ready: the app reached the sandbox slots and they passed every safety check.',
+        detail: `The sandbox is ready: the app reached it and it passed every safety check. ${SANDBOX_PROMISE}`,
       });
     }
     return failCheck({
@@ -40,7 +47,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
   } catch (error) {
     return failCheck({
       id,
-      detail: `The sandbox slots could not be asked (${describeNetworkError(error)}).`,
+      detail: `The sandbox could not be asked (${describeNetworkError(error)}).`,
       fix: `Run "${SLOT_FIX_COMMAND}" on the host, then run doctor again.`,
     });
   }

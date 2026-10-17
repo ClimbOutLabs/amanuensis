@@ -21,7 +21,6 @@ const wireShape = {
 describe('readSandboxLimits', () => {
   it('reads the snake_case wire shape', () => {
     expect(readSandboxLimits(wireShape)).toEqual({
-      image: wireShape.sandbox_isolation.image,
       defaultTimeoutSeconds: 60,
       maxTimeoutSeconds: 600,
       memoryMb: 2048,
@@ -34,7 +33,6 @@ describe('readSandboxLimits', () => {
     expect(
       readSandboxLimits({
         sandboxIsolation: {
-          image: 'img@sha256:' + 'b'.repeat(64),
           defaultTimeoutSeconds: 30,
           maxTimeoutSeconds: 300,
           memoryMb: 1024,
@@ -45,9 +43,8 @@ describe('readSandboxLimits', () => {
     ).toMatchObject({ defaultTimeoutSeconds: 30, memoryMb: 1024, diskMb: 512 });
   });
 
-  it('accepts an empty image, which is how a server without a sandbox image reports itself', () => {
+  it('ignores the image, which the page no longer shows', () => {
     expect(readSandboxLimits({ sandbox_isolation: { ...wireShape.sandbox_isolation, image: '' } })).toMatchObject({
-      image: '',
       memoryMb: 2048,
     });
   });
@@ -55,8 +52,7 @@ describe('readSandboxLimits', () => {
   it('returns null when the capability is missing or malformed', () => {
     expect(readSandboxLimits(null)).toBeNull();
     expect(readSandboxLimits({})).toBeNull();
-    expect(readSandboxLimits({ sandboxIsolation: { image: 'img' } })).toBeNull();
+    expect(readSandboxLimits({ sandboxIsolation: { memory_mb: 1 } })).toBeNull();
     expect(readSandboxLimits({ sandboxIsolation: { ...wireShape.sandbox_isolation, memory_mb: -1 } })).toBeNull();
-    expect(readSandboxLimits({ sandboxIsolation: { ...wireShape.sandbox_isolation, image: 3 } })).toBeNull();
   });
 });
