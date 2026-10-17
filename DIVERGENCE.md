@@ -284,6 +284,27 @@ earlier agents in this sync):
   per package (`packages/trueforge-core` 112 vs origin/main's 107, `packages/trueforge` 139 vs 105,
   `packages/trueforge-ui` 219 vs 161, `packages/frontend` 11 vs 10) all increased, none decreased.
 
+## Model usage visibility (resolution: ours)
+
+Shows which model did each piece of work and what it cost. Additive modules:
+packages/trueforge/src/runtime/modelPricing.ts, runtime/modelUsage.ts, schemas/modelUsageEvents.ts,
+schemas/tokenFactoryUsage.ts, apis/tokenFactoryUsage.ts, routes/tokenFactoryUsageRoutes.ts, the
+`token_factory_model_usage` migrations, and the matching trueforge-ui and frontend files.
+
+| Path                                                                                     | What we changed                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge-core/src/agent-session/TurnResourceResolver.ts                        | `deps.llm` takes the role (`chat`, `delegation`, `compaction`) and the model cache is keyed by name and role, so a host can attribute every call                    |
+| packages/trueforge/src/apis/turns.ts                                                     | Wraps each model client to record its usage, builds a per-turn ledger, and flushes it as `aman.model.usage` events when the turn completes and after follow-up work |
+| packages/trueforge/src/schemas/events.ts, schemas/turn.ts, db/completedTurnEvents.ts     | `aman.model.usage` joins the passthrough event unions and the completed-turn registry                                                                               |
+| packages/trueforge/src/runtime/PersonaTurnResourceResolver.ts                            | Passes the role to `deps.llm` for the persona model and the pinned compaction model                                                                                 |
+| packages/trueforge/src/runtime/tokenFactoryBudget.ts and the usage store (both backends) | Daily counting is per model and always on; the cap still needs `TOKEN_FACTORY_DAILY_TOKEN_CAP`                                                                      |
+| packages/trueforge-ui/src/containers/MemoryTurnContextProvider.tsx                       | Polling moved into `hooks/usePolledSessionContext.ts`, shared with the new usage provider; behavior unchanged                                                       |
+| packages/trueforge-ui/src/containers/AssistantMessageContainer.tsx                       | Draws the model and cost line and lists helper calls in the agent details                                                                                           |
+
+The `patches` layer needs no change: the vendor runtime's event unions carry no `aman.*` events, and
+`aman.model.usage` is filtered out of them like the other passthrough events
+(`VendorIncompatibleEventType` in `toUiTurnState.ts`).
+
 ## Standing dependency patches
 
 | Patch                                                   | Why                                                                                | Sync note                                                                                                                                                                        |
