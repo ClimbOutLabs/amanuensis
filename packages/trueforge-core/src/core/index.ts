@@ -422,6 +422,8 @@ export {
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
+export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
+export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -442,5 +444,5 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { createWebSearchTurnState } from './permissions/webSearch';
+export { createWebSearchTurnState, recordResultUrls, remoteImageAskReason } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
