@@ -315,17 +315,33 @@ describe('pinAllowlistedExec', () => {
   ];
 
   /** Pinned dir holding fake `git`, `ls` and `nice`; the invocation must name them by absolute path. */
-  function harden(command: string): { pinned: PinnedExecInvocation | undefined; dir: string } {
+  function harden(
+    command: string,
+    { workspaceRoot }: { workspaceRoot: string | undefined } = { workspaceRoot: '/ws' },
+  ): { pinned: PinnedExecInvocation | undefined; dir: string } {
     const { dir, cleanup } = tempBin('git');
     for (const name of ['ls', 'nice']) {
       writeFileSync(join(dir, name), '#!/bin/sh\n');
     }
     try {
-      return { pinned: pinAllowlistedExec({ command, config: seedShellAllowlist(dir), workspace_root: '/ws' }), dir };
+      return {
+        pinned: pinAllowlistedExec({ command, config: seedShellAllowlist(dir), workspace_root: workspaceRoot }),
+        dir,
+      };
     } finally {
       cleanup();
     }
   }
+
+  test('pins a non-git command by absolute path even without a workspace root', () => {
+    const ls = harden('ls hello.txt', { workspaceRoot: undefined });
+    expect(ls.pinned?.argv).toEqual([join(ls.dir, 'ls'), 'hello.txt']);
+    expect(ls.pinned?.git_needs_workspace_root).toBe(false);
+  });
+
+  test('git without a workspace root is flagged so it is refused rather than run unhardened', () => {
+    expect(harden('git status', { workspaceRoot: undefined }).pinned?.git_needs_workspace_root).toBe(true);
+  });
 
   test('prepends global overrides and the subcommand forced flags', () => {
     const status = harden('git status --short');
@@ -379,7 +395,13 @@ describe('pinAllowlistedExec', () => {
 
   test('runs other allowlisted commands by absolute path with no probe', () => {
     const { pinned, dir } = harden('ls -l src');
-    expect(pinned).toEqual({ argv: [join(dir, 'ls'), '-l', 'src'], probe_argv: null, env: {}, pinned_path: dir });
+    expect(pinned).toEqual({
+      argv: [join(dir, 'ls'), '-l', 'src'],
+      probe_argv: null,
+      env: {},
+      pinned_path: dir,
+      git_needs_workspace_root: false,
+    });
   });
 
   test('leaves non-allowlisted commands alone', () => {

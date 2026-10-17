@@ -87,15 +87,19 @@ describe('allowlisted commands run the program that was classified (real LocalSa
   }
 
   test.each([
-    ['ls hello.txt', '.venv/bin/ls'],
-    ['ls -l hello.txt', 'mcp-client/bin/ls'],
-    ['cat hello.txt', '.venv/bin/cat'],
-    ['nice ls hello.txt', '.venv/bin/nice'],
-  ])('a planted program cannot stand in for the safe `%s`', async (command, plantedAt) => {
+    ['ls hello.txt', '.venv/bin/ls', 'hello.txt'],
+    ['ls -l hello.txt', 'mcp-client/bin/ls', 'hello.txt'],
+    ['cat hello.txt', '.venv/bin/cat', 'hello'],
+    ['nice ls hello.txt', '.venv/bin/nice', 'hello.txt'],
+    ['ls hello.txt', '.venv/bin/flock', 'hello.txt'],
+  ])('a planted program cannot stand in for the safe `%s`', async (command, plantedAt, realOutput) => {
     const marker = join(sandboxId, 'planted-ran');
     await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
     await plant(plantedAt, marker);
     const outcome = await run(command);
+    // A run that aborts or asks would also lack the planted output, so the real program's output must be present.
+    expect(outcome.asksForApproval).toBe(false);
+    expect(outcome.text).toContain(realOutput);
     expect(outcome.text).not.toContain(PLANTED_OUTPUT);
     // Host bookkeeping may still call a bare name; the user's command and its operand must never reach it.
     const calls = (await exists(marker)) ? await readFile(marker, 'utf8') : '';

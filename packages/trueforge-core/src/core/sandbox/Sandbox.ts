@@ -2381,6 +2381,7 @@ export class Sandbox extends LocalToolMCP {
   ): Promise<BoundRepositoryState | undefined> {
     const [stateResult, gitDirResult] = await Promise.all([
       this.execWorkspaceExclusive({
+        inSandboxLock: true,
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
         command: BOUND_REPOSITORY_STATE_COMMAND,
@@ -2388,6 +2389,7 @@ export class Sandbox extends LocalToolMCP {
         signal,
       }),
       this.execWorkspaceExclusive({
+        inSandboxLock: true,
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
         command: 'git rev-parse --absolute-git-dir',
@@ -2422,6 +2424,7 @@ export class Sandbox extends LocalToolMCP {
       );
     }
     const checkoutNodesResult = await this.execWorkspaceExclusive({
+      inSandboxLock: true,
       sandboxId,
       workspaceRoot: binding.workspace_cwd,
       command: `ls -di -- .git ${shellEscape(gitDir)}`,
@@ -3433,6 +3436,7 @@ export class Sandbox extends LocalToolMCP {
     paths: readonly string[];
   }): Promise<StructuredEditPrecondition> {
     const result = await this.execWorkspaceExclusive({
+      inSandboxLock: true,
       sandboxId: input.sandboxId,
       workspaceRoot: input.lockRoot,
       cwd: input.cwd,
@@ -3495,6 +3499,8 @@ export class Sandbox extends LocalToolMCP {
   private async execWorkspaceExclusive(input: {
     sandboxId: string;
     workspaceRoot: string | undefined;
+    /** False for a command that must not run inside the PATH-resolving lock wrapper; the host-side lock still applies. */
+    inSandboxLock: boolean;
     command: string;
     cwd: string | undefined;
     env?: Record<string, string> | undefined;
@@ -3502,9 +3508,10 @@ export class Sandbox extends LocalToolMCP {
     signal?: AbortSignal | undefined;
   }): Promise<ExecResult> {
     // The in-sandbox lock wrapper resolves mkdir, flock, sh and others through PATH, which a
-    // model can shadow; a command carrying the token never runs inside it. The host-side
-    // workspace mutation lock already serialises it.
-    const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
+    // model can shadow; a command carrying the token, or one pinned to a classified program,
+    // never runs inside it. The host-side workspace mutation lock already serialises it.
+    const useProviderLock =
+      input.inSandboxLock && input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
     const operation = this.provider.exec({
       sandboxId: input.sandboxId,
       command: input.command,
@@ -3856,6 +3863,7 @@ export class Sandbox extends LocalToolMCP {
     planAdmission: { context: ToolInvocationContext | undefined; scope: ImplementationPlanGrantScope } | undefined,
     dispatchMarker: { dispatched: boolean },
     preflight: ExecPreflight | undefined,
+    inSandboxLock: boolean,
   ): Promise<VerifiedExecOutcome> {
     const guarded = effect === 'verify' || effect === 'commit' || effect === 'edit' || effect === 'execute';
     // A verify or commit purpose only takes the durable coordination path when a repository
@@ -3874,6 +3882,7 @@ export class Sandbox extends LocalToolMCP {
               ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
             })
           : this.execWorkspaceExclusive({
+              inSandboxLock,
               sandboxId,
               workspaceRoot,
               command: input.command,
@@ -3979,6 +3988,7 @@ export class Sandbox extends LocalToolMCP {
                 return {
                   status: 'completed' as const,
                   result: await this.execWorkspaceExclusive({
+                    inSandboxLock,
                     sandboxId,
                     workspaceRoot: lease.workspaceRoot,
                     command: input.command,
@@ -4416,15 +4426,24 @@ export class Sandbox extends LocalToolMCP {
     exec: SandboxRuntimeExecInput;
     env: Record<string, string>;
     preflight: ExecPreflight | undefined;
+    inSandboxLock: boolean;
   } {
     const allowlist = this.sentinelContext?.services.shell_allowlist;
     const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
     const pinned =
-      allowlist === undefined || workspaceRoot === undefined
+      allowlist === undefined
         ? undefined
         : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (pinned === undefined) {
-      return { exec: input.exec, env: {}, preflight: undefined };
+      return { exec: input.exec, env: {}, preflight: undefined, inSandboxLock: true };
+    }
+    if (pinned.git_needs_workspace_root) {
+      return {
+        exec: input.exec,
+        env: {},
+        preflight: () => Promise.resolve(GIT_CONFIG_UNREADABLE_REFUSAL),
+        inSandboxLock: true,
+      };
     }
     const pinnedCommand = (argv: readonly string[]): string =>
       [ENV_BINARY, `PATH=${pinned.pinned_path}`, ...argv].map(shellEscape).join(' ');
@@ -4453,6 +4472,8 @@ export class Sandbox extends LocalToolMCP {
       exec: { ...input.exec, command: pinnedCommand(pinned.argv) },
       env: pinned.env,
       preflight,
+      // The lock wrapper looks programs up by name on the sandbox PATH, so a pinned command stays out of it.
+      inSandboxLock: false,
     };
   }
 
@@ -4470,6 +4491,7 @@ export class Sandbox extends LocalToolMCP {
         exec: SandboxRuntimeExecInput;
         env: Record<string, string>;
         preflight: ExecPreflight | undefined;
+        inSandboxLock: boolean;
       }
     | undefined {
     const token = this.githubGitToken;
@@ -4504,7 +4526,7 @@ export class Sandbox extends LocalToolMCP {
           return gitLocalConfigIsSafe(probe.response.result) ? undefined : HOST_GIT_CONFIG_UNSAFE_REFUSAL;
         }
       : undefined;
-    return { exec: { ...input.exec, command: built.command }, env: built.env, preflight };
+    return { exec: { ...input.exec, command: built.command }, env: built.env, preflight, inSandboxLock: false };
   }
 
   private async handleExec(
@@ -4593,6 +4615,7 @@ export class Sandbox extends LocalToolMCP {
         planScope === undefined ? undefined : { context, scope: planScope },
         dispatchMarker,
         gitPrep.preflight,
+        gitPrep.inSandboxLock,
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
@@ -4657,6 +4680,7 @@ export class Sandbox extends LocalToolMCP {
         planScope === undefined ? undefined : { context, scope: planScope },
         retryDispatchMarker,
         retryGitPrep.preflight,
+        retryGitPrep.inSandboxLock,
       );
       if (retryExecution.status === 'blocked') {
         return hostRefusalResponse(retryExecution.reason);
@@ -4833,6 +4857,7 @@ export class Sandbox extends LocalToolMCP {
         });
         return this.runReservedImplementationPlanDispatch(reservation, () =>
           this.execWorkspaceExclusive({
+            inSandboxLock: true,
             sandboxId: rawId,
             workspaceRoot: workspaceLockRoot,
             command: `python3 ${shellEscape(scriptPath)} ${shellEscape(payloadPath)}`,
@@ -4965,6 +4990,7 @@ export class Sandbox extends LocalToolMCP {
       return map;
     }
     const result = await this.execWorkspaceExclusive({
+      inSandboxLock: true,
       sandboxId: input.sandboxId,
       workspaceRoot: input.workspaceRoot,
       command: `python3 -c ${shellEscape(OPENAI_PATCH_CONTENT_READ_SCRIPT)} ${shellEscape(input.workspaceRoot)} ${shellEscape(JSON.stringify([...repositoryRelativeByRawPath.values()]))}`,
@@ -5140,6 +5166,7 @@ export class Sandbox extends LocalToolMCP {
           approved: context?.structured_edit_precondition,
         });
         const check = await this.execWorkspaceExclusive({
+          inSandboxLock: true,
           sandboxId: rawId,
           workspaceRoot,
           // --unidiff-zero: a hunk with only added lines (a pure insertion, e.g. from an
@@ -5171,6 +5198,7 @@ export class Sandbox extends LocalToolMCP {
         // before this callback can dispatch the repository mutation.
         const apply = await this.runReservedImplementationPlanDispatch(reservation, () =>
           this.execWorkspaceExclusive({
+            inSandboxLock: true,
             sandboxId: rawId,
             workspaceRoot,
             command: `git apply --recount --unidiff-zero -- ${shellEscape(patchPath)}`,
@@ -5382,6 +5410,7 @@ export class Sandbox extends LocalToolMCP {
           reservation,
           async (): Promise<ReplaceTextDispatchOutcome> => {
             const exec = await this.execWorkspaceExclusive({
+              inSandboxLock: true,
               sandboxId: rawId,
               workspaceRoot,
               command: `python3 ${shellEscape(scriptPath)} ${shellEscape(payloadPath)}`,
