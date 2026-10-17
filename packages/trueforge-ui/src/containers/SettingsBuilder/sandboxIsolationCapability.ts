@@ -6,13 +6,11 @@
  * that expose the raw payload working.
  *
  * Never throws: anything short of the complete, well-typed set reads as `null`, so the page shows
- * no limits rather than wrong ones. An empty `image` is valid: it means no sandbox image is set.
+ * no limits rather than wrong ones.
  */
 import { isObject } from './memoryScreenCapability.js';
 
 export interface SandboxLimits {
-  /** Empty when the server has no sandbox image configured. */
-  image: string;
   defaultTimeoutSeconds: number;
   maxTimeoutSeconds: number;
   memoryMb: number;
@@ -34,7 +32,6 @@ export function readSandboxLimits(capabilities: unknown): SandboxLimits | null {
   if (!isObject(capabilities)) return null;
   const raw = read({ raw: capabilities, camel: 'sandboxIsolation', snake: 'sandbox_isolation' });
   if (!isObject(raw)) return null;
-  const image = read({ raw, camel: 'image', snake: 'image' });
   const defaultTimeoutSeconds = nonNegativeInt(
     read({ raw, camel: 'defaultTimeoutSeconds', snake: 'default_timeout_seconds' }),
   );
@@ -43,7 +40,6 @@ export function readSandboxLimits(capabilities: unknown): SandboxLimits | null {
   const diskMb = nonNegativeInt(read({ raw, camel: 'diskMb', snake: 'disk_mb' }));
   const networkEgress = read({ raw, camel: 'networkEgress', snake: 'network_egress' });
   if (
-    typeof image !== 'string' ||
     defaultTimeoutSeconds === null ||
     maxTimeoutSeconds === null ||
     memoryMb === null ||
@@ -52,5 +48,5 @@ export function readSandboxLimits(capabilities: unknown): SandboxLimits | null {
   ) {
     return null;
   }
-  return { image, defaultTimeoutSeconds, maxTimeoutSeconds, memoryMb, diskMb, networkEgress };
+  return { defaultTimeoutSeconds, maxTimeoutSeconds, memoryMb, diskMb, networkEgress };
 }

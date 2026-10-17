@@ -1,5 +1,6 @@
 'use client';
 
+import { SANDBOX_PROMISE } from '@truefoundry/trueforge-core/core/sandbox/driver/RunCodeSchemas';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { cn } from '@/atoms/lib/cn.js';
@@ -14,7 +15,6 @@ import {
   formatMegabytes,
   formatSeconds,
   presentRunCodeStatus,
-  shortImageName,
   type StatusTone,
 } from './runCodeStatusPresentation.js';
 import { readSandboxLimits, type SandboxLimits } from './sandboxIsolationCapability.js';
@@ -67,33 +67,6 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       <dt className="shrink-0 text-text-secondary">{label}</dt>
       <dd className="min-w-0 text-text-primary sm:text-right">{children}</dd>
     </div>
-  );
-}
-
-function ChecksValue({ tone, text }: { tone: StatusTone; text: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', TONE_DOT[tone])} aria-hidden />
-      {text}
-    </span>
-  );
-}
-
-function ImageCard({ status, limits }: { status: RunCodeStatus; limits: SandboxLimits | null }) {
-  if (status.backend === 'slots') return null;
-  const { checks } = presentRunCodeStatus(status);
-  if ((limits === null || limits.image === '') && checks.length === 0) return null;
-  return (
-    <Card headingId="sandbox-image-heading" title="Image">
-      <dl className="mt-2 divide-y divide-border text-sm">
-        {limits !== null && limits.image !== '' ? <Row label="Version">{shortImageName(limits.image)}</Row> : null}
-        {checks.map(check => (
-          <Row key={check.label} label={check.label}>
-            <ChecksValue tone={check.tone} text={check.text} />
-          </Row>
-        ))}
-      </dl>
-    </Card>
   );
 }
 
@@ -150,13 +123,11 @@ const LIMIT_SETTINGS =
 
 function StatusCard({
   status,
-  limits,
   checkedAt,
   checking,
   onRecheck,
 }: {
   status: RunCodeStatus;
-  limits: SandboxLimits | null;
   checkedAt: number | null;
   checking: boolean;
   onRecheck: () => void;
@@ -164,10 +135,6 @@ function StatusCard({
   const presentation = presentRunCodeStatus(status);
   const now = useNow();
   const lines = [
-    ...(limits !== null && limits.image !== '' && status.backend !== 'slots'
-      ? [{ label: 'Image', value: limits.image }]
-      : []),
-    ...(presentation.settings === undefined ? [] : [{ label: 'Server settings', value: presentation.settings }]),
     { label: 'Limits set by', value: LIMIT_SETTINGS },
     ...(status.detail === undefined ? [] : [{ label: 'Details', value: status.detail }]),
   ];
@@ -182,7 +149,9 @@ function StatusCard({
             )}
           </div>
           <p className="mt-2 text-sm font-medium text-text-primary">{presentation.headline}</p>
-          <p className="mt-0.5 text-sm text-text-secondary">{presentation.summary}</p>
+          {presentation.summary === undefined ? null : (
+            <p className="mt-0.5 text-sm text-text-secondary">{presentation.summary}</p>
+          )}
         </div>
         <RecheckButton checking={checking} onClick={onRecheck} />
       </div>
@@ -242,7 +211,7 @@ function ErrorCard({ message, checking, onRetry }: { message: string; checking: 
   );
 }
 
-/** Settings > Sandbox: the Docker sandbox that runs code for the assistant, and whether it can run now. */
+/** Settings > Sandbox: the sealed sandbox that runs code for the assistant, and whether it is ready now. */
 const SandboxSettings = () => {
   const api = useOptionalRunCodeStatus();
   const limits = readSandboxLimits(useServerCapabilities());
@@ -286,28 +255,18 @@ const SandboxSettings = () => {
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto pb-1">
       <header>
         <h3 className="text-base font-semibold text-text-primary">Sandbox</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          {status === null
-            ? 'Runs the code the assistant writes in an isolated sandbox with no network access.'
-            : status.backend === 'slots'
-              ? 'Runs the Python, Node.js and shell commands the assistant writes, in isolated sandboxes with no network access.'
-              : 'Runs the Python and Node.js code the assistant writes, in an isolated Docker container with no network access.'}
-        </p>
+        <p className="mt-1 text-sm text-text-secondary">{SANDBOX_PROMISE}</p>
       </header>
 
       {status !== null ? (
-        <>
-          <StatusCard
-            status={status}
-            limits={limits}
-            checkedAt={checkedAt}
-            checking={checking}
-            onRecheck={() => {
-              void check();
-            }}
-          />
-          <ImageCard status={status} limits={limits} />
-        </>
+        <StatusCard
+          status={status}
+          checkedAt={checkedAt}
+          checking={checking}
+          onRecheck={() => {
+            void check();
+          }}
+        />
       ) : error !== null ? (
         <ErrorCard
           message={error}

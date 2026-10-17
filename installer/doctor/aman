@@ -1372,6 +1372,9 @@ doctor_sandbox() {
     state=$(record_state "$name" run_code)
     if [ "$state" != ok ]; then failed=1; fi
   done
+  if [ "$failed" = 1 ]; then
+    ui_line "Code won't run until the sandbox is ready. Run: aman doctor sandbox --fix"
+  fi
   exit "$failed"
 }
 

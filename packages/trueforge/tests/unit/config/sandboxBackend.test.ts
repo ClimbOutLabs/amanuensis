@@ -31,12 +31,17 @@ async function loadConfig(env: Partial<Record<(typeof KEYS)[number], string>>): 
 }
 
 describe('sandbox backend config', () => {
-  it('defaults to docker with four slots and a 2 GiB workspace quota', async () => {
+  it('defaults to the slots with four slots and a 2 GiB workspace quota, and still boots without a control directory', async () => {
     const { default: configuration } = await loadConfig({});
-    expect(configuration.SANDBOX_BACKEND).toBe('docker');
+    expect(configuration.SANDBOX_BACKEND).toBe('slots');
     expect(configuration.SANDBOX_SLOTS).toBe(4);
     expect(configuration.SANDBOX_SLOTS_DIR).toBe('');
     expect(configuration.SANDBOX_SESSION_DISK_MB).toBe(2048);
+  });
+
+  it('keeps docker as an explicit opt-in', async () => {
+    const { default: configuration } = await loadConfig({ SANDBOX_BACKEND: 'docker' });
+    expect(configuration.SANDBOX_BACKEND).toBe('docker');
   });
 
   it('accepts the slot backend with a control directory', async () => {

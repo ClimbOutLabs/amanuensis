@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/** The one sentence every surface (Settings, doctor, docs, README) uses to describe the sandbox. */
+export const SANDBOX_PROMISE =
+  "Code Aman writes runs in a sealed sandbox with no internet access, a fresh one for every run. If the sandbox isn't available, code doesn't run.";
+
 /** Model-visible error codes. One taxonomy for both drivers. */
 export const RUN_CODE_ERROR_CODES = [
   'timeout',

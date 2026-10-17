@@ -35,8 +35,11 @@ export function slotsBackendEnabled(): boolean {
   return configuration.SANDBOX_BACKEND === 'slots';
 }
 
-/** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..SANDBOX_SLOTS. */
+/** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..SANDBOX_SLOTS; none when no directory is set. */
 export function slotSocketPaths(): string[] {
+  if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
+    return [];
+  }
   return slotSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });
 }
 

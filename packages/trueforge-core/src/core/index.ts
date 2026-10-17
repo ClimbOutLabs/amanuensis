@@ -283,6 +283,7 @@ export {
   RunCodeInputSchema,
   RunCodeResultSchema,
   RunCodeStatusSchema,
+  SANDBOX_PROMISE,
 } from './sandbox/driver/RunCodeSchemas';
 export type { RunCodeErrorCode, RunCodeInput, RunCodeResult, RunCodeStatus } from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
