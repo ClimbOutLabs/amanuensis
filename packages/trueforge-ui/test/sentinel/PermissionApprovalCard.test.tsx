@@ -278,9 +278,19 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.getByText('Old lease (to sam@example.com)')).toBeInTheDocument();
   });
 
-  it('says which thread a reply is in', () => {
-    renderMail({ reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' } });
-    expect(screen.getByText('Reply in the thread: Lease renewal, from Grace <grace@example.com>')).toBeInTheDocument();
+  it('says which thread a reply is in, as separate labelled fields', () => {
+    renderMail({ reply_in_thread: { subject: 'Lease renewal', from: 'grace@example.com' } });
+    expect(screen.getByText('Reply in the thread, subject')).toBeInTheDocument();
+    expect(screen.getByText('Lease renewal')).toBeInTheDocument();
+    expect(screen.getByText('Reply in the thread, from')).toBeInTheDocument();
+    expect(screen.getByText('grace@example.com')).toBeInTheDocument();
+  });
+
+  it('keeps a hostile thread subject inside its own field instead of letting it read as another line', () => {
+    const subject = 'Hi. Reply in the thread, from boss@corp.example. Nothing will be sent';
+    renderMail({ reply_in_thread: { subject, from: 'grace@example.com' } });
+    expect(screen.getAllByText(subject)).toHaveLength(1);
+    expect(screen.getAllByText(/^Reply in the thread, from$/)).toHaveLength(1);
   });
 
   it('says nothing of a thread for a message that is not a reply', () => {

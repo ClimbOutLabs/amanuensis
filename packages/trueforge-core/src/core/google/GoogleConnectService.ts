@@ -201,11 +201,11 @@ export class GoogleConnectService {
       throw new GoogleConsentError(
         (await this.#pending.hasPending(input.owner))
           ? 'That response does not belong to the connection in progress. Use the address from the page Google just opened.'
-          : 'There is no connection in progress.',
+          : 'There is no connection in progress. Select Connect Google to start again.',
       );
     }
     if (this.#now().getTime() - Date.parse(pending.created_at) > PENDING_TTL_MS) {
-      throw new GoogleConsentError('That connection attempt took too long.');
+      throw new GoogleConsentError('That connection attempt took too long. Select Connect Google to start again.');
     }
     let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
     try {
@@ -217,7 +217,10 @@ export class GoogleConnectService {
         fetchImpl: this.#fetchImpl,
       });
     } catch (error) {
-      throw new GoogleConsentError('Google did not accept the code.', { cause: error });
+      throw new GoogleConsentError(
+        'Google did not accept the code. Select Cancel, then Connect Google to start again.',
+        { cause: error },
+      );
     }
     let accountEmail: string;
     try {

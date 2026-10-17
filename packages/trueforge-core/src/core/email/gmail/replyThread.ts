@@ -3,15 +3,34 @@
  * Gmail count: In-Reply-To must be the Message-ID of a message in the draft's own thread, and every id in
  * References must come from that thread. Text the model or an edit supplied is never trusted on its own.
  */
+import { fromAddress } from './draftAssessment';
 import type { ReviewableDraft } from './draftReview';
-import type { GmailThread } from './gmailWire';
+import type { GmailMessage, GmailThread } from './gmailWire';
 import { headerOf, rawHeaderOf } from './message';
 import { idsIn, MAX_REFERENCES, parseIdList } from './messageId';
 
-/** The message a reply answers, as shown on the approval card. */
+/** The message a reply answers, as shown on the approval card. `from` is only the sender's address. */
 export interface AnsweredMessage {
   subject: string;
   from: string;
+}
+
+/** Longest address an email can have; a longer one is not shown, so the card never cuts an address short. */
+const MAX_ADDRESS_CHARS = 254;
+const UNREADABLE_SENDER = 'an address Aman cannot read';
+
+/** The message a reply answers, as the card names it. */
+export function answeredMessageOf(message: GmailMessage): AnsweredMessage {
+  return {
+    subject: headerOf({ message, name: 'Subject' }),
+    from: senderAddress(headerOf({ message, name: 'From' })),
+  };
+}
+
+/** The sender's address only, so a display name cannot add words or a second address to the card. */
+function senderAddress(from: string): string {
+  const address = fromAddress(from);
+  return address === null || address.length > MAX_ADDRESS_CHARS ? UNREADABLE_SENDER : address;
 }
 
 type ReplyCheck = { ok: true; answered: AnsweredMessage | null } | { ok: false; reason: string };
@@ -76,11 +95,5 @@ export function checkReplyThreading(input: {
   if (!chain.every(id => known.has(id))) {
     return { ok: false, reason: MISMATCH };
   }
-  return {
-    ok: true,
-    answered: {
-      subject: headerOf({ message: answered, name: 'Subject' }),
-      from: headerOf({ message: answered, name: 'From' }),
-    },
-  };
+  return { ok: true, answered: answeredMessageOf(answered) };
 }

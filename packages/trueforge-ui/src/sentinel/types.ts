@@ -40,7 +40,7 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
   return undefined;
 }
 
-export const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
+const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 

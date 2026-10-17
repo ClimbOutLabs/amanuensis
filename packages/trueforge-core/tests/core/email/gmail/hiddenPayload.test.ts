@@ -8,7 +8,7 @@ import { hasHiddenCharacters, stripInvisible } from '../../../../src/core/email/
 import { DraftEmailSchema, UpdateDraftSchema } from '../../../../src/core/email/gmail/toolContract';
 import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
 import { message, plainDraft } from './fixtures';
-import { build, json, route, sentDraft, text } from './harness';
+import { approvalProblem, build, json, route, sentDraft, text } from './harness';
 
 const ACCOUNT = 'ada@example.com';
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
@@ -119,9 +119,7 @@ describe('assessDraft refuses a draft that hides text', () => {
       arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'clean' },
     });
     expect(update.tier3_card ?? null).toBeNull();
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-      'needs your OK again',
-    );
+    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('"error"');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -384,7 +382,7 @@ describe('a send delivers the body exactly as the card shows it', () => {
 
   it('refuses a send whose trailing blank space is replaced after review, because the hash is of the exact body', async () => {
     let live = plainDraft({ id: 'd-m1', threadId: 't9', to: 'grace@example.com', body: 'Thursday works.\n' });
-    const { tools, google } = await build({
+    const { tools, google, sentinel } = await build({
       features: [...COMPOSE],
       routes: [
         url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json({ id: 'd1', message: live }) : undefined),
@@ -394,9 +392,9 @@ describe('a send delivers the body exactly as the card shows it', () => {
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.email?.body).toBe('Thursday works.\n');
     live = plainDraft({ id: 'd-m1', threadId: 't9', to: 'grace@example.com', body: 'Thursday works.' });
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-      'changed after you reviewed it',
-    );
+    expect(
+      await approvalProblem({ tools, sentinel, info, call: { name: 'send_draft', arguments: { draft_id: 'd1' } } }),
+    ).toContain('Approval invalid');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 

@@ -14,12 +14,12 @@ import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
-import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
+import { hashDraft, type ReviewableDraft } from './draftReview';
 import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
-import { checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
+import { answeredMessageOf, checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
   listDraftsResult,
@@ -80,8 +80,6 @@ interface GmailToolSetOptions {
   attachmentStager: AttachmentStager | undefined;
   /** Where the host classifies each call; the same turn state the web search provider reads. */
   sentinel: SentinelHostContext;
-  /** What the user was shown before each send, shared by every turn of this process. */
-  reviews: DraftReviewLedger;
   /** How long a list call may spend before it returns the rows it has. */
   listDeadlineMs: number;
 }
@@ -148,10 +146,6 @@ export class GmailToolSet extends LocalToolMCP {
 
   get #context(): ResultContext {
     return { account: this.#options.account, attachmentsOpenable: this.#options.attachmentStager !== undefined };
-  }
-
-  get #owner() {
-    return { tenant_id: this.#options.sentinel.tenant_id, created_by: this.#options.sentinel.created_by };
   }
 
   #buildTools(): ToolDefinition[] {
@@ -268,7 +262,7 @@ export class GmailToolSet extends LocalToolMCP {
       workspace_cwd: null,
       action: {
         tool_name: params.name,
-        canonical_params: params.arguments ?? {},
+        canonical_params: this.#approvedParams({ call: params, draft: prepared.draft }),
         tool_type: 'truefoundry-system',
         mcp_server_name: GMAIL_SERVER_ID,
         mcp_hints: {
@@ -282,6 +276,31 @@ export class GmailToolSet extends LocalToolMCP {
       },
     });
     return { ...info, ...stampSentinelDecision({ decision }) };
+  }
+
+  /** A send is approved for the exact draft shown: its hash joins the call's arguments the approval is minted over. */
+  #approvedParams(input: { call: CallToolRequest['params']; draft: ReviewableDraft | undefined }) {
+    const args = input.call.arguments ?? {};
+    return input.call.name === SEND_DRAFT_TOOL_NAME && input.draft !== undefined
+      ? { ...args, review_hash: hashDraft(input.draft) }
+      : args;
+  }
+
+  /** Re-reads the draft at dispatch, so an approval of a send ends if the draft changed after the card. */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    if (params.name !== SEND_DRAFT_TOOL_NAME) {
+      return undefined;
+    }
+    const parsed = DraftIdSchema.parse(params.arguments);
+    const assessed = assessDraft({
+      message: await this.#liveDraft(parsed.draft_id),
+      account: this.#options.account,
+      forSend: true,
+    });
+    if (!assessed.ok) {
+      throw new Error(assessed.reason);
+    }
+    return { ...parsed, review_hash: hashDraft(assessed.draft) };
   }
 
   async #liveDraft(draftId: string) {
@@ -320,11 +339,6 @@ export class GmailToolSet extends LocalToolMCP {
         if (!threading.ok) {
           return { failure: sendRefusal(threading.reason) };
         }
-        this.#options.reviews.record({
-          ...this.#owner,
-          draft_id: parsed.data.draft_id,
-          hash: hashDraft(assessed.draft),
-        });
         return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
       const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
@@ -410,15 +424,12 @@ export class GmailToolSet extends LocalToolMCP {
       };
       if (replyHeaders(reply).inReplyTo === '') {
         throw new RangeError(
-          'The message being replied to has no usable Message-ID, so a threaded reply cannot be made.',
+          "This message can't be answered in its conversation, so nothing was saved. I can write it as a new email to the same people instead.",
         );
       }
       subject = replySubject(headerOf({ message: original, name: 'Subject' }));
       threadId = original.threadId;
-      answered = {
-        subject: headerOf({ message: original, name: 'Subject' }),
-        from: headerOf({ message: original, name: 'From' }),
-      };
+      answered = answeredMessageOf(original);
     } else if (existing?.payload !== undefined) {
       reply = {
         messageIdHeader: rawHeaderOf({ part: existing.payload, name: 'in-reply-to' }),
@@ -621,7 +632,6 @@ export class GmailToolSet extends LocalToolMCP {
         return errorResult(existing.failure);
       }
       const { content, reply, threadId } = await this.#resolveContent({ input, existing: existing.message });
-      this.#options.reviews.forget({ ...this.#owner, draft_id: input.draft_id });
       const updated = await this.#options.api.updateDraft({
         draftId: input.draft_id,
         raw: buildRawMessage({ content, reply }),
@@ -639,26 +649,13 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  /** Sends only the text the user was shown: the draft is read again and must still hash to the reviewed text. */
+  /** The approval already holds the hash of the text shown, and dispatch refused the call if the draft no longer matches. */
   async #sendDraft(input: z.infer<typeof DraftIdSchema>) {
     try {
-      const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
-      if (reviewed === undefined) {
-        return errorResult(
-          `This send needs your OK again. Nothing was sent. Ask to send the draft again. ${NEW_APPROVAL}`,
-        );
-      }
       const live = await this.#liveDraft(input.draft_id);
       const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
       if (!assessed.ok) {
         return errorResult(sendRefusal(assessed.reason));
-      }
-      if (reviewed !== hashDraft(assessed.draft)) {
-        return errorResult(
-          sendRefusal(
-            'The draft changed after you reviewed it (its text, recipients or the thread it replies in). Ask to send it again so the user can review the new text.',
-          ),
-        );
       }
       const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
       if (!threading.ok) {

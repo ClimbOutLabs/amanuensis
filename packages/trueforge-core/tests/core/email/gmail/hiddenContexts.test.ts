@@ -9,7 +9,7 @@ import { hasHiddenCharacters, stripInvisible } from '../../../../src/core/email/
 import { DraftEmailSchema } from '../../../../src/core/email/gmail/toolContract';
 import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
 import { message, plainDraft } from './fixtures';
-import { build, json, route, text, threadRoute } from './harness';
+import { approvalProblem, build, json, route, text, threadRoute } from './harness';
 
 const ACCOUNT = 'ada@example.com';
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
@@ -235,9 +235,7 @@ describe('a Content-Type that readers could resolve differently is refused for a
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card ?? null).toBeNull();
     expect(info.pre_dispatch_failure?.message).toContain('text encoding');
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-      'needs your OK again',
-    );
+    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('"error"');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -345,9 +343,7 @@ describe('every header of a sent draft is either checked and shown, or in a clos
       });
       const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
       expect(info.tier3_card ?? null).toBeNull();
-      expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-        'needs your OK again',
-      );
+      expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('"error"');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
   });
@@ -530,7 +526,7 @@ describe('message ids are RFC ids, and the chain is under the review hash', () =
         header('References', '<a@mail.example.com> <b@mail.example.com>'),
       ],
     });
-    const { tools, google } = await build({
+    const { tools, google, sentinel } = await build({
       features: [...COMPOSE],
       routes: [
         url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json({ id: 'd1', message: live }) : undefined),
@@ -555,7 +551,7 @@ describe('message ids are RFC ids, and the chain is under the review hash', () =
         }),
       ],
     });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     live = plainDraft({
       id: 'd-m1',
       threadId: 't9',
@@ -566,9 +562,9 @@ describe('message ids are RFC ids, and the chain is under the review hash', () =
         header('References', '<z@mail.example.com> <b@mail.example.com>'),
       ],
     });
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-      'changed after you reviewed it',
-    );
+    expect(
+      await approvalProblem({ tools, sentinel, info, call: { name: 'send_draft', arguments: { draft_id: 'd1' } } }),
+    ).toContain('Approval invalid');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 });
@@ -620,15 +616,15 @@ describe('the name a message is sent under is shown and hashed', () => {
 
   it('refuses a send when the name changed after review', async () => {
     let name = 'Ada';
-    const { tools, google } = await build({
+    const { tools, google, sentinel } = await build({
       features: [...COMPOSE],
       routes: COMPOSE_ROUTES(() => draftFrom(`${name} <ada@example.com>`)),
     });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     name = 'Ada Lovelace';
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-      'changed after you reviewed it',
-    );
+    expect(
+      await approvalProblem({ tools, sentinel, info, call: { name: 'send_draft', arguments: { draft_id: 'd1' } } }),
+    ).toContain('Approval invalid');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 

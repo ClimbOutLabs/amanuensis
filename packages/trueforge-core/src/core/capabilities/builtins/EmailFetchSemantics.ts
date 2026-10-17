@@ -17,7 +17,12 @@
  *
  * Current entries cover the Gmail MCP server (@george43g/gmail-mcp) and Aman's own Gmail tools.
  */
-import { GMAIL_SERVER_ID } from '../../email/gmail/toolContract';
+import {
+  GET_THREAD_TOOL_NAME,
+  GMAIL_SERVER_ID,
+  LIST_INBOX_THREADS_TOOL_NAME,
+  READ_EMAIL_TOOL_NAME,
+} from '../../email/gmail/toolContract';
 import {
   buildBoundedTextSummary,
   MAX_SUMMARY_ITEMS,
@@ -95,13 +100,13 @@ const AMAN_GMAIL_PAGINATION: EmailPaginationSemantics = {
 /** Aman's own Gmail tools take and return snake_case, so they carry their own entries ahead of the generic ones. */
 const AMAN_GMAIL_SEMANTICS: readonly EmailFetchSemantics[] = [
   {
-    toolName: 'list_inbox_threads',
+    toolName: LIST_INBOX_THREADS_TOOL_NAME,
     serverId: GMAIL_SERVER_ID,
     idField: 'thread_id',
     envelopeFields: ['threads'],
     totalFields: ['result_size_estimate'],
     totalApproximate: true,
-    fetchTool: 'get_thread',
+    fetchTool: GET_THREAD_TOOL_NAME,
     fetchIdParam: 'thread_id',
     pagination: AMAN_GMAIL_PAGINATION,
     narrowing: undefined,
@@ -110,13 +115,13 @@ const AMAN_GMAIL_SEMANTICS: readonly EmailFetchSemantics[] = [
     singleItem: undefined,
   },
   {
-    toolName: 'get_thread',
+    toolName: GET_THREAD_TOOL_NAME,
     serverId: GMAIL_SERVER_ID,
     idField: 'id',
     envelopeFields: ['messages'],
     totalFields: ['message_count'],
     totalApproximate: false,
-    fetchTool: 'read_email',
+    fetchTool: READ_EMAIL_TOOL_NAME,
     fetchIdParam: 'message_id',
     pagination: undefined,
     narrowing: { param: 'format', value: 'metadata', idEchoField: 'thread_id', idParam: 'thread_id' },
@@ -125,13 +130,13 @@ const AMAN_GMAIL_SEMANTICS: readonly EmailFetchSemantics[] = [
     singleItem: undefined,
   },
   {
-    toolName: 'read_email',
+    toolName: READ_EMAIL_TOOL_NAME,
     serverId: GMAIL_SERVER_ID,
     idField: 'id',
     envelopeFields: [],
     totalFields: [],
     totalApproximate: false,
-    fetchTool: 'read_email',
+    fetchTool: READ_EMAIL_TOOL_NAME,
     fetchIdParam: 'message_id',
     pagination: undefined,
     narrowing: undefined,

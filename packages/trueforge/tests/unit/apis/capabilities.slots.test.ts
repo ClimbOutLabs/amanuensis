@@ -19,7 +19,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { slotSandboxBuildStatus } from '../../../src/sandbox/slotBackend';
 
-const mockSlotStatus = slotSandboxBuildStatus as jest.Mock;
+const mockSlotStatus = jest.mocked(slotSandboxBuildStatus);
 
 const CapabilitiesBodySchema = z.object({ data: z.object({ sandbox: z.object({ enabled: z.boolean() }) }) });
 type CapabilitiesBody = z.infer<typeof CapabilitiesBodySchema>;

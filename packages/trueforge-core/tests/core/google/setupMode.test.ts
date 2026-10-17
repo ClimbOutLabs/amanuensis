@@ -1,5 +1,4 @@
 import {
-  GOOGLE_CALLBACK_PATH,
   parsePastedAddress,
   PASTE_REDIRECT_URI,
   publicHttpsBase,
@@ -33,12 +32,15 @@ describe('publicHttpsBase', () => {
   });
 });
 
+const GOOGLE_CALLBACK_PATH = '/callback/path';
+
 describe('resolveGoogleSetup', () => {
   it('uses a Web client and the exact public callback when the install has a public https address', () => {
     expect(
       resolveGoogleSetup({
         public_base_url: 'https://aman.example.org/',
         request_url: 'https://aman.example.org/api/v1/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
       }),
     ).toEqual({
       mode: 'web',
@@ -49,10 +51,18 @@ describe('resolveGoogleSetup', () => {
 
   it('does not use the public address for a browser that reached Aman some other way, since its session would not follow', () => {
     expect(
-      resolveGoogleSetup({ public_base_url: 'https://aman.example.org', request_url: 'http://192.168.1.5:8791/x' }),
+      resolveGoogleSetup({
+        public_base_url: 'https://aman.example.org',
+        request_url: 'http://192.168.1.5:8791/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+      }),
     ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
     expect(
-      resolveGoogleSetup({ public_base_url: 'https://aman.example.org', request_url: 'http://localhost:8791/x' }),
+      resolveGoogleSetup({
+        public_base_url: 'https://aman.example.org',
+        request_url: 'http://localhost:8791/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+      }),
     ).toMatchObject({ mode: 'loopback' });
   });
 
@@ -61,12 +71,19 @@ describe('resolveGoogleSetup', () => {
       resolveGoogleSetup({
         public_base_url: 'https://box.tailnet-name.ts.net',
         request_url: 'https://box.tailnet-name.ts.net/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
       }),
     ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
   });
 
   it('returns straight to this server when the browser is on this machine', () => {
-    expect(resolveGoogleSetup({ public_base_url: '', request_url: 'http://localhost:8791/api/v1/x' })).toEqual({
+    expect(
+      resolveGoogleSetup({
+        public_base_url: '',
+        request_url: 'http://localhost:8791/api/v1/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+      }),
+    ).toEqual({
       mode: 'loopback',
       client_type: 'desktop',
       redirect_uri: `http://localhost:8791${GOOGLE_CALLBACK_PATH}`,
@@ -76,7 +93,13 @@ describe('resolveGoogleSetup', () => {
   it.each(['http://192.168.1.5:8791/x', 'http://aman-box:8791/x', 'http://100.64.0.7:8791/x'])(
     'asks for a pasted address when the browser reaches %s',
     requestUrl => {
-      expect(resolveGoogleSetup({ public_base_url: 'http://localhost:8791', request_url: requestUrl })).toEqual({
+      expect(
+        resolveGoogleSetup({
+          public_base_url: 'http://localhost:8791',
+          request_url: requestUrl,
+          callback_path: GOOGLE_CALLBACK_PATH,
+        }),
+      ).toEqual({
         mode: 'paste',
         client_type: 'desktop',
         redirect_uri: PASTE_REDIRECT_URI,

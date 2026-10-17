@@ -53,8 +53,6 @@ export const Tier3EmailSchema = z
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
 
-export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
-
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.

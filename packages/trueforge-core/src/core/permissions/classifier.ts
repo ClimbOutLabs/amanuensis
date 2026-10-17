@@ -14,6 +14,7 @@
 import { realpathSync } from 'fs';
 import path from 'path';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
+import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
   isGmailReadToolName,
@@ -139,7 +140,7 @@ export interface SentinelAction {
   /** For a draft change: the saved draft it replaces, as Gmail holds it now. */
   mail_replaces?: ReviewableDraft | undefined;
   /** For a reply: the message in its own thread that it answers, read by the host from Gmail. */
-  mail_reply_in_thread?: { subject: string; from: string } | undefined;
+  mail_reply_in_thread?: AnsweredMessage | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {

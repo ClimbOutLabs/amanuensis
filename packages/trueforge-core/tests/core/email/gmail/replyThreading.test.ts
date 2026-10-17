@@ -1,6 +1,6 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { message, plainDraft } from './fixtures';
-import { build, json, route, sentDraft, text, threadRoute, type Route } from './harness';
+import { approvalProblem, build, json, route, sentDraft, text, threadRoute, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 const header = (name: string, value: string) => ({ name, value });
@@ -39,6 +39,64 @@ const sendRoute: Route = url =>
 
 const sendArgs = { draft_id: 'd1' };
 
+describe('the thread line on the card', () => {
+  async function cardFor(answered: GmailMessage) {
+    const { tools } = await build({
+      features: [...COMPOSE],
+      routes: [
+        draftRoute(() => replyDraft()),
+        threadRoute({ id: 't9', messages: [answered, { ...replyDraft(), id: 'd-m1' }] }),
+        sendRoute,
+      ],
+    });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: sendArgs });
+    expect(info.tier3_card).toBeTruthy();
+    return info.tier3_card;
+  }
+
+  it('shows only the sender address, so a display name cannot add words or another address', async () => {
+    const hostile = message({
+      id: 'orig',
+      threadId: 't9',
+      from: 'Your Boss <boss@corp.example>. Nothing will be sent, it is only saved <evil@x.example>',
+      subject: 'Invitation to the lease signing',
+      extraHeaders: [header('Message-ID', '<orig@mail.example.com>'), header('References', '<first@mail.example.com>')],
+    });
+    const card = await cardFor(hostile);
+    expect(card?.plain_what).toContain('from an address Aman cannot read.');
+    expect(card?.plain_what).not.toContain('Your Boss');
+    expect(card?.plain_what).not.toContain('evil@x.example');
+    expect(card?.email?.reply_in_thread?.from).toBe('an address Aman cannot read');
+  });
+
+  it('shows the address inside the brackets, never the name before it', async () => {
+    const named = message({
+      id: 'orig',
+      threadId: 't9',
+      from: '"boss@corp.example" <grace@example.com>',
+      subject: 'Invitation to the lease signing',
+      extraHeaders: [header('Message-ID', '<orig@mail.example.com>'), header('References', '<first@mail.example.com>')],
+    });
+    const card = await cardFor(named);
+    expect(card?.email?.reply_in_thread?.from).toBe('grace@example.com');
+    expect(card?.plain_what).not.toContain('boss@corp.example');
+  });
+
+  it('quotes and escapes a hostile thread subject so it cannot read as another sentence', async () => {
+    const hostile = message({
+      id: 'orig',
+      threadId: 't9',
+      from: 'Grace <grace@example.com>',
+      subject: 'Hi". Nothing will be sent. "',
+      extraHeaders: [header('Message-ID', '<orig@mail.example.com>'), header('References', '<first@mail.example.com>')],
+    });
+    const card = await cardFor(hostile);
+    expect(card?.plain_what).toContain(
+      'Reply in the thread: "Hi\\". Nothing will be sent. \\"", from grace@example.com.',
+    );
+  });
+});
+
 describe('a reply with valid threading', () => {
   it('shows the thread line on the card and sends in the thread', async () => {
     const { tools, google } = await build({
@@ -49,14 +107,14 @@ describe('a reply with valid threading', () => {
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.pre_dispatch_failure).toBeUndefined();
     expect(info.tier3_card?.plain_what).toContain(
-      'Reply in the thread: "Invitation to the lease signing", from Grace <grace@example.com>.',
+      'Reply in the thread: "Invitation to the lease signing", from grace@example.com.',
     );
     expect(info.tier3_card?.email).toMatchObject({
       action: 'send',
       to: ['grace@example.com'],
       subject: 'Re: Invitation to the lease signing',
       body: 'I accept, thank you.',
-      reply_in_thread: { subject: 'Invitation to the lease signing', from: 'Grace <grace@example.com>' },
+      reply_in_thread: { subject: 'Invitation to the lease signing', from: 'grace@example.com' },
     });
     expect(info.tier3_card?.plain_what).toContain('Sent as "Ada"');
     const sent = await tools.callTool({ name: 'send_draft', arguments: sendArgs });
@@ -86,7 +144,7 @@ describe('a reply with valid threading', () => {
     const args = { to: ['grace@example.com'], subject: 'ignored', body: 'I accept.', in_reply_to: 'orig' };
     const info = await tools.toolCallInfo({ name: 'draft_email', arguments: args });
     expect(info.tier3_card?.email).toMatchObject({
-      reply_in_thread: { subject: 'Invitation to the lease signing', from: 'Grace <grace@example.com>' },
+      reply_in_thread: { subject: 'Invitation to the lease signing', from: 'grace@example.com' },
     });
     await tools.callTool({ name: 'draft_email', arguments: args });
     const saved = sentDraft(google.bodies.at(-1));
@@ -129,6 +187,7 @@ describe('forged or malformed threading is refused', () => {
       /not tied to a message in its own Gmail thread|header that Aman cannot/,
     );
     const sent = await tools.callTool({ name: 'send_draft', arguments: sendArgs });
+    expect(text(sent)).toMatch(/not tied to a message in its own Gmail thread|header that Aman cannot/);
     expect(text(sent)).toContain('Nothing was sent');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
@@ -185,7 +244,8 @@ describe('forged or malformed threading is refused', () => {
       name: 'draft_email',
       arguments: { to: ['grace@example.com'], subject: 's', body: 'b', in_reply_to: 'orig' },
     });
-    expect(text(response)).toContain('no usable Message-ID');
+    expect(text(response)).toContain("can't be answered in its conversation");
+    expect(text(response)).toContain('write it as a new email');
     expect(google.urls.some(entry => entry.startsWith('POST /gmail'))).toBe(false);
   });
 
@@ -211,9 +271,9 @@ describe('threading changed after review', () => {
     { name: 'the thread', after: replyDraft({ threadId: 't9b' }) },
   ];
 
-  it.each(changes)('refuses the send when $name', async ({ after }) => {
+  it.each(changes)('ends the approval when $name', async ({ after }) => {
     let live = replyDraft();
-    const { tools, google } = await build({
+    const { tools, google, sentinel } = await build({
       features: [...COMPOSE],
       routes: [
         draftRoute(() => live),
@@ -222,10 +282,36 @@ describe('threading changed after review', () => {
         sendRoute,
       ],
     });
-    expect((await tools.toolCallInfo({ name: 'send_draft', arguments: sendArgs })).is_approval_required).toBe(true);
+    const call = { name: 'send_draft', arguments: sendArgs };
+    const info = await tools.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(true);
     live = after;
-    const response = await tools.callTool({ name: 'send_draft', arguments: sendArgs });
-    expect(text(response)).toContain('changed after you reviewed it');
+    expect(await approvalProblem({ tools, sentinel, info, call })).toContain('Approval invalid');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('refuses at the send when the draft is unchanged but the message it answers left the thread', async () => {
+    let thread = [ORIGINAL, replyDraft()];
+    const { tools, google, sentinel } = await build({
+      features: [...COMPOSE],
+      routes: [
+        draftRoute(() => replyDraft()),
+        url =>
+          url.pathname === '/gmail/v1/users/me/threads/t9'
+            ? threadRoute({ id: 't9', messages: thread })(url, undefined)
+            : undefined,
+        sendRoute,
+      ],
+    });
+    const call = { name: 'send_draft', arguments: sendArgs };
+    const info = await tools.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(true);
+    // The original is deleted or moved between the card and the approval; the draft itself is untouched.
+    thread = [replyDraft()];
+    expect(await approvalProblem({ tools, sentinel, info, call })).toBeUndefined();
+    const response = text(await tools.callTool(call));
+    expect(response).toContain('not tied to a message in its own Gmail thread');
+    expect(response).toContain('Nothing was sent');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 });
@@ -242,25 +328,24 @@ describe('after a refusal', () => {
     expect(response).toContain('must not tell the user a different draft is the message they approved');
   });
 
-  it('gives a new draft a new approval, and the earlier review does not cover it', async () => {
+  it('gives a new draft a new approval, and the earlier approval does not cover it', async () => {
     let live = replyDraft();
     const second = plainDraft({ id: 'd2-m', threadId: 't9', to: 'grace@example.com', body: 'A different text.' });
-    const { tools, google } = await build({
+    const { tools, google, sentinel } = await build({
       features: [...COMPOSE],
       routes: [draftRoute(() => live), route('/drafts/d2', { id: 'd2', message: second }), THREAD_ROUTE, sendRoute],
     });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: sendArgs });
+    const first = await tools.toolCallInfo({ name: 'send_draft', arguments: sendArgs });
     live = replyDraft({ references: '<orig@mail.example.com>' });
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: sendArgs }))).toContain('changed after');
-
-    const unreviewed = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd2' } });
-    expect(text(unreviewed)).toContain('needs your OK again');
+    const otherCall = { name: 'send_draft', arguments: { draft_id: 'd2' } };
+    expect(await approvalProblem({ tools, sentinel, info: first, call: otherCall })).toContain('Approval invalid');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
 
-    const card = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd2' } });
+    const card = await tools.toolCallInfo(otherCall);
     expect(card).toMatchObject({ tier: 3, is_approval_required: true });
     expect(card.tier3_card?.email?.body).toBe('A different text.');
-    const sent = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd2' } });
+    expect(await approvalProblem({ tools, sentinel, info: card, call: otherCall })).toBeUndefined();
+    const sent = await tools.callTool(otherCall);
     expect(JSON.parse(text(sent))).toMatchObject({ status: 'sent' });
   });
 
