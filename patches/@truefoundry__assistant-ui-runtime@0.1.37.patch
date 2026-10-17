@@ -65,7 +65,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..95372efd452ad9399f7cb3634a8869ff
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6e98f9063 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9c8dd14f9 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -921,7 +921,17 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4047,6 +4270,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4233,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+           "This session has not been saved yet, so its files cannot be downloaded."
+         );
+       }
+-      if (sandboxId == null) {
+-        throw new Error("No sandbox is available yet for this session.");
+-      }
+       return await server.downloadSandboxFile({
+         sessionId,
+         turnId,
+@@ -4047,6 +4267,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -929,7 +939,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4473,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4470,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -945,7 +955,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4527,7 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4524,7 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -953,7 +963,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4638,7 @@ export {
+@@ -4408,6 +4635,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -961,7 +971,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4658,7 @@ export {
+@@ -4427,6 +4655,7 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -970,7 +980,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..c769d2df548eb588786bcf4aadddbab6
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..0787be44cf7f037a4b7cf186bc3653b7232ace14 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..eabcf39e1a700c73a44f5cdfe4c09e702ed9b62f 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1077,7 +1087,23 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..0787be44cf7f037a4b7cf186bc3653b7
  } | {
      status: "deny";
      reason?: string;
-@@ -671,7 +706,7 @@ interface ToolBase {
+@@ -525,12 +560,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
+     /**
+      * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
+      * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
+-     * directly use `sandboxId`.
++     * directly use `sandboxId`. It is undefined when the conversation has not announced a sandbox,
++     * which must not block a download the host can resolve from the turn.
+      */
+     downloadSandboxFile?(req: {
+         sessionId: string;
+         turnId: string;
+-        sandboxId: string;
++        sandboxId: string | undefined;
+         path: string;
+     }): Promise<Blob>;
+ }
+@@ -671,7 +707,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1086,7 +1112,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..0787be44cf7f037a4b7cf186bc3653b7
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +719,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +720,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1101,7 +1127,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..0787be44cf7f037a4b7cf186bc3653b7
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +737,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +738,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -2251,7 +2277,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad82
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..99874d6f2101f5d4d72be429a000b90f6a674885 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..1d51c5438aad3fdc2a91fd1c628d91212763315d 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2275,6 +2301,22 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..99874d6f2101f5d4d72be429a000b90f
    | { status: "deny"; reason?: string };
  
  export interface UserToolApprovalEvent {
+@@ -390,12 +395,13 @@ export interface AgentChatServer<
+   /**
+    * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
+    * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
+-   * directly use `sandboxId`.
++   * directly use `sandboxId`. It is undefined when the conversation has not announced a sandbox,
++   * which must not block a download the host can resolve from the turn.
+    */
+   downloadSandboxFile?(req: {
+     sessionId: string;
+     turnId: string;
+-    sandboxId: string;
++    sandboxId: string | undefined;
+     path: string;
+   }): Promise<Blob>;
+ }
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
 index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..e4b5770819d0a2beaec8069383b6704ac508bc5e 100644
 --- a/src/sessionSnapshot.ts
@@ -3383,7 +3425,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
          resumeUnavailable,
          isLoading,
 diff --git a/src/useTrueFoundryAgentRuntime.ts b/src/useTrueFoundryAgentRuntime.ts
-index c052c5ebca99422738d44fa380ca28743c2e592a..cd953d2fbcbad2a29a8fc3a009f62f46c8c85086 100644
+index c052c5ebca99422738d44fa380ca28743c2e592a..19ffe06522b9d9d17fcf689c6fd2870e2a07dfdf 100644
 --- a/src/useTrueFoundryAgentRuntime.ts
 +++ b/src/useTrueFoundryAgentRuntime.ts
 @@ -130,6 +130,7 @@ function useTrueFoundryAgentRuntimeImpl(
@@ -3394,7 +3436,17 @@ index c052c5ebca99422738d44fa380ca28743c2e592a..cd953d2fbcbad2a29a8fc3a009f62f46
          isRunning,
          resumeUnavailable,
          isLoading,
-@@ -225,6 +226,7 @@ function useTrueFoundryAgentRuntimeImpl(
+@@ -186,9 +187,6 @@ function useTrueFoundryAgentRuntimeImpl(
+                     "This session has not been saved yet, so its files cannot be downloaded.",
+                 );
+             }
+-            if (sandboxId == null) {
+-                throw new Error("No sandbox is available yet for this session.");
+-            }
+             return await server.downloadSandboxFile({
+                 sessionId,
+                 turnId,
+@@ -225,6 +223,7 @@ function useTrueFoundryAgentRuntimeImpl(
              pendingToolResponses,
              pendingMcpAuth,
              resumeUnavailable,
