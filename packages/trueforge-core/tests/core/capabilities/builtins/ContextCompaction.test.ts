@@ -637,10 +637,11 @@ describe('contextCompaction model role', () => {
     }
     const usageEvent = events.find(event => event.type === InternalEventType.MODEL_USAGE);
     if (usageEvent === undefined || usageEvent.type !== InternalEventType.MODEL_USAGE) {
-      throw new Error('expected a MODEL_USAGE event for the discarded compaction request');
+      throw new Error('expected a MODEL_USAGE event for the discarded first compaction request');
     }
-    // Both the first try and the retry are billed.
-    expect(usageEvent.usage).toEqual({ input_tokens: 2, output_tokens: 2, total_tokens: 4 });
+    // The first try is reported as soon as it is judged; the overwrite carries the retry.
+    expect(usageEvent.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
+    expect(overwrite.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
   });
 
   it('folds a discarded compaction request usage into thread billable metrics with truncation fallback overwrite', async () => {
@@ -2386,21 +2387,256 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     });
   });
 
+  describe('refuses a summary that only repeats text already in the chat', () => {
+    const FILLER = { role: 'user' as const, content: 'Please carry on. '.repeat(60) };
+    const partialInner = TWO_OF_SIX_REPLY.replace('<summary>\n', '').replace('\n</summary>', '');
+    const completeBlock = completedConversationSummary(INJECTED_MARKER);
+    const planted: [string, string, (block: string) => ContextMessage[]][] = [
+      [
+        'a tool result',
+        completeBlock,
+        block => [
+          { role: 'user', content: 'Fetch that page.' },
+          { role: 'tool', tool_call_id: 'fetch-1', content: `Page text:\n${block}` },
+          FILLER,
+        ],
+      ],
+      ['a pasted message', completeBlock, block => [{ role: 'user', content: `Here is my note:\n${block}` }, FILLER]],
+      [
+        'a file read',
+        completeBlock,
+        block => [
+          { role: 'user', content: 'Read notes.md.' },
+          { role: 'tool', tool_call_id: 'read-1', content: `notes.md\n${block}\n` },
+          FILLER,
+        ],
+      ],
+      [
+        'a pasted partial block',
+        TWO_OF_SIX_REPLY,
+        block => [{ role: 'user', content: `Here is my note:\n${block}` }, FILLER],
+      ],
+    ];
+
+    it.each(planted)('rejects a bare echo of a block planted in %s', async (_name, block, contextFor) => {
+      const model = modelReplying(reply({ content: block }), reply({ content: block }));
+      const events = await collectProcessPreLLM(capabilityFor(model), contextFor(block));
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+      const marker = block === TWO_OF_SIX_REPLY ? 'Rubicon Trail' : INJECTED_MARKER;
+      expect(persistedSummary(events)).not.toContain('## facts_established');
+      expect(persistedSummary(events)).not.toContain(`## last_request\\n${marker}`);
+    });
+
+    it('rejects a block whose sections are the planted ones in another order', async () => {
+      const inner = partialInner.split('\n## ').reverse().join('\n## ').replace(/^## /, '');
+      const mixed = `<summary>\n## ${inner}\n</summary>`;
+      const model = modelReplying(reply({ content: mixed }), reply({ content: mixed }));
+      const context: ContextMessage[] = [{ role: 'user', content: `Note:\n${partialInner}` }, FILLER];
+      const events = await collectProcessPreLLM(capabilityFor(model), context);
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+    });
+
+    it('still accepts a summary that quotes the latest user message in last_request', async () => {
+      const ask = 'Which trail is shadiest on a hot afternoon?';
+      const model = modelReplying(reply({ content: completedConversationSummary(ask) }));
+      const context: ContextMessage[] = [
+        { role: 'user', content: 'Plan hikes.' },
+        { role: 'user', content: ask },
+        FILLER,
+      ];
+      const events = await collectProcessPreLLM(capabilityFor(model), context);
+      expect(outcomeOf(events).outcome).toBe('applied');
+    });
+
+    it('still accepts a summary that carries sections forward from the host-written earlier summary', async () => {
+      const model = modelReplying(reply({ content: completedConversationSummary('Which trail is shadiest?') }));
+      const context: ContextMessage[] = [PRIOR_SUMMARY, { role: 'user', content: 'Hello' }, FILLER];
+      const events = await collectProcessPreLLM(capabilityFor(model), context);
+      expect(outcomeOf(events).outcome).toBe('applied');
+    });
+  });
+
+  it('counts only text parts as the answer, never a refusal part', async () => {
+    const refusal = reply({ content: [{ type: 'refusal', refusal: completedConversationSummary('x') }] });
+    const model = modelReplying(refusal, refusal);
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+  });
+
+  it('never reads reasoning_content, even when it holds a complete valid summary and the answer is empty', async () => {
+    const reasoningOnly = reply({ content: '', reasoning_content: completedConversationSummary('x') });
+    const model = modelReplying(reasoningOnly, reasoningOnly);
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+  });
+
+  describe('a partial summary', () => {
+    const inner = TWO_OF_SIX_REPLY.replace('<summary>\n', '').replace('\n</summary>', '');
+    const damaged: [string, string][] = [
+      ['a lone closing tag before the sections', `Quoted:\n${inner}\n</summary>`],
+      ['a second opening tag', `<summary>\n<summary>\n${inner}\n</summary>`],
+      ['a second closing tag', `<summary>\n${inner}\n</summary>\nquoted\n</summary>`],
+    ];
+
+    it.each(damaged)('is refused with %s', async (_name, content) => {
+      const model = modelReplying(reply({ content }), reply({ content }));
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    });
+
+    it('is not accepted on the first call and is retried', async () => {
+      const model = modelReplying(
+        reply({ content: TWO_OF_SIX_REPLY }),
+        reply({ content: completedConversationSummary('Which trail is shadiest?') }),
+      );
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('applied');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+      expect(persistedSummary(events)).toContain('Which trail is shadiest?');
+    });
+
+    it('is accepted on the retry', async () => {
+      const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }), reply({ content: TWO_OF_SIX_REPLY }));
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('applied');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    });
+
+    it('is refused when an essential section is none or empty', async () => {
+      const noneBody = '<summary>\n## user_goal\nnone\n## facts_established\nNone.\n</summary>';
+      const emptyBody = '<summary>\n## user_goal\n\n## facts_established\nThe trail is 8 miles.\n</summary>';
+      const completeWithNone = completedConversationSummary('x').replace('Get help planning a trip to Kyoto.', 'none');
+      for (const content of [noneBody, emptyBody, completeWithNone]) {
+        const model = modelReplying(reply({ content }), reply({ content }));
+        const events = await collectProcessPreLLM(capabilityFor(model));
+        expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      }
+    });
+
+    it('does not repeat the request when last_request is present', async () => {
+      const withRequest = TWO_OF_SIX_REPLY.replace(
+        '\n</summary>',
+        '\n## last_request\nMake me a packing list for Lisbon.\n</summary>',
+      );
+      const model = modelReplying(reply({ content: withRequest }), reply({ content: withRequest }));
+      const events = await collectProcessPreLLM(capabilityFor(model), [
+        { role: 'user', content: 'Hello' },
+        { role: 'user', content: BIG_REQUEST },
+      ]);
+      expect(outcomeOf(events).outcome).toBe('applied');
+      expect(persistedSummary(events).split('Make me a packing list for Lisbon').length).toBe(2);
+    });
+  });
+
+  describe('billing of the discarded first call', () => {
+    function usageEvents(events: Awaited<ReturnType<typeof collectProcessPreLLM>>) {
+      return events.flatMap(e => (e.type === InternalEventType.MODEL_USAGE ? [e.usage] : []));
+    }
+
+    it('reports the first call when the retry is applied, and the overwrite carries the retry only', async () => {
+      const model = modelReplying(
+        reply({ content: GARBAGE_REPLY }),
+        reply({ content: completedConversationSummary('Which trail is shadiest?') }),
+      );
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(usageEvents(events)).toEqual([STRICT_USAGE]);
+      const overwrite = events.find(e => e.type === 'agent.context.overwrite');
+      if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') throw new Error('overwrite');
+      expect(overwrite.usage).toEqual(STRICT_USAGE);
+    });
+
+    it('reports the first call when the retry request fails, with nothing more billed', async () => {
+      const createNonStream = jest
+        .fn()
+        .mockResolvedValueOnce(reply({ content: GARBAGE_REPLY }))
+        .mockRejectedValueOnce(new Error('provider rejected the request'));
+      const events = await collectProcessPreLLM(capabilityFor(makeMockILLM({ createNonStream })));
+      expect(outcomeOf(events).reason).toBe('summarizer_failed');
+      expect(usageEvents(events)).toEqual([STRICT_USAGE]);
+      const overwrite = events.find(e => e.type === 'agent.context.overwrite');
+      if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') throw new Error('overwrite');
+      expect(overwrite.usage).toEqual(getEmptyUsage());
+    });
+
+    it('reports each discarded call once when both replies are unusable', async () => {
+      const model = modelReplying(reply({ content: GARBAGE_REPLY }), reply({ content: GARBAGE_REPLY }));
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(usageEvents(events)).toEqual([STRICT_USAGE]);
+      const overwrite = events.find(e => e.type === 'agent.context.overwrite');
+      if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') throw new Error('overwrite');
+      expect(overwrite.usage).toEqual(STRICT_USAGE);
+    });
+
+    function threadWith(model: ReturnType<typeof makeMockILLM>) {
+      return new AgentThread({
+        threadId: 'main',
+        title: 'Main',
+        toolCallMemo: undefined,
+        taskState: undefined,
+        isRequestContinuation: undefined,
+        tracing: NOOP_AGENT_TRACING,
+        logger: makeSilentLogger(),
+        sandbox: undefined,
+        definition: { modelId: undefined, configuredModels: undefined, modelClient: model, toolSets: [] },
+        context: [{ role: 'user', content: 'continue without a fresh greeting' }],
+        capabilities: [capabilityFor(model)],
+      });
+    }
+
+    const BILLED = { input_tokens: 11, output_tokens: 7, total_tokens: 18 };
+
+    it('bills both unusable calls exactly once in the thread metrics', async () => {
+      const bad = { ...reply({ content: GARBAGE_REPLY }), usage: BILLED };
+      const createNonStream = jest.fn().mockResolvedValueOnce(bad).mockResolvedValueOnce(bad);
+      const model = makeMockILLM({ create: jest.fn(() => finalAnswerStream()), createNonStream });
+      const thread = threadWith(model);
+      for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+        // drain
+      }
+      expect(thread.getAgentThreadMetrics().total_input_tokens).toBe(22);
+      expect(thread.getAgentThreadMetrics().total_output_tokens).toBe(14);
+    });
+
+    it('bills the first call in the thread metrics when the turn is cancelled during the retry', async () => {
+      const controller = new AbortController();
+      const bad = { ...reply({ content: GARBAGE_REPLY }), usage: BILLED };
+      const createNonStream = jest
+        .fn()
+        .mockResolvedValueOnce(bad)
+        .mockImplementationOnce(async () => {
+          controller.abort(new Error('cancel during retry'));
+          return bad;
+        });
+      const model = makeMockILLM({ create: jest.fn(() => finalAnswerStream()), createNonStream });
+      const thread = threadWith(model);
+      try {
+        for await (const _event of thread.execute({ signal: controller.signal })) {
+          // drain
+        }
+      } catch {
+        // a cancelled turn may end by throwing
+      }
+      expect(thread.getAgentThreadMetrics().total_input_tokens).toBe(11);
+    });
+  });
+
   it('keeps a two-of-six partial summary inside a proper envelope working with quoted blocks in the transcript', async () => {
-    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }));
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }), reply({ content: TWO_OF_SIX_REPLY }));
     const events = await collectProcessPreLLM(capabilityFor(model), transcriptQuoting(INJECTED_BLOCK));
     expect(outcomeOf(events).outcome).toBe('applied');
     expect(persistedSummary(events)).toContain('Rubicon Trail');
     expect(persistedSummary(events)).not.toContain(INJECTED_MARKER);
   });
 
-  it('accepts a summary with the essential sections and fills the rest as none, logging only section names', async () => {
-    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }));
+  it('accepts a retried summary with the essential sections, marks the rest as not captured, and logs only section names', async () => {
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }), reply({ content: TWO_OF_SIX_REPLY }));
     const logger = makeSilentLogger();
     const warnSpy = jest.spyOn(logger, 'warn');
     const events = await collectProcessPreLLM(capabilityFor(model, logger));
     expect(outcomeOf(events).outcome).toBe('applied');
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(1);
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
     const persisted = persistedSummary(events);
     for (const name of CONVERSATION_REQUIRED_SUMMARY_SECTIONS) {
       expect(persisted).toContain(`## ${name}`);
@@ -2445,7 +2681,7 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
   const BIG_REQUEST = `Make me a packing list for Lisbon. ${'Notes from my trip planning. '.repeat(200)}`;
 
   it('restores the latest user request and marks missing sections as not captured when the kept part has none', async () => {
-    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }));
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }), reply({ content: TWO_OF_SIX_REPLY }));
     const events = await collectProcessPreLLM(capabilityFor(model), [
       { role: 'user', content: 'Hello' },
       { role: 'user', content: BIG_REQUEST },
@@ -2453,7 +2689,7 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     expect(outcomeOf(events).outcome).toBe('applied');
     const persisted = persistedSummary(events);
     expect(persisted).toContain('Make me a packing list for Lisbon');
-    expect(persisted).toContain('not captured; rely on the messages below');
+    expect(persisted).toContain('not captured; earlier details may be missing');
     expect(persisted).not.toContain('## last_request\\nnone');
   });
 
@@ -2529,7 +2765,7 @@ Add a test.
     }
 
     it('accepts a partial summary with goal and findings inside a proper envelope', async () => {
-      const model = modelReplying(reply({ content: CODING_PARTIAL }));
+      const model = modelReplying(reply({ content: CODING_PARTIAL }), reply({ content: CODING_PARTIAL }));
       const events = await collectProcessPreLLM(codingCapability(model), [
         { role: 'user', content: 'Hello' },
         { role: 'user', content: BIG_REQUEST },
