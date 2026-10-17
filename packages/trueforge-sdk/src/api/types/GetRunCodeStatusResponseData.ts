@@ -3,8 +3,6 @@
 import * as TrueForge from "../index.js";
 
 export interface GetRunCodeStatusResponseData {
-    /** Which backend runs code: docker, or the isolated sandbox slots. */
-    backend?: TrueForge.GetRunCodeStatusResponseDataBackend;
     /** Technical detail from the sandbox check. Absent when the state says it all. */
     detail?: string;
     /** Whether run_code can execute code, or the reason it cannot. */

@@ -1,9 +1,6 @@
 /**
- * Pluggable isolation contract for `run_code`. One interface, two drivers
- * (Docker default, Firecracker opt-in); the host wrapper owns the contract,
- * bounds, truncation, and harvesting — the driver owns ALL isolation.
- *
- * The old `SandboxProvider` interface is superseded by this contract.
+ * Isolation contract for `run_code`, implemented by the sandbox slot driver. The host wrapper
+ * owns the contract, bounds, truncation, and harvesting — the driver owns ALL isolation.
  */
 
 /** Languages the `run_code` contract offers. Shell is deliberately NOT offered. */
@@ -16,8 +13,8 @@ export type RunCodeLanguage = 'python' | 'node';
 export const OUTPUT_EXCEEDED_MARKER = 'output_exceeded:';
 
 /**
- * Prefix a driver sets on DriverRunResult.internalError when a created
- * container fails post-create isolation verification. The wrapper maps it
+ * Prefix a driver sets on DriverRunResult.internalError when a slot
+ * fails isolation verification. The wrapper maps it
  * onto `isolation_refused` and surfaces the spec's exact refusal message.
  * Mirrors the OUTPUT_EXCEEDED_MARKER pattern.
  */
@@ -57,25 +54,13 @@ export interface SandboxIdentity {
 export type DriverTermination = 'completed' | 'timeout' | 'oom' | 'killed' | 'disk' | 'internal';
 
 /** Finer cause behind a failure whose `error_code` is shared with other causes. */
-export type DriverReadinessReason = 'signature_unverified' | 'isolation_refused';
+export type DriverReadinessReason = 'isolation_refused';
 
 export type DriverReadiness =
   | { ready: true }
   | {
       ready: false;
-      /**
-       * `image_missing` is the only code the wrapper may heal: it triggers the
-       * explicit bounded provisioning step. Every other code is terminal
-       * for the call.
-       */
-      error_code:
-        | 'daemon_unavailable'
-        | 'docker_unavailable'
-        | 'image_unavailable'
-        | 'image_missing'
-        | 'kvm_unavailable'
-        | 'slots_unavailable'
-        | 'unsupported_platform';
+      error_code: 'daemon_unavailable' | 'slots_unavailable';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
       /** True when `error` is already the complete message, so it reaches the model and the chat unchanged. */
@@ -113,8 +98,6 @@ export interface DriverRunParams {
   sandboxIdentity: SandboxIdentity;
   /** Cancels the run: the driver must kill the container/VM on abort. */
   signal: AbortSignal | undefined;
-  /** FC pull-before-kill best-effort grace in ms (Docker ignores it). */
-  harvestGraceMs: number;
 }
 
 export interface DriverRunResult {
@@ -130,8 +113,7 @@ export interface DriverRunResult {
   /** Host-path-scrubbed before it reaches the model. */
   internalError: string | undefined;
   /**
-   * Driver-originated collection notes (e.g. Firecracker's pull-before-kill
-   * grace expiring with zero bytes pulled). The wrapper appends these to the
+   * Driver-originated collection notes. The wrapper appends these to the
    * result's `harvest_warnings` and owns the final shape; the driver never
    * builds the result contract itself.
    */
@@ -139,23 +121,8 @@ export interface DriverRunResult {
 }
 
 export interface IsolationDriver {
-  readonly kind: 'docker' | 'firecracker' | 'slots';
-  /**
-   * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
-   * image, but it is neither quick nor read-only: the Docker driver also creates and removes
-   * probe containers and stages, runs and deletes a canary run.
-   */
+  /** Idempotent readiness: at least one slot is reachable and proves its isolation. */
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness>;
-  /**
-   * Explicit provisioning step: pull/prepare the image inside
-   * image_pull_timeout_seconds with honest progress events. Never called
-   * implicitly from ensureReady; concurrent calls coalesce on the one pull.
-   */
-  provision(input: {
-    signal: AbortSignal | undefined;
-    onProgress: (message: string) => void;
-    timeoutSeconds: number;
-  }): Promise<void>;
   /** One execution. The driver owns ALL isolation; the wrapper owns contract + bounds. */
   run(params: DriverRunParams): Promise<DriverRunResult>;
   /**

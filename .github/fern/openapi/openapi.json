@@ -2726,14 +2726,6 @@
         "properties": {
           "data": {
             "properties": {
-              "backend": {
-                "description": "Which backend runs code: docker, or the isolated sandbox slots.",
-                "enum": [
-                  "docker",
-                  "slots"
-                ],
-                "type": "string"
-              },
               "detail": {
                 "description": "Technical detail from the sandbox check. Absent when the state says it all.",
                 "type": "string"
@@ -2743,13 +2735,8 @@
                 "enum": [
                   "ready",
                   "not_configured",
-                  "docker_unavailable",
                   "daemon_unavailable",
-                  "image_missing",
-                  "signature_unverified",
-                  "image_unavailable",
                   "isolation_refused",
-                  "unsupported_platform",
                   "slots_unavailable"
                 ],
                 "type": "string"
@@ -6663,49 +6650,6 @@
         ],
         "type": "object"
       },
-      "ProvisioningPersistedEvent": {
-        "properties": {
-          "created_at": {
-            "description": "ISO 8601 event timestamp.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Unique identifier for the event (monotonic ULID).",
-            "type": "string"
-          },
-          "messages": {
-            "description": "Ordered driver progress messages, oldest first (capped).",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "succeeded": {
-            "description": "Whether the provisioning step completed and the image verified.",
-            "type": "boolean"
-          },
-          "truncated_count": {
-            "description": "Progress messages dropped from `messages` by the cap; 0 when nothing was dropped.",
-            "type": "number"
-          },
-          "type": {
-            "description": "Emitted when run_code provisions (pulls) its sandbox image.",
-            "enum": [
-              "aman.sandbox.provisioning"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "succeeded",
-          "messages",
-          "truncated_count",
-          "id",
-          "created_at"
-        ],
-        "type": "object"
-      },
       "RawToolCall": {
         "allOf": [
           {
@@ -7233,10 +7177,6 @@
       },
       "SandboxIsolationCapability": {
         "properties": {
-          "cosign_key_configured": {
-            "description": "Whether a cosign public key is configured for image signature verification (path never exposed).",
-            "type": "boolean"
-          },
           "default_timeout_seconds": {
             "description": "Default per-run timeout for run_code, seconds (`SANDBOX_DEFAULT_TIMEOUT_SECONDS`).",
             "type": "integer"
@@ -7245,28 +7185,12 @@
             "description": "Scratch+egress disk quota for run_code, MiB (`SANDBOX_DISK_MB`).",
             "type": "integer"
           },
-          "image": {
-            "description": "Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`); empty when run_code is not configured.",
-            "type": "string"
-          },
-          "image_pull_timeout_seconds": {
-            "description": "Bound for the first-run image pull, seconds (`SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS`).",
-            "type": "integer"
-          },
-          "isolation_driver": {
-            "description": "Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).",
-            "enum": [
-              "docker",
-              "firecracker"
-            ],
-            "type": "string"
-          },
           "max_timeout_seconds": {
             "description": "Max per-run timeout for run_code, seconds (`SANDBOX_MAX_TIMEOUT_SECONDS`).",
             "type": "integer"
           },
           "memory_mb": {
-            "description": "Container memory limit for run_code, MiB (`SANDBOX_MEMORY_MB`).",
+            "description": "Memory limit for run_code, MiB (`SANDBOX_MEMORY_MB`).",
             "type": "integer"
           },
           "network_egress": {
@@ -7279,16 +7203,12 @@
           }
         },
         "required": [
-          "isolation_driver",
-          "image",
           "default_timeout_seconds",
           "max_timeout_seconds",
           "memory_mb",
           "disk_mb",
           "stdout_stderr_cap_kb",
-          "image_pull_timeout_seconds",
-          "network_egress",
-          "cosign_key_configured"
+          "network_egress"
         ],
         "type": "object"
       },
@@ -7912,9 +7832,6 @@
           },
           {
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           }
         ]
       },
@@ -7953,8 +7870,7 @@
           "agent.context.compaction",
           "aman.memory.recall",
           "aman.profile.learned",
-          "aman.skill.used",
-          "aman.sandbox.provisioning"
+          "aman.skill.used"
         ],
         "type": "string"
       },
@@ -10631,7 +10547,6 @@
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
-            "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
             "document.ingestion": "#/components/schemas/DocumentIngestionEvent",
             "mcp.auth_required": "#/components/schemas/MCPAuthRequiredEvent",
@@ -10702,9 +10617,6 @@
           },
           {
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
@@ -16777,7 +16689,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 19,
+              "maxItems": 18,
               "minItems": 1,
               "type": "array"
             }

@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import type { Logger } from 'winston';
-import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
 import { ISOLATION_REFUSED_MARKER, OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
@@ -49,10 +48,6 @@ export interface RunCodeServiceOptions {
   /** Per-stream stdout/stderr cap in KiB (wrapper-owned truncation contract). */
   outputCapKb: number;
   maxConcurrentRuns: number;
-  /** Bound for the explicit image-provisioning step. */
-  imagePullTimeoutSeconds: number;
-  /** FC pull-before-kill best-effort grace (Docker ignores it). */
-  harvestGraceMs: number;
   logger: Logger;
   /** Injectable clock / sleep for tests. */
   now: (() => number) | undefined;
@@ -81,8 +76,6 @@ export interface RunCodeCallOptions {
   signal: AbortSignal | undefined;
   /** Turn attachments staged into ingress (harness-owned, §2.1.1). */
   attachments: TurnAttachment[] | undefined;
-  /** Progress events for the explicit provisioning step. */
-  onProgress: ((message: string) => void) | undefined;
   /**
    * Called with harvested file bytes after a run, before run-root cleanup.
    * Sink failures never fail the run — they become a harvest warning.
@@ -115,21 +108,11 @@ export class RunCodeService implements RunCodeBackend {
   private readonly diskMb: number;
   private readonly outputCapBytes: number;
   private readonly maxConcurrentRuns: number;
-  private readonly imagePullTimeoutSeconds: number;
-  private readonly harvestGraceMs: number;
   private readonly logger: Logger;
   private readonly now: () => number;
   private readonly sleepMs: (ms: number) => Promise<void>;
 
   private activeRuns = 0;
-  private provisioningPromise: Promise<void> | undefined;
-  /** AbortController for the shared pull; aborted only when every coalesced caller has left. */
-  private provisioningController: AbortController | undefined;
-  /** Every caller currently waiting on the shared pull, for progress fan-out and refcounted abort. */
-  private readonly provisioningListeners = new Set<{
-    onProgress: (message: string) => void;
-    signal: AbortSignal | undefined;
-  }>();
   /** timestamp (via the injectable clock) of the last successful readiness probe. */
   private readinessAt: number | undefined;
   /** in-flight readiness probe shared by concurrent runCode calls. */
@@ -146,15 +129,9 @@ export class RunCodeService implements RunCodeBackend {
     this.diskMb = options.diskMb;
     this.outputCapBytes = options.outputCapKb * 1024;
     this.maxConcurrentRuns = options.maxConcurrentRuns;
-    this.imagePullTimeoutSeconds = options.imagePullTimeoutSeconds;
-    this.harvestGraceMs = options.harvestGraceMs;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
-  }
-
-  get driverKind(): IsolationDriver['kind'] {
-    return this.driver.kind;
   }
 
   /**
@@ -210,72 +187,14 @@ export class RunCodeService implements RunCodeBackend {
     await this.driver.dispose();
   }
 
-  /**
-   * Readiness probe that never provisions. It can take seconds and runs a canary
-   * container, so hot paths go through the cached checkReadiness. A missing image
-   * surfaces as a readiness failure; provisioning is the explicit step below.
-   */
+  /** Uncached readiness probe; hot paths go through the cached checkReadiness. */
   async ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
     return this.driver.ensureReady(signal);
   }
 
   /**
-   * Explicit provisioning step: bounded image pull with honest progress
-   * events. Concurrent calls coalesce on the one pull: every waiter receives
-   * progress, and one caller's abort never kills the pull for the others —
-   * the pull aborts only when every coalesced caller has left. Never called
-   * implicitly from ensureReady.
-   */
-  async provision(options: {
-    signal: AbortSignal | undefined;
-    onProgress: ((message: string) => void) | undefined;
-  }): Promise<void> {
-    if (options.signal?.aborted === true) {
-      throw signalAbortError(options.signal);
-    }
-    const listener = {
-      onProgress: options.onProgress ?? ((): void => undefined),
-      signal: options.signal,
-    };
-    this.provisioningListeners.add(listener);
-    const onCallerAbort = (): void => {
-      this.provisioningListeners.delete(listener);
-      if (this.provisioningListeners.size === 0) {
-        this.provisioningController?.abort();
-      }
-    };
-    onSignalAbort(listener.signal, onCallerAbort);
-    try {
-      if (this.provisioningPromise === undefined) {
-        const controller = new AbortController();
-        this.provisioningController = controller;
-        const fanout = (message: string): void => {
-          for (const waiter of this.provisioningListeners) {
-            waiter.onProgress(message);
-          }
-        };
-        this.provisioningPromise = this.driver
-          .provision({ signal: controller.signal, onProgress: fanout, timeoutSeconds: this.imagePullTimeoutSeconds })
-          .finally(() => {
-            this.provisioningPromise = undefined;
-            this.provisioningController = undefined;
-          });
-      }
-      await this.provisioningPromise;
-    } finally {
-      listener.signal?.removeEventListener('abort', onCallerAbort);
-      this.provisioningListeners.delete(listener);
-    }
-    // provisioning may have replaced the image — the readiness cache is
-    // only valid for the image it probed.
-    this.readinessAt = undefined;
-  }
-
-  /**
    * readiness probe with a short success cache and in-flight coalescing.
-   * ensureReady shells out to docker/cosign; without the cache every run_code
-   * call pays the full probe. Only successes are cached (failures re-probe
-   * next call); provisioning invalidates.
+   * Only successes are cached; failures re-probe on the next call.
    */
   private async checkReadiness(signal: AbortSignal | undefined): Promise<DriverReadiness> {
     const now = this.now();
@@ -321,44 +240,11 @@ export class RunCodeService implements RunCodeBackend {
     }
 
     // Readiness short-circuits BEFORE anything is staged.
-    let readiness = await this.checkReadiness(options?.signal);
-    if (!readiness.ready && readiness.error_code === 'image_missing') {
-      // The explicit provisioning step — bounded pull with honest progress.
-      // The first run_code that triggers it waits; concurrent calls coalesce
-      // on the one pull via provisioningPromise. A failed pull is
-      // image_unavailable (user-actionable), never a hang or retry loop.
-      try {
-        await this.provision({ signal: options?.signal, onProgress: options?.onProgress });
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        // An aborted caller isn't a provisioning failure — the harness owns
-        // the abort disposition, so don't log it as one.
-        if (options?.signal?.aborted !== true) {
-          this.logger.warn('run_code image provisioning failed', { detail });
-        }
-        return this.failedResult({
-          error_code: 'image_unavailable',
-          error: errorTextForCode({ error_code: 'image_unavailable', detail }),
-          runRoot: '',
-          stdout: '',
-          stderr: '',
-          filesOut: [],
-          harvestWarnings: [],
-        });
-      }
-      readiness = await this.checkReadiness(options?.signal);
-    }
+    const readiness = await this.checkReadiness(options?.signal);
     if (!readiness.ready) {
-      // The model-visible taxonomy has no kvm/platform codes: a backend that
-      // cannot isolate is daemon_unavailable with actionable detail text.
-      // docker_unavailable keeps its own code so the exact install message
-      // surfaces verbatim instead of being prefixed.
-      const code: RunCodeErrorCode =
-        readiness.error_code === 'image_unavailable' || readiness.error_code === 'image_missing'
-          ? 'image_unavailable'
-          : readiness.error_code === 'docker_unavailable'
-            ? 'docker_unavailable'
-            : 'daemon_unavailable';
+      // Both readiness failures are reported as daemon_unavailable; the slot driver's text is complete
+      // and reaches the user unchanged.
+      const code: RunCodeErrorCode = 'daemon_unavailable';
       return this.failedResult({
         error_code: code,
         error:
@@ -510,8 +396,6 @@ export class RunCodeService implements RunCodeBackend {
       env: SANDBOX_RUN_ENV,
       sandboxIdentity: identity,
       signal: controller.signal,
-      // FC pull-before-kill best-effort grace (Docker ignores it).
-      harvestGraceMs: this.harvestGraceMs,
     };
 
     // Supervisors: wall-clock timeout, disk du-poll, absolute abandon deadline.
@@ -967,20 +851,6 @@ export class RunCodeService implements RunCodeBackend {
 /** Validate the startup invariants : fail closed, never warn-and-continue. */
 export function validateRunCodeStartupConfig(input: {
   networkEgress: boolean;
-  isolationDriver: 'docker' | 'firecracker';
-  platform: NodeJS.Platform;
-  image: string;
-  /**
-   * the image pin is the feature opt-in. False (blank SANDBOX_IMAGE, the
-   * default for existing standalone installs) leaves run_code dormant: the
-   * Docker-identity checks (digest pin) and the pull-related timeout
-   * cross-check are skipped so boot succeeds, while the numeric sanity checks
-   * below still run. True preserves the full fail-closed validation. Docker is
-   * required only when run_code executes (plan §2.8), not at install/startup —
-   * a dormant install fails closed at call time (image_unavailable).
-   */
-  imageConfigured: boolean;
-  imagePullTimeoutSeconds: number;
   defaultTimeoutSeconds: number;
   maxTimeoutSeconds: number;
   memoryMb: number;
@@ -994,24 +864,7 @@ export function validateRunCodeStartupConfig(input: {
       'sandbox.network_egress is reserved for a future version and must be false in v1 — refusing to start.',
     );
   }
-  if (input.isolationDriver === 'firecracker' && input.platform === 'darwin') {
-    throw new Error('isolation_driver=firecracker is Linux+KVM only — refusing to start on darwin.');
-  }
-  if (input.isolationDriver === 'firecracker') {
-    throw new Error(
-      'isolation_driver=firecracker is configured but the Firecracker driver is not implemented in this build (parked until /dev/kvm is confirmed on the target host) — refusing to start.',
-    );
-  }
-  // Dormant (blank image): the digest pin is not checked — Docker is required
-  // only when run_code executes. The numeric bounds below still apply so a
-  // misconfigured install surfaces its mistakes at boot.
-  if (input.imageConfigured && !/^.+@sha256:[0-9a-f]{64}$/.test(input.image)) {
-    throw new Error(
-      `sandbox.image must be a pinned digest reference (<tag>@sha256:<64 hex chars>), got ${JSON.stringify(input.image)} — refusing to start.`,
-    );
-  }
   const bounds: [name: string, value: number][] = [
-    ['image_pull_timeout_seconds', input.imagePullTimeoutSeconds],
     ['default_timeout_seconds', input.defaultTimeoutSeconds],
     ['max_timeout_seconds', input.maxTimeoutSeconds],
     ['memory_mb', input.memoryMb],
@@ -1028,19 +881,9 @@ export function validateRunCodeStartupConfig(input: {
       `sandbox.default_timeout_seconds (${String(input.defaultTimeoutSeconds)}) exceeds sandbox.max_timeout_seconds (${String(input.maxTimeoutSeconds)}) — refusing to start.`,
     );
   }
-  // No pull ever happens while dormant, so the pull-sized tool-call timeout
-  // is only enforced for configured installs.
-  if (input.runCodeToolCallTimeoutMs !== undefined && input.imageConfigured) {
-    const requiredMs = (input.imagePullTimeoutSeconds + input.maxTimeoutSeconds) * 1000;
-    if (input.runCodeToolCallTimeoutMs < requiredMs) {
-      throw new Error(
-        `run_code tool-call timeout (${String(input.runCodeToolCallTimeoutMs)} ms) is below image_pull_timeout_seconds + max_timeout_seconds (${String(requiredMs)} ms) — a first-run image pull could not complete inside the tool-call timeout. Refusing to start.`,
-      );
-    }
-  }
   // A turn that dies before run_code's own deadline would kill a worst-case
-  // run_code call (first-run pull + longest run) from above; the turn ceiling
-  // must cover the run_code bound it no longer shares with every tool.
+  // run_code call from above; the turn ceiling must cover the run_code bound
+  // it no longer shares with every tool.
   if (
     input.serverExecutionTimeoutSeconds !== undefined &&
     input.runCodeToolCallTimeoutMs !== undefined &&

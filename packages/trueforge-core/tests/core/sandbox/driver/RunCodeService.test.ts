@@ -25,26 +25,14 @@ const OK_RESULT: DriverRunResult = {
 };
 
 class FakeDriver implements IsolationDriver {
-  readonly kind = 'docker' as const;
   readiness: DriverReadiness = { ready: true };
   runBehavior: (params: DriverRunParams) => Promise<DriverRunResult> = () => Promise.resolve({ ...OK_RESULT });
   runs: DriverRunParams[] = [];
-  provisionCalls = 0;
   reaped = 0;
   disposed = false;
 
   ensureReady(): Promise<DriverReadiness> {
     return Promise.resolve(this.readiness);
-  }
-
-  provision(input: {
-    signal: AbortSignal | undefined;
-    onProgress: (message: string) => void;
-    timeoutSeconds: number;
-  }): Promise<void> {
-    this.provisionCalls += 1;
-    input.onProgress(`fake pulling (timeout ${String(input.timeoutSeconds)}s)`);
-    return Promise.resolve();
   }
 
   run(params: DriverRunParams): Promise<DriverRunResult> {
@@ -83,8 +71,6 @@ function makeService(driver: FakeDriver, dataDir: string, now?: () => number): R
     diskMb: 1024,
     outputCapKb: 256,
     maxConcurrentRuns: 2,
-    imagePullTimeoutSeconds: 120,
-    harvestGraceMs: 2000,
     logger: makeSilentLogger(),
     now,
     sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
@@ -121,69 +107,16 @@ describe('RunCodeService', () => {
   it('short-circuits on readiness failure before staging anything', async () => {
     driver.readiness = {
       ready: false,
-      error_code: 'image_unavailable',
-      error: `image missing behind ${dataDir}/images`,
+      error_code: 'daemon_unavailable',
+      error: `socket gone behind ${dataDir}/slots`,
     };
     const result = await service.runCode(VALID_INPUT);
     expect(result.status).toBe('failed');
     if (result.status === 'failed') {
-      expect(result.error_code).toBe('image_unavailable');
+      expect(result.error_code).toBe('daemon_unavailable');
       // Host path in the readiness detail is scrubbed.
       expect(result.error).not.toContain(dataDir);
       expect(result.error).toContain('<sandbox>/');
-    }
-    expect(driver.runs).toHaveLength(0);
-  });
-
-  it('fails a dormant install closed at first call time with image_unavailable', async () => {
-    // Blank SANDBOX_IMAGE leaves run_code dormant: the driver's ensureReady
-    // reports image_unavailable (unpinned image, no digest to verify), so the
-    // first runCode call fails closed — no provisioning pull is attempted, no
-    // run is staged, and nothing executes.
-    driver.readiness = {
-      ready: false,
-      error_code: 'image_unavailable',
-      error: `sandbox image '' is not pinned as tag@sha256:<digest> — refusing to run an unpinned image`,
-    };
-    const result = await service.runCode(VALID_INPUT);
-    expect(result.status).toBe('failed');
-    if (result.status === 'failed') {
-      expect(result.error_code).toBe('image_unavailable');
-    } else {
-      throw new Error('expected failure');
-    }
-    expect(driver.provisionCalls).toBe(0);
-    expect(driver.runs).toHaveLength(0);
-  });
-
-  it('maps daemon_unavailable and kvm_unavailable readiness onto daemon_unavailable', async () => {
-    driver.readiness = { ready: false, error_code: 'daemon_unavailable', error: 'socket gone' };
-    const r1 = await service.runCode(VALID_INPUT);
-    expect(r1.status).toBe('failed');
-    if (r1.status === 'failed') {
-      expect(r1.error_code).toBe('daemon_unavailable');
-    }
-    driver.readiness = { ready: false, error_code: 'kvm_unavailable', error: 'no /dev/kvm' };
-    const r2 = await service.runCode(VALID_INPUT);
-    if (r2.status === 'failed') {
-      expect(r2.error_code).toBe('daemon_unavailable');
-      expect(r2.error).toContain('no /dev/kvm');
-    } else {
-      throw new Error('expected failure');
-    }
-  });
-
-  it('maps docker_unavailable readiness onto docker_unavailable with the exact message', async () => {
-    const message =
-      "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
-    driver.readiness = { ready: false, error_code: 'docker_unavailable', error: message };
-    const result = await service.runCode(VALID_INPUT);
-    expect(result.status).toBe('failed');
-    if (result.status === 'failed') {
-      expect(result.error_code).toBe('docker_unavailable');
-      expect(result.error).toBe(message);
-    } else {
-      throw new Error('expected failure');
     }
     expect(driver.runs).toHaveLength(0);
   });
@@ -228,8 +161,6 @@ describe('RunCodeService', () => {
       diskMb: 1024,
       outputCapKb: 256,
       maxConcurrentRuns: 1,
-      imagePullTimeoutSeconds: 120,
-      harvestGraceMs: 2000,
       logger: makeSilentLogger(),
       now: undefined,
       sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
@@ -272,7 +203,6 @@ describe('RunCodeService', () => {
     expect(params.timeoutMs).toBe(30_000);
     expect(params.memoryMb).toBe(512);
     expect(params.diskMb).toBe(1024);
-    expect(params.harvestGraceMs).toBe(2000);
     expect(params.signal).toBeInstanceOf(AbortSignal);
     // Curated env only — the host process env never passes through.
     expect(params.env).toEqual({
@@ -475,16 +405,16 @@ describe('RunCodeService', () => {
     }
   });
 
-  it('propagates driver harvest warnings (e.g. FC pull-before-kill grace)', async () => {
+  it('propagates driver harvest warnings', async () => {
     driver.runBehavior = () =>
       Promise.resolve({
         ...OK_RESULT,
-        harvestWarnings: ['pull-before-kill grace expired with zero bytes pulled'],
+        harvestWarnings: ['a file was skipped'],
       });
     const result = await service.runCode(VALID_INPUT);
     expect(result.status).toBe('ok');
     if (result.status === 'ok') {
-      expect(result.harvest_warnings).toContain('pull-before-kill grace expired with zero bytes pulled');
+      expect(result.harvest_warnings).toContain('a file was skipped');
     }
   });
 
@@ -502,7 +432,6 @@ describe('RunCodeService', () => {
       {
         signal: undefined,
         attachments: [{ name: 'photo.png', bytes: Buffer.from('img') }],
-        onProgress: undefined,
         onHarvestedFiles: undefined,
       },
     );
@@ -540,7 +469,6 @@ describe('RunCodeService', () => {
       {
         signal: undefined,
         attachments: [{ name: 'photo.png', bytes: Buffer.from('x') }],
-        onProgress: undefined,
         onHarvestedFiles: undefined,
       },
     );
@@ -590,7 +518,6 @@ describe('RunCodeService', () => {
     const result = await service.runCode(VALID_INPUT, {
       signal: undefined,
       attachments: undefined,
-      onProgress: undefined,
       onHarvestedFiles: async files => {
         sinkFiles = files;
         // The sink must observe the run root before the finally-block cleanup deletes it.
@@ -616,7 +543,6 @@ describe('RunCodeService', () => {
     const result = await service.runCode(VALID_INPUT, {
       signal: undefined,
       attachments: undefined,
-      onProgress: undefined,
       onHarvestedFiles: async () => {
         throw new Error('disk on fire');
       },
@@ -689,8 +615,6 @@ describe('RunCodeService output truncation', () => {
       diskMb: 1024,
       outputCapKb: 1,
       maxConcurrentRuns: 2,
-      imagePullTimeoutSeconds: 120,
-      harvestGraceMs: 2000,
       logger: makeSilentLogger(),
       now: undefined,
       sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
@@ -725,105 +649,7 @@ describe('RunCodeService lifecycle', () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  it('coalesces concurrent provision calls onto one driver pull', async () => {
-    let progress = 0;
-    await Promise.all([
-      service.provision({
-        signal: undefined,
-        onProgress: () => {
-          progress += 1;
-        },
-      }),
-      service.provision({ signal: undefined, onProgress: undefined }),
-    ]);
-    expect(driver.provisionCalls).toBe(1);
-    expect(progress).toBe(1);
-  });
-
-  it('fans provision progress out to every coalesced caller', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    driver.provision = (input: {
-      signal: AbortSignal | undefined;
-      onProgress: (message: string) => void;
-      timeoutSeconds: number;
-    }): Promise<void> =>
-      gate.then(() => {
-        input.onProgress('layer 1/2');
-        input.onProgress('layer 2/2');
-      });
-    const seenA: string[] = [];
-    const seenB: string[] = [];
-    const pending = Promise.all([
-      service.provision({ signal: undefined, onProgress: m => seenA.push(m) }),
-      service.provision({ signal: undefined, onProgress: m => seenB.push(m) }),
-    ]);
-    // Let both callers join the shared pull before it emits progress.
-    await new Promise(resolve => setTimeout(resolve, 25));
-    release();
-    await pending;
-    expect(seenA).toEqual(['layer 1/2', 'layer 2/2']);
-    expect(seenB).toEqual(['layer 1/2', 'layer 2/2']);
-  });
-
-  it('keeps the shared pull alive when one coalesced caller aborts', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    let aborted = false;
-    driver.provision = (input: {
-      signal: AbortSignal | undefined;
-      onProgress: (message: string) => void;
-      timeoutSeconds: number;
-    }): Promise<void> => {
-      input.signal?.addEventListener('abort', () => {
-        aborted = true;
-      });
-      return gate;
-    };
-    const controllerA = new AbortController();
-    const pendingA = service.provision({ signal: controllerA.signal, onProgress: undefined });
-    const pendingB = service.provision({ signal: undefined, onProgress: undefined });
-    await new Promise(resolve => setTimeout(resolve, 25));
-    controllerA.abort();
-    await new Promise(resolve => setTimeout(resolve, 25));
-    // A left, but B is still waiting: the pull must not have been aborted.
-    expect(aborted).toBe(false);
-    release();
-    await expect(pendingA).resolves.toBeUndefined();
-    await expect(pendingB).resolves.toBeUndefined();
-  });
-
-  it('aborts the shared pull when every coalesced caller has left', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    let aborted = false;
-    driver.provision = (input: {
-      signal: AbortSignal | undefined;
-      onProgress: (message: string) => void;
-      timeoutSeconds: number;
-    }): Promise<void> => {
-      input.signal?.addEventListener('abort', () => {
-        aborted = true;
-        release();
-      });
-      return gate;
-    };
-    const controller = new AbortController();
-    const pending = service.provision({ signal: controller.signal, onProgress: undefined });
-    await new Promise(resolve => setTimeout(resolve, 25));
-    controller.abort();
-    await pending;
-    expect(aborted).toBe(true);
-  });
-
-  it('passes readiness through and exposes the driver kind', async () => {
-    expect(service.driverKind).toBe('docker');
+  it('passes readiness through', async () => {
     await expect(service.ensureReady()).resolves.toEqual({ ready: true });
   });
 
@@ -931,11 +757,6 @@ describe('RunCodeService lifecycle', () => {
 describe('validateRunCodeStartupConfig', () => {
   const base = {
     networkEgress: false,
-    isolationDriver: 'docker' as const,
-    platform: 'linux' as NodeJS.Platform,
-    image: `sandbox:1.0.0@sha256:${'a'.repeat(64)}`,
-    imageConfigured: true,
-    imagePullTimeoutSeconds: 120,
     defaultTimeoutSeconds: 120,
     maxTimeoutSeconds: 600,
     memoryMb: 512,
@@ -957,24 +778,6 @@ describe('validateRunCodeStartupConfig', () => {
     }).toThrow(/network_egress/);
   });
 
-  it('rejects firecracker on darwin', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, isolationDriver: 'firecracker', platform: 'darwin' });
-    }).toThrow(/Linux\+KVM/);
-  });
-
-  it('refuses firecracker on linux: driver not implemented in this build', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, isolationDriver: 'firecracker', platform: 'linux' });
-    }).toThrow(/not implemented in this build/);
-  });
-
-  it('rejects an image that is not a pinned digest reference', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, image: 'sandbox:latest' });
-    }).toThrow(/pinned digest reference/);
-  });
-
   it('rejects non-positive bounds', () => {
     expect(() => {
       validateRunCodeStartupConfig({ ...base, memoryMb: 0 });
@@ -985,12 +788,6 @@ describe('validateRunCodeStartupConfig', () => {
     expect(() => {
       validateRunCodeStartupConfig({ ...base, defaultTimeoutSeconds: 900 });
     }).toThrow(/exceeds sandbox.max_timeout_seconds/);
-  });
-
-  it('rejects a run_code tool-call timeout below pull + run budget', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, runCodeToolCallTimeoutMs: 1000 });
-    }).toThrow(/below image_pull_timeout_seconds/);
   });
 
   it('allows an absent run_code tool-call timeout', () => {
@@ -1008,26 +805,6 @@ describe('validateRunCodeStartupConfig', () => {
   it('E4: allows an absent turn deadline', () => {
     expect(() => {
       validateRunCodeStartupConfig({ ...base, serverExecutionTimeoutSeconds: undefined });
-    }).not.toThrow();
-  });
-
-  it('S2: dormant installs (blank image) boot without a digest pin or pull-sized timeout', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, image: '', imageConfigured: false, runCodeToolCallTimeoutMs: 1000 });
-    }).not.toThrow();
-  });
-
-  it('S2: dormant installs still fail closed on bad numeric bounds', () => {
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, image: '', imageConfigured: false, memoryMb: 0 });
-    }).toThrow(/memory_mb/);
-  });
-
-  it('S2: a non-blank image without imageConfigured still skips the pin check', () => {
-    // imageConfigured is the single source of truth for "configured"; the
-    // string content alone does not opt in.
-    expect(() => {
-      validateRunCodeStartupConfig({ ...base, image: 'sandbox:latest', imageConfigured: false });
     }).not.toThrow();
   });
 });

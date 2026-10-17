@@ -15,9 +15,8 @@ describe('app data dir', () => {
     expect(expected).toMatch(/trueforge-unit$/);
   });
 
-  it('roots the sandbox runs, state and git bridge directories in one place', () => {
+  it('roots the sandbox runs and git bridge directories in one place', () => {
     const root = path.dirname(configuration.SANDBOX_RUNS_DIR);
-    expect(configuration.SANDBOX_STATE_DIR).toBe(path.join(root, 'sandbox-state'));
     expect(configuration.SANDBOX_GIT_BRIDGE_DIR).toBe(path.join(root, 'git-bridge'));
   });
 });

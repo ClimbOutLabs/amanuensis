@@ -44,7 +44,6 @@ ALLOWLIST = [
     ("Email address", "example"),   # example.com etc.
     ("Email address", "example.com"),
     ("Email address", "test.com"),
-    ("Generic secret assignment", "build-sandbox-image.sh"),  # shell var fetching Docker token at runtime
 ]
 
 # Content allowlist: (pattern_name, content_substring) - known false positives by line content

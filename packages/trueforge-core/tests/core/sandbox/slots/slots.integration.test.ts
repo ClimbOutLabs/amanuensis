@@ -55,8 +55,6 @@ describe('sandbox slots (live agents)', () => {
       diskMb: 200,
       outputCapKb: 256,
       maxConcurrentRuns: 4,
-      imagePullTimeoutSeconds: 10,
-      harvestGraceMs: 0,
       logger: makeSilentLogger(),
       now: undefined,
       sleepMs: undefined,

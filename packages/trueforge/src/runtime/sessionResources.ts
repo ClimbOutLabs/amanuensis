@@ -1,7 +1,6 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
 import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import {
-  DockerDriver,
   McpConnectionError,
   RunCodeService,
   Sandbox,
@@ -624,46 +623,31 @@ export async function resolveSandboxProvider({
 /**
  * Builds a Sandbox for one turn from a resolved provider and skill mounts.
  */
-/** Process-wide cap on concurrent run_code container executions. */
+/** Process-wide cap on concurrent run_code executions. */
 const RUN_CODE_MAX_CONCURRENT_RUNS = 4;
 
 let sharedRunCodeService: RunCodeService | undefined;
 
 /**
  * Process-shared run_code backend. One instance per process: the concurrency
- * semaphore and the stale-container reaper are process-wide resources, and the
- * Docker driver is stateless across turns (per-run containers). Built lazily on
- * the first turn that needs it; the isolation config is validated fail-closed
- * at startup, so construction here only fails on unexpected driver errors.
+ * semaphore and the stale-run reaper are process-wide resources. Built lazily on
+ * the first turn that needs it. Undefined unless the sandbox slots are on, since
+ * slots are the only place run_code can run.
  * Keeps the first caller's logger for the service lifetime.
  */
-export function getSharedRunCodeService(logger: Logger): RunCodeService {
+export function getSharedRunCodeService(logger: Logger): RunCodeService | undefined {
+  if (!slotsBackendEnabled()) {
+    return undefined;
+  }
   if (sharedRunCodeService === undefined) {
-    if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
-      throw new Error(
-        `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
-      );
-    }
     const runCodeLogger = logger.child({ module: 'run-code' });
-    const driver = slotsBackendEnabled()
-      ? new SlotDriver({ socketPaths: slotSocketPaths(), logger: runCodeLogger, now: undefined, sleepMs: undefined })
-      : new DockerDriver(
-          {
-            image: configuration.SANDBOX_IMAGE,
-            cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
-            stateDir: configuration.SANDBOX_STATE_DIR,
-            dockerBinary: undefined,
-            cosignBinary: undefined,
-            dockerSocketPath: undefined,
-            dataDir: configuration.SANDBOX_RUNS_DIR,
-            commandTimeoutMs: undefined,
-            createTimeoutMs: undefined,
-            logger: runCodeLogger,
-          },
-          undefined,
-        );
     sharedRunCodeService = new RunCodeService({
-      driver,
+      driver: new SlotDriver({
+        socketPaths: slotSocketPaths(),
+        logger: runCodeLogger,
+        now: undefined,
+        sleepMs: undefined,
+      }),
       dataDir: configuration.SANDBOX_RUNS_DIR,
       defaultTimeoutSeconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
       maxTimeoutSeconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
@@ -671,15 +655,12 @@ export function getSharedRunCodeService(logger: Logger): RunCodeService {
       diskMb: configuration.SANDBOX_DISK_MB,
       outputCapKb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
       maxConcurrentRuns: RUN_CODE_MAX_CONCURRENT_RUNS,
-      imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
-      // Docker ignores the FC pull-before-kill grace.
-      harvestGraceMs: 0,
       logger: runCodeLogger,
       now: undefined,
       sleepMs: undefined,
     });
-    // the singleton owns the stale-container reaper; starting it here (it
-    // is idempotent) covers every construction path, including the lazy
+    // the singleton owns the stale-run reaper; starting it here (it is
+    // idempotent) covers every construction path, including the lazy
     // per-turn path that never went through server startup.
     sharedRunCodeService.startReaper();
   }

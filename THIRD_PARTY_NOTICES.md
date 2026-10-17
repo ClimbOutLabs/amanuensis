@@ -291,13 +291,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ## 3. Image tools: poppler-utils, ffmpeg and bundled codecs (GPL-2.0-or-later)
 
-Three images in this repository add GPL or LGPL software on top of their base images:
+Two images in this repository add GPL or LGPL software on top of their base images:
 
-| Image                                              | Added software                                                                                                           | Pinned in                                                                                                       |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `ops/nightona-sandbox`                             | Debian `poppler-utils`, `ffmpeg`, `tesseract-ocr` (Apache-2.0)                                                           | `POPPLER_UTILS_VERSION`, `FFMPEG_VERSION` in `ops/nightona-sandbox/Dockerfile` (Debian 13 "trixie")             |
-| `packages/trueforge-core/scripts/sandbox-run-code` | Debian `poppler-utils`, `tesseract-ocr` (Apache-2.0)                                                                     | `POPPLER_UTILS_VERSION` in `packages/trueforge-core/scripts/sandbox-run-code/Dockerfile` (Debian 12 "bookworm") |
-| `ops/aman-stt`                                     | PyAV (`av`, BSD-3-Clause), whose Linux wheels bundle FFmpeg libraries plus codec libraries including libx264 and libx265 | `ops/aman-stt/requirements.txt` (hash-pinned `av` version)                                                      |
+| Image                  | Added software                                                                                                           | Pinned in                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `ops/nightona-sandbox` | Debian `poppler-utils`, `ffmpeg`, `tesseract-ocr` (Apache-2.0)                                                           | `POPPLER_UTILS_VERSION`, `FFMPEG_VERSION` in `ops/nightona-sandbox/Dockerfile` (Debian 13 "trixie") |
+| `ops/aman-stt`         | PyAV (`av`, BSD-3-Clause), whose Linux wheels bundle FFmpeg libraries plus codec libraries including libx264 and libx265 | `ops/aman-stt/requirements.txt` (hash-pinned `av` version)                                          |
 
 The other Dockerfiles (`Dockerfile`, `Dockerfile.dev`, `mcp/gmail/Dockerfile`, `ops/prompt-guard`, `benchmark/Dockerfile`) install no additional GPL or LGPL system packages. Every image built on a Debian-based base image (`node`, `python`, the Nightona base) also contains that distribution's own packages (for example `bash`, `coreutils`, glibc), each under its own license; their copyright files are in `/usr/share/doc/<package>/copyright` inside the image.
 

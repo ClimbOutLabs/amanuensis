@@ -68,16 +68,12 @@ const expectedMemoryDefaults = {
 
 /** The resolved SANDBOX_* settings, as the capability reports them for every caller. */
 const expectedSandboxIsolation = {
-  isolation_driver: configuration.SANDBOX_ISOLATION_DRIVER,
-  image: configuration.SANDBOX_IMAGE,
   default_timeout_seconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
   max_timeout_seconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
   memory_mb: configuration.SANDBOX_MEMORY_MB,
   disk_mb: configuration.SANDBOX_DISK_MB,
   stdout_stderr_cap_kb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
-  image_pull_timeout_seconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
   network_egress: configuration.SANDBOX_NETWORK_EGRESS,
-  cosign_key_configured: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() !== '',
 };
 
 /**

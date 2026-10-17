@@ -56,17 +56,8 @@ export function errorTextForCode(input: { error_code: RunCodeErrorCode; detail: 
       );
     case 'output_exceeded':
       return `Output exceeded the transport bound${detail}. Narrow what the code prints.`;
-    case 'image_unavailable':
-      return `The sandbox image is unavailable${detail}.`;
     case 'daemon_unavailable':
       return `The sandbox backend is unavailable${detail}.`;
-    case 'docker_unavailable':
-      // The detail carries the complete user-facing message (the driver sets
-      // the spec's exact wording); surface it unchanged. The fallback covers
-      // a driver that reports the code without detail, which never happens.
-      return input.detail !== undefined && input.detail !== ''
-        ? input.detail
-        : 'The sandbox backend is unavailable: Docker was not detected on this machine.';
     case 'isolation_refused':
       // The detail carries the complete user-facing message (the driver sets
       // the spec's exact wording); surface it unchanged.

@@ -119,7 +119,6 @@ describe('SlotDriver', () => {
       env: {},
       sandboxIdentity: { uid: 1, gid: 1, chownRunDirs: false },
       signal: undefined,
-      harvestGraceMs: 0,
     };
   }
 
@@ -254,11 +253,6 @@ describe('SlotDriver', () => {
     const { driver } = await driverFor([garbage]);
     const result = await driver.run(await params());
     expect(result.terminatedBy).toBe('internal');
-  });
-
-  test('provision refuses and points at the repair command', async () => {
-    const { driver } = await driverFor([healthy]);
-    await expect(driver.provision()).rejects.toThrow('aman doctor sandbox --fix');
   });
 });
 

@@ -99,8 +99,6 @@ interface SlotHealth {
  * and results come back in the reply.
  */
 export class SlotDriver implements IsolationDriver {
-  readonly kind = 'slots' as const;
-
   private readonly clients: SlotClient[];
   private readonly logger: Logger;
   private readonly now: () => number;
@@ -143,12 +141,6 @@ export class SlotDriver implements IsolationDriver {
       };
     }
     return { ready: false, error_code: 'slots_unavailable', error: SLOT_NOT_READY_MESSAGE, verbatim: true };
-  }
-
-  provision(): Promise<void> {
-    return Promise.reject(
-      new Error(`Sandbox slots are prepared outside the app. Run \`${SLOT_FIX_COMMAND}\`, then check again.`),
-    );
   }
 
   async run(params: DriverRunParams): Promise<DriverRunResult> {
