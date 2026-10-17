@@ -59,13 +59,18 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('First page to read (1-based), in a PDF or Word file. Defaults to 1.'),
     page_end: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe('Last PDF page to read (inclusive). Defaults to a full window past page_start.'),
+      .describe('Last page to read (inclusive), in a PDF or Word file. Defaults to a full window past page_start.'),
   })
   .strict()
   .refine(data => data.page_end === undefined || data.page_start === undefined || data.page_end >= data.page_start, {
@@ -337,7 +342,7 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
-        'Extract page- and line-addressable text from PDF, Word (.docx, .odt) and image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
+        'Extract page- and line-addressable text from PDF, Word (.docx, .odt) and image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs and Word files, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
       handler: input => this.extractText(input),
     }),

@@ -28,6 +28,11 @@ export function looksLikeZip(bytes: Buffer): boolean {
   return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
+/** The header of an old binary Office file, which is also what a password-protected .docx is saved as. */
+export function looksLikeOle(bytes: Buffer): boolean {
+  return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'));
+}
+
 /** True when a file name's extension is one the sniffed format uses. */
 export function extensionMatchesImage({
   extension,

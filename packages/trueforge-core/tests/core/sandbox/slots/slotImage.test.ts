@@ -42,7 +42,7 @@ describe('the slot image and the server agree on what is deployed', () => {
     }
   });
 
-  test('the guest image reads Word files with python-docx and lxml, installed only from hashed wheels', () => {
+  test('the guest image installs python-docx and lxml only from hashed wheels', () => {
     const requirements = read('ops/sandbox-slot/guest/requirements.txt');
     for (const name of ['python-docx', 'lxml']) {
       expect(requirements).toMatch(new RegExp(`^${name}==\\S+ \\\\\\n\\s+--hash=sha256:`, 'm'));

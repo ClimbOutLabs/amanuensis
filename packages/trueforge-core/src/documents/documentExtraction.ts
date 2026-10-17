@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
-import { extensionMatchesImage, inspectImageHeader, looksLikePdf, looksLikeZip, MAX_OCR_PIXELS } from './fileSniff';
+import { estimateTokens } from '../core/email/gmail/tokenBound';
+import {
+  extensionMatchesImage,
+  inspectImageHeader,
+  looksLikeOle,
+  looksLikePdf,
+  looksLikeZip,
+  MAX_OCR_PIXELS,
+} from './fileSniff';
+import { splitWordPages, WORD_PROBLEMS } from './wordText';
 
 const OCR_IMAGE_EXTENSIONS = new Set(['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 
@@ -36,6 +45,8 @@ export const MAX_CHARS_PER_DOCUMENT = 200_000;
 /** Scanned pages read per call; a long scan continues from the page the result names, so one call cannot hold a sandbox for minutes. */
 export const MAX_OCR_PAGES_PER_CALL = 20;
 export const MAX_TOTAL_DOCUMENT_CHARS = 1_000_000;
+/** Tokens of Word text one tool read shows when no range is asked for, so the result stays under the large-result threshold. */
+const WORD_TOOL_WINDOW_TOKENS = 3000;
 
 export type DocumentExtractionMode = 'text' | 'ocr' | 'mixed';
 
@@ -551,17 +562,26 @@ export async function extractDocumentText(input: {
           }
         }
       } else if (WORD_DOCUMENT_EXTENSIONS.has(extension)) {
-        // A Word file is one continuous page: it has no fixed pages to continue from.
-        const problem =
-          input.pageRange !== undefined
-            ? `page_start/page_end apply to PDF files only; ${file.filename} is not a PDF.`
-            : !looksLikeZip(buffer)
-              ? `${file.filename} is not a valid Word document, so it cannot be read.`
-              : undefined;
-        const pagesAllowed = problem === undefined ? reservePages(1) : 0;
-        if (problem !== undefined) {
-          pushDocument({ ...file, sha256, extraction_mode: null, pages: [], issue: problem }, fileStartedAt);
-        } else if (pagesAllowed === 0) {
+        const rangeStart = input.pageRange?.page_start ?? 1;
+        const rangeEnd = input.pageRange?.page_end ?? rangeStart + MAX_PAGES_PER_DOCUMENT - 1;
+        const adapterMaxPages = Math.min(Math.max(0, rangeEnd - rangeStart + 1), pageBudgetRemaining);
+        const notAWordZip = looksLikeZip(buffer)
+          ? undefined
+          : looksLikeOle(buffer)
+            ? WORD_PROBLEMS.OLD_OR_PROTECTED
+            : WORD_PROBLEMS.NOT_ZIP;
+        if (notAWordZip !== undefined) {
+          pushDocument(
+            {
+              ...file,
+              sha256,
+              extraction_mode: null,
+              pages: [],
+              issue: `Could not extract ${file.filename}: ${notAWordZip}`,
+            },
+            fileStartedAt,
+          );
+        } else if (adapterMaxPages === 0) {
           pushDocument(
             {
               ...file,
@@ -573,19 +593,68 @@ export async function extractDocumentText(input: {
             fileStartedAt,
           );
         } else {
-          const lines = linesFromText((await input.runWordText({ filePath: file.path })).text);
-          pushDocument(
-            {
-              ...file,
-              sha256,
-              extraction_mode: 'text',
-              pages: lines.length > 0 ? [{ page_number: 1, extraction_mode: 'text', lines }] : [],
-              issue: lines.length > 0 ? null : `${file.filename} has no text to read. It may hold only pictures.`,
-            },
-            fileStartedAt,
-          );
+          // A Word file has no fixed pages, so it is cut into pages of whole lines and read in windows like a PDF.
+          const wordPages = splitWordPages((await input.runWordText({ filePath: file.path })).text);
+          if (wordPages.length === 0) {
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: 'text',
+                pages: [],
+                issue: `${file.filename} has no text to read. It may hold only pictures.`,
+              },
+              fileStartedAt,
+            );
+          } else if (rangeStart > wordPages.length) {
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: null,
+                pages: [],
+                issue:
+                  `page_start ${String(rangeStart)} is beyond the end of ${file.filename} ` +
+                  `(${String(wordPages.length)} pages).`,
+              },
+              fileStartedAt,
+            );
+          } else {
+            rangeInfo = { start: rangeStart, total: wordPages.length };
+            let lastPageInRange = Math.min(rangeStart + adapterMaxPages - 1, rangeEnd, wordPages.length);
+            if (input.pageRange?.page_end === undefined && budget.scope === 'session') {
+              // The tool's answer must stay readable, so an open-ended read shows a window and names the next one.
+              let tokens = 0;
+              let page = rangeStart;
+              while (page < lastPageInRange) {
+                tokens += estimateTokens(wordPages[page - 1] ?? '');
+                if (tokens + estimateTokens(wordPages[page] ?? '') > WORD_TOOL_WINDOW_TOKENS) {
+                  break;
+                }
+                page += 1;
+              }
+              lastPageInRange = page;
+            }
+            const pagesAllowed = reservePages(lastPageInRange - rangeStart + 1);
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: 'text',
+                pages: Array.from({ length: pagesAllowed }, (_, index): ExtractedDocumentPage => {
+                  const page_number = rangeStart + index;
+                  return {
+                    page_number,
+                    extraction_mode: 'text',
+                    lines: linesFromText(wordPages[page_number - 1] ?? ''),
+                  };
+                }),
+                issue: null,
+              },
+              fileStartedAt,
+            );
+          }
         }
-        rangeInfo = undefined;
       } else if (OCR_IMAGE_EXTENSIONS.has(extension)) {
         const problem = imageProblem(buffer, extension);
         if (input.pageRange !== undefined) {
@@ -595,7 +664,7 @@ export async function extractDocumentText(input: {
               sha256,
               extraction_mode: null,
               pages: [],
-              issue: `page_start/page_end apply to PDF files only; ${file.filename} is not a PDF.`,
+              issue: `page_start/page_end apply to PDF and Word files only; ${file.filename} is neither.`,
             },
             fileStartedAt,
           );

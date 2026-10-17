@@ -122,16 +122,16 @@ except Exception:
     fail('UNREADABLE')
 `;
 
-const UNREADABLE_MESSAGE = "Aman couldn't read this file. It may be damaged. Ask the sender to send it again.";
+export const UNREADABLE_MESSAGE = "Aman couldn't read this file. It may be damaged. Ask the sender to send it again.";
 
-const WORD_PROBLEMS: Record<string, string> = {
+export const WORD_PROBLEMS = {
   NOT_ZIP: 'The file is damaged or incomplete. Ask the sender to send it again.',
   NOT_TEXT_DOCUMENT: 'The file is not a Word or OpenDocument text document.',
   TOO_BIG: 'The file is too large to read.',
   OLD_OR_PROTECTED:
     'The file is protected with a password or saved in an older Word format. Open it in Word, save it as a .docx without a password, and send it again.',
   UNREADABLE: UNREADABLE_MESSAGE,
-};
+} satisfies Record<string, string>;
 
 /** The document text from the script's output, or the plain reason it could not be read. */
 export function parseWordTextOutput(input: { output: string; marker: string }): string {
@@ -141,7 +141,41 @@ export function parseWordTextOutput(input: { output: string; marker: string }): 
   }
   if (after.startsWith('ERR:')) {
     const code = after.slice(4).split('\n')[0]?.trim() ?? '';
-    throw new Error(WORD_PROBLEMS[code] ?? UNREADABLE_MESSAGE);
+    throw new Error(Object.entries(WORD_PROBLEMS).find(([key]) => key === code)?.[1] ?? UNREADABLE_MESSAGE);
   }
   return after.slice(after.indexOf('\n') + 1);
+}
+
+/** Characters of a Word file shown as one page, about what a printed page holds. */
+const WORD_PAGE_CHARS = 3000;
+
+/** The text cut into pages of whole lines, so page_start and page_end work on a Word file as they do on a PDF. */
+export function splitWordPages(text: string): string[] {
+  const pages: string[] = [];
+  let current: string[] = [];
+  let size = 0;
+  const flush = (): void => {
+    if (current.length > 0) {
+      pages.push(current.join('\n'));
+      current = [];
+      size = 0;
+    }
+  };
+  for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
+    let rest = line;
+    while (rest.length > WORD_PAGE_CHARS) {
+      // Never cut between the two halves of a character outside the basic plane.
+      const cutAt = /[\ud800-\udbff]/.test(rest.charAt(WORD_PAGE_CHARS - 1)) ? WORD_PAGE_CHARS - 1 : WORD_PAGE_CHARS;
+      flush();
+      pages.push(rest.slice(0, cutAt));
+      rest = rest.slice(cutAt);
+    }
+    if (size + rest.length + 1 > WORD_PAGE_CHARS) {
+      flush();
+    }
+    current.push(rest);
+    size += rest.length + 1;
+  }
+  flush();
+  return pages.filter(page => page.trim().length > 0);
 }
