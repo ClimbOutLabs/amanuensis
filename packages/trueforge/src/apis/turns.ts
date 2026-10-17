@@ -293,7 +293,7 @@ export type BeginTurnExecutionDeps = Pick<
   memorySettings?: MemoryProviderSettings | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
-  /** From CreateTurnRequest.client_timezone; absent for callers with no HTTP client (e.g. schedule run-now). */
+  /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
 };
 

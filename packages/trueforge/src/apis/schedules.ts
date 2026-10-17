@@ -166,6 +166,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       logger: deps.logger,
+      // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
+      clientTimezone: item.schedule.manifest.timezone,
     },
   });
 }

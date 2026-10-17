@@ -1,7 +1,7 @@
+import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
-import { isValidTimeZone } from './calendar';
 import type { DemoSeedSession } from './session';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
@@ -86,7 +86,7 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
       throw new UsageError('--user must be a login email without spaces.');
     }
     const timeZone = options.timezone ?? DEFAULT_DEMO_TIME_ZONE;
-    if (!isValidTimeZone(timeZone)) {
+    if (!isValidTimezone(timeZone)) {
       throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Madrid.`);
     }
 
