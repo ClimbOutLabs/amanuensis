@@ -386,4 +386,27 @@ describe('HtmlArtifactPreview egress containment', () => {
     expect(srcdoc).not.toContain('evil.example');
     expect(srcdoc).toContain('after');
   });
+
+  it('does not fetch script files, since scripts never run', async () => {
+    const onFetchRelatedFile = vi.fn().mockResolvedValue(new Blob(['x']));
+    render(
+      <HtmlArtifactPreview
+        content={new Blob(['<html><body><script src="app.js"></script></body></html>'], { type: 'text/html' })}
+        filename="t.html"
+        onFetchRelatedFile={onFetchRelatedFile}
+      />,
+    );
+    await screen.findByTestId('aui-html-preview-iframe');
+    expect(onFetchRelatedFile).not.toHaveBeenCalled();
+  });
+
+  it('says in plain words that a page with scripts will not fully show', async () => {
+    await renderedSrcdoc('<html><body>x<SCRIPT>1</SCRIPT></body></html>');
+    expect(screen.getByText(/uses scripts, which previews don.t run/i)).toBeInTheDocument();
+  });
+
+  it('shows no scripts note for a page without scripts', async () => {
+    await renderedSrcdoc('<html><body>plain <scripting>x</scripting></body></html>');
+    expect(screen.queryByText(/scripts/i)).not.toBeInTheDocument();
+  });
 });

@@ -20,6 +20,8 @@ export type HtmlArtifactPreviewProps = {
   readOnly?: boolean;
 };
 
+const SCRIPT_TAG_RE = /<script[\s/>]/i;
+
 const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
 
 /**
@@ -41,13 +43,13 @@ const WRAPPER_CSP_POLICY = `${CSP_POLICY}; frame-src about:`;
 
 interface AssetToInline {
   originalUrl: string;
-  type: 'stylesheet' | 'script' | 'image';
+  type: 'stylesheet' | 'image';
   selector: string; // CSS selector to find and replace
 }
 
 /**
  * Extracts relative asset references from HTML content.
- * Returns paths to stylesheets, scripts, and images that might need inlining.
+ * Returns paths to stylesheets and images that might need inlining (scripts never run, so they are not fetched).
  */
 function extractRelativeAssets(htmlText: string): AssetToInline[] {
   const assets: AssetToInline[] = [];
@@ -62,19 +64,6 @@ function extractRelativeAssets(htmlText: string): AssetToInline[] {
         originalUrl: href,
         type: 'stylesheet',
         selector: `link[href="${href}"]`,
-      });
-    }
-  }
-
-  // Extract scripts: <script src="...">
-  const scriptRe = /<script\s+[^>]*src=["']([^"']+)["'][^>]*><\/script>/g;
-  while ((match = scriptRe.exec(htmlText)) !== null) {
-    const src = match[1];
-    if (src && !src.startsWith('http://') && !src.startsWith('https://')) {
-      assets.push({
-        originalUrl: src,
-        type: 'script',
-        selector: `script[src="${src}"]`,
       });
     }
   }
@@ -152,15 +141,6 @@ async function inlineAssets(
         const linkPattern = new RegExp(`<link\\s+[^>]*href=["']([^"']*/)?${escapedUrl}["'][^>]*\\s*/?>`, 'gi');
         const styleTag = `<style>${assetText}</style>`;
         modifiedHtml = modifiedHtml.replace(linkPattern, () => styleTag);
-      } else if (asset.type === 'script') {
-        // Replace <script src="..."></script> with <script>...</script>
-        const escapedUrl = escapeRegex(asset.originalUrl);
-        const scriptPattern = new RegExp(
-          `<script\\s+[^>]*src=["']([^"']*/)?${escapedUrl}["'][^>]*>\\s*</script>`,
-          'gi',
-        );
-        const scriptTag = `<script>${assetText}</script>`;
-        modifiedHtml = modifiedHtml.replace(scriptPattern, () => scriptTag);
       } else if (asset.type === 'image') {
         // Convert image to data URI
         const dataUri = await blobToDataUri(assetBlob);
@@ -276,6 +256,7 @@ export function HtmlArtifactPreview({
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [bytesInlined, setBytesInlined] = useState(0);
+  const [usesScripts, setUsesScripts] = useState(false);
 
   // Convert blob to string and inline assets
   useEffect(() => {
@@ -284,6 +265,7 @@ export function HtmlArtifactPreview({
     async function prepare() {
       try {
         let htmlText = await blobToText(content);
+        if (isMounted) setUsesScripts(SCRIPT_TAG_RE.test(htmlText));
 
         htmlText = insertPolicyFirst(stripHttpEquivMetas(htmlText));
 
@@ -398,6 +380,12 @@ export function HtmlArtifactPreview({
           data-testid="aui-html-preview-iframe"
         />
       </div>
+
+      {usesScripts && (
+        <div className="bg-primary-button-bg/5 px-3 py-1 text-xs text-text-secondary">
+          This page uses scripts, which previews don't run, so parts of it may look blank or unfinished.
+        </div>
+      )}
 
       {/* Footer with info */}
       {!readOnly && (
