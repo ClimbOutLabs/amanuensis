@@ -25,6 +25,7 @@ jest.mock('../../../src/runtime/memory/embeddingModel', () => ({
 import {
   PersonaKnowledgeIndexer,
   describeUserFacingFailure,
+  personaLibraryBytes,
   writeKnowledgeBlob,
 } from '../../../src/personaKnowledge/knowledgeIndexer';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
@@ -244,5 +245,43 @@ describe('PersonaKnowledgeIndexer', () => {
     expect(describeUserFacingFailure(error)).not.toContain('/secret/volumes/data');
     // Ordinary failures keep their plain-English rendering.
     expect(describeUserFacingFailure(new Error('boom'))).toContain('boom');
+  });
+});
+
+describe('personaLibraryBytes', () => {
+  it('stops counting space once its documents are deleted', async () => {
+    const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-usage-'));
+    const location = { knowledgeDir, tenantId: 'default', personaId: 'persona-usage' };
+    const { dbPath } = personaKnowledgeLocation(location);
+    const repo = openPersonaKnowledgeRepository({ dbPath, dimensions: 384 });
+    try {
+      const documentIds: string[] = [];
+      for (let index = 0; index < 4; index += 1) {
+        const document = repo.createDocument({
+          title: `Doc ${String(index)}`,
+          titleExplicit: true,
+          source_kind: 'text',
+          source_label: 'Pasted text',
+          source_url: null,
+        });
+        repo.setDocumentChunks({
+          documentId: document.id,
+          chunks: Array.from({ length: 250 }, (_, chunk) => ({
+            text: `${String(chunk)} `.padEnd(5000, 'x'),
+            embedding: new Float32Array(384).fill(0.1),
+          })),
+        });
+        documentIds.push(document.id);
+      }
+      const filled = await personaLibraryBytes(location);
+      for (const documentId of documentIds) {
+        repo.deleteDocument({ documentId });
+      }
+      const emptied = await personaLibraryBytes(location);
+      expect(filled).toBeGreaterThan(5_000_000);
+      expect(emptied).toBeLessThan(filled / 10);
+    } finally {
+      repo.close();
+    }
   });
 });

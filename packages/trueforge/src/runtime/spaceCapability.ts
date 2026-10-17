@@ -39,7 +39,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
-import { gmailCapability, sandboxAttachmentStager } from './gmailCapability';
+import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
@@ -1286,30 +1286,31 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     if (isSubAgent) {
       return resolved;
     }
-    const gmail = await this.#gmail(input);
+    const google = await this.#google(input);
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
-        ...(gmail === undefined ? [] : [gmail]),
+        ...(google === undefined ? [] : [google]),
       ],
     };
   }
 
-  /** A store that cannot be read costs the chat its mail tools, never the chat itself. */
-  async #gmail(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+  /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
+  async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
     if (connections === undefined) {
       return undefined;
     }
     try {
-      return await gmailCapability({
+      return await googleCapability({
         fetchImpl: undefined,
         connections,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
+        timeZone: this.clientTimezone,
         sentinel: createSentinelHostContext({
           services: input.sentinel_services,
           tenant_id: input.tenant_id,
@@ -1322,7 +1323,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       });
     } catch (error) {
       this.#space.logger.warn(
-        'Gmail tools not mounted: the Google login could not be read',
+        'Google tools not mounted: the Google login could not be read',
         extractErrorLogFields(error),
       );
       return undefined;

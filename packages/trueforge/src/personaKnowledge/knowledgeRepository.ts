@@ -82,6 +82,8 @@ export interface PersonaKnowledgeRepository {
   setDocumentChunks(input: { documentId: string; chunks: IndexedKnowledgeChunk[] }): void;
   deleteDocument(input: { documentId: string }): void;
   countReadyChunks(): number;
+  /** Bytes the library's live data holds. Space freed by deletes is not counted, though the file keeps it. */
+  usedBytes(): number;
   searchNearest(input: { embedding: Float32Array; limit: number }): KnowledgeSearchHit[];
   close(): void;
 }

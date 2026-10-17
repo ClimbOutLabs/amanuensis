@@ -47,6 +47,7 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { gitHardeningEnv } from '../permissions/gitHardening';
 import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
@@ -110,6 +111,12 @@ import {
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
+import {
+  GIT_INDEX_ENTRIES_COMMAND,
+  parseTrackedWorktreeListing,
+  pathLostBytes,
+  TRACKED_WORKTREE_COMMAND,
+} from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
@@ -777,6 +784,26 @@ function normalizedRepositoryPath(value: string): string {
   return /^[A-Za-z]:\//u.test(withoutTrailingSlash) ? withoutTrailingSlash.toLowerCase() : withoutTrailingSlash;
 }
 
+/**
+ * `git apply` against a throwaway empty repository, so the workspace's own config is never read: a
+ * `.gitattributes` may still name a filter driver, but no driver program is defined to run. Paths
+ * resolve as before, against the toplevel discovered from the cwd when there is one.
+ */
+function buildIsolatedGitApplyCommand(input: { patchPath: string; scratchDir: string; check: boolean }): string {
+  return [
+    '(',
+    'top=$(git rev-parse --show-toplevel 2>/dev/null) || top=',
+    `git_dir=$(mktemp -d ${shellEscape(`${input.scratchDir}/git-apply.XXXXXX`)}) || exit 1`,
+    'git init -q --bare --template= "$git_dir" >/dev/null || { rm -rf "$git_dir"; exit 1; }',
+    'if [ -n "$top" ]; then GIT_WORK_TREE=$top; export GIT_WORK_TREE; else unset GIT_WORK_TREE; fi',
+    `GIT_DIR=$git_dir git apply --recount --unidiff-zero${input.check ? ' --check' : ''} -- ${shellEscape(input.patchPath)}`,
+    'status=$?',
+    'rm -rf "$git_dir"',
+    'exit $status',
+    ')',
+  ].join('\n');
+}
+
 function buildAbnormalHandoffCaptureCommand(input: { artifactPath: string; expectedWorkspaceRoot: string }): string {
   return [
     'env -i PATH="$PATH" HOME=/nonexistent python3 -I -S -E -c',
@@ -958,6 +985,8 @@ export const sandboxApplyPatchSchema = z
         `The diff as line array, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} patch, not both. Preferred: single strings with escaped newlines can mangle hunk headers.`,
       ),
   })
+  // The targets are the patch's own; a path or target argument would only mislead the approval card.
+  .strict()
   .transform((value, ctx) => {
     const { patch_lines: patchLines, ...rest } = value;
     const patch = resolveOrFailLineArrayField({
@@ -2031,27 +2060,41 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * The arguments a call is classified and approved over: structured-edit calls pass through the same
+   * normalisation the dispatch handlers apply, here at proposal time, so the approval card and the
+   * path extraction see exactly the arguments `handleApplyPatch`/`handleReplaceText`/`handleWriteFile`
+   * will act on.
+   */
+  private proposedCall(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): {
+    requestedCwd: string | undefined;
+    cwd: string | undefined;
+    effectiveArguments: Record<string, unknown> | undefined;
+  } {
+    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
+    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    const structuredEditToolName = structuredEditToolNameFor(params.name);
+    if (structuredEditToolName === undefined || params.arguments === undefined) {
+      return { requestedCwd, cwd, effectiveArguments: params.arguments };
+    }
+    const normalization = normalizeStructuredEditArguments({
+      toolName: structuredEditToolName,
+      args: params.arguments,
+      cwd: cwd ?? '',
+      repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
+    });
+    return { requestedCwd, cwd, effectiveArguments: normalization.args };
+  }
+
+  mintCanonicalParams(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): Record<string, unknown> {
+    return toJsonSafeParams(this.proposedCall(params).effectiveArguments ?? {});
+  }
+
   override async toolCallInfo(
     params: Parameters<LocalToolMCP['toolCallInfo']>[0],
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
-    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
-    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
-    // Every structured-edit tool call's arguments pass through the same normalisation the
-    // dispatch handlers apply, here at proposal time, so the approval card (built from `info`
-    // below) and the structured-edit path extraction further down see exactly the arguments
-    // `handleApplyPatch`/`handleReplaceText`/`handleWriteFile` will act on.
-    const structuredEditToolName = structuredEditToolNameFor(params.name);
-    let effectiveArguments = params.arguments;
-    if (structuredEditToolName !== undefined && params.arguments !== undefined) {
-      const normalization = normalizeStructuredEditArguments({
-        toolName: structuredEditToolName,
-        args: params.arguments,
-        cwd: cwd ?? '',
-        repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
-      });
-      effectiveArguments = normalization.args;
-    }
+    const { requestedCwd, cwd, effectiveArguments } = this.proposedCall(params);
     const effectiveParams = { ...params, arguments: effectiveArguments };
     const info = await super.toolCallInfo(effectiveParams, resolveUnderlyingTool);
     const command = commandFromToolArguments(effectiveArguments);
@@ -3563,11 +3606,17 @@ export class Sandbox extends LocalToolMCP {
     sandboxId: string,
     cwd: string | undefined,
   ): Promise<WorkspaceVerificationIdentity | undefined> {
+    const hardeningRoot = this.boundRepository?.workspace_cwd ?? cwd;
+    if (hardeningRoot === undefined) {
+      return undefined;
+    }
+    const env = gitHardeningEnv({ workspaceRoot: hardeningRoot });
     const read = async (input: { command: string; commandCwd: string | undefined }): Promise<string | undefined> => {
       const result = await this.hostExec({
         sandboxId,
         command: input.command,
         cwd: input.commandCwd,
+        env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
       return successfulExec(result) ? result.response.result : undefined;
@@ -3582,14 +3631,8 @@ export class Sandbox extends LocalToolMCP {
       const head = (await read({ command: 'git rev-parse HEAD', commandCwd: workspaceRoot }))?.trim();
       const refs = await read({ command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
       const taggedTrackedPaths = await read({ command: 'git ls-files -v -z', commandCwd: workspaceRoot });
-      const indexDiff = await read({
-        command: 'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --',
-        commandCwd: workspaceRoot,
-      });
-      const trackedWorktreeDiff = await read({
-        command: 'git diff --binary --no-ext-diff --no-textconv --no-color --',
-        commandCwd: workspaceRoot,
-      });
+      const indexEntries = await read({ command: GIT_INDEX_ENTRIES_COMMAND, commandCwd: workspaceRoot });
+      const trackedWorktreeListing = await read({ command: TRACKED_WORKTREE_COMMAND, commandCwd: workspaceRoot });
       const untrackedPathList = await read({
         command: 'git ls-files --others --exclude-standard -z',
         commandCwd: workspaceRoot,
@@ -3600,16 +3643,23 @@ export class Sandbox extends LocalToolMCP {
         refs === undefined ||
         taggedTrackedPaths === undefined ||
         gitIndexHidesTrackedPaths(taggedTrackedPaths) ||
-        indexDiff === undefined ||
-        trackedWorktreeDiff === undefined ||
+        indexEntries === undefined ||
+        trackedWorktreeListing === undefined ||
         untrackedPathList === undefined
       ) {
+        return undefined;
+      }
+      const trackedWorktree = parseTrackedWorktreeListing({ listing: trackedWorktreeListing, indexEntries });
+      if (trackedWorktree === undefined) {
         return undefined;
       }
       const untrackedPaths = untrackedPathList
         .split('\0')
         .filter(path => path.length > 0)
         .sort((left, right) => left.localeCompare(right));
+      if (untrackedPaths.some(pathLostBytes) || new Set(untrackedPaths).size !== untrackedPaths.length) {
+        return undefined;
+      }
       const untrackedFiles: { path: string; objectSha: string }[] = [];
       for (const path of untrackedPaths) {
         const objectSha = (
@@ -3624,8 +3674,8 @@ export class Sandbox extends LocalToolMCP {
         untrackedFiles.push({ path, objectSha });
       }
       const refsSha256 = createHash('sha256').update(refs).digest('hex');
-      const indexSha256 = createHash('sha256').update(indexDiff).digest('hex');
-      const trackedWorktreeSha256 = createHash('sha256').update(trackedWorktreeDiff).digest('hex');
+      const indexSha256 = createHash('sha256').update(indexEntries).digest('hex');
+      const trackedWorktreeSha256 = createHash('sha256').update(JSON.stringify(trackedWorktree)).digest('hex');
       const untrackedSha256 = createHash('sha256').update(JSON.stringify(untrackedFiles)).digest('hex');
       const stateSha256 = createHash('sha256')
         .update(JSON.stringify({ branch, head, refsSha256, indexSha256, trackedWorktreeSha256, untrackedSha256 }))
@@ -3965,6 +4015,11 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Durable workspace coordinator disappeared while a lease was held');
     }
     try {
+      // A refused command must not consume a receipt or record a state observation.
+      const earlyRefusal = await preflight?.();
+      if (earlyRefusal !== undefined) {
+        return { status: 'blocked', reason: earlyRefusal };
+      }
       const before = await this.captureWorkspaceVerificationIdentity(sandboxId, input.cwd);
       if (before === undefined) {
         return {
@@ -5234,7 +5289,8 @@ export class Sandbox extends LocalToolMCP {
     }
     const normalizedPatch = finalNormalizedPatch;
     const normalizedPatchDigest = createHash('sha256').update(normalizedPatch).digest('hex');
-    const patchPath = `${this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '')}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
+    const patchDir = this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '');
+    const patchPath = `${patchDir}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
     await this.provider.uploadFile({
       sandboxId: rawId,
       remotePath: patchPath,
@@ -5267,7 +5323,8 @@ export class Sandbox extends LocalToolMCP {
           // OpenAI-format apply_patch hunk with no removed/context lines) declares a zero-length
           // old side. Without this flag `git apply` silently mis-locates such a hunk — it applies
           // without error, but at the wrong offset — instead of honoring the declared position.
-          command: `git apply --recount --unidiff-zero --check -- ${shellEscape(patchPath)}`,
+          command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: true }),
+          env: gitHardeningEnv({ workspaceRoot }),
           cwd: input.cwd,
         });
         if (!successfulExec(check)) {
@@ -5295,7 +5352,8 @@ export class Sandbox extends LocalToolMCP {
             hostAuthored: true,
             sandboxId: rawId,
             workspaceRoot,
-            command: `git apply --recount --unidiff-zero -- ${shellEscape(patchPath)}`,
+            command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: false }),
+            env: gitHardeningEnv({ workspaceRoot }),
             cwd: input.cwd,
           }),
         );

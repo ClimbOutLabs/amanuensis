@@ -32,3 +32,19 @@ export function resolveCatalogLogoSrc({ src, mode }: { src: string; mode: 'light
   if (mode === 'dark') return toDarkCatalogLogoUrl(src) ?? src;
   return toLightCatalogLogoUrl(src) ?? src;
 }
+
+/**
+ * Same-origin path for a catalog logo, so the app shell never has to allow the host that serves it:
+ * `https://h/a.svg` becomes `<base>catalog-logos/https/h/a.svg`. Non-http(s) values pass through.
+ */
+export function toSameOriginCatalogLogoUrl({ logo, baseUrl }: { logo: string; baseUrl: string }): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(logo);
+  } catch {
+    return logo;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return logo;
+  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return `${base}catalog-logos/${parsed.protocol.slice(0, -1)}/${parsed.host}${parsed.pathname}`;
+}

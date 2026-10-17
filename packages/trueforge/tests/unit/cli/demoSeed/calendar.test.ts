@@ -1,11 +1,6 @@
-import {
-  addDays,
-  clockLabel,
-  dayInZone,
-  isValidTimeZone,
-  isoDay,
-  longDayLabel,
-} from '../../../../src/cli/demoSeed/calendar';
+import { addDays, isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
+import { clockLabel, dayInZone, longDayLabel } from '../../../../src/cli/demoSeed/calendar';
 
 describe('calendar', () => {
   it('reads today in the target zone, not in UTC', () => {
@@ -31,7 +26,7 @@ describe('calendar', () => {
   });
 
   it('validates zone names', () => {
-    expect(isValidTimeZone('Europe/Madrid')).toBe(true);
-    expect(isValidTimeZone('Mars/Olympus')).toBe(false);
+    expect(isValidTimezone('Europe/Madrid')).toBe(true);
+    expect(isValidTimezone('Mars/Olympus')).toBe(false);
   });
 });

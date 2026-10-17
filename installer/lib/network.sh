@@ -252,3 +252,34 @@ network_bind_addresses() { # origin list
     fi
   done < <(printf '%s\n' "$1" | tr ',' '\n')
 }
+
+# On native Linux, Engine 27 and older let other devices on the network reach ports published to 127.0.0.1 only.
+DOCKER_MIN_LINUX_ENGINE_MAJOR=28
+
+# True when Docker runs natively on Linux (not Docker Desktop, not WSL2) with an Engine that publishes loopback-only
+# ports to the whole network. Docker Desktop and WSL2 are unaffected. Arguments: engine version, operating system name.
+docker_engine_leaks_loopback() {
+  local engine=$1 os=$2 major=${1%%.*}
+  [ "$(uname -s)" = Linux ] || return 1
+  case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) return 1 ;; esac
+  case "$os" in *[Dd]ocker\ [Dd]esktop*) return 1 ;; esac
+  case "$major" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$major" -lt "$DOCKER_MIN_LINUX_ENGINE_MAJOR" ]
+}
+
+docker_leaks_loopback_text() {
+  echo "Docker Engine $1 lets other devices on your network reach ports meant for this computer only. Install Docker Engine $DOCKER_MIN_LINUX_ENGINE_MAJOR or newer (install.sh --print-root-steps shows the steps), then run this again."
+}
+
+# True when this computer's hardware names a well-known cloud provider. A cloud network's private addresses are shared
+# with other customers, so they are not a home network. Providers not listed here are not caught.
+network_cloud_vm() {
+  local dir=${AMAN_DMI_DIR:-/sys/class/dmi/id} field text=''
+  for field in sys_vendor product_name board_vendor chassis_asset_tag; do
+    [ -r "$dir/$field" ] && text="$text $(cat "$dir/$field" 2>/dev/null)"
+  done
+  case "$(lowercase "$text")" in
+    *"amazon ec2"* | *"google compute engine"* | *digitalocean* | *hetzner* | *vultr* | *linode* | *akamai* | *openstack* | *oraclecloud* | *"alibaba cloud"* | *"tencent cloud"* | *7783-7084-3265-9085-8269-3286-77*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
