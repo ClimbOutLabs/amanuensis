@@ -48,7 +48,9 @@ async function resolveTavily(connection: Connection): Promise<IToolSet> {
       Promise.resolve({
         url: connection.url,
         headers: connection.headers,
-        search_provider: connection.designated ? { tools: ['tavily_search', 'tavily_extract'] } : undefined,
+        search_provider: connection.designated
+          ? { tools: ['tavily_search', 'tavily_extract'], plumbing_fields: [] }
+          : undefined,
       }),
     mcpRequestTimeoutMs: 1_000,
     mcpConnectTimeoutMs: 1_000,

@@ -53,7 +53,7 @@ function harness(options: { searchWithoutAsking: boolean; secrets?: readonly str
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
     preload: false,
     sentinel: host,
-    searchProvider: { tools: [...TAVILY_SOURCE_TOOLS] },
+    searchProvider: { tools: [...TAVILY_SOURCE_TOOLS], plumbing_fields: [] },
   });
   return { toolSet, audit, sent };
 }
