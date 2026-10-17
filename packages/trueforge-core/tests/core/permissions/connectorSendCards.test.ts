@@ -269,3 +269,70 @@ describe('the owner line for a refused send', () => {
     expect(line).not.toMatch(/card/i);
   });
 });
+
+describe('replies must name every recipient in To', () => {
+  test.each([
+    ['cc only', { threadId: 't1', cc: ['a@example.com'], body: 'ok' }],
+    ['bcc only', { threadId: 't1', bcc: ['a@example.com'], body: 'ok' }],
+    ['an empty to list', { threadId: 't1', to: [], cc: ['a@example.com'], body: 'ok' }],
+    ['an empty to string', { threadId: 't1', to: '', bcc: 'a@example.com', body: 'ok' }],
+    ['a blank to entry', { threadId: 't1', to: ['  '], cc: ['a@example.com'], body: 'ok' }],
+  ])('refuses a reply with %s', async (_label, params) => {
+    expectRefused(await classify(mailCall('reply_to_thread', params)));
+    expectRefused(await classify(mailCall('reply', params)));
+  });
+
+  test('cards a reply whose to is named', async () => {
+    const decision = await classify(
+      mailCall('reply', { threadId: 't1', to: ['a@example.com'], cc: ['b@example.com'], body: 'ok' }),
+    );
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.recipient).toBe('a@example.com, b@example.com');
+  });
+});
+
+describe('hidden sends in other spellings', () => {
+  test.each([
+    ['send_message', { draft: { id: 'd1' }, to: ['shown@example.com'] }],
+    ['send_message', { draftIds: ['d1'], to: ['shown@example.com'] }],
+    ['send_message', { messageDraftId: 'd1', to: ['shown@example.com'] }],
+    ['reply', { messageId: 'm1', replyToAll: true, to: ['a@example.com'] }],
+    ['reply', { messageId: 'm1', reply_to_all: true, to: ['a@example.com'] }],
+    ['reply', { messageId: 'm1', mode: 'reply_all', to: ['a@example.com'] }],
+    ['replyall', { messageId: 'm1', to: ['a@example.com'] }],
+    ['replyAll', { messageId: 'm1', to: ['a@example.com'] }],
+    ['drafts_send', { draftId: 'd1' }],
+    ['send', { draftId: 'd1' }],
+    ['dispatch', { draftId: 'd1' }],
+  ])('%s is refused for %j', async (name, params) => {
+    expectRefused(await classify(mailCall(name, params)));
+  });
+
+  test.each(['drafts_send', 'send', 'dispatch'])(
+    '%s is refused even with first-party read-only hints or a standing grant',
+    async name => {
+      expectRefused(
+        await classify({
+          ...mailCall(name, { draftId: 'd1' }),
+          mcp_first_party: true,
+          mcp_hints: readOnlyClosedWorld,
+        }),
+      );
+      const ctx = makeCtx();
+      await ctx.services.tool_grants.recordToolGrant({
+        tenant_id: 't1',
+        created_by: 'u1',
+        mcp_server_name: 'mail',
+        tool_name: name,
+      });
+      expectRefused(await classifyTier({ ...mailCall(name, { draftId: 'd1' }), mcp_hints: readOnlyClosedWorld }, ctx));
+    },
+  );
+
+  test('reading or deleting a draft is not treated as a send', async () => {
+    const read = await classify({ ...mailCall('get_draft', { draftId: 'd1' }), mcp_hints: readOnlyClosedWorld });
+    expect(read.auto_deny).toBeNull();
+    const flag = await classify(mailCall('send_message', { to: ['a@example.com'], body: 'hi', isDraft: false }));
+    expect(flag.auto_deny).toBeNull();
+  });
+});

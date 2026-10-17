@@ -465,8 +465,8 @@ interface ConnectorCallInput {
 interface ConnectorFamily {
   match: (words: string, params: Record<string, unknown>) => boolean;
   describe: (input: ConnectorCallInput) => string;
-  /** The call sends data to someone; its card must show all of it. `recipient` also needs a named recipient. */
-  sends?: 'content' | 'recipient';
+  /** The call sends data to someone; its card must show all of it. `recipient` also needs a named recipient; `to` needs one in `to`. */
+  sends?: 'content' | 'recipient' | 'to';
   /** Replaces the destination when the params name a more precise one. */
   destination?: (params: Record<string, unknown>) => string | null;
 }
@@ -477,7 +477,7 @@ const FORWARD_KEY_SET = new Set(FORWARD_KEYS.map(normalizeKey));
 function hasForwardAction(params: Record<string, unknown>): boolean {
   return hasArgument({
     value: params,
-    keys: FORWARD_KEY_SET,
+    matchKey: key => FORWARD_KEY_SET.has(key),
     test: field => typeof field === 'string' && field.trim() !== '',
   });
 }
@@ -530,7 +530,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: words => hasPhrase(words, 'reply'),
-    sends: 'recipient',
+    sends: 'to',
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -596,10 +596,11 @@ export interface ExtractionResult {
 }
 
 /** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
-const HIDDEN_SEND_PHRASES = ['reply_all', 'send_draft'];
+const HIDDEN_SEND_PHRASES = ['reply_all', 'replyall', 'reply_to_all', 'replytoall', 'send_draft', 'senddraft'];
+/** Whole words that make a tool a send even when no recipient is named. */
+const SEND_NAME_WORDS = ['send', 'dispatch', 'deliver', 'reply', 'forward', 'publish', 'post', 'submit'];
 
-const DRAFT_KEY_SET = new Set(['draft_id'].map(normalizeKey));
-const REPLY_ALL_KEY_SET = new Set(['reply_all'].map(normalizeKey));
+const REPLY_ALL_KEY_SET = new Set(['reply_all', 'reply_to_all'].map(normalizeKey));
 
 function isTruthyFlag(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -608,38 +609,55 @@ function isTruthyFlag(value: unknown): boolean {
   return value === true || value === 1;
 }
 
-function isPresent(value: unknown): boolean {
-  return value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === '');
+/** A reference to a stored draft: any value except an empty one or a switched-off flag. */
+function isDraftReference(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === 0) {
+    return false;
+  }
+  return !(typeof value === 'string' && ['', 'false', '0'].includes(value.trim().toLowerCase()));
 }
 
-/** True when any argument, at any depth, has a key in `keys` whose value passes `test`. */
+/** A string that names the reply-to-everyone mode, whatever key carries it. */
+function isReplyAllMode(value: unknown): boolean {
+  return typeof value === 'string' && REPLY_ALL_KEY_SET.has(normalizeKey(value));
+}
+
+/** True when any argument, at any depth, has a key (compared by `normalizeKey`) passing `matchKey` and a value passing `test`. */
 function hasArgument(input: {
   value: unknown;
-  keys: Set<string>;
+  matchKey: (normalizedKey: string) => boolean;
   test: (v: unknown) => boolean;
   depth?: number;
 }): boolean {
-  const { value, keys, test, depth = 0 } = input;
+  const { value, matchKey, test, depth = 0 } = input;
   if (Array.isArray(value)) {
     return (
       depth <= NESTED_RECIPIENT_MAX_DEPTH &&
-      value.some(item => hasArgument({ value: item, keys, test, depth: depth + 1 }))
+      value.some(item => hasArgument({ value: item, matchKey, test, depth: depth + 1 }))
     );
   }
   if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
     return false;
   }
   return Object.entries(value).some(([key, field]) =>
-    keys.has(normalizeKey(key)) && test(field) ? true : hasArgument({ value: field, keys, test, depth: depth + 1 }),
+    matchKey(normalizeKey(key)) && test(field) ? true : hasArgument({ value: field, matchKey, test, depth: depth + 1 }),
   );
 }
 
 /** A send that names a stored draft or asks to reply to everyone fills in its audience or text after approval. */
 function hasHiddenSendArgument(params: Record<string, unknown>): boolean {
   return (
-    hasArgument({ value: params, keys: DRAFT_KEY_SET, test: isPresent }) ||
-    hasArgument({ value: params, keys: REPLY_ALL_KEY_SET, test: isTruthyFlag })
+    hasArgument({ value: params, matchKey: key => key.includes('draft'), test: isDraftReference }) ||
+    hasArgument({ value: params, matchKey: key => REPLY_ALL_KEY_SET.has(key), test: isTruthyFlag }) ||
+    hasArgument({ value: params, matchKey: () => true, test: isReplyAllMode })
   );
+}
+
+/** True when the top-level `to` holds at least one non-empty recipient. */
+function namesToRecipient(params: Record<string, unknown>): boolean {
+  return nestedRecipientValues(
+    Object.fromEntries(Object.entries(params).filter(([key]) => normalizeKey(key) === 'to')),
+  ).some(value => value.trim() !== '');
 }
 
 interface IncompleteSend {
@@ -654,6 +672,7 @@ function incompleteSend(input: {
   params: Record<string, unknown>;
   words: string;
   needs_recipient: boolean;
+  needs_to: boolean;
   fields: ExtractedCardFields;
   truncated: boolean;
 }): IncompleteSend | null {
@@ -672,7 +691,10 @@ function incompleteSend(input: {
       owner_message: 'Nothing was sent: it is too long to show you in full. Ask for a shorter message, or split it up.',
     };
   }
-  if (input.needs_recipient && input.fields.recipient === null) {
+  if (
+    (input.needs_recipient && input.fields.recipient === null) ||
+    (input.needs_to && !namesToRecipient(input.params))
+  ) {
     return {
       model_message: 'The card cannot name who receives this. Name each recipient in `to` and try again.',
       owner_message: 'Nothing was sent: it does not say who gets it. Ask the assistant to name each recipient.',
@@ -718,7 +740,12 @@ export function extractCardFields(input: {
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
   const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
-  const sends = externalService || family?.sends !== undefined || recipients.length > 0;
+  const hiddenArgument = hasHiddenSendArgument(input.canonical_params);
+  const sends =
+    externalService ||
+    family?.sends !== undefined ||
+    recipients.length > 0 ||
+    (hiddenArgument && hasPhrase(words, ...SEND_NAME_WORDS));
   const outbound = renderOutboundArguments(input.canonical_params, {
     valueMaxChars: sends ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
   });
@@ -742,6 +769,7 @@ export function extractCardFields(input: {
       params: input.canonical_params,
       words,
       needs_recipient: family?.sends === 'recipient',
+      needs_to: family?.sends === 'to',
       fields,
       truncated: outbound.truncated,
     }),
