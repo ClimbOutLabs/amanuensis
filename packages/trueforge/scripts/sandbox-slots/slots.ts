@@ -167,9 +167,9 @@ const SAFETY_CHECKS: ReadonlyMap<string, { problem: string; fixable: boolean }> 
   ['runsc', { problem: 'the code runner does not start on this computer', fixable: false }],
 ]);
 
-/** The lines `FAIL <check>: <detail>` that the sandbox's own check prints, wherever they sit in tool output. */
+/** The lines `FAIL <check>: <detail>` (or the agent's `attestation FAILED <check>: <detail>`) wherever they sit in tool output. */
 function failedCheckLines(text: string): { name: string; line: string }[] {
-  return Array.from(text.matchAll(/\bFAIL\s+([a-z0-9_]+):[ \t]*([^\n]*)/g), match => ({
+  return Array.from(text.matchAll(/\bFAIL(?:ED)?\s+([a-z0-9_]+):[ \t]*([^\n]*)/g), match => ({
     name: match[1] ?? '',
     line: `${match[1] ?? ''}: ${(match[2] ?? '').trim()}`,
   }));

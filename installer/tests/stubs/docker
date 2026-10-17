@@ -381,6 +381,7 @@ case "$cmd" in
         if [ "$proj" != aman-machine ]; then
           # A host port that some program holds, as Docker words it for a port the compose file publishes.
           for busy in ${STUB_UP_BUSY_PORTS:-}; do
+            if [ -n "${STUB_UP_BUSY_TAG:-}" ] && [ "$img" != "$STUB_UP_BUSY_TAG" ]; then continue; fi
             if grep -q "'[0-9.]*:$busy:" "$file"; then
               echo "Error response from daemon: driver failed programming external connectivity on endpoint ${proj}-loopback-1 (abc): Bind for 127.0.0.1:$busy failed: port is already allocated" >&2
               exit 1

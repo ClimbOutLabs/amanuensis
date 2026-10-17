@@ -378,7 +378,7 @@ plan_build() {
     done
   fi
   if need_new_instance; then
-    if [ -n "$I_ORIGINS" ]; then
+    if origins_reach_the_network "$I_ORIGINS"; then
       plan_instance_with_addresses
     else
       plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
@@ -420,14 +420,20 @@ plan_aman_command() {
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
 # One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
 plan_existing_addresses() { # name
-  local name=$1 hosts port
+  local name=$1 hosts port origins
   port=$(reg_get "$name" app_port)
   if [ "$(instance_address_change "$name")" = close ]; then
     plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
     return 0
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
-  hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
+  origins=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)})
+  # Where Docker opens ports on this computer alone (Mac, Windows), nothing is opened to the network.
+  if ! origins_reach_the_network "$origins"; then
+    plan_add todo "Open instance $name on this computer only" "Docker here opens it on this computer alone, so addresses of your network are not used."
+    return 0
+  fi
+  hosts=$(printf '%s\n' "$origins" | sed "s|http://||g; s|:$port||g; s|,|, |g")
   if [ "$(tls_target "$name")" = local ]; then
     plan_add todo "Serve instance $name over https on your network" \
       "It will answer at: $hosts, with a certificate from an authority Aman makes on this computer. The old plain address sends devices to https." \
@@ -569,8 +575,10 @@ cmd_install() {
 }
 
 install_execute() {
-  local name demo_name='' change recreate ADDRESS_CHANGED=''
+  local name demo_name='' change recreate fresh_home=0 ADDRESS_CHANGED=''
+  [ -e "$AMAN_HOME" ] || fresh_home=1
   ensure_private_dir "$AMAN_HOME"
+  home_claim "$fresh_home"
   lock_acquire
   ensure_private_dir "$STATE_DIR/logs"
   docker_prepare

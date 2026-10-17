@@ -350,6 +350,64 @@ test_removing_the_last_instance_takes_the_machine_project_with_it() {
   sandbox_drop
 }
 
+test_a_purge_leaves_the_project_of_an_instance_named_like_a_sandbox() {
+  t_begin "purging aman-foo does not touch the containers, networks and volumes of the saved instance foo-slots, and new names ending in -slots are refused"
+  sandbox_new
+  install_machine
+  cp "$AMAN_HOME/state/instances/main.conf" "$AMAN_HOME/state/instances/foo-slots.conf"
+  sed -i 's/^name=.*/name=foo-slots/' "$AMAN_HOME/state/instances/foo-slots.conf"
+  printf '%s\n' "aman-foo-slots c-theirs" "aman-aman-foo c-ours" >"$SB_STATE/leftover_containers"
+  printf '%s\n' "aman-foo-slots net-theirs" "aman-aman-foo net-ours" >"$SB_STATE/leftover_networks"
+  printf '%s\n' aman_foo-slots_data >>"$SB_STATE/volumes"
+  printf '%s\n' "aman_foo-slots_data aman-foo-slots" >>"$SB_STATE/volume_projects"
+  run_install instance remove aman-foo --purge-data --confirm-name aman-foo
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-ours"
+  assert_not_contains "$(cat "$SB_STATE/containers_removed")" "c-theirs"
+  assert_contains "$(cat "$SB_STATE/networks_removed")" "net-ours"
+  assert_not_contains "$(cat "$SB_STATE/networks_removed")" "net-theirs"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_foo-slots_data"
+  assert_file "$AMAN_HOME/state/instances/foo-slots.conf"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add bar-slots --yes --password-stdin --email bar@example.invalid
+  clear_input
+  assert_rc 2
+  assert_flat_contains "$ERR" "must not end with -slots"
+  sandbox_drop
+}
+
+test_removing_the_last_instance_keeps_files_that_are_not_the_installers() {
+  t_begin "purging the last instance under a shared --home such as ~/.local deletes only what the installer wrote there"
+  sandbox_new
+  AMAN_HOME="$SB/user/.local"
+  mkdir -p "$AMAN_HOME/bin" "$AMAN_HOME/lib" "$AMAN_HOME/state/otherapp" "$AMAN_HOME/share"
+  : >"$AMAN_HOME/bin/foreign" && : >"$AMAN_HOME/lib/foreign" && : >"$AMAN_HOME/state/otherapp/data" && : >"$AMAN_HOME/share/keep"
+  install_machine
+  assert_file "$AMAN_HOME/bin/aman"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_file "$AMAN_HOME/bin/foreign"
+  assert_file "$AMAN_HOME/lib/foreign"
+  assert_file "$AMAN_HOME/state/otherapp/data"
+  assert_file "$AMAN_HOME/share/keep"
+  assert_no_path "$AMAN_HOME/bin/aman"
+  assert_no_path "$AMAN_HOME/lib/ui.sh"
+  assert_no_path "$AMAN_HOME/state/instances"
+  sandbox_drop
+  sandbox_new
+  AMAN_HOME="$SB/user/."
+  mkdir -p "$SB/user/bin" "$SB/user/lib"
+  : >"$SB/user/bin/mine" && : >"$SB/user/lib/mine"
+  install_machine
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_file "$SB/user/bin/mine"
+  assert_file "$SB/user/lib/mine"
+  assert_file "$SB/user/state/install.log"
+  sandbox_drop
+}
+
 test_removing_one_of_two_instances_leaves_the_machine_project() {
   t_begin "purging one of two instances leaves the shared project running"
   sandbox_new
@@ -610,6 +668,8 @@ test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
 test_purge_removes_leftovers_that_were_never_saved
 test_removing_the_last_instance_takes_the_machine_project_with_it
+test_a_purge_leaves_the_project_of_an_instance_named_like_a_sandbox
+test_removing_the_last_instance_keeps_files_that_are_not_the_installers
 test_removing_one_of_two_instances_leaves_the_machine_project
 test_a_failed_first_install_names_its_cleanup
 test_name_validation

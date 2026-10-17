@@ -241,6 +241,8 @@ name_problem() {
     echo "\"$v\" is longer than 24 characters."
   elif [[ $v == *- ]]; then
     echo "\"$v\" must not end with a hyphen."
+  elif [[ $v == *-slots ]]; then
+    echo "\"$v\" must not end with -slots; that ending is used for the run-code sandbox of another instance."
   elif ! valid_name "$v"; then
     echo "\"$v\" is not a usable name; use lowercase letters, digits or hyphens, starting with a letter."
   fi

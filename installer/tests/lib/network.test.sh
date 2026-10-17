@@ -232,7 +232,10 @@ test_shared_address_space_is_not_a_home_network() {
   sandbox_new_plain
   run_install --dry-run --yes --email owner@example.invalid --address 100.101.102.103
   assert_rc 2
-  assert_flat_contains "$ERR" "100.64.0.0/10, which internet providers and VPNs use, not your home network"
+  assert_flat_contains "$ERR" "is not an address on your home network. Use an address of this computer on your home network, such as 192.168.1.20, or a name ending in .local."
+  assert_not_contains "$ERR" "100.64" "no address range in the message"
+  run_install --help
+  assert_not_contains "$OUT" "100.64" "no address range in the help"
   run_install --dry-run --yes --email owner@example.invalid --address spark.example.ts.net
   assert_rc 2
   sandbox_drop
@@ -524,6 +527,27 @@ test_docker_in_a_virtual_machine_publishes_on_127_0_0_1_only() {
   done
 }
 
+test_the_plan_does_not_promise_the_network_where_docker_opens_only_this_computer() {
+  t_begin "on a Mac or WSL2 the plan for a new instance and for a re-run never says the port is open to the network"
+  sandbox_new_plain
+  fixture_full_machine
+  fixture_uname Darwin arm64
+  run_install --dry-run --yes --email owner@example.invalid
+  assert_rc 0
+  assert_not_contains "$OUT" "open to your network"
+  assert_flat_contains "$OUT" "The app opens at http://127.0.0.1:8791 (port 8791 on this computer)"
+  sandbox_drop
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8791:8790'"
+  fixture_uname Darwin arm64
+  run_install --dry-run --yes --tls off
+  assert_not_contains "$OUT" "open to your network"
+  assert_flat_contains "$OUT" "Open instance main on this computer only"
+  sandbox_drop
+}
+
 test_a_linux_host_keeps_the_home_network_addresses() {
   t_begin "on Linux with a native Docker the app is still published on 127.0.0.1 and each home-network address, and no line says otherwise"
   sandbox_new_plain
@@ -548,6 +572,7 @@ test_an_instance_on_a_virtual_machine_host_is_brought_back_to_127_0_0_1() {
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791"
   assert_flat_contains "$OUT" "opens only on this computer"
+  assert_not_contains "$OUT" "now opens on this computer and your home network" "a computer that opens on itself alone is not told it opens on the network"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
   sandbox_drop
 }
@@ -571,6 +596,24 @@ test_an_instance_that_was_opened_on_tailscale_drops_it() {
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "ts.net"
   run_install --yes --tls off
   assert_flat_contains "$OUT" "Nothing to do."
+  sandbox_drop
+}
+
+test_an_upgrade_drops_addresses_the_new_version_refuses() {
+  t_begin "aman upgrade removes an old 100.64.0.0/10 address or .ts.net name before it renders, so the new version can start"
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  local conf="$AMAN_HOME/state/instances/main.conf" ts="http://100.101.102.103:8791,http://spark.example.ts.net:8791"
+  sed -i "s|^origins=.*|origins=$(reg_value main origins),$ts|; s|^extra_hosts=.*|extra_hosts=nas.local spark.example.ts.net 100.101.102.103|" "$conf"
+  repo_commit_change "app change"
+  run_install upgrade --force
+  assert_rc 0
+  assert_not_contains "$(reg_value main origins)" "100.101.102.103"
+  assert_not_contains "$(reg_value main origins)" "ts.net"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" "100.101.102.103"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" "ts.net"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.101.102.103"
   sandbox_drop
 }
 
@@ -604,9 +647,11 @@ test_a_name_only_address_is_not_published_on
 test_virtual_and_vpn_links_are_never_opened_on
 test_numeric_looking_names_are_not_names
 test_docker_in_a_virtual_machine_publishes_on_127_0_0_1_only
+test_the_plan_does_not_promise_the_network_where_docker_opens_only_this_computer
 test_a_linux_host_keeps_the_home_network_addresses
 test_an_instance_on_a_virtual_machine_host_is_brought_back_to_127_0_0_1
 test_an_instance_that_was_opened_on_tailscale_drops_it
+test_an_upgrade_drops_addresses_the_new_version_refuses
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
 test_a_legacy_instance_stays_local_with_local_only

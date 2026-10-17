@@ -7,6 +7,41 @@ set -euo pipefail
 app_tag() { sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$1"; }
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$AMAN_HOME/instances/$1/compose.yaml" | head -n 1; }
 
+test_an_upgrade_never_moves_a_port_from_a_record_made_before_the_flag() {
+  t_begin "an instance saved before ports were marked as chosen keeps its --port when the upgrade finds it busy"
+  sandbox_new
+  INSTALL_EXTRA=(--port 8791)
+  install_machine
+  assert_rc 0
+  sed -i '/^app_port_chosen=/d; /^login_port_chosen=/d' "$AMAN_HOME/state/instances/main.conf"
+  repo_commit_change "app change"
+  STUB_UP_BUSY_PORTS="8791"
+  run_install upgrade --force
+  assert_rc 2
+  assert_not_contains "$OUT$ERR" "was busy, so Aman uses"
+  assert_eq "$(sed -n 's/^app_port=//p' "$AMAN_HOME/state/instances/main.conf")" 8791 "the port is kept"
+  sandbox_drop
+}
+
+test_a_busy_port_during_a_rollback_keeps_the_previous_images() {
+  t_begin "a port that is busy while the previous version comes back moves the port but does not bring back the failed images"
+  sandbox_new
+  install_machine
+  local old
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  repo_commit_change "bad app change"
+  STUB_UP_FAIL_UNLESS_TAG=$old
+  STUB_UP_BUSY_TAG=$old
+  STUB_UP_BUSY_PORTS="8791"
+  run_install upgrade
+  assert_rc 1
+  assert_contains "$OUT" "Rolled back to the previous version"
+  assert_flat_contains "$OUT" "Port 8791 was busy, so Aman uses 8792."
+  assert_eq "$(compose_image main)" "$old" "compose still points at the previous image"
+  assert_eq "$(cat "$SB_STATE/up/aman-main")" "$old" "stack running on the previous image"
+  sandbox_drop
+}
+
 test_noop_when_current() {
   t_begin "upgrade with nothing new says so and rebuilds nothing"
   sandbox_new
@@ -331,5 +366,7 @@ test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
+test_an_upgrade_never_moves_a_port_from_a_record_made_before_the_flag
+test_a_busy_port_during_a_rollback_keeps_the_previous_images
 test_doctor_failure_blocks_unless_forced
 tests_finish

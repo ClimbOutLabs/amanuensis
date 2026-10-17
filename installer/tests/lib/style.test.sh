@@ -9,6 +9,15 @@ ESC=$'\033'
 PASSWORD_ANSWERS="Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
 
+test_the_docs_send_both_names_to_the_app_port() {
+  t_begin "the Mac and Windows guide forwards sign-in to the app port, never to the sign-in server, and uses no address range"
+  local docs
+  docs=$(cat "$(dirname "${BASH_SOURCE[0]}")/../../../docs/install.mdx")
+  assert_not_contains "$docs" "127.0.0.1:5556" "sign-in is not sent to the login server itself"
+  assert_contains "$docs" "forward both the app name and the sign-in name to"
+  assert_not_contains "$docs" "100.64" "no address range in the guide"
+}
+
 test_prompts_state_their_rule() {
   t_begin "each question shows the rule for its answer, with an example, and Enter keeps the default"
   sandbox_new
@@ -372,6 +381,7 @@ test_the_closing_block_and_warnings() {
   sandbox_drop
 }
 
+test_the_docs_send_both_names_to_the_app_port
 test_prompts_state_their_rule
 test_an_invalid_name_asks_again_with_the_reason
 test_each_kind_of_bad_name_gets_its_own_reason

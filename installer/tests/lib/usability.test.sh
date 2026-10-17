@@ -153,7 +153,7 @@ Repeat the password=>$SENTINEL_PASSWORD"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
   assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"
   assert_not_contains "$OUT" "  Login:"
-  assert_flat_contains "$OUT" "on port 8791 at: 127.0.0.1, localhost"
+  assert_flat_contains "$OUT" "port 8791 on this computer"
   sandbox_drop
 }
 

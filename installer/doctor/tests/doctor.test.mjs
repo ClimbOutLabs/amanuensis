@@ -1264,15 +1264,21 @@ describe('network address check', () => {
     assert.match(ports.detail, /this computer only/);
   });
 
-  it('flags an old record that still lists Tailscale addresses, and points to install.sh', () => {
+  it('flags an old record that still lists an address or name Aman no longer opens at, and points to install.sh', () => {
     make();
     world.network('main', {
       origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791',
     });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
-    assert.match(check.detail, /Tailscale address \(100\.101\.102\.103\)/);
+    assert.match(check.detail, /lists an address Aman no longer opens at \(100\.101\.102\.103\)/);
+    assert.doesNotMatch(check.detail, /Tailscale/);
     assert.match(check.fix, /install\.sh/);
+    assert.match(check.fix, /remove it/);
+    world.network('main', { origins: 'http://127.0.0.1:8791,http://localhost:8791,http://spark.example.ts.net:8791' });
+    const named = find(world.json().doc.instances.main, 'network');
+    assert.equal(named.state, 'warn');
+    assert.match(named.detail, /\(spark\.example\.ts\.net\)/);
   });
 
   for (const [label, out] of [

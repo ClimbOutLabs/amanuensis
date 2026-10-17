@@ -330,7 +330,7 @@ describe('runSandboxSlots', () => {
         return { exitCode: 1, stderr: 'container is unhealthy' };
       }
       if (text.includes(' logs ')) {
-        return { stdout: 'sandbox-2  | FAIL network: interfaces: erspan0 gre0 lo' };
+        return { stdout: 'sandbox-2  | 2026/10/17 01:02:03 attestation FAILED network: interfaces: erspan0 gre0 lo' };
       }
       return undefined;
     });

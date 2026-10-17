@@ -172,7 +172,7 @@ instance_port_flags() { # name
 # Moves a local instance to another port and rewrites everything that names the old one: its record, its settings, its
 # compose file, its sign-in settings and, with https, the front end's. The data and the secrets are not touched.
 instance_move_port() { # name app|login|tls new_port
-  local name=$1 kind=$2 new=$3 env app login origins
+  local name=$1 kind=$2 new=$3 env app login origins compose
   env="$(instance_dir "$name")/.env"
   reg_set "$name" "${kind}_port" "$new"
   app=$(reg_get "$name" app_port)
@@ -187,7 +187,9 @@ instance_move_port() { # name app|login|tls new_port
     reg_set "$name" origins "$origins"
     env_managed_set "$env" ALLOWED_ORIGINS "$origins"
   fi
-  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  # Keep the images already rendered: a move during an upgrade rollback must not bring the failed release back.
+  compose="$(instance_dir "$name")/compose.yaml"
+  instance_render "$name" "$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$compose" | head -n 1)" "$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$compose" | tail -n 1)"
   log_event "instance $name port $kind moved to $new"
 }
 
@@ -208,7 +210,8 @@ instance_retry_busy_port() { # name
     "$(reg_get "$name" tls_port)") kind=tls ;;
     *) return 1 ;;
   esac
-  if [ "$kind" != tls ] && [ "$(reg_get "$name" "${kind}_port_chosen")" = 1 ]; then return 1; fi
+  # Records saved before this key existed have none; only a port the installer picked itself (0) may move.
+  if [ "$kind" != tls ] && [ "$(reg_get "$name" "${kind}_port_chosen")" != 0 ]; then return 1; fi
   new=$(pick_port $((port + 1)) "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $port") || return 1
   ui_step_abort
   instance_move_port "$name" "$kind" "$new"
@@ -571,7 +574,7 @@ instance_apply_addresses() { # name open|close|refresh
   reg_set "$name" extra_hosts "$extras"
   env_managed_set "$env" ALLOWED_ORIGINS "$origins"
   log_event "instance $name addresses $mode"
-  if [ "$dropped" = 1 ] && [ -n "$origins" ]; then
+  if [ "$dropped" = 1 ] && origins_reach_the_network "$origins"; then
     say "Instance $name now opens on this computer and your home network."
   fi
 }
@@ -854,6 +857,7 @@ cmd_instance_refresh() {
 cmd_instance_add() {
   [ -n "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance add <name> [--email ...]"
   valid_name "$OPT_NAME" || usage_die "$(name_problem "$OPT_NAME")"
+  reg_exists "$OPT_NAME" || [ -z "$(name_problem "$OPT_NAME")" ] || usage_die "$(name_problem "$OPT_NAME")"
   require_installed
   docker_prepare
   lock_acquire
@@ -938,6 +942,13 @@ project_objects() { # containers|networks|volumes project
   esac
 }
 
+# True for the Compose project of a saved instance. The sandbox project of instance aman-foo (aman-foo-slots) is also the
+# app project of an instance named foo-slots, so a purge of one must leave the other's containers and volumes alone.
+# The caller removes its own record first, so its own project is never in the way.
+project_is_another_instances() { # project
+  case "$1" in aman-?*) reg_exists "${1#aman-}" ;; *) return 1 ;; esac
+}
+
 # Volumes that belong to an instance: those labelled for it or for its Compose projects, and those named after it
 # (found by name too, since an install that failed early may have left them without labels or a saved instance).
 instance_volumes() {
@@ -945,7 +956,7 @@ instance_volumes() {
   {
     D volume ls -q --filter "label=com.amanuensis.instance=$name" 2>/dev/null || true
     project_objects volumes "aman-$name"
-    project_objects volumes "$name-slots"
+    if ! project_is_another_instances "$name-slots"; then project_objects volumes "$name-slots"; fi
     for volume in $(D volume ls -q 2>/dev/null || true); do
       case "$volume" in
         aman_stt_cache | aman_machine) ;;
@@ -975,6 +986,7 @@ PURGED_NETWORKS=0
 projects_purge() { # project...
   local project ids id
   for project in "$@"; do
+    if project_is_another_instances "$project"; then continue; fi
     ids=$(project_objects containers "$project")
     for id in $ids; do
       if D rm -f "$id" >/dev/null 2>&1; then PURGED_CONTAINERS=$((PURGED_CONTAINERS + 1)); fi
@@ -991,6 +1003,7 @@ instance_has_leftovers() {
   local name=$1 project
   [ -n "$(instance_volumes "$name")" ] && return 0
   for project in "aman-$name" "$name-slots"; do
+    if project_is_another_instances "$project"; then continue; fi
     [ -z "$(project_objects containers "$project")$(project_objects networks "$project")" ] || return 0
   done
   return 1
@@ -1014,15 +1027,53 @@ machine_purge() {
   installer_state_remove
 }
 
-# Deletes the installer's folders under the home folder; never anything else, and never through a symbolic link.
+# Folders the installer keeps under its home; a home that holds nothing else, or that the installer created itself, is
+# wholly its own.
+HOME_FOLDERS="instances machine tls release runtime"
+HOME_MARKER=.aman-home
+
+# Records that the installer owns its whole home folder: when it made the folder, or when only its own folders are in it.
+home_claim() { # fresh (1 when the installer just created the folder)
+  local fresh=$1 entry
+  [ ! -e "$AMAN_HOME/$HOME_MARKER" ] || return 0
+  if [ "$fresh" != 1 ]; then
+    for entry in "$AMAN_HOME"/* "$AMAN_HOME"/.[!.]*; do
+      [ -e "$entry" ] || continue
+      case "${entry##*/}" in
+        state | backups | lib | bin | instances | machine | tls | release | runtime) ;;
+        *) return 0 ;;
+      esac
+    done
+  fi
+  printf 'This folder belongs to the Aman installer.\n' >"$AMAN_HOME/$HOME_MARKER"
+}
+
+# Deletes what the installer wrote under its home folder, never through a symbolic link and never in the person's own
+# home folder or above it. Folders other programs may share (bin, lib, state) lose only the files written by name; the
+# installer's own folders go only when the installer owns the whole home.
 installer_state_remove() {
-  local entry
-  case "$AMAN_HOME" in / | "$HOME" | "") return 0 ;; esac
-  [ -d "$STATE_DIR" ] && [ ! -L "$AMAN_HOME" ] && [ ! -L "$STATE_DIR" ] || return 0
-  for entry in instances machine tls lib bin release runtime; do
-    rm -rf -- "${AMAN_HOME:?}/$entry"
+  local entry lib physical home_physical
+  [ -d "$AMAN_HOME" ] && [ -d "$STATE_DIR" ] && [ ! -L "$AMAN_HOME" ] && [ ! -L "$STATE_DIR" ] || return 0
+  physical=$(cd "$AMAN_HOME" && pwd -P) || return 0
+  home_physical=$(cd "$HOME" && pwd -P) || home_physical=$HOME
+  case "$physical" in / | "$home_physical") return 0 ;; esac
+  case "$home_physical/" in "$physical"/*) return 0 ;; esac
+  rm -f -- "$(doctor_shim)" "$(sandbox_bundle)" "$AMAN_HOME/lib/pki.mjs"
+  for lib in $AMAN_COMMAND_LIBS; do
+    rm -f -- "$AMAN_HOME/lib/$lib.sh"
   done
-  find "$STATE_DIR" -mindepth 1 -maxdepth 1 ! -name install.log ! -name lock -exec rm -rf -- {} +
+  rmdir -- "$AMAN_HOME/bin" "$AMAN_HOME/lib" 2>/dev/null || true
+  for entry in instances installed logs source sandbox.log; do
+    rm -rf -- "${STATE_DIR:?}/$entry"
+  done
+  if [ -f "$AMAN_HOME/$HOME_MARKER" ]; then
+    for entry in $HOME_FOLDERS; do
+      rm -rf -- "${AMAN_HOME:?}/$entry"
+    done
+    rm -f -- "$AMAN_HOME/$HOME_MARKER"
+  else
+    say "$AMAN_HOME was there before Aman, so only the files Aman wrote were deleted from it."
+  fi
 }
 
 # On a failed run that may have left parts of a new instance in Docker: the one command that removes them.
@@ -1055,9 +1106,11 @@ docker_reach_quietly() {
 }
 
 confirm_purge_name() {
-  local name=$1 typed=${OPT_CONFIRM_NAME:-}
+  local name=$1 typed=${OPT_CONFIRM_NAME:-} also=
   if [ -z "$typed" ]; then
-    printf 'This permanently deletes the data of instance %s. Type its name to confirm: ' "$name" >&2
+    # The last instance takes Aman's own files with it, so the person is told which folder before agreeing.
+    if [ -z "$(reg_names | grep -vx -- "$name" || true)" ]; then also=" and, as the last instance, Aman's own files in $AMAN_HOME (your backups stay)"; fi
+    printf 'This permanently deletes the data of instance %s%s. Type its name to confirm: ' "$name" "$also" >&2
     read -r typed || true
   fi
   [ "$typed" = "$name" ] || die "the typed name did not match; nothing was removed"

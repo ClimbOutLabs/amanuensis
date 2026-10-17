@@ -79,6 +79,8 @@ upgrade_switch() {
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
+    # Addresses the new version refuses are dropped first, as a plain install does, so it can start.
+    if [ "$(instance_address_change "$name")" = refresh ]; then instance_apply_addresses "$name" refresh; fi
     instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$name" || exit 1
   done
@@ -93,7 +95,10 @@ cmd_upgrade() {
   docker_attach
   release_resolve
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
-  if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
+  if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+    home_claim 0
+    install_doctor_shim
+  fi
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."

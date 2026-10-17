@@ -981,8 +981,8 @@ check_instance_network() {
   while IFS= read -r host; do
     host=$(origin_host "$host")
     if shared_address_space "$host" || [ "${host%.ts.net}" != "$host" ]; then
-      record "$name" network warn "This instance still lists a Tailscale address (${host}), which Aman no longer opens at." \
-        "Run install.sh again to refresh the instance."
+      record "$name" network warn "This instance still lists an address Aman no longer opens at (${host})." \
+        "Run install.sh again to remove it."
       return
     fi
   done < <(printf '%s\n' "$origins" | tr ',' '\n')
