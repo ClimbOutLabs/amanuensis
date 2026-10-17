@@ -46,6 +46,7 @@
     "dev:controller": "cross-env NODE_OPTIONS=--conditions=trueforge-dev NODE_ENV=development tsx watch --env-file=.env src/controller-main.ts",
     "dev:controller:no-watch": "cross-env NODE_OPTIONS=--conditions=trueforge-dev NODE_ENV=development tsx --env-file=.env src/controller-main.ts",
     "demo:seed": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env src/cli/main.ts demo-seed",
+    "import:data": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env src/cli/main.ts import-data",
     "start": "cross-env NODE_ENV=production node --env-file=.env dist/main.js",
     "start:controller": "cross-env NODE_ENV=production node --env-file=.env dist/controller-main.js",
     "push-sandbox-image-to-daytona": "node scripts/push-sandbox-image-to-daytona.mjs",

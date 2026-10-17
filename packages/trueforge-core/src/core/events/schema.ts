@@ -466,7 +466,7 @@ export const ThreadDoneEventSchema = BaseThreadDoneEventSchema.extend({
   state: ThreadStateSchema,
 }).openapi('ThreadDoneEvent');
 
-const ContextMessageSchema = z.union([
+export const ContextMessageSchema = z.union([
   LLMUserMessageSchema,
   LLMSystemMessageSchema,
   InternalEnrichedAssistantMessageSchema,
@@ -507,8 +507,8 @@ export const ContextCompactionEventSchema = z
     created_at: z.string().describe('ISO 8601 event timestamp.'),
     thread_id: z.string().describe('Thread the compaction ran on.'),
     mode: z.enum(['coding', 'conversation']).describe('Which host template was used for the summary.'),
-    tokens_before: z.number().int().nonnegative().describe('Estimated context tokens before this attempt.'),
-    tokens_after: z.number().int().nonnegative().describe('Estimated context tokens after this attempt.'),
+    tokens_before: z.number().nonnegative().describe('Estimated context tokens before this attempt.'),
+    tokens_after: z.number().nonnegative().describe('Estimated context tokens after this attempt.'),
     summary_chars: z.number().int().nonnegative().describe('Length of the persisted summary text, in characters.'),
     outcome: z
       .enum(['applied', 'skipped_invalid', 'skipped_blocked', 'truncated_fallback'])

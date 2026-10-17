@@ -152,6 +152,8 @@ export * from "./GitSkill.js";
 export * from "./GoogleGeminiModelProvider.js";
 export * from "./ImplementationPlan.js";
 export * from "./ImplementationPlanGrant.js";
+export * from "./ImportDataResponse.js";
+export * from "./ImportDataResult.js";
 export * from "./ImportMemoryVaultResponse.js";
 export * from "./InitialUserMessage.js";
 export * from "./InputTokensCompactionTrigger.js";
