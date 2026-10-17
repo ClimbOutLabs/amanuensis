@@ -74,7 +74,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
-- `--home-network`: on a cloud server, open Aman at its private addresses anyway. Private addresses there are shared with other customers, so by default (for the common providers, recognised by their hardware) Aman opens on `127.0.0.1` alone and says so.
+- `--home-network`: on a cloud server, open Aman at its private addresses anyway. Private addresses there are shared with other customers, so by default (for the common providers, recognised by their hardware) a new instance opens on `127.0.0.1` alone and says so. An instance that already exists keeps where it opens; `--local-only` puts it back on this computer.
 
 ### Feeding the Token Factory key safely
 

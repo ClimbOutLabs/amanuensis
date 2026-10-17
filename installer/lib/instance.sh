@@ -396,7 +396,10 @@ instance_derive() {
     # The sign-in service is only ever reached on this computer: other devices go through the app.
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
     I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
-    if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+    if reach_default_local; then
+      # Plain http is fine on this computer only; a --tls meant for the network side does not apply.
+      I_TLS=
+    else
       I_TLS=${I_TLS:-local}
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
       I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
@@ -421,16 +424,21 @@ issuer_check() {
 
 # ---- addresses of an existing instance ----------------------------------------------------------
 
-# An instance from before addresses were listed has no `origins` record at all. A plain re-run opens it on the network
-# like a new one; --local-only keeps it (or puts it back) on this computer only.
-instance_address_change() { # name; prints open, close or nothing
-  local name=$1 recorded=0
-  grep -q '^origins=' "$(reg_file "$name")" && recorded=1
+# An instance from before addresses were listed has no `origins` record at all.
+reach_recorded() { grep -q '^origins=' "$(reg_file "$1")"; }
+
+# Where an instance whose reach is not recorded yet stays on this computer: --local-only, or the cloud server default.
+reach_default_local() { [ "$OPT_LOCAL_ONLY" = 1 ] || [ "$CLOUD_DEFAULT_LOCAL" = 1 ]; }
+
+# An unrecorded instance opens on the network like a new one unless it stays on this computer by default. A recorded
+# reach changes only when --local-only puts it back on this computer.
+instance_address_change() { # name; prints open, close, refresh or nothing
+  local name=$1
   is_loopback_origin "$(reg_get "$name" public_url)" || return 0
-  if [ "$OPT_LOCAL_ONLY" = 1 ]; then
-    if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
-  elif [ "$recorded" = 0 ]; then
-    printf 'open'
+  if ! reach_recorded "$name"; then
+    if reach_default_local; then printf 'close'; else printf 'open'; fi
+  elif [ "$OPT_LOCAL_ONLY" = 1 ]; then
+    if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
   fi

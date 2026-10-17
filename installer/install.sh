@@ -90,6 +90,7 @@ OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
 OPT_HOME_NETWORK=0
+CLOUD_DEFAULT_LOCAL=0
 OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
@@ -310,15 +311,20 @@ check_demo_options() {
   fi
 }
 
-# On a cloud server a private address is shared with other customers, so Aman stays on this computer unless asked.
+# On a cloud server a private address is shared with other customers, so an instance whose reach is not recorded yet (a
+# new one, or one from before the address list) stays on this computer unless asked. A recorded reach is kept.
 cloud_guard() {
+  local name undecided=0
   [ "$COMMAND" = install ] || { [ "$COMMAND" = instance ] && [ "$SUBCOMMAND" = add ]; } || return 0
   [ "$OPT_LOCAL_ONLY" != 1 ] && [ "$OPT_HOME_NETWORK" != 1 ] && [ -z "$OPT_PUBLIC_URL" ] && [ -z "$OPT_ADDRESSES" ] || return 0
   network_cloud_vm || return 0
+  if need_new_instance; then undecided=1; fi
+  if [ "$COMMAND" = install ]; then
+    for name in $(reg_names); do reach_recorded "$name" || undecided=1; done
+  fi
+  [ "$undecided" = 1 ] || return 0
   warn "This looks like a cloud server, where private addresses are shared with other customers, so Aman will open on this computer only. To open it at the private addresses anyway, run this again with --home-network."
-  OPT_LOCAL_ONLY=1
-  # --tls local or off only shapes the network side, which is now off.
-  case "$OPT_TLS" in local | off) OPT_TLS= ;; esac
+  CLOUD_DEFAULT_LOCAL=1
 }
 
 on_exit() {
