@@ -1,6 +1,7 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
 import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import {
+  DisabledDriver,
   DockerDriver,
   McpConnectionError,
   RunCodeService,
@@ -35,7 +36,12 @@ import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
-import { createSlotSandboxProvider, slotsBackendEnabled, slotSocketPaths } from '../sandbox/slotBackend';
+import {
+  createSlotSandboxProvider,
+  sandboxDisabledByInstaller,
+  slotsBackendEnabled,
+  slotSocketPaths,
+} from '../sandbox/slotBackend';
 import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../schemas/mcpServer';
 import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
@@ -47,7 +53,7 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
-  /** Set when the user designated this connector as their search provider: the tools it may run silently. */
+  /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
 }
 
@@ -647,21 +653,23 @@ export function getSharedRunCodeService(logger: Logger): RunCodeService {
     const runCodeLogger = logger.child({ module: 'run-code' });
     const driver = slotsBackendEnabled()
       ? new SlotDriver({ socketPaths: slotSocketPaths(), logger: runCodeLogger, now: undefined, sleepMs: undefined })
-      : new DockerDriver(
-          {
-            image: configuration.SANDBOX_IMAGE,
-            cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
-            stateDir: configuration.SANDBOX_STATE_DIR,
-            dockerBinary: undefined,
-            cosignBinary: undefined,
-            dockerSocketPath: undefined,
-            dataDir: configuration.SANDBOX_RUNS_DIR,
-            commandTimeoutMs: undefined,
-            createTimeoutMs: undefined,
-            logger: runCodeLogger,
-          },
-          undefined,
-        );
+      : sandboxDisabledByInstaller()
+        ? new DisabledDriver()
+        : new DockerDriver(
+            {
+              image: configuration.SANDBOX_IMAGE,
+              cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+              stateDir: configuration.SANDBOX_STATE_DIR,
+              dockerBinary: undefined,
+              cosignBinary: undefined,
+              dockerSocketPath: undefined,
+              dataDir: configuration.SANDBOX_RUNS_DIR,
+              commandTimeoutMs: undefined,
+              createTimeoutMs: undefined,
+              logger: runCodeLogger,
+            },
+            undefined,
+          );
     sharedRunCodeService = new RunCodeService({
       driver,
       dataDir: configuration.SANDBOX_RUNS_DIR,

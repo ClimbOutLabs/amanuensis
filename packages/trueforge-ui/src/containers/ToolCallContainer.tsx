@@ -176,7 +176,8 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
     // and taking the first allow option would silently approve every later equivalent call.
     const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
-    const allowChatId = allowChatOptionId(part.approval?.options);
+    // The server decides who may get chat scope; a declared option never overrides a refusal.
+    const allowChatId = approvalInfo.chatAllowOffered === false ? undefined : allowChatOptionId(part.approval?.options);
     const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still

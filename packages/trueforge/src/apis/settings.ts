@@ -17,6 +17,8 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
+import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
+import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
@@ -24,6 +26,7 @@ import { createModelProvidersRouter } from './modelProviders';
 import { createRunCodeRouter } from './runCode';
 import { createSandboxProvidersRouter } from './sandboxProviders';
 import { createSkillsRouter, type ResolveSkillStore } from './skills';
+import { createTokenFactoryUsageRouter } from './tokenFactoryUsage';
 import { createToolOutputScreensRouter } from './toolOutputScreens';
 
 export interface SettingsRouterDeps<TTransaction> {
@@ -35,6 +38,7 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  tokenFactoryBudget: TokenFactoryBudget;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
   withTransaction: WithTransaction<TTransaction>;
@@ -86,6 +90,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     '/run-code',
     createRunCodeRouter({
       backend: () => configuration.SANDBOX_BACKEND,
+      sandboxDisabledByInstaller,
       imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
       ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
     }),
@@ -111,5 +116,6 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       logger: deps.logger,
     }),
   );
+  router.route('/token-factory-usage', createTokenFactoryUsageRouter({ budget: deps.tokenFactoryBudget }));
   return router;
 }

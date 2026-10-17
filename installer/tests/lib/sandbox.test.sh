@@ -4,6 +4,8 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+slot_starts() { grep -c "aman-sandbox.mjs --instance main --repo-root" "$STUB_LOG" || true; }
+
 first_line_of() { grep -Fn -- "$1" "$STUB_LOG" | head -n 1 | cut -d: -f1; }
 
 test_dry_run_plans_the_sandbox() {
@@ -18,7 +20,7 @@ test_dry_run_plans_the_sandbox() {
   assert_flat_contains "$OUT" "Needs admin. Adds a security rule for the sandbox and sets up 4 disks of up to 16 GB that use space only as they fill."
   assert_flat_contains "$OUT" "Each part is skipped if it is already in place."
   assert_flat_contains "$OUT" "--sandbox-root"
-  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
+  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
   run_install --dry-run --verbose --email owner@example.invalid
   assert_flat_contains "$OUT" "The sandbox: base images, Ubuntu packages"
   assert_log_lacks "aman-sandbox.mjs"
@@ -239,7 +241,7 @@ test_install_builds_then_starts_slots_then_the_instance() {
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
   assert_not_contains "$OUT" "Sandbox check for instance main:" "the check is quiet when the sandbox answers"
   assert_log_has "doctor sandbox --instance main"
-  assert_flat_contains "$OUT" "Run code on, in a sandbox"
+  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c 'run_code')" 0 "the sandbox row is not printed twice"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
@@ -251,6 +253,7 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   install_machine
   local compose
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$compose" "INSTALLER_INSTANCE: 'main'"
   assert_contains "$compose" "SANDBOX_BACKEND: slots"
   assert_contains "$compose" "SANDBOX_SLOTS: '4'"
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
@@ -372,6 +375,25 @@ test_healthy_slots_need_no_root() {
   sandbox_drop
 }
 
+test_rerun_restarts_healthy_slots_when_the_image_changed() {
+  t_begin "a plain re-run starts running slots again when the slot image was rebuilt, and leaves them alone when it was not"
+  sandbox_new
+  install_machine
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 1 "the first install starts the slots once"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 1 "a re-run with the same image leaves the slots alone"
+  printf 'rebuilt\n' >"$SB_STATE/image_id"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 2 "a rebuilt image starts the slots again"
+  run_install --yes
+  assert_eq "$(slot_starts)" 2 "and the next re-run leaves them alone"
+  sandbox_drop
+}
+
 test_slot_image_failure_stops_before_anything_runs() {
   t_begin "a failed slot image build stops the install with the log path and starts no instance"
   sandbox_new
@@ -476,6 +498,73 @@ test_existing_instance_without_wiring_gets_it() {
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
   run_install --yes
   assert_contains "$OUT" "The 4 sandboxes of instance main are running"
+  sandbox_drop
+}
+
+test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
+  t_begin "re-running for an instance installed with --no-sandbox turns the sandbox on, keeps its volumes and restarts its app"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off
+  printf 'aman_main_data\n' >>"$SB_STATE/volumes"
+  : >"$STUB_LOG"
+  run_install --dry-run --name main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Turn on the sandbox for instance main (run code, PDF and image reading)"
+  assert_flat_contains "$OUT" "Build the sandbox"
+  assert_not_contains "$OUT" "Start 4 sandboxes for main"
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off "a dry run changes nothing"
+  run_install --yes --name main
+  assert_rc 0
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "SANDBOX_BACKEND: slots"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
+  assert_log_has "up -d --force-recreate"
+  assert_log_lacks "volume rm"
+  assert_log_lacks " down"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the data volume is still there"
+  assert_flat_contains "$OUT" "Run code on, in a sandbox"
+  run_install --yes --name main
+  assert_contains "$OUT" "The 4 sandboxes of instance main are running"
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  sandbox_drop
+}
+
+test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how() {
+  t_begin "a plain re-run without --name keeps an instance installed with --no-sandbox off and tells how to turn it on"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  assert_flat_contains "$OUT" "To turn it on later, run aman doctor sandbox --fix."
+  sandbox_drop
+}
+
+test_no_sandbox_flag_leaves_a_sandboxed_instance_alone() {
+  t_begin "--no-sandbox on an instance that has the sandbox changes nothing and says so"
+  sandbox_new
+  install_machine
+  run_install --dry-run --name main --no-sandbox
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main keeps its sandbox"
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  run_install --yes --name main --no-sandbox
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
+  sandbox_drop
+}
+
+test_rerun_with_no_sandbox_keeps_it_off() {
+  t_begin "--no-sandbox on an instance installed without the sandbox keeps it off and plans nothing"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  run_install --dry-run --name main --no-sandbox
+  assert_not_contains "$OUT" "Turn on the sandbox"
   sandbox_drop
 }
 
@@ -587,6 +676,7 @@ test_root_steps_with_the_flag
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
 test_healthy_slots_need_no_root
+test_rerun_restarts_healthy_slots_when_the_image_changed
 test_slot_image_failure_stops_before_anything_runs
 test_image_without_the_setup_is_explained
 test_failed_verification_fails_the_install_with_the_repair
@@ -594,6 +684,10 @@ test_second_instance_gets_its_own_slots
 test_instance_add_without_the_sandbox
 test_remove_stops_the_slots
 test_existing_instance_without_wiring_gets_it
+test_rerun_turns_the_sandbox_on_and_keeps_the_data
+test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how
+test_no_sandbox_flag_leaves_a_sandboxed_instance_alone
+test_rerun_with_no_sandbox_keeps_it_off
 test_upgrade_refreshes_the_setup_and_image
 test_node_calls_use_the_docker_access_of_the_run
 test_docker_is_enabled_at_boot_with_consent

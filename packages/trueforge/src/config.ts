@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_OCR_LANGUAGES,
+  DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -31,10 +33,12 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
@@ -525,7 +529,7 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
 }
 
 /**
- * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * Parse a maps upstream URL: must be https (http only for loopback), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
 function parseMapsUrl({
@@ -548,6 +552,9 @@ function parseMapsUrl({
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+    throw new Error(`${envKey} must use https: plain http is only allowed for localhost, 127.0.0.0/8 or [::1]`);
   }
   if (parsed.search !== '' || parsed.hash !== '') {
     throw new Error(`${envKey} must not include a query or hash`);
@@ -982,6 +989,8 @@ export interface SharedServerConfiguration {
    * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
    */
   SANDBOX_BACKEND: SandboxBackend;
+  /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
+  INSTALLER_INSTANCE: string;
   /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
   SANDBOX_SLOTS: number;
   /**
@@ -1080,6 +1089,18 @@ export interface SharedServerConfiguration {
    * Max bytes for an HTTP request body. Env: `MAX_REQUEST_BODY_BYTES`. Default 36 MiB.
    */
   MAX_REQUEST_BODY_BYTES: number;
+  /**
+   * Max total bytes of a data export archive. The export aborts (and the download fails) rather
+   * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
+   * Default 1 GiB; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
+   */
+  DATA_EXPORT_MAX_BYTES: number;
+  /**
+   * Max total bytes of a data import archive, compressed and uncompressed.
+   * An upload past the cap is refused before anything is read or written.
+   * Env: `DATA_IMPORT_MAX_BYTES`. Default 1 GiB.
+   */
+  DATA_IMPORT_MAX_BYTES: number;
   /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
@@ -1411,7 +1432,7 @@ export interface SharedServerConfiguration {
   /**
    * Optional cheaper Token Factory model registered next to the default on the env-managed
    * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
    */
   TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
@@ -1436,8 +1457,16 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
-   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
-   * unless it is true, so it can never touch a real instance.
+   * Price overrides in USD per million tokens, as JSON keyed by upstream model id, for example
+   * `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`.
+   * Adds to, and wins over, the built-in Token Factory defaults; an entry also gives a model on any
+   * other provider a cost. Without a price a model shows tokens only.
+   * Env: `TOKEN_FACTORY_PRICES`. Unset means the built-in defaults only.
+   */
+  TOKEN_FACTORY_PRICES: ModelPrices;
+  /**
+   * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
+   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
@@ -1492,8 +1521,9 @@ export interface SharedServerConfiguration {
    */
   PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
-   * Space-separated Tesseract language codes for OCR operations.
-   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
+   * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
+   * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
+   * ignored. Default: English, Portuguese, Spanish, French, German, Italian and Dutch. Env: `DOCUMENT_OCR_LANGUAGES`.
    */
   DOCUMENT_OCR_LANGUAGES: string;
   /**
@@ -1734,6 +1764,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: 'docker',
   }),
   SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  INSTALLER_INSTANCE: getEnv('INSTALLER_INSTANCE', { defaultValue: '' })?.trim() ?? '',
   SANDBOX_SLOTS: parsePositiveInt({
     envKey: 'SANDBOX_SLOTS',
     raw: getEnv('SANDBOX_SLOTS'),
@@ -1743,7 +1774,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
-    defaultValue: 2048,
+    defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
@@ -1805,6 +1836,17 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAX_REQUEST_BODY_BYTES',
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
+  }),
+  DATA_EXPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_EXPORT_MAX_BYTES',
+    raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+    maxValue: ZIP_MAX_ARCHIVE_BYTES,
+  }),
+  DATA_IMPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_IMPORT_MAX_BYTES',
+    raw: getEnv('DATA_IMPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
@@ -2042,6 +2084,7 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
+  TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
@@ -2075,7 +2118,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
     defaultValue: 3_600_000,
   }),
-  DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
+  DOCUMENT_OCR_LANGUAGES:
+    getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),

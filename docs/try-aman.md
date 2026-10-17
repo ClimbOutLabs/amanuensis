@@ -49,7 +49,7 @@ It first checks your computer, then asks:
 4. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.
 5. **Password**: choose a password of at least 8 characters and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
 
-Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (the long step)" is the longest; 15 minutes is normal.
+Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (this might take a while)" is the longest step; 15 minutes is normal.
 
 On **Linux** it asks two more questions near the end. Type `y` for both, then your computer password when it asks:
 

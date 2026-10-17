@@ -7,6 +7,7 @@
  */
 import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
+import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
 import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
 import type { Tier3Card } from './tier';
 
@@ -126,6 +127,15 @@ export function holdApprovalCalls(input: {
 
 export type HeldReplayCheck = { ok: true; approval_token_id: string | null } | { ok: false; reason: HeldRefusalReason };
 
+/** A held git command runs against the remotes its owner was shown, so the ones seen again must be those. */
+function heldRemotesUnchanged(input: { held: InternalToolCallInfo; fresh: InternalToolCallInfo }): boolean {
+  const approved = input.held.git_remote_precondition;
+  const current = input.fresh.git_remote_precondition;
+  return approved === undefined || current === undefined
+    ? approved === current
+    : gitRemotesMatch({ approved, current });
+}
+
 /** The card fields a person reads before approving; free text such as the reason is not compared. */
 function sameCardTargets(held: Tier3Card, fresh: Tier3Card): boolean {
   return (
@@ -167,6 +177,9 @@ export async function checkHeldReplay(input: {
     if (freshToken?.action_id !== heldToken.action_id) {
       return { ok: false, reason: 'changed' };
     }
+  }
+  if (!heldRemotesUnchanged({ held, fresh })) {
+    return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;

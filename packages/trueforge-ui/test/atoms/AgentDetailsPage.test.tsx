@@ -355,7 +355,7 @@ describe('AgentDetailsPage', () => {
       schedules: createMockScheduleServer(),
     });
 
-    expect(await screen.findByRole('heading', { name: 'New Schedule' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'New schedule' })).toBeInTheDocument();
     await waitFor(() => {
       expect(new URL(window.location.href).searchParams.get('isNew')).toBeNull();
     });
@@ -620,13 +620,13 @@ describe('AgentDetailsPage', () => {
 
   it('shows the shared unavailable state without the optional server', () => {
     renderPage({ withSessions: false });
-    expect(screen.getByRole('heading', { name: 'Agent details unavailable' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Could not load this agent.' })).toBeInTheDocument();
   });
 
   it('shows the shared unavailable state when loading fails', async () => {
     renderPage({ getAgent: vi.fn(async () => Promise.reject(new Error('not found'))) });
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Agent details unavailable' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Could not load this agent.' })).toBeInTheDocument();
     });
   });
 });

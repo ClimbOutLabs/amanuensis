@@ -1,6 +1,6 @@
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
- * trips the loop breaker, and the set of URLs the provider's own results returned, which is all a
+ * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
  * silent fetch may name. Both live in host memory for one turn and never reach the model.
  */
 
@@ -19,11 +19,20 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_guard',
   'mcp_search_limit',
   'mcp_search_unreturned_url',
+  'mcp_search_after_private_read',
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
 export function isSearchAskReason(reason: string): boolean {
   return SEARCH_ASK_REASONS.some(known => known === reason);
+}
+
+/** What the host lets the designated search provider's connector do silently, resolved for one turn. */
+export interface SearchProviderGrant {
+  /** Tools that run without asking even when the server does not declare them read-only. */
+  tools: readonly string[];
+  /** Top-level argument names that are provider plumbing, not user text. */
+  plumbing_fields: readonly string[];
 }
 
 export interface WebSearchTurnState {
@@ -33,12 +42,20 @@ export interface WebSearchTurnState {
   resultUrls: Set<string>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
+  /** True once the session read private data (mail), after which a search asks instead of running silently. */
+  privateDataRead: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
-  return { silentSearches: 0, resultUrls: new Set(), sentText: '', admission: Promise.resolve() };
+  return {
+    silentSearches: 0,
+    resultUrls: new Set(),
+    sentText: '',
+    privateDataRead: false,
+    admission: Promise.resolve(),
+  };
 }
 
 /**
@@ -156,4 +173,16 @@ export function unreturnedUrls(input: { values: readonly string[]; state: WebSea
     }
   }
   return unreturned;
+}
+
+/**
+ * The one place that records and answers "has this session read private data". A tool that returns the user's
+ * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
+ */
+export function markPrivateDataRead(state: WebSearchTurnState): void {
+  state.privateDataRead = true;
+}
+
+export function hasReadPrivateData(state: WebSearchTurnState): boolean {
+  return state.privateDataRead;
 }

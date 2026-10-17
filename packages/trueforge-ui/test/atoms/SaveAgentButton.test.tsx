@@ -220,7 +220,7 @@ describe('SaveAgentButton', () => {
     expect(within(dialog).getByRole('button', { name: 'Edit Model' })).toHaveClass('bg-ghost-button-bg');
     expect(within(dialog).getByRole('button', { name: 'Edit Connectors' })).toHaveClass('bg-ghost-button-bg');
     expect(within(dialog).getByRole('button', { name: 'Edit Skills' })).toHaveClass('bg-ghost-button-bg');
-    expect(within(dialog).queryByRole('button', { name: 'Edit Runtime Config' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Edit Run settings' })).not.toBeInTheDocument();
   });
 
   it('preserves configuration without exposing unsupported fields', async () => {

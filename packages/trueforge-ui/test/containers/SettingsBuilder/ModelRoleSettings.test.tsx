@@ -50,12 +50,12 @@ describe('ModelRoleSettings', () => {
     expect(screen.getByRole('heading', { name: 'Summarization model' })).toBeInTheDocument();
   });
 
-  it('explains why bounded control-plane checks reuse the main model', async () => {
+  it('explains why bounded background checks reuse the main model', async () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Roles and Personas' });
-    expect(screen.getByText(/control-plane checks.*reuse the main chat model/i)).toBeInTheDocument();
-    expect(screen.getByText(/approvals are decided without a model/i)).toBeInTheDocument();
+    expect(screen.getByText(/background checks.*reuse the main chat model/i)).toBeInTheDocument();
+    expect(screen.getByText(/they do not need their own role/i)).toBeInTheDocument();
   });
 
   it('shows shared draft-save failures at the settings-page level', async () => {
