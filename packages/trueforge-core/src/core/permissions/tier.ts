@@ -153,6 +153,8 @@ export interface TierDecision {
   approval_token_id: string | null;
   /** Text of a web search that runs without asking, for the chat chip and the audit row; null otherwise. */
   silent_search_query: string | null;
+  /** Audit-row text that stands in for the card sentence when that sentence quotes caught text. */
+  audit_description: string | null;
   /**
    * Full parsed shell binding for shell actions that need approval (or null).
    * Re-verified byte-for-byte immediately before invocation.
@@ -190,6 +192,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }
@@ -205,6 +208,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }

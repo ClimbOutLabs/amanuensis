@@ -1,4 +1,8 @@
-import type { AgentSpec, ResolvedAgentDefinition } from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentSpecSchema,
+  type AgentSpec,
+  type ResolvedAgentDefinition,
+} from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
@@ -22,6 +26,8 @@ export interface MemoryTurnContext {
   sessionTitle: string | undefined;
   /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
   providerServerName: string | undefined;
+  /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
+  searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
   /** When false, the user has disabled memory recall and retention for this session. */
   recallEnabled?: boolean | undefined;
   /**
@@ -83,6 +89,16 @@ function withMemoryProviderNarrowedToReads(spec: AgentSpec, providerServerName: 
   };
 }
 
+/** The designated search provider is offered to every root thread, so a chat that never opened Add-ons still searches. */
+function withSearchProviderAttached(spec: AgentSpec, searchProviderServerName: string): AgentSpec {
+  const servers = spec.mcp_servers ?? [];
+  if (servers.some(entry => entry.name === searchProviderServerName)) {
+    return spec;
+  }
+  const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: searchProviderServerName }]);
+  return attached === undefined ? spec : { ...spec, mcp_servers: [...servers, attached] };
+}
+
 /** Adds host-enforced long-term memory (recall + retain) to the root thread of one turn. */
 export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
   readonly #memory: MemoryTurnContext;
@@ -110,11 +126,18 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const providerServerName = this.#memory.providerServerName;
     // Root threads only, matching where the memory capability itself is attached: a sub-agent
     // is not the thread the host retains, so its mounts are left exactly as the spec states them.
-    const resolved = await super.resolveAgentDefinition(
+    const searchProviderServerName = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
+    const narrowedSpec =
       providerServerName === undefined || isSubAgent
-        ? input
-        : { ...input, spec: withMemoryProviderNarrowedToReads(input.spec, providerServerName) },
-    );
+        ? input.spec
+        : withMemoryProviderNarrowedToReads(input.spec, providerServerName);
+    const resolved = await super.resolveAgentDefinition({
+      ...input,
+      spec:
+        searchProviderServerName === undefined
+          ? narrowedSpec
+          : withSearchProviderAttached(narrowedSpec, searchProviderServerName),
+    });
     // Derive recallEnabled from the spec (defaults to true per schema)
     const recallEnabled = input.spec.config.memory.recall_enabled;
     const memoryCapabilities = memoryCapabilitiesForTurn({

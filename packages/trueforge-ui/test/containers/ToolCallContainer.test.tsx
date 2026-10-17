@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessage, type ThreadMessageLike } from '@assistant-ui/react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AskUserPromptProps } from '@/atoms/adapters/AskUserPromptAdapter.js';
@@ -941,5 +942,84 @@ describe('ToolCallContainer', () => {
       expect(screen.getAllByText('Sends to')).toHaveLength(1);
       expect(screen.getAllByText('This request expired.')).toHaveLength(1);
     });
+  });
+});
+
+describe('ToolCallContainer: held search request', () => {
+  const rawKey = 'wsk-live-7Q2mZ9pL4vR8tN3x';
+  const argsText = JSON.stringify({ query: `how do I rotate ${rawKey} safely` });
+
+  function renderHeldSearch(call: Record<string, unknown>, status?: ThreadMessageLike['status']) {
+    const card: SentinelApprovalInfo['card'] = {
+      plain_what: searchHoldCardText({
+        server: 'finder',
+        query: 'how do I rotate ws••••••3x safely',
+        why: "it contains one of this computer's keys",
+      }),
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: 'query: how do I rotate ws••••••3x safely',
+      destination_host: null,
+      outbound_truncated: false,
+      email: null,
+    };
+    const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      updateUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+      })),
+      listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
+    };
+    const message: ThreadMessageLike = {
+      role: 'assistant',
+      content: [{ type: 'tool-call', toolCallId: 'search-1', toolName: 'web_search', args: {}, argsText, ...call }],
+      ...(status === undefined ? {} : { status }),
+    };
+    return render(
+      <RuntimeHarness threadId="local-1" remoteId="session-1" messages={[message]}>
+        <SentinelApiProvider api={api}>
+          <SentinelStateProvider>
+            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+          </SentinelStateProvider>
+        </SentinelApiProvider>
+      </RuntimeHarness>,
+    );
+  }
+
+  it('shows the masked arguments in the Request block of an answered hold, never the raw key', async () => {
+    const { container } = renderHeldSearch({ result: 'ok' });
+    await screen.findByText('web_search');
+    fireEvent.click(screen.getByText('web_search'));
+    const blocks = await screen.findAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', 'query: how do I rotate ws••••••3x safely');
+    expect(container.innerHTML).not.toContain(rawKey);
+  });
+
+  it('shows the masked arguments while the hold waits for an answer', async () => {
+    const { container } = renderHeldSearch(
+      {
+        interrupt: { type: 'human', payload: {} },
+        approval: {
+          id: 'search-1',
+          approved: undefined,
+          options: [
+            { id: 'allow-once', kind: 'allow-once' as const },
+            { id: 'deny', kind: 'reject-once' as const, confirm: {} },
+          ],
+        },
+      },
+      { type: 'requires-action', reason: 'tool-calls' },
+    );
+    expect(await screen.findAllByTestId('tfy-tool-call-content-block')).toHaveLength(1);
+    expect(container.innerHTML).not.toContain(rawKey);
   });
 });
