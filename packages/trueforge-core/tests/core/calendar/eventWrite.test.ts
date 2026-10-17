@@ -268,4 +268,11 @@ describe('a change to an event', () => {
       ok(update({ event_id: 'ev1', title: 'x', send_updates: 'none' }, withCall)).review.incomplete_reason,
     ).toBeNull();
   });
+
+  it.each([{ description: '' }, { description: '   ' }, { location: ' ' }])(
+    'refuses blank text that would wipe what the event has: %j',
+    blank => {
+      expect(UpdateEventSchema.safeParse({ event_id: 'ev1', ...blank }).success).toBe(false);
+    },
+  );
 });

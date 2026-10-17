@@ -76,6 +76,8 @@ const MAX_ATTENDEES = 50;
 /** Who Google emails about the change: every guest, or no one. Never left to Google's default. */
 const SendUpdates = z.enum(['all', 'none']);
 
+const NO_BLANK = { message: 'Give the new text. Aman does not clear a location or description.' };
+
 const EventFieldsShape = {
   title: visible(z.string().trim().min(1).max(300)),
   time_zone: TimeZone.optional().describe("IANA zone the times are in. Leave out to use the user's own."),
@@ -103,8 +105,9 @@ export const UpdateEventSchema = z
     event_id: EventId,
     title: EventFieldsShape.title.optional(),
     time_zone: EventFieldsShape.time_zone,
-    location: EventFieldsShape.location,
-    description: EventFieldsShape.description,
+    // A change names the new text; blank text would wipe what is there without the card saying so.
+    location: visible(z.string().trim().min(1, NO_BLANK).max(500)).optional(),
+    description: visible(z.string().trim().min(1, NO_BLANK).max(8000)).optional(),
     start: EventMoment.optional().describe('New start. Leave out end to keep the length.'),
     end: EventMoment.optional(),
     send_updates: SendUpdates.optional().describe(
