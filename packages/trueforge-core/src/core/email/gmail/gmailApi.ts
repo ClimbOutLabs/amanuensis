@@ -1,5 +1,6 @@
 /** Gmail's REST API, called directly with the user's own login. No adapter process, no container. */
 import type { GoogleAccessTokens } from '../../google/GoogleAccessTokens';
+import { GoogleApiError } from '../../google/errors';
 import { GoogleRestClient, type GoogleRestProduct } from '../../google/restClient';
 import {
   AttachmentBodySchema,
@@ -19,18 +20,7 @@ const DETAIL_CONCURRENCY = 4;
 /** A 25 MB file arrives base64-encoded, about a third larger. */
 const MAX_ATTACHMENT_RESPONSE_BYTES = 40 * 1024 * 1024;
 
-/** Gmail refused or failed a request. The message is safe to show; it never carries mail content. */
-export class GmailApiError extends Error {
-  readonly status: number;
-
-  constructor(input: { status: number; message: string; cause?: unknown }) {
-    super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
-    this.name = 'GmailApiError';
-    this.status = input.status;
-  }
-}
-
-const GMAIL: GoogleRestProduct<GmailApiError> = {
+const GMAIL: GoogleRestProduct = {
   name: 'Gmail',
   baseUrl: 'https://gmail.googleapis.com/gmail/v1/users/me',
   apiOffMessage:
@@ -39,7 +29,6 @@ const GMAIL: GoogleRestProduct<GmailApiError> = {
     "Google hasn't given Aman permission for that. Open Settings, Connectors, Google, choose Reconnect and allow every box.",
   notFoundMessage: 'Gmail has no such message, thread or draft.',
   tooLargeMessage: 'Gmail sent back more than Aman will read at once. Ask for fewer results, or read one message.',
-  makeError: input => new GmailApiError(input),
 };
 
 interface ThreadList {
@@ -54,7 +43,7 @@ interface DraftList {
 }
 
 export class GmailApi {
-  readonly #rest: GoogleRestClient<GmailApiError>;
+  readonly #rest: GoogleRestClient;
 
   constructor(input: {
     tokens: GoogleAccessTokens;
@@ -208,7 +197,7 @@ export async function mapSkippingMissing<T, R>(input: {
         try {
           return { found: true as const, value: await input.work(item) };
         } catch (error) {
-          if (error instanceof GmailApiError && error.status === 404) {
+          if (error instanceof GoogleApiError && error.status === 404) {
             return { found: false as const };
           }
           throw error;

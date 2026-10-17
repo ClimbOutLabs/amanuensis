@@ -150,10 +150,11 @@ function clip(value: string): string {
  */
 export function getEventResult(input: { context: CalendarResultContext; event: CalendarEvent }) {
   const { event, context } = input;
+  const { description: fullDescription, ...withoutDescription } = event;
   const budget = new TokenBudget(MAX_TOKENS_PER_CALL - RESULT_OVERHEAD_TOKENS);
-  const { description: _snippet, ...base } = eventView({
+  const base = eventView({
     event: {
-      ...event,
+      ...withoutDescription,
       id: clip(event.id),
       ...(event.status === undefined ? {} : { status: clip(event.status) }),
       ...(event.eventType === undefined ? {} : { eventType: clip(event.eventType) }),
@@ -205,7 +206,7 @@ export function getEventResult(input: { context: CalendarResultContext; event: C
   const guestCount = event.attendees?.length ?? 0;
   omitted ||= guests.length < guestCount;
 
-  const text = String(neutralizeDeep(descriptionText(event.description ?? '')));
+  const text = String(neutralizeDeep(descriptionText(fullDescription ?? '')));
   const description = truncateToTokens({ text, maxTokens: Math.min(DESCRIPTION_TOKENS, Math.max(0, budget.left)) });
   omitted ||= description.truncated;
 

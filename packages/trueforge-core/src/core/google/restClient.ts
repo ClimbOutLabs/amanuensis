@@ -1,5 +1,6 @@
 /** The part of calling a Google product's REST API that does not depend on the product: the user's own login, retries, size caps. */
 import { z } from 'zod';
+import { GoogleApiError } from './errors';
 import type { GoogleAccessTokens } from './GoogleAccessTokens';
 import { fetchGoogle } from './oauth';
 
@@ -107,7 +108,7 @@ export interface GoogleRestRequest {
 }
 
 /** What differs per product: where it lives, what to call it, and the error type its tools catch. */
-export interface GoogleRestProduct<E extends Error> {
+export interface GoogleRestProduct {
   /** How the product is named to the user, e.g. `Gmail`. */
   name: string;
   baseUrl: string;
@@ -117,14 +118,9 @@ export interface GoogleRestProduct<E extends Error> {
   scopeMessage: string;
   notFoundMessage: string;
   tooLargeMessage: string;
-  makeError(input: { status: number; message: string; cause?: unknown }): E;
 }
 
-function describeFailure<E extends Error>(input: {
-  product: GoogleRestProduct<E>;
-  status: number;
-  reason: string;
-}): string {
+function describeFailure(input: { product: GoogleRestProduct; status: number; reason: string }): string {
   const { product, status, reason } = input;
   const busy = `${product.name} is busy right now. Try again in a minute.`;
   if (status === 429 || BUSY_REASONS.has(reason)) {
@@ -159,14 +155,14 @@ function safeParse<T>(input: { schema: z.ZodType<T>; value: unknown }) {
   }
 }
 
-export class GoogleRestClient<E extends Error> {
+export class GoogleRestClient {
   readonly #tokens: GoogleAccessTokens;
   readonly #fetchImpl: typeof fetch;
   readonly #sleep: (ms: number) => Promise<void>;
-  readonly #product: GoogleRestProduct<E>;
+  readonly #product: GoogleRestProduct;
 
   constructor(input: {
-    product: GoogleRestProduct<E>;
+    product: GoogleRestProduct;
     tokens: GoogleAccessTokens;
     fetchImpl: typeof fetch | undefined;
     /** Replaceable so tests do not wait. */
@@ -209,7 +205,7 @@ export class GoogleRestClient<E extends Error> {
           },
         });
       } catch (error) {
-        throw product.makeError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
+        throw new GoogleApiError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
       }
       if (response.status === 401 && !refreshed) {
         // A cached token Google no longer honors: refresh once. A refresh Google refuses flips needs-reconnect.
@@ -222,10 +218,10 @@ export class GoogleRestClient<E extends Error> {
         try {
           read = await readJsonCapped({ response, maxBytes: input.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES });
         } catch (error) {
-          throw product.makeError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
+          throw new GoogleApiError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
         }
         if (!read.ok) {
-          throw product.makeError({ status: 502, message: input.unknownOutcome ?? product.tooLargeMessage });
+          throw new GoogleApiError({ status: 502, message: input.unknownOutcome ?? product.tooLargeMessage });
         }
         return read.value;
       }
@@ -236,7 +232,7 @@ export class GoogleRestClient<E extends Error> {
         await this.#sleep(retryDelayMs({ response, attempt }));
         continue;
       }
-      throw product.makeError({
+      throw new GoogleApiError({
         status: response.status,
         message:
           input.unknownOutcome !== undefined && response.status >= 500
@@ -249,7 +245,7 @@ export class GoogleRestClient<E extends Error> {
   async parsed<T>(schema: z.ZodType<T>, request: GoogleRestRequest): Promise<T> {
     const body = safeParse({ schema, value: await this.#send(request) });
     if (!body.success) {
-      throw this.#product.makeError({
+      throw new GoogleApiError({
         status: 502,
         message: request.unknownOutcome ?? `${this.#product.name} returned a response Aman could not read.`,
         cause: body.error,

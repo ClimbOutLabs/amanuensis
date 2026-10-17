@@ -3,18 +3,7 @@ import type { GoogleAccessTokens } from '../google/GoogleAccessTokens';
 import { GoogleRestClient, type GoogleRestProduct } from '../google/restClient';
 import { CalendarEventSchema, CalendarZoneSchema, EventListSchema, type CalendarEvent } from './calendarWire';
 
-/** Google Calendar refused or failed a request. The message is safe to show; it never carries event text. */
-export class CalendarApiError extends Error {
-  readonly status: number;
-
-  constructor(input: { status: number; message: string; cause?: unknown }) {
-    super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
-    this.name = 'CalendarApiError';
-    this.status = input.status;
-  }
-}
-
-const CALENDAR: GoogleRestProduct<CalendarApiError> = {
+const CALENDAR: GoogleRestProduct = {
   name: 'Google Calendar',
   baseUrl: 'https://www.googleapis.com/calendar/v3/calendars/primary',
   apiOffMessage:
@@ -23,7 +12,6 @@ const CALENDAR: GoogleRestProduct<CalendarApiError> = {
     "Google hasn't given Aman permission to read your calendar. Open Settings, Connectors, Google and connect Calendar.",
   notFoundMessage: 'Google Calendar has no such event.',
   tooLargeMessage: 'Google Calendar sent back more than Aman will read at once. Ask for a shorter range.',
-  makeError: input => new CalendarApiError(input),
 };
 
 interface EventPage {
@@ -32,7 +20,7 @@ interface EventPage {
 }
 
 export class CalendarApi {
-  readonly #rest: GoogleRestClient<CalendarApiError>;
+  readonly #rest: GoogleRestClient;
 
   constructor(input: {
     tokens: GoogleAccessTokens;

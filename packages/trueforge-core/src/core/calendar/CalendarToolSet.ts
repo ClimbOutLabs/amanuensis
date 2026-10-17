@@ -1,17 +1,15 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
-import { neutralizeDeep } from '../email/gmail/results';
-import { GoogleOAuthError, GoogleReconnectRequiredError } from '../google/errors';
 import type { GoogleFeature } from '../google/scopes';
+import { errorResult, failureResult, jsonResult } from '../google/toolResults';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
-import { toolResultResponse } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
-import { CalendarApi, CalendarApiError } from './CalendarApi';
+import { CalendarApi } from './CalendarApi';
 import { getEventResult, listEventsResult } from './results';
 import { resolveBounds } from './timeRange';
 import {
@@ -34,27 +32,6 @@ interface CalendarToolSetOptions {
   timeZone: string | undefined;
   /** Where the host classifies each call; the same turn state the web search provider reads. */
   sentinel: SentinelHostContext;
-}
-
-function errorResult(error: string) {
-  return toolResultResponse({ text: JSON.stringify({ error }), isError: true });
-}
-
-/** Every success result is event-derived, so every string in it is neutralized on the way out. */
-function jsonResult(value: unknown) {
-  return toolResultResponse({ text: JSON.stringify(neutralizeDeep(value)) });
-}
-
-/** A failure the model can act on, in words that never carry event text or a credential. */
-function failureResult(error: unknown) {
-  if (
-    error instanceof GoogleReconnectRequiredError ||
-    error instanceof CalendarApiError ||
-    error instanceof GoogleOAuthError
-  ) {
-    return errorResult(error.message);
-  }
-  throw error;
 }
 
 /**
