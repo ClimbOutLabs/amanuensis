@@ -12,25 +12,10 @@ import type { Logger } from 'winston';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { TurnStreamingEvent } from '../schemas/events';
 
-import type {
-  ModelUsagePersistedEvent,
-  ModelUsagePersistedEventSchema,
-  ModelUsageRole,
-} from '../schemas/modelUsageEvents';
+import type { ModelUsagePersistedEvent, ModelUsageRole } from '../schemas/modelUsageEvents';
 import { MODEL_USAGE_EVENT_TYPE } from '../schemas/modelUsageEvents';
 import type { EventSubscription } from './event-subscription';
 import { lookupModelPrice, modelDisplayName, priceTokens, type ModelPrices } from './modelPricing';
-
-/**
- * Registers `aman.model.usage` in the harness's passthrough event registry, so the durable turn
- * event log (including archive import) accepts it. Same mechanics as the `aman.memory.recall`
- * registration in runtime/memory/memoryEvents.ts.
- */
-declare module '../../../trueforge-core/src/core/events/PassthroughEvents' {
-  interface AgentPassthroughEventSchemaMap {
-    'aman.model.usage': typeof ModelUsagePersistedEventSchema;
-  }
-}
 
 /** The model a call went to: the configured name, the id the provider was called with, and the provider type. */
 export interface ModelIdentity {

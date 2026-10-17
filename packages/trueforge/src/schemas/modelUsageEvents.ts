@@ -52,5 +52,12 @@ export const ModelUsagePersistedEventSchema = z
   })
   .openapi('ModelUsagePersistedEvent');
 
+// Registers the event with the harness so the durable turn event log (and archive import) accepts it.
+declare module '../../../trueforge-core/src/core/events/PassthroughEvents' {
+  interface AgentPassthroughEventSchemaMap {
+    'aman.model.usage': typeof ModelUsagePersistedEventSchema;
+  }
+}
+
 export type ModelUsageRole = z.infer<typeof ModelUsageRoleSchema>;
 export type ModelUsagePersistedEvent = z.infer<typeof ModelUsagePersistedEventSchema>;
