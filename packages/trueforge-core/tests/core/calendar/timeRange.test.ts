@@ -1,5 +1,6 @@
-import { isDateOnly, previousDay, resolveBounds, weekdayOfDate } from '../../../src/core/calendar/timeRange';
-import { isRealDate, ListEventsSchema } from '../../../src/core/calendar/toolContract';
+import { resolveBounds, shiftDate } from '../../../src/core/calendar/timeRange';
+import { ListEventsSchema } from '../../../src/core/calendar/toolContract';
+import { isRealDate, weekdayNameOf } from '../../../src/core/util/calendarDay';
 
 describe('resolveBounds', () => {
   it('begins a start date at midnight in the zone and ends an end date after that whole day', () => {
@@ -39,14 +40,14 @@ describe('resolveBounds', () => {
 
 describe('days', () => {
   it('steps back one day across a month and a year', () => {
-    expect(previousDay('2026-11-01')).toBe('2026-10-31');
-    expect(previousDay('2027-01-01')).toBe('2026-12-31');
+    expect(shiftDate({ date: '2026-11-01', days: -1 })).toBe('2026-10-31');
+    expect(shiftDate({ date: '2027-01-01', days: -1 })).toBe('2026-12-31');
   });
 
   it('names the weekday of a calendar date, and tells a date from a moment', () => {
-    expect(weekdayOfDate('2026-10-19')).toBe('Monday');
-    expect(isDateOnly('2026-10-19')).toBe(true);
-    expect(isDateOnly('2026-10-19T00:00:00Z')).toBe(false);
+    expect(weekdayNameOf('2026-10-19')).toBe('Monday');
+    expect(isRealDate('2026-10-19')).toBe(true);
+    expect(isRealDate('2026-10-19T00:00:00Z')).toBe(false);
   });
 });
 

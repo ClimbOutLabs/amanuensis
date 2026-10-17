@@ -3,6 +3,7 @@
  * design: there is no write tool, so a scheduled run and a chat hold the same tools.
  */
 import { z } from 'zod';
+import { isRealDate } from '../util/calendarDay';
 
 export const CALENDAR_SERVER_ID = 'google_calendar';
 
@@ -20,19 +21,6 @@ const DEFAULT_MAX_RESULTS = 25;
 
 /** Longest span one list may cover; a wider question is asked in pieces. */
 export const MAX_RANGE_DAYS = 400;
-
-const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-/** Whether the text is a real calendar day, so 2026-02-30 is refused instead of rolling into March. */
-export function isRealDate(text: string): boolean {
-  const match = DATE_ONLY.exec(text);
-  if (match === null) {
-    return false;
-  }
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
 
 /** A day (`2026-10-19`) read in the user's time zone, or an exact moment with its offset (`2026-10-19T09:00:00-03:00`). */
 const Moment = z.union([

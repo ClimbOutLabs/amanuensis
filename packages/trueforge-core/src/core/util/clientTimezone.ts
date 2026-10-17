@@ -49,6 +49,16 @@ function utcOffsetAt(now: Date, zone: string): string {
   return `${sign}${String(Math.abs(hours)).padStart(2, '0')}:${minutes}`;
 }
 
+/** Minutes `zone` is ahead of UTC at `instant`. */
+export function utcOffsetMinutes({ instant, zone }: { instant: Date; zone: string }): number {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(utcOffsetAt(instant, zone));
+  if (match === null) {
+    return 0;
+  }
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === '-' ? -minutes : minutes;
+}
+
 /** Resolves `timezone` to local date/time fields at `now`, falling back to UTC when needed. */
 export function resolveLocalTime(now: Date, timezone: string | undefined): LocalTimeInfo {
   const isFallback = timezone === undefined || timezone.length === 0 || !isValidTimezone(timezone);
