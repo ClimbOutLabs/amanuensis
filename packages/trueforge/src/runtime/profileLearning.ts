@@ -53,9 +53,11 @@ import {
 } from '../personalization/profile';
 import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/profileLearningEvents';
 import type { EventSubscription } from './event-subscription';
+import { routeHelperModel } from './helperModelRouting';
 import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
+import { modelIdentity, type TurnModelUsage } from './modelUsage';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -341,11 +343,14 @@ export interface ProfileLearningDrainMember {
   eventStore: ICompletedTurnEventStore;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   memoryClient: MemoryClient | undefined;
   tenantId: string;
   createdBy: string;
   userText: string;
   turnModelFqn: string | undefined;
+  /** The small model for helper jobs; see `routeHelperModel`. */
+  helperFqn?: string | undefined;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }
@@ -455,7 +460,10 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     return;
   }
 
-  const modelFqn = config.modelFqn.trim() !== '' ? config.modelFqn.trim() : params.turnModelFqn;
+  const modelFqn =
+    config.modelFqn.trim() !== ''
+      ? config.modelFqn.trim()
+      : routeHelperModel({ modelFqn: params.turnModelFqn, helperFqn: params.helperFqn });
   if (modelFqn === undefined || modelFqn === '') {
     return;
   }
@@ -475,8 +483,10 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
           signal: AbortSignal.timeout(DISTILLATION_TIMEOUT_MS),
           streamTimeout,
         }),
-        providerType: providerConfig.provider.type,
+        identity: modelIdentity({ name, providerConfig }),
+        role: 'profile_learning',
         budget: params.tokenFactoryBudget,
+        usage: params.modelUsage,
         logger: params.logger,
       });
     });

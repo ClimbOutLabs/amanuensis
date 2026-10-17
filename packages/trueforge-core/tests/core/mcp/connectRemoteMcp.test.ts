@@ -188,6 +188,26 @@ describe('connectRemoteMcp transport selection', () => {
     expect(mockConnectAttempts).toEqual(['streamable-http', 'sse']);
   });
 
+  it('never carries an upstream response body into the connect error', async () => {
+    const planted = 'plantedUpstreamToken0000';
+    mockConnectImpl = type => {
+      throw Object.assign(
+        new Error(`Streamable HTTP error: Error POSTing to endpoint: {"detail":"rejected Authorization: Bearer ${planted}"}`),
+        { code: 500, transport: type },
+      );
+    };
+
+    const failure = await connectRemoteMcp(baseParams()).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(McpConnectionError);
+    const message = failure instanceof Error ? failure.message : '';
+    expect(message).toContain('Error POSTing to endpoint (HTTP 500)');
+    expect(message).not.toContain(planted);
+  });
+
   it('isSessionExpiredError treats the -32000 "not initialized" rejection as session-expired', () => {
     expect(
       isSessionExpiredError(

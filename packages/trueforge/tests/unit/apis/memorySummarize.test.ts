@@ -7,6 +7,7 @@ import { createLogger } from 'winston';
 import { createMemorySummarizeRouter } from '../../../src/apis/memorySummarize';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -42,6 +43,10 @@ class ReadFailingGlobalSettingsStore implements IGlobalSettingsStore {
 
   deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
+  }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
   }
 }
 

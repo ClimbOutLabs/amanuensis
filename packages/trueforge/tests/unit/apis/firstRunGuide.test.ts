@@ -62,6 +62,7 @@ describe('first-run guide router', () => {
       getSetting: () => Promise.reject(new Error('transient store read failure')),
       setSetting: (): Promise<GlobalSettingRecord> => Promise.reject(new Error('unused')),
       deleteSetting: () => Promise.reject(new Error('unused')),
+      compareAndSetSetting: () => Promise.reject(new Error('unused')),
     };
     const router = createFirstRunGuideRouter({ globalSettingsStore: failing, logger: silentLogger });
     expect(await readState(await router.request('/'))).toBe(false);

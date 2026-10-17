@@ -252,11 +252,11 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
-  async destroySandbox(params: { sandboxId: string }): Promise<void> {
+  async destroySandbox(params: { sandboxId: string; signal?: AbortSignal | undefined }): Promise<void> {
     const target = this.resolve(params.sandboxId);
     const result = await this.whileBusy({
-      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: undefined }),
-      signal: undefined,
+      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: params.signal }),
+      signal: params.signal,
     });
     if (!result.ok) {
       throw new Error(`Failed to remove the sandbox workspace: ${describeAgentError(result.error)}`);
@@ -292,6 +292,11 @@ export class SlotSandboxProvider implements SandboxProvider {
     return `${STATE_DIR}/uploads`;
   }
 
+  /** Reads below the transfer directory may be as large as a document; ordinary reads are capped lower by the agent. */
+  getDocumentSnapshotDir(): string {
+    return `${STATE_DIR}/transfer`;
+  }
+
   getSkillsDir(): string {
     return `${STATE_DIR}/skills`;
   }
@@ -311,6 +316,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       command: params.command,
       plan,
       token: this.gitToken,
+      approvedRemotes: params.approvedGitRemotes,
       guest: this.guestFor(params.sandboxId),
       sandboxId: params.sandboxId,
       cwd: params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd),
@@ -334,6 +340,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           command: input.command,
           plan,
           token: this.gitToken,
+          approvedRemotes: undefined,
           guest: this.guestFor(input.sandboxId),
           sandboxId: input.sandboxId,
           cwd: input.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, input.cwd),
@@ -352,6 +359,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           sandboxId,
           command: input.command,
           cwd: input.cwd,
+          ...(input.env === undefined ? {} : { env: input.env }),
           ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
           signal: input.signal,
         }),

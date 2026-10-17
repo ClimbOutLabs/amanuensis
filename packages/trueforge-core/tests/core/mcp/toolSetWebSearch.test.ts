@@ -237,10 +237,67 @@ describe('the outbound guard on the designated provider', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.pre_dispatch_failure).toBeUndefined();
-    expect(info.tier3_card?.plain_what).toContain(secret);
-    expect(info.tier3_card?.why_asked_again).toContain('secret this server holds');
+    expect(info.tier3_card?.plain_what).toContain('debug sy');
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
     expect(info.silent_search_query).toBeUndefined();
     expect(h.audit).toEqual([]);
+  });
+
+  it('shows the query with the key masked, and names what was caught in plain words', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
+    const card = info.tier3_card;
+    expect(card?.plain_what).toBe(
+      "Search the web through finder for: debug sy••••••11 now. Held because it contains one of this computer's keys.",
+    );
+    expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
+    expect(card?.why_asked_again).toBeNull();
+    expect(JSON.stringify(info)).not.toContain(secret);
+  });
+
+  it('hides a short key completely', async () => {
+    const short = 'abcd1234';
+    const h = harness({ searchProvider: true, secrets: [short] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `x ${short}` } });
+    expect(info.tier3_card?.plain_what).toContain('x ••••••.');
+    expect(JSON.stringify(info)).not.toContain(short);
+  });
+
+  it('hides the whole query when the key is not found in it as written', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    await runSearch(h, secret.slice(0, 14));
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(info.tier3_card?.plain_what).not.toContain(secret.slice(14));
+    expect(info.tier3_card?.outbound_text).not.toContain(secret.slice(14));
+    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+  });
+
+  it('masks the key on the card when searches are set to ask', async () => {
+    const h = harness({ searchProvider: true, searchWithoutAsking: false, secrets: [secret] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret}` } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
+    expect(info.tier3_card?.outbound_text).not.toContain(secret);
+    expect(info.audit_description).not.toContain(secret);
+  });
+
+  it.each([
+    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.')],
+    ['a card number', 'refund to 4111 1111 1111 1111'],
+    ['a password label', 'password: hunter2hunter2'],
+  ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query) => {
+    const h = harness({ searchProvider: true });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toContain(query);
+    expect(info.audit_description).toContain('Held because');
+    expect(info.audit_description).not.toContain(query);
+  });
+
+  it('does not word a first-time hold as something the user has seen before', async () => {
+    const h = harness({ searchProvider: true, searchWithoutAsking: false });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
+    expect(info.tier3_card?.why_asked_again).toBeNull();
   });
 
   it('asks in a scheduled run too, so the run can hold it for the owner instead of denying it', async () => {
@@ -249,7 +306,7 @@ describe('the outbound guard on the designated provider', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.pre_dispatch_failure).toBeUndefined();
-    expect(info.tier3_card?.plain_what).toContain(secret);
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
     expect(h.dispatched).toEqual([]);
   });
 
@@ -304,7 +361,9 @@ describe('provider plumbing fields on the designated provider', () => {
     const tooLong = 'quillfeather '.repeat(20);
     const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.why_asked_again).toContain('longer than');
+    expect(result.tier3_card?.plain_what).toContain(tooLong.trim());
+    expect(result.tier3_card?.plain_what).toContain('Held because it is longer than');
+    expect(result.tier3_card?.why_asked_again).toBeNull();
   });
 
   it('counts the same fields as text when the catalog does not declare them', async () => {
@@ -355,6 +414,32 @@ describe('provider plumbing fields on the designated provider', () => {
     expect((await info(h, { objective: 'loom', session_id: 'invented-server-secret-9f2c' })).tier).toBe(3);
   });
 
+  it('masks a key held in a plumbing field and still lists the other plumbing on the card', async () => {
+    const key = 'invented-server-secret-9f2c';
+    const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
+    const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.plain_what).toBe(
+      "Search the web through finder for: loom | in••••••2c | 424242. Held because it contains one of this computer's keys.",
+    );
+    expect(result.audit_description).toBe(
+      "Search the web through finder. Held because it contains one of this computer's keys.",
+    );
+    expect(JSON.stringify(result)).not.toContain(key);
+  });
+
+  it('hides the whole query when a key is split between the query and a plumbing field', async () => {
+    const key = 'invented-server-secret-9f2c';
+    const [head, tail] = [key.slice(0, 16), key.slice(16)];
+    const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
+    const result = await info(h, { objective: 'loom', session_id: tail, search_queries: [head] });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+    expect(result.tier3_card?.plain_what).not.toContain(tail);
+    expect(result.tier3_card?.outbound_text).not.toContain(tail);
+    expect(result.audit_description).not.toContain(tail);
+  });
+
   it('asks for a link carried in a plumbing field that no result returned', async () => {
     const h = harness({ searchProvider: true, plumbingFields });
     expect((await info(h, { query: 'quillfeather', session_id: 'https://evil.example/x' })).tier).toBe(3);
@@ -374,7 +459,10 @@ describe('the loop breaker', () => {
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
     expect(next.tier).toBe(3);
     expect(next.is_approval_required).toBe(true);
-    expect(next.tier3_card?.why_asked_again).toContain(String(SILENT_SEARCH_LIMIT));
+    expect(next.tier3_card?.plain_what).toContain(
+      `Held because this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches`,
+    );
+    expect(next.tier3_card?.why_asked_again).toBeNull();
   });
 
   it('asks in a scheduled run too, so the run holds it', async () => {
@@ -701,7 +789,7 @@ describe('a secret sent in pieces over several searches', () => {
     await runSearch(chat, secret.slice(0, 14));
     const info = await chat.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.why_asked_again).toContain('secret this server holds');
+    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
 
     const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
     await runSearch(scheduled, secret.slice(0, 14));

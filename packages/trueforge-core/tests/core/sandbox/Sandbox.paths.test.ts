@@ -24,9 +24,15 @@ import {
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
-import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
+import {
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from '../../../src/core/sandbox/provider/Provider';
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
+  buildWriteAndRunScriptCommand,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -45,10 +51,13 @@ import {
 import { SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
 import { REQUESTED_SKILLS_FILE_NAME, SkillMounter, type GitSkill } from '../../../src/core/sandbox/skills/SkillMounter';
 import { structuredEditObservationForTargets } from '../../../src/core/sandbox/structuredEditPrecondition';
+import { GIT_INDEX_ENTRIES_COMMAND, TRACKED_WORKTREE_COMMAND } from '../../../src/core/sandbox/workspaceStateCapture';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { fakeTrackedState } from './fakeTrackedState';
+import { realCommandExec } from './realCommandExec';
 
 function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -79,13 +88,21 @@ const DEFAULT_CHECKOUT_ID = implementationPlanCheckoutId({
 const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 
+const APP_INDEX_SHA = '1'.repeat(40);
+const APP_WORKTREE_SHA = '2'.repeat(40);
+const APP_CHANGED_LISTING =
+  fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: '3'.repeat(40) }])[
+    TRACKED_WORKTREE_COMMAND
+  ] ?? '';
+
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
+
 const BASE_GIT_STATE_RESULTS: Readonly<Record<string, string>> = {
   'git rev-parse --show-toplevel': '/repo',
   'git rev-parse --abbrev-ref HEAD': 'feature/reliable-agent',
   'git rev-parse HEAD': '0123456789abcdef',
   [GIT_TRACKED_PATH_TAGS_COMMAND]: 'H src/app.ts\0',
-  'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-  'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts',
+  ...fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: APP_WORKTREE_SHA }]),
   'git ls-files --others --exclude-standard -z': '',
 };
 
@@ -115,6 +132,10 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
   const { exec: overrideExec, ...providerOverrides } = overrides;
   const exec = async (params: SandboxExecParams): Promise<ExecResult> => {
     const result = overrideExec === undefined ? await readyExec() : await overrideExec(params);
+    const emptyTrackedState = EMPTY_TRACKED_STATE[params.command];
+    if (emptyTrackedState !== undefined && result.success && result.response.result === 'ok') {
+      return { success: true, response: { ...result.response, result: emptyTrackedState } };
+    }
     if (
       params.command === BOUND_REPOSITORY_STATE_COMMAND &&
       result.success &&
@@ -150,7 +171,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
         },
       };
     }
-    if (params.command.startsWith('python3 -c ') && result.success && result.response.result === 'ok') {
+    if (params.command.startsWith('python3 -I -S -c ') && result.success && result.response.result === 'ok') {
       const path = params.command.includes('src/runtime.ts')
         ? 'src/runtime.ts'
         : params.command.includes('src/app.ts')
@@ -187,7 +208,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
+    exec: realCommandExec(exec),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -804,7 +825,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result =
@@ -892,7 +913,7 @@ describe('Sandbox provider-owned paths', () => {
     );
 
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
-    const applyIndex = commandOrder.findIndex(command => command.startsWith('git apply --recount --unidiff-zero -- '));
+    const applyIndex = commandOrder.findIndex(command => command.includes('git apply --recount --unidiff-zero -- '));
     const durableIndex = commandOrder.lastIndexOf('load-durable-grant');
     const checkoutIndex = commandOrder.map(command => command.startsWith('ls -di ')).lastIndexOf(true);
     const branchIndex = commandOrder.findIndex(
@@ -929,7 +950,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse HEAD') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: grant.plan.head_sha } });
       }
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result = params.command === 'git rev-parse --show-toplevel' ? '/repo' : 'ok';
@@ -1358,7 +1379,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -1427,7 +1448,7 @@ describe('Sandbox provider-owned paths', () => {
     });
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -2230,8 +2251,10 @@ describe('Sandbox provider-owned paths', () => {
 
     expect(ocrCommands).toHaveLength(3);
     for (const command of ocrCommands) {
-      expect(command).not.toMatch(/tesseract [^;]*\|\s*head/);
-      expect(command).toMatch(/tesseract [^;]+ > "\$raw_text_file"; head -c/);
+      // The page is read into a file and then cut, so a Tesseract failure is not hidden behind head.
+      expect(command).not.toMatch(/--psm 6 [^;]*\|/);
+      expect(command).toMatch(/tesseract [^;]+ --psm 6 > "\$raw_text_file"; head -c/);
+      expect(command).toContain('export OMP_THREAD_LIMIT=1');
     }
   });
 
@@ -2258,7 +2281,7 @@ describe('Sandbox provider-owned paths', () => {
     ).rejects.toThrow('(exit code 1): tesseract failed');
   });
 
-  it('adds OCR language flags to Tesseract commands when configured', async () => {
+  it('picks OCR languages per page and falls back to the configured ones', async () => {
     const ocrCommands: string[] = [];
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
       if (params.command.startsWith('realpath -e --')) {
@@ -2282,7 +2305,9 @@ describe('Sandbox provider-owned paths', () => {
     });
 
     expect(ocrCommands).toHaveLength(1);
-    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+-l\s+deu\+fra\s+--psm\s+6/);
+    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+--psm\s+0/);
+    expect(ocrCommands[0]).toContain("*) wanted='deu fra';;");
+    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+-l\s+"\$ocr_languages"\s+--psm\s+6/);
   });
 
   it('exposes apply_patch as a structured approval-gated edit', async () => {
@@ -2407,7 +2432,7 @@ describe('Sandbox provider-owned paths', () => {
         content: Buffer.from(patch.replace('@@ -1 +1 @@', '@@ -1,1 +1,1 @@'), 'utf-8'),
       }),
     );
-    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.startsWith('git apply'));
+    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]).toEqual(expect.objectContaining({ cwd: '/repo' }));
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
@@ -2482,7 +2507,7 @@ describe('Sandbox provider-owned paths', () => {
     // file's current content, rather than reject it and fall back to unstructured shell edits.
     const originalContent = 'export function add(a, b) {\n  return a + b;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2532,7 +2557,7 @@ describe('Sandbox provider-owned paths', () => {
     );
     const patchCalls = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .filter(callArgs => callArgs.command.startsWith('git apply'));
+      .filter(callArgs => callArgs.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
     expect(patchCalls[1]?.command).toContain('git apply --recount --');
@@ -2549,7 +2574,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo' } });
       }
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         const content = params.command.includes('"sub/a.txt"') ? nestedContent : rootContent;
         return Promise.resolve({
           success: true,
@@ -2620,7 +2645,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toMatch(/mixes|embeds/i);
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(callArgs => callArgs[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(callArgs => callArgs[0].command.includes('git apply'))).toBe(false);
   });
 
   it('rejects ambiguous plain multi-file diffs instead of corrupting their hunk boundaries', async () => {
@@ -2643,7 +2668,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toContain('Git-format unified diff');
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(call => call[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(call => call[0].command.includes('git apply'))).toBe(false);
   });
 
   it('sends exact text replacements as data through one approval-gated edit', async () => {
@@ -2684,9 +2709,9 @@ describe('Sandbox provider-owned paths', () => {
     expect(uploadedScript?.content.toString('utf-8')).toContain('replacement would not change the file');
     const executed = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c '));
+      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c '));
     expect(executed?.cwd).toBe('/repo');
-    expect(executed?.command).toMatch(/^python3 '.*\.py' '.*\.json'$/);
+    expect(executed?.command).toMatch(/^python3 -I -S '.*\.py' '.*\.json'$/);
     expect(executed?.command).not.toContain('yield update');
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
   });
@@ -2694,7 +2719,7 @@ describe('Sandbox provider-owned paths', () => {
   it('proceeds unchanged when old_text matches the current file content exactly once', async () => {
     const fileContent = 'function reconnect() {\n  break;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2737,7 +2762,7 @@ describe('Sandbox provider-owned paths', () => {
     // it never guesses — and point at the real (tab-indented) passage instead of substituting it.
     const fileContent = 'function connect() {\n  if (down) {\n\t\tbreak;\n  }\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2777,7 +2802,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text matches more than one location', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2815,7 +2840,7 @@ describe('Sandbox provider-owned paths', () => {
   it('dispatches replace_text when old_text matches more than one location and replace_all is true', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2856,7 +2881,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text has no acceptable match', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2895,7 +2920,7 @@ describe('Sandbox provider-owned paths', () => {
   it("surfaces the replace script's own {error: string} JSON output at the top level", async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2904,7 +2929,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         return Promise.resolve({
           success: true,
           response: { exitCode: 1, result: JSON.stringify({ error: 'replacement would not change the file' }) },
@@ -2937,7 +2962,7 @@ describe('Sandbox provider-owned paths', () => {
   it('falls back to a generic rejection when the failed script output is not a {error: string} shape', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2946,7 +2971,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         // Neither a string `error`, nor JSON at all in the second call — both must be handled
         // without throwing out of the `hasStringErrorProperty` narrowing.
         return Promise.resolve({ success: true, response: { exitCode: 1, result: JSON.stringify({ error: 42 }) } });
@@ -3003,7 +3028,7 @@ describe('Sandbox provider-owned paths', () => {
 
   it('does not apply a patch that fails validation', async () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> =>
-      params.command.startsWith('python3 -c ')
+      params.command.startsWith('python3 -I -S -c ')
         ? Promise.resolve({
             success: true,
             response: {
@@ -3037,7 +3062,7 @@ describe('Sandbox provider-owned paths', () => {
 
     const response = await sandbox.callTool(call, { status: 'allow', scope: 'once' }, context);
 
-    expect(exec.mock.calls.filter(call => call[0].command.startsWith('git apply'))).toHaveLength(1);
+    expect(exec.mock.calls.filter(call => call[0].command.includes('git apply'))).toHaveLength(1);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
   });
 
@@ -3159,16 +3184,11 @@ describe('Sandbox provider-owned paths', () => {
   it.each([
     {
       name: 'tracked worktree',
-      afterState: {
-        'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts\n+changed',
-      },
+      afterState: { [TRACKED_WORKTREE_COMMAND]: APP_CHANGED_LISTING },
     },
     {
       name: 'staged index',
-      afterState: {
-        'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --':
-          'diff --git a/src/app.ts b/src/app.ts\n+staged',
-      },
+      afterState: { [GIT_INDEX_ENTRIES_COMMAND]: `100644 ${'4'.repeat(40)} 0\tsrc/app.ts\0` },
     },
     { name: 'HEAD', afterState: { 'git rev-parse HEAD': 'fedcba9876543210' } },
     {
@@ -3332,18 +3352,15 @@ describe('Sandbox provider-owned paths', () => {
     try {
       let trackedChanged = false;
       const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-        if (
-          params.command.startsWith('git apply --recount --unidiff-zero -- ') &&
-          !params.command.includes('--check')
-        ) {
+        if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
           trackedChanged = true;
           // The provider mutated the checkout, then did not return until after
           // the original fixed 90-second workspace lease had expired.
           jest.setSystemTime(new Date(Date.now() + 91_000));
         }
         const result =
-          params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-            ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+          params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+            ? APP_CHANGED_LISTING
             : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
         return Promise.resolve({ success: true, response: { exitCode: 0, result } });
       });
@@ -3445,8 +3462,8 @@ describe('Sandbox provider-owned paths', () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
       if (params.command === 'touch src/app.ts') trackedChanged = true;
       const result =
-        params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-          ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+        params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+          ? APP_CHANGED_LISTING
           : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
       return Promise.resolve({ success: true, response: { exitCode: 0, result } });
     });
@@ -4056,5 +4073,43 @@ describe('Sandbox provider-owned paths', () => {
     expect(portableCommand).toContain("mv -f 'mcp-client/mcp_client.py.new' 'mcp-client/mcp_client.py'");
     expect(portableCommand).toContain("ln -sf '../mcp_client.py'");
     expect(portableCommand).toContain('mcp-client/bin/mcp-client');
+  });
+});
+
+describe('Sandbox host bookkeeping', () => {
+  it('runs every host-authored command on the trusted PATH and only the model command on the sandbox PATH', async () => {
+    const commands: string[] = [];
+    const transport: CodeModeTransport = {
+      getClientInstall: () => ({ content: 'print("mock")\n', remotePath: 'mcp-client/mcp_client.py' }),
+      start: () =>
+        Promise.resolve({
+          env: { TFY_NATS_URL: 'ws://localhost:4223', TFY_NATS_SUBJECT_PREFIX: 'sandbox.bridge.test' },
+        }),
+      stop: () => Promise.resolve(),
+    };
+    const provider: SandboxProvider = {
+      ...makeProvider({ createCodeModeTransport: () => transport }),
+      exec: (params): Promise<ExecResult> => {
+        commands.push(params.command);
+        return readyExec();
+      },
+    };
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter([]) });
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+    await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Run command', purpose: 'execute', command: 'true' } },
+      { status: 'allow', scope: 'once' },
+    );
+    const trustedPrefix = withTrustedPath('');
+    expect(commands).toContain('true');
+    expect(commands.some(command => command.includes('skill_downloader.py'))).toBe(true);
+    expect(commands.some(command => command.includes('mcp_client.py'))).toBe(true);
+    expect(commands.filter(command => command !== 'true' && !command.startsWith(trustedPrefix))).toEqual([]);
+  });
+
+  it('runs setup scripts in isolated mode so the workspace stays off the import path', () => {
+    expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
+      / && python3 -I -S 'skill_downloader\.py'$/u,
+    );
   });
 });
