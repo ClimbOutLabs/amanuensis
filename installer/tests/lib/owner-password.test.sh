@@ -160,9 +160,9 @@ test_the_stub_refuses_a_delete_that_cannot_work() {
   local dex_image
   dex_image=$(sed -n 's/.*--entrypoint sh \([^ ]*dex[^ ]*\) -c .*/\1/p' "$STUB_LOG" | head -n 1)
   : "${dex_image:=dexidp/dex}"
-  "$SB_BIN/docker" run --rm --network none -v aman_main_dex:/var/dex --entrypoint sh aman-app:x -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_fail "the app image deleted it" || t_pass
-  "$SB_BIN/docker" run --rm --network none --user 10001:10001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_fail "uid 10001 deleted it" || t_pass
-  "$SB_BIN/docker" run --rm --network none --user 1001:1001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_pass || t_fail "uid 1001 in the Dex image was refused"
+  if "$SB_BIN/docker" run --rm --network none -v aman_main_dex:/var/dex --entrypoint sh aman-app:x -c rm -f /var/dex/dex.db >/dev/null 2>&1; then t_fail "the app image deleted it"; else t_pass; fi
+  if "$SB_BIN/docker" run --rm --network none --user 10001:10001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1; then t_fail "uid 10001 deleted it"; else t_pass; fi
+  if "$SB_BIN/docker" run --rm --network none --user 1001:1001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1; then t_pass; else t_fail "uid 1001 in the Dex image was refused"; fi
   sandbox_drop
 }
 
