@@ -1055,7 +1055,14 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     });
   }
   // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
-  if (writeTargetTouchesSandboxTools({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
+  if (
+    writeTargetTouchesSandboxTools({
+      p: target,
+      cwd: identityCwd,
+      roots: ctx.workspace_cwd === null ? [] : [ctx.workspace_cwd],
+      resolution: ctx.path_resolution,
+    })
+  ) {
     return tier3Decision({
       card: {
         plain_what: `Write \`${target}\`, in a folder the sandbox uses for its own tools.`,

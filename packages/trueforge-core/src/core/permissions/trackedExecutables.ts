@@ -230,13 +230,44 @@ export function writeTargetTouchesGitControl(input: {
   return writeTargetMatches({ ...input, matches: isGitControlPath });
 }
 
-/** True when a write target is, or resolves through symlinks to, the sandbox's tool folders. */
+/** Tool folders (and the PATH folders inside them) as they resolve under each root, so a symlinked folder is still covered. */
+function resolvedSandboxToolDirs(roots: readonly string[]): string[] {
+  const resolved: string[] = [];
+  for (const root of roots) {
+    for (const dir of ['.venv', '.venv/bin', 'mcp-client', 'mcp-client/bin']) {
+      try {
+        resolved.push(realpathSync(path.join(root, dir)));
+      } catch {
+        // A folder that does not exist cannot be a link to anywhere.
+      }
+    }
+  }
+  return resolved;
+}
+
+/**
+ * True when a write target is, or resolves through symlinks to, the sandbox's tool folders: by name, or by
+ * landing inside where `.venv`, `mcp-client` or their `bin` folders actually point under `roots`.
+ */
 export function writeTargetTouchesSandboxTools(input: {
   p: string;
   cwd: string;
+  roots: readonly string[];
   resolution?: PathResolution | undefined;
 }): boolean {
-  return writeTargetMatches({ ...input, matches: isSandboxToolPath });
+  if (writeTargetMatches({ ...input, matches: isSandboxToolPath })) {
+    return true;
+  }
+  if (input.resolution === 'remote') {
+    return false;
+  }
+  const protectedDirs = resolvedSandboxToolDirs([input.cwd, ...input.roots]);
+  const identities = [canonicalWriteTarget(input), canonicalFileIdentity(input)];
+  return identities.some(
+    identity =>
+      identity !== null &&
+      protectedDirs.some(dir => identity === dir || identity.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)),
+  );
 }
 
 /** A dangling symlink cannot be resolved, so its destination is unknown: fail closed. */
