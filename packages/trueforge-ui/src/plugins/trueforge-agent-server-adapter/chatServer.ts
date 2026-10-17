@@ -16,8 +16,8 @@ import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atom
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
-import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
-import { extractSentinelFromEvent } from '../../sentinel/types.js';
+import { publishSendReceipt, publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
+import { extractSendReceiptFromEvent, extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
   AgentChatServer,
   CreateSessionRequest,
@@ -381,7 +381,7 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
+ * Taps Sentinel approval events and send receipts off a raw SSE stream item before `toUiStreamingEvent`
  * narrows it away: the vendor `TurnStreamingEvent` union has no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
@@ -389,6 +389,8 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
  */
 function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
+  const receipt = extractSendReceiptFromEvent(data);
+  if (receipt !== undefined) publishSendReceipt(receipt);
 }
 
 /**

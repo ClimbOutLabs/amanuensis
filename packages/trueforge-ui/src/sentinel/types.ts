@@ -52,6 +52,8 @@ export type SentinelApprovalEmail = {
   bcc: string[];
   subject: string;
   body: string;
+  /** Short code a send card and its receipt both show; null for a draft. */
+  check_code: string | null;
   /** The saved draft a change replaces, or null. */
   replaces: { subject: string; to: string[] } | null;
 };
@@ -88,6 +90,38 @@ export type SentinelApprovalCard = {
   /** The whole message when the action is sending or saving mail, or null. */
   email: SentinelApprovalEmail | null;
 };
+
+export const NOT_SENT_REASONS = [
+  'draft_changed',
+  'needs_ok_again',
+  'cannot_send',
+  'gmail_refused',
+  'unconfirmed',
+] as const;
+
+export type SentinelNotSentReason = (typeof NOT_SENT_REASONS)[number];
+
+/** The message a receipt repeats, as the server verified it. */
+export type SentinelReceiptMessage = {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+};
+
+/** How a send ended, written by the server from what it verified. Keyed to the send's tool call. */
+export type SentinelSendReceipt =
+  | {
+      outcome: 'sent';
+      toolCallId: string;
+      /** ISO time Gmail accepted the send. */
+      sentAt: string;
+      sentMessageId: string;
+      checkCode: string;
+      message: SentinelReceiptMessage;
+    }
+  | { outcome: 'not_sent'; toolCallId: string; reason: SentinelNotSentReason };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
 export type HeldActionInfo = {
@@ -180,6 +214,8 @@ export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
   /** Answers already given, by tool call id. Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
+  /** How each send ended, by tool call id. Absent when the host reads none. */
+  receipts?: Record<string, SentinelSendReceipt> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -253,6 +289,7 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     bcc,
     subject,
     body,
+    check_code: cardString(value, { snake: 'check_code', camel: 'checkCode' }),
     replaces:
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
   };
@@ -362,15 +399,61 @@ function answersFromEvent(event: unknown): [string, ApprovalAnswer][] {
   return answers;
 }
 
+function parseNotSentReason(value: unknown): SentinelNotSentReason | undefined {
+  return NOT_SENT_REASONS.find(reason => reason === value);
+}
+
+function parseReceiptMessage(value: unknown): SentinelReceiptMessage | undefined {
+  if (!isRecord(value)) return undefined;
+  const to = stringList(value.to);
+  const cc = stringList(value.cc);
+  const bcc = stringList(value.bcc);
+  const subject = optionalString(value, 'subject');
+  const body = optionalString(value, 'body');
+  if (to === undefined || cc === undefined || bcc === undefined || subject === undefined || body === undefined) {
+    return undefined;
+  }
+  return { to, cc, bcc, subject, body };
+}
+
+const SEND_RECEIPT_EVENT_TYPE = 'aman.email.send_receipt';
+
+/**
+ * Reads a send receipt off a raw or persisted event. A receipt that does not carry everything a sent
+ * message needs is dropped, so the chat never shows a half-filled "Sent".
+ */
+export function extractSendReceiptFromEvent(event: unknown): SentinelSendReceipt | undefined {
+  if (!isRecord(event) || event.type !== SEND_RECEIPT_EVENT_TYPE) return undefined;
+  const toolCallId = optionalString(event, 'tool_call_id') ?? optionalString(event, 'toolCallId');
+  const result = event.result;
+  if (toolCallId === undefined || !isRecord(result)) return undefined;
+  if (result.outcome === 'not_sent') {
+    const reason = parseNotSentReason(result.reason);
+    return reason === undefined ? undefined : { outcome: 'not_sent', toolCallId, reason };
+  }
+  if (result.outcome !== 'sent') return undefined;
+  const sentAt = optionalString(result, 'sent_at') ?? optionalString(result, 'sentAt');
+  const sentMessageId = optionalString(result, 'sent_message_id') ?? optionalString(result, 'sentMessageId');
+  const checkCode = optionalString(result, 'check_code') ?? optionalString(result, 'checkCode');
+  const message = parseReceiptMessage(result.message);
+  if (sentAt === undefined || sentMessageId === undefined || checkCode === undefined || message === undefined) {
+    return undefined;
+  }
+  return { outcome: 'sent', toolCallId, sentAt, sentMessageId, checkCode, message };
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
+  const receipts: Record<string, SentinelSendReceipt> = {};
   for (const event of events) {
     for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
+    const receipt = extractSendReceiptFromEvent(event);
+    if (receipt !== undefined) receipts[receipt.toolCallId] = receipt;
   }
-  return { approvals: [...approvals.values()], answers };
+  return { approvals: [...approvals.values()], answers, receipts };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {

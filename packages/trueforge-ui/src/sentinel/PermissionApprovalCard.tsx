@@ -5,7 +5,12 @@ import { useState, type FC } from 'react';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
+import type {
+  SentinelApprovalCard,
+  SentinelApprovalEmail,
+  SentinelApprovalEmailAction,
+  SentinelReceiptMessage,
+} from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
@@ -88,17 +93,35 @@ function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail
   );
 }
 
+/** The short code the receipt repeats, so a person can see the message that went is the one they approved. */
+function CheckCode({ code }: { code: string }) {
+  return (
+    <p className="mt-1 text-sm text-text-secondary" data-role="check-code">
+      Check code <span className="font-mono font-semibold text-text-primary">{code}</span>
+    </p>
+  );
+}
+
 /** The whole message, never cut: the body scrolls in its own box instead of being folded. */
-function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
+export function EmailMessage({
+  email,
+  heading,
+  checkCode,
+}: {
+  email: SentinelReceiptMessage;
+  heading: string;
+  checkCode: string | null;
+}) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">{heading}</p>
       <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
       {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
       {email.bcc.length > 0 && (
         <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
+      {checkCode !== null && <CheckCode code={checkCode} />}
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
         Message, exactly as sent
       </p>
@@ -204,7 +227,9 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </dl>
         )}
 
-        {email !== null && <EmailMessage email={email} />}
+        {email !== null && (
+          <EmailMessage email={email} heading="Exactly what will be sent" checkCode={email.check_code} />
+        )}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 

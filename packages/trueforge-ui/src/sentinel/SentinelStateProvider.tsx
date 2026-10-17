@@ -6,8 +6,8 @@ import { createContext, useContext, useEffect, useMemo, useState, type FC, type 
 import { useAuiState } from '../assistant-ui.js';
 
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
-import { subscribeToSentinelEvents } from './sentinelEvents.js';
-import type { ApprovalAnswer, SentinelApprovalInfo } from './types.js';
+import { subscribeToSendReceipts, subscribeToSentinelEvents } from './sentinelEvents.js';
+import type { ApprovalAnswer, SentinelApprovalInfo, SentinelSendReceipt } from './types.js';
 
 export type SentinelState = {
   /** Tiered approval info the server attached to a tool call, if any. */
@@ -20,6 +20,8 @@ export type SentinelState = {
   answerFor: (toolCallId: string) => ApprovalAnswer | undefined;
   /** Remembers an answer given in this tab until a reload reads it back from the server. */
   recordAnswer: (toolCallId: string, answer: ApprovalAnswer) => void;
+  /** How the send behind this tool call ended, once the server has said. */
+  receiptFor: (toolCallId: string) => SentinelSendReceipt | undefined;
 };
 
 const SentinelStateContext = createContext<SentinelState | null>(null);
@@ -35,14 +37,22 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
   const [approvals, setApprovals] = useState<Map<string, SentinelApprovalInfo>>(new Map());
   const [answers, setAnswers] = useState<Map<string, ApprovalAnswer>>(new Map());
+  const [receipts, setReceipts] = useState<Map<string, SentinelSendReceipt>>(new Map());
 
   useEffect(() => {
     return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(info.toolCallId, info)));
   }, []);
 
   useEffect(() => {
+    return subscribeToSendReceipts(receipt =>
+      setReceipts(previous => new Map(previous).set(receipt.toolCallId, receipt)),
+    );
+  }, []);
+
+  useEffect(() => {
     setApprovals(new Map());
     setAnswers(new Map());
+    setReceipts(new Map());
     if (api == null || sessionId == null) return;
     let cancelled = false;
     void api
@@ -57,6 +67,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
           return merged;
         });
         setAnswers(previous => new Map([...Object.entries(context.answers ?? {}), ...previous]));
+        setReceipts(previous => new Map([...Object.entries(context.receipts ?? {}), ...previous]));
       })
       .catch((error: unknown) => {
         // Best-effort: live events still populate the map, but a failed read leaves a reloaded tab
@@ -80,8 +91,9 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
       answerFor: toolCallId => answers.get(toolInvocationRawId(toolCallId)),
       recordAnswer: (toolCallId, answer) =>
         setAnswers(previous => new Map(previous).set(toolInvocationRawId(toolCallId), answer)),
+      receiptFor: toolCallId => receipts.get(toolInvocationRawId(toolCallId)),
     }),
-    [approvals, answers],
+    [approvals, answers, receipts],
   );
 
   return <SentinelStateContext.Provider value={state}>{children}</SentinelStateContext.Provider>;

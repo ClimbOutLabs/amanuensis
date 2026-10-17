@@ -98,6 +98,27 @@ test('session context folds persisted events into approvals of both tiers', asyn
   );
 });
 
+test('session context carries how each send ended, so a reloaded chat shows the receipt', async () => {
+  const receipt = {
+    type: 'aman.email.send_receipt',
+    toolCallId: 'call-3',
+    result: {
+      outcome: 'sent',
+      sentAt: '2026-10-17T09:12:00.000Z',
+      sentMessageId: 'm-1',
+      checkCode: 'A7F39C',
+      message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+    },
+  };
+  const api = createSentinelApi({
+    fetcher: async () => Response.json({}),
+    listSessionEvents: async () => [approvalEvent, receipt],
+  });
+  const context = await api.listSentinelSessionContext('session-1');
+  assert.equal(context.receipts?.['call-3']?.outcome, 'sent');
+  assert.equal(context.receipts?.['call-3']?.toolCallId, 'call-3');
+});
+
 test('a failed audit request surfaces the server error', async () => {
   const fetcher: typeof fetch = async () =>
     Response.json({ error: { message: 'Audit log unavailable.' } }, { status: 503 });

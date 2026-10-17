@@ -54,6 +54,8 @@ The user opens a thread. It reads oldest first, with each attachment named. Long
 
 "Send it." The approval card is the one confirmation step. It shows the whole message exactly as it will be sent: recipients, copy, hidden copy, subject, the name it is sent under, and the full text. There is no second prompt and no standing permission to send.
 
+A send card also shows a short check code, such as "Check code A7F39C". After Gmail accepts the send, the card turns into a receipt: the same recipients, subject, text and check code, with "Sent at 09:12, exactly as approved". If the send did not go out, the card says so in plain words, for example "Not sent: the draft changed after you approved it. Review it again.", and offers the new card. It is never a receipt.
+
 ## Tools
 
 Reads run silently and count as reading private data. Writes always ask.
@@ -75,6 +77,8 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 ## Safety Model
 
 **What a send delivers is what the user saw.** The card is built from the draft as Gmail holds it, never from the model's words. Aman remembers a fingerprint of that draft: recipients, copy, hidden copy, subject, text, thread, reply headers, and the sender name. The send goes ahead only if the draft still matches. An edit made after review, by anyone, makes the send stop and ask again. A review is used once and lasts 30 minutes. It lives in memory, so after a restart or an expiry the user is asked again.
+
+**A receipt shows only what the send gate verified.** The check code is the first six characters of the same hash the gate binds, so it changes if any bound field changes. The receipt is written by the server after Gmail accepts the send. It holds the message id, the time, the check code, and the message from the draft that matched the reviewed hash, never model text. It is stored with the turn's events, so it survives a reload. When Gmail does not answer, the card says the message may have gone through and points to the Sent folder, because "not sent" would be a claim the gate cannot check.
 
 **Only drafts Aman can show in full are sent.** A draft is refused when it has an attachment, an HTML version, extra headers such as a reply address, a different sender, a body too long to read, odd blank space at its edges, or a recipient list that a mail reader might split differently. Headers that are not shown must be in a closed, simple format.
 

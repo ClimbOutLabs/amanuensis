@@ -210,6 +210,7 @@ describe('PermissionApprovalCard for mail', () => {
     bcc: ['audit@example.com'],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
+    check_code: 'A7F39C',
     replaces: null,
   };
 
@@ -235,6 +236,16 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText('Copy')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('(Bcc)');
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
+  });
+
+  it('shows the check code the receipt will repeat', () => {
+    renderMail();
+    expect(screen.getByText('Check code', { exact: false })).toHaveTextContent('Check code A7F39C');
+  });
+
+  it('shows no check code on a draft, which sends nothing', () => {
+    renderMail({ action: 'save', check_code: null });
+    expect(screen.queryByText('Check code', { exact: false })).not.toBeInTheDocument();
   });
 
   it('names the action in the badge instead of the tool id', () => {
