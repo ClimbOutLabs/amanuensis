@@ -71,7 +71,11 @@ describe('owner sign-in with the installer settings', () => {
 
   it('lets the owner in as admin', async () => {
     const { claims, identity, oidc } = await loadAuth(INSTALLER_ENV);
-    const owner = claims.toRequestContext({ claims: { email: OWNER }, config: oidc, user_credential: 'jwt' });
+    const owner = claims.toRequestContext({
+      claims: { email: OWNER, email_verified: true },
+      config: oidc,
+      user_credential: 'jwt',
+    });
     expect(owner.subject.id).toBe(OWNER);
     expect(identity.hasAdminRole(owner)).toBe(true);
   });
@@ -88,7 +92,7 @@ describe('owner sign-in with the installer settings', () => {
   it('keeps the owner one identity whatever subject the login service gives the token', async () => {
     const { claims, identity, oidc } = await loadAuth(INSTALLER_ENV);
     const context = claims.toRequestContext({
-      claims: { sub: 'another-subject', email: OWNER },
+      claims: { sub: 'another-subject', email: OWNER, email_verified: true },
       config: oidc,
       user_credential: 'jwt',
     });
@@ -106,6 +110,9 @@ describe('owner sign-in with the installer settings', () => {
         user_credential: 'jwt',
       }),
     ).toThrow(EmailNotAllowedError);
+    expect(() => claims.toRequestContext({ claims: { email: OWNER }, config: oidc, user_credential: 'jwt' })).toThrow(
+      EmailNotAllowedError,
+    );
     expect(
       claims.toRequestContext({ claims: { email: OWNER, email_verified: true }, config: oidc, user_credential: 'jwt' })
         .subject.id,
