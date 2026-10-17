@@ -292,10 +292,8 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, args);
     expect(result.tier).toBe(1);
     expect(result.is_approval_required).toBe(false);
-    // The chip names what was asked, not the plumbing.
-    expect(result.silent_search_query).toBe([objective, ...queries].join(' | '));
-    expect(result.silent_search_query).not.toContain(uuid);
-    expect(result.silent_search_query).not.toContain('invented-model-7');
+    // The chip lists everything sent, plumbing included, so nothing leaves unseen.
+    expect(result.silent_search_query).toBe([objective, ...queries, uuid, 'invented-model-7'].join(' | '));
 
     await h.toolSet.callTool({ name: 'lookup', arguments: args });
     expect(h.dispatched).toHaveLength(1);
@@ -333,7 +331,7 @@ describe('provider plumbing fields on the designated provider', () => {
       const result = await info(h, args);
       expect(result.tier).toBe(1);
       expect(result.is_approval_required).toBe(false);
-      expect(result.silent_search_query).not.toContain(sessionId);
+      expect(result.silent_search_query).toContain(sessionId);
       await h.toolSet.callTool({ name: 'lookup', arguments: args });
       expect(h.dispatched).toHaveLength(1);
     }
@@ -343,6 +341,13 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields });
     expect((await info(h, { objective: `again ${hexId}`, session_id: hexId })).tier).toBe(3);
     expect((await info(h, { objective: 'again', session_id: hexId, note_id: hexId })).tier).toBe(3);
+  });
+
+  it('holds an encoded secret placed in a plumbing field', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    const encoded = Buffer.from(['gh', 'p_', 'a1B2c3D4'.repeat(4)].join('')).toString('base64');
+    expect((await info(h, { objective: 'loom', session_id: encoded })).tier).toBe(3);
+    expect((await info(h, { objective: 'loom', model_name: encoded })).tier).toBe(3);
   });
 
   it('holds a plumbing value that carries a secret, whatever it is named', async () => {

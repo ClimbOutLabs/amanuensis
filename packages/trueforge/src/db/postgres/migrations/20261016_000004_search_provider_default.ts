@@ -13,7 +13,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     await sql`SET LOCAL lock_timeout = '5s'`.execute(trx);
     await applySearchProviderDefaultMigration({
       db: trx,
-      catalog: McpCatalog.load(),
+      catalog: McpCatalog.loadShipped(),
       dialect: {
         readManifest: () => sql`manifest`,
         mergeIntoManifest: patch => sql`manifest || ${JSON.stringify(patch)}::jsonb`,

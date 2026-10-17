@@ -13,7 +13,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
     await applySearchProviderDefaultMigration({
       db: trx,
-      catalog: McpCatalog.load(),
+      catalog: McpCatalog.loadShipped(),
       dialect: {
         readManifest: () => sql`json(manifest)`,
         mergeIntoManifest: patch => sql`jsonb_patch(manifest, jsonb(${JSON.stringify(patch)}))`,

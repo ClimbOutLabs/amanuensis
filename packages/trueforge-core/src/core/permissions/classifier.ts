@@ -1190,7 +1190,7 @@ const INSTALL_FRAGMENTS = ['install'];
 const SEARCH_CARD_TEXT_MAX = 1000;
 
 function searchQueryText(strings: OutboundStrings): string {
-  return strings.values
+  return [...strings.values, ...strings.plumbing]
     .map(value => value.trim())
     .filter(value => value !== '')
     .join(' | ');

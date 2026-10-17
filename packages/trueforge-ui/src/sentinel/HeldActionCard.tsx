@@ -4,6 +4,7 @@ import type { FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
+import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
 import type { SentinelApprovalCard } from './types.js';
 
@@ -154,16 +155,36 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {canAnswer && (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Button variant="primary" size="large" onClick={onApprove} disabled={disabled} className="sm:min-w-24">
-              Approve
+            <Button
+              variant="primary"
+              size="large"
+              title={APPROVAL_CHOICES.approve.hint}
+              onClick={onApprove}
+              disabled={disabled}
+              className="sm:min-w-24"
+            >
+              {APPROVAL_CHOICES.approve.label}
             </Button>
             {alwaysAllowOffered && (
-              <Button variant="secondary" size="large" onClick={onAlwaysAllow} disabled={disabled}>
-                Always allow
+              <Button
+                variant="secondary"
+                size="large"
+                title={APPROVAL_CHOICES.alwaysAllow.hint}
+                onClick={onAlwaysAllow}
+                disabled={disabled}
+              >
+                {APPROVAL_CHOICES.alwaysAllow.label}
               </Button>
             )}
-            <Button variant="secondary" size="large" onClick={onDeny} disabled={disabled} className="sm:min-w-24">
-              Deny
+            <Button
+              variant="secondary"
+              size="large"
+              title={APPROVAL_CHOICES.deny.hint}
+              onClick={onDeny}
+              disabled={disabled}
+              className="sm:min-w-24"
+            >
+              {APPROVAL_CHOICES.deny.label}
             </Button>
           </div>
         )}

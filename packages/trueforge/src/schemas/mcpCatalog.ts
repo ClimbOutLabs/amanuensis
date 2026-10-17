@@ -36,16 +36,21 @@ export const CatalogMcpServerSchema = z
     search_tools: McpSearchToolsSchema.optional().describe(
       'Search tools of this server that run without asking when it is the web search provider.',
     ),
-    search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional().describe(
-      'Top-level search tool arguments, such as a session id or model name, that are not the user text and do not count toward the length check.',
-    ),
   })
   .strict()
   .openapi('CatalogMCPServer');
 
+/** A shipped catalog entry: the public preset plus what only the server reads. */
+const CatalogPresetSchema = z
+  .object({
+    ...CatalogMcpServerSchema.shape,
+    search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional(),
+  })
+  .strict();
+
 export const McpCatalogFileSchema = z
   .object({
-    mcp_servers: z.array(CatalogMcpServerSchema),
+    mcp_servers: z.array(CatalogPresetSchema),
   })
   .strict()
   .superRefine((file, ctx) => {
@@ -59,4 +64,5 @@ export const GetMcpServerCatalogResponseSchema = z
   .openapi('GetMCPServerCatalogResponse');
 
 export type CatalogMcpServer = z.infer<typeof CatalogMcpServerSchema>;
+export type CatalogPreset = z.infer<typeof CatalogPresetSchema>;
 export type McpCatalogFile = z.infer<typeof McpCatalogFileSchema>;

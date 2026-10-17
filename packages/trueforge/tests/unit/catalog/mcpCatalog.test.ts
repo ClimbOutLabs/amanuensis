@@ -95,6 +95,14 @@ describe('shipped MCP catalog', () => {
     expect(catalog.presetForUrl('https://mcp.tavily.com/mcp')?.search_plumbing_fields).toBeUndefined();
   });
 
+  it('keeps the plumbing arguments out of the public catalog list', () => {
+    const parallel = McpCatalog.load()
+      .list()
+      .find(entry => entry.name === 'parallel-web');
+    expect(parallel).toBeDefined();
+    expect(Object.keys(parallel ?? {})).not.toContain('search_plumbing_fields');
+  });
+
   it('grants the stored search tools as they are, with the preset’s plumbing arguments', () => {
     const grant = McpCatalog.load().searchProviderGrant({
       url: 'https://search.parallel.ai/mcp',

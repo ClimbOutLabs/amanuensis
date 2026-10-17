@@ -3,6 +3,7 @@
 import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
+import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 
 /**
@@ -57,6 +58,23 @@ export const SentinelSettings: FC = () => {
       <div>
         <h2 className="text-base font-semibold text-text-primary">Permissions</h2>
         <p className="mt-1 text-sm text-text-secondary">How the assistant asks before acting on your behalf.</p>
+      </div>
+
+      <div className="rounded-lg border border-border p-4">
+        <p className="text-sm font-medium text-text-primary">When the assistant asks, you can choose</p>
+        <dl className="mt-2 space-y-1.5 text-sm">
+          {[
+            APPROVAL_CHOICES.approve,
+            APPROVAL_CHOICES.approveForChat,
+            APPROVAL_CHOICES.alwaysAllow,
+            APPROVAL_CHOICES.deny,
+          ].map(choice => (
+            <div key={choice.label} className="flex flex-col sm:flex-row sm:gap-2">
+              <dt className="shrink-0 font-medium text-text-primary sm:w-44">{choice.label}</dt>
+              <dd className="text-text-secondary">{choice.hint}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
       <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
