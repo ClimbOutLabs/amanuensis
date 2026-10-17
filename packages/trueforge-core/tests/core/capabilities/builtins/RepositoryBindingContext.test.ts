@@ -18,6 +18,7 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../..
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../../sandbox/durableWorkspaceCoordinator';
+import { realCommandExec } from '../../sandbox/realCommandExec';
 
 const BOUND_REPOSITORY: BoundRepository = {
   repository_id: 'repo-no-sandbox',
@@ -237,7 +238,7 @@ describe('host request context', () => {
       buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       createSandbox: () => Promise.resolve({ sandboxId: 'sandbox-1' }),
-      exec,
+      exec: realCommandExec(exec),
       getAdditionalInstructions: () => undefined,
       getWorkspaceDir: () => undefined,
       getToolResultDumpDir: () => '/provider/tool-results',

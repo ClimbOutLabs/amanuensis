@@ -32,6 +32,17 @@ describe('OfflineIndicator', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Offline mode');
   });
 
+  it('keeps a short reminder in compact form', async () => {
+    const { api } = stubApi({ offline_mode: true, tier2_auto_allow: [], search_without_asking: true });
+    render(
+      <SentinelApiProvider api={api}>
+        <OfflineIndicator compact />
+      </SentinelApiProvider>,
+    );
+    const status = await screen.findByRole('status', { name: 'Offline mode is on' });
+    expect(status).not.toHaveTextContent('Offline mode');
+  });
+
   it('hides while offline mode is off', () => {
     const { api } = stubApi({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
     const { container } = render(

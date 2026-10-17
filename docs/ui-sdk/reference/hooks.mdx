@@ -71,10 +71,11 @@ Types: `DraftAgentConfig`, `NamedAgentConfig`, `TrueFoundryAgentConfig`,
 ## Utilities
 
 ```ts
-computeAgentStepsSplit(parts: AgentStepPart[], isRunning: boolean): AgentStepsSplitResult;
+computeAgentStepsSplit(parts: AgentStepPart[]): AgentStepsSplitResult;
 ```
 
-Finds the runs of parts that fold into agent internals: tool calls, reasoning, and short narration.
-Substantive text stays in the main flow, in order. The result lists the folded `runs` (with per-run
-tool and reasoning counts) and whether the trailing answer is confirmed. `AgentStepPart`,
+Finds the runs of parts that fold into agent internals: tool calls, reasoning, and whitespace-only
+text. Every part with visible text stays in the main flow, in order, and streams as it is written.
+The result lists the folded `runs` (with per-run tool and reasoning counts) and whether the trailing
+text has content (`hasFinal`). `AgentStepPart`,
 `AgentStepsRun`, and `AgentStepsSplitResult` are exported.

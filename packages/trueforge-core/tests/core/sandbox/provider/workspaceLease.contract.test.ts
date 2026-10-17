@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import {
   commandWithWorkspaceLock,
   workspaceTerminationCommand,
@@ -25,6 +26,22 @@ function waitForFile(path: string): Promise<void> {
     };
     poll();
   });
+}
+
+const execFileAsync = promisify(execFile);
+
+/** The lock wrapper runs its helpers by fixed path, so a waiter is observed through the process list. */
+async function waitForFlockWaiters(input: { lockPath: string; count: number }): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const { stdout } = await execFileAsync('ps', ['-eo', 'args']);
+    const waiters = stdout.split('\n').filter(line => line.includes(`flock -x ${input.lockPath}`));
+    if (waiters.length >= input.count) {
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${String(input.count)} processes on ${input.lockPath}`);
 }
 
 function waitForExit(child: ReturnType<typeof spawn>): Promise<number | null> {
@@ -88,27 +105,18 @@ describe('workspace lease provider contract', () => {
     const workspaceRoot = join(fixtureRoot, 'repository');
     const operationId = 'handoff-operation';
     const markerPath = join(workspaceRoot, '.git', 'trueforge-evidence-control', `${operationId}.pid`);
-    const admissionPath = join(fixtureRoot, 'mutation-admitted');
-    const flockWrapper = join(fixtureRoot, 'flock');
+    const lockPath = join(workspaceRoot, '.git', 'trueforge-workspace.lock');
     try {
       const init = spawn('git', ['init', workspaceRoot]);
       await expect(waitForExit(init)).resolves.toBe(0);
-      await writeFile(flockWrapper, '#!/bin/sh\n: > "$LEASE_ADMITTED_MARKER"\nexec /usr/bin/flock "$@"\n', 'utf8');
-      await chmod(flockWrapper, 0o755);
       const evidence = spawn('sh', [
         '-c',
         leaseCommand({ workspaceRoot, operationId, command: 'trap "exit 0" TERM; sleep 10' }),
       ]);
       await waitForFile(markerPath);
 
-      const mutation = spawn('sh', ['-c', leaseCommand({ workspaceRoot, command: 'printf mutation' })], {
-        env: {
-          ...process.env,
-          LEASE_ADMITTED_MARKER: admissionPath,
-          PATH: `${fixtureRoot}:${process.env['PATH'] ?? ''}`,
-        },
-      });
-      await waitForFile(admissionPath);
+      const mutation = spawn('sh', ['-c', leaseCommand({ workspaceRoot, command: 'printf mutation' })]);
+      await waitForFlockWaiters({ lockPath, count: 2 });
       const termination = spawn('sh', ['-c', workspaceTerminationCommand({ workspaceRoot, operationId })]);
 
       await expect(waitForExit(termination)).resolves.toBe(0);
@@ -135,26 +143,9 @@ describe('workspace lease provider contract', () => {
     );
     const holderReady = join(fixtureRoot, 'holder-ready');
     const holderRelease = join(fixtureRoot, 'holder-release');
-    const terminationReady = join(fixtureRoot, 'termination-ready');
-    const terminationRelease = join(fixtureRoot, 'termination-release');
-    const flockWrapper = join(fixtureRoot, 'flock');
     try {
       const init = spawn('git', ['init', workspaceRoot]);
       await expect(waitForExit(init)).resolves.toBe(0);
-      await writeFile(
-        flockWrapper,
-        [
-          '#!/bin/sh',
-          'if test "$2" = "$TARGET_WORKSPACE_LOCK"; then',
-          '  : > "$TERMINATION_READY"',
-          '  while ! test -e "$TERMINATION_RELEASE"; do sleep 0.01; done',
-          'fi',
-          'exec /usr/bin/flock "$@"',
-          '',
-        ].join('\n'),
-        'utf8',
-      );
-      await chmod(flockWrapper, 0o755);
 
       const holder = spawn(
         'flock',
@@ -169,29 +160,19 @@ describe('workspace lease provider contract', () => {
       );
       await waitForFile(holderReady);
 
-      const termination = spawn('sh', ['-c', workspaceTerminationCommand({ workspaceRoot, operationId })], {
-        env: {
-          ...process.env,
-          PATH: `${fixtureRoot}:${process.env['PATH'] ?? ''}`,
-          TARGET_WORKSPACE_LOCK: workspaceLockPath,
-          TERMINATION_READY: terminationReady,
-          TERMINATION_RELEASE: terminationRelease,
-        },
-      });
+      // The held workspace lock keeps the termination waiting after it announces itself.
+      const termination = spawn('sh', ['-c', workspaceTerminationCommand({ workspaceRoot, operationId })]);
       await waitForFileText({ path: statePath, expected: `${operationId}:terminating` });
-      await waitForFile(terminationReady);
 
       const laterCommand = spawn('sh', ['-c', leaseCommand({ workspaceRoot, command: 'printf post-announcement' })]);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(laterCommand.exitCode).toBeNull();
 
-      await writeFile(terminationRelease, '', 'utf8');
       await writeFile(holderRelease, '', 'utf8');
       await expect(waitForExit(holder)).resolves.toBe(0);
       await expect(waitForExit(termination)).resolves.toBe(0);
       await expect(waitForExit(laterCommand)).resolves.toBe(0);
     } finally {
-      await writeFile(terminationRelease, '', 'utf8').catch(() => undefined);
       await writeFile(holderRelease, '', 'utf8').catch(() => undefined);
       await rm(fixtureRoot, { recursive: true, force: true });
     }
