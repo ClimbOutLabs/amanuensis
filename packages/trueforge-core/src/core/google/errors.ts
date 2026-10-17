@@ -26,3 +26,14 @@ export class GoogleReconnectRequiredError extends Error {
     this.name = 'GoogleReconnectRequiredError';
   }
 }
+
+/** Google refused or failed a REST request. The message is safe to show; it never carries mail or event text. */
+export class GoogleApiError extends Error {
+  readonly status: number;
+
+  constructor(input: { status: number; message: string; cause?: unknown }) {
+    super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
+    this.name = 'GoogleApiError';
+    this.status = input.status;
+  }
+}

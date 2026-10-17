@@ -18,6 +18,7 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../..
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../../sandbox/fakeTrackedState';
 import { realCommandExec } from '../../sandbox/realCommandExec';
 
 const BOUND_REPOSITORY: BoundRepository = {
@@ -231,7 +232,10 @@ describe('host request context', () => {
         branch = 'codex/second';
         headSha = '2222222222222222';
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: fakeTrackedState([])[params.command] ?? 'ok' },
+      });
     });
     const provider: SandboxProvider = {
       type: 'test',

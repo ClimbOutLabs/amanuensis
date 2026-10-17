@@ -161,6 +161,12 @@ export interface IToolSet {
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
 
   /**
+   * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
+   * classification derives them. Absent on tool sets whose wire arguments are already canonical.
+   */
+  mintCanonicalParams?(params: CallToolRequest['params']): Record<string, unknown>;
+
+  /**
    * Content digest of a file in this tool set's own sandbox, for approvals that bind to file content when the
    * server cannot read that sandbox's disk. Null when the file cannot be read. Absent for tool sets without one.
    */

@@ -3,7 +3,7 @@ import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/go
 import { defaultSentinelServices, forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
-import { gmailCapability } from '../../../src/runtime/gmailCapability';
+import { googleCapability } from '../../../src/runtime/googleCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 
 const OWNER = { tenant_id: 't1', created_by: 'ada' };
@@ -26,18 +26,18 @@ function record(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConnecti
   };
 }
 
-async function toolNames(capability: Awaited<ReturnType<typeof gmailCapability>>): Promise<string[]> {
+async function toolNames(capability: Awaited<ReturnType<typeof googleCapability>>): Promise<string[]> {
   const sets = capability?.systemToolSets ?? [];
   const listed = await Promise.all(sets.map(set => set.listTools()));
   return listed.flatMap(response => ('result' in response ? response.result.tools.map(tool => tool.name) : []));
 }
 
-describe('gmailCapability', () => {
+describe('googleCapability for mail', () => {
   let env: SqliteTestDatabase;
   let store: SqliteGoogleConnectionStore;
 
   const mount = (owner = OWNER, unattended = false) =>
-    gmailCapability({
+    googleCapability({
       connections: store,
       owner,
       tracing: NOOP_AGENT_TRACING,
@@ -49,6 +49,7 @@ describe('gmailCapability', () => {
           : defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
       }),
       attachmentStager: undefined,
+      timeZone: undefined,
       fetchImpl: () => Promise.reject(new Error('no network in this test')),
     });
 
@@ -101,5 +102,81 @@ describe('gmailCapability', () => {
   it('offers no write tool with only the read grant', async () => {
     await store.save(record());
     expect(await toolNames(await mount())).not.toContain('send_draft');
+  });
+});
+
+const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
+
+async function calendarToolNames(capability: Awaited<ReturnType<typeof googleCapability>>): Promise<string[]> {
+  const sets = (capability?.systemToolSets ?? []).filter(set => set.name === 'google_calendar');
+  const listed = await Promise.all(sets.map(set => set.listTools()));
+  return listed.flatMap(response => ('result' in response ? response.result.tools.map(tool => tool.name) : []));
+}
+
+describe('googleCapability for calendar', () => {
+  let env: SqliteTestDatabase;
+  let store: SqliteGoogleConnectionStore;
+
+  const mount = (owner = OWNER, unattended = false) =>
+    googleCapability({
+      connections: store,
+      owner,
+      tracing: NOOP_AGENT_TRACING,
+      timeZone: 'America/Sao_Paulo',
+      attachmentStager: undefined,
+      sentinel: createSentinelHostContext({
+        ...owner,
+        conversation_id: 'c1',
+        services: unattended
+          ? forUnattendedRun(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }))
+          : defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      }),
+      fetchImpl: () => Promise.reject(new Error('no network in this test')),
+    });
+
+  beforeEach(async () => {
+    env = await createSqliteTestDatabase();
+    store = new SqliteGoogleConnectionStore(env.db);
+  }, 120_000);
+
+  afterEach(async () => {
+    await env.teardown();
+  });
+
+  it('mounts nothing for a user who never connected', async () => {
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('mounts the two reading tools once Calendar is granted', async () => {
+    await store.save(record({ granted_scopes: [READ, CALENDAR] }));
+    expect(await calendarToolNames(await mount())).toEqual(['list_events', 'get_event']);
+  });
+
+  it('mounts nothing for a mail-only login, so chat does not offer a calendar it cannot read', async () => {
+    await store.save(record({ granted_scopes: [READ, COMPOSE] }));
+    expect(await calendarToolNames(await mount())).toEqual([]);
+  });
+
+  it('mounts nothing while the login needs reconnecting', async () => {
+    await store.save(record({ status: 'needs_reconnect' }));
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('never mounts one user login for another', async () => {
+    await store.save(record({ granted_scopes: [READ, CALENDAR] }));
+    expect(await mount({ ...OWNER, created_by: 'grace' })).toBeUndefined();
+  });
+
+  it('offers a scheduled run the same reading tools and nothing that writes', async () => {
+    await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR] }));
+    expect(await calendarToolNames(await mount(OWNER, true))).toEqual(['list_events', 'get_event']);
+  });
+
+  it('mounts mail and calendar together from one read of the login', async () => {
+    await store.save(record({ granted_scopes: [READ, CALENDAR] }));
+    const reads = jest.spyOn(store, 'get');
+    const capability = await mount();
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect((capability?.systemToolSets ?? []).map(set => set.name)).toEqual(['gmail', 'google_calendar']);
   });
 });

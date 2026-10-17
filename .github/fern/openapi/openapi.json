@@ -3299,7 +3299,8 @@
       "GoogleFeature": {
         "enum": [
           "gmail_read",
-          "gmail_compose"
+          "gmail_compose",
+          "calendar_read"
         ],
         "type": "string"
       },
@@ -9171,11 +9172,13 @@
             ]
           },
           "result": {
+            "description": "calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.",
             "enum": [
               "ok",
               "not_connected",
               "needs_reconnect",
-              "unreachable"
+              "unreachable",
+              "calendar_unavailable"
             ],
             "type": "string"
           }
