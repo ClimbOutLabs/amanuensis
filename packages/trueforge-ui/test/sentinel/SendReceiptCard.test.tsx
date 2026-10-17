@@ -70,6 +70,7 @@ describe('SendReceiptCard for a send that did not go out', () => {
     render(
       <SendReceiptCard
         receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason: 'draft_changed' }}
+        approvedCheckCode={null}
         onReviewAgain={onReviewAgain}
       />,
     );
@@ -82,7 +83,11 @@ describe('SendReceiptCard for a send that did not go out', () => {
     'never shows a receipt, a time or a check code for "%s"',
     reason => {
       render(
-        <SendReceiptCard receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason }} onReviewAgain={vi.fn()} />,
+        <SendReceiptCard
+          receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason }}
+          approvedCheckCode={null}
+          onReviewAgain={vi.fn()}
+        />,
       );
       expect(screen.getByText(NOT_SENT_TEXT[reason])).toBeInTheDocument();
       expect(document.body.textContent).not.toMatch(/Sent at|exactly as approved|Check code|Email sent/);
@@ -93,6 +98,7 @@ describe('SendReceiptCard for a send that did not go out', () => {
     const { rerender } = render(
       <SendReceiptCard
         receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason: 'gmail_refused' }}
+        approvedCheckCode={null}
         onReviewAgain={vi.fn()}
       />,
     );
@@ -100,6 +106,7 @@ describe('SendReceiptCard for a send that did not go out', () => {
     rerender(
       <SendReceiptCard
         receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason: 'needs_ok_again' }}
+        approvedCheckCode={null}
         onReviewAgain={vi.fn()}
       />,
     );
@@ -107,7 +114,12 @@ describe('SendReceiptCard for a send that did not go out', () => {
   });
 
   it('does not say "Not sent" when Gmail never answered, because the message may have gone', () => {
-    render(<SendReceiptCard receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason: 'unconfirmed' }} />);
+    render(
+      <SendReceiptCard
+        receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason: 'unconfirmed' }}
+        approvedCheckCode={null}
+      />,
+    );
     expect(NOT_SENT_TEXT.unconfirmed).not.toMatch(/^Not sent/);
     expect(screen.getByText(/may have gone through/)).toBeInTheDocument();
   });
