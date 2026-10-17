@@ -1,0 +1,70 @@
+From: Skyward Air <bookings@skyward-air.example.com>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Wed, 14 Oct 2026 09:14:22 +0100
+Subject: Your booking is confirmed: Skyward Air XK7Q2P
+Message-ID: <xk7q2p-confirmation@skyward-air.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
+
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Maya,
+
+Your booking is confirmed. Booking reference: XK7Q2P
+
+  Flight:    SW 214 (Skyward Air)
+  From:      Lisbon (LIS)
+  To:        Porto (OPO)
+  Date:      Saturday, November 7, 2026
+  Departs:   08:05 AM WET
+  Arrives:   08:55 AM WET
+  Passenger: Maya Hollis
+  Seat:      14A (Economy)
+
+Your itinerary is attached as a PDF, and a calendar file is
+attached so you can add the flight to your calendar.
+
+Safe travels,
+Skyward Air
+------=_fixture-boundary-7d3a9f2c
+Content-Type: application/pdf; name="itinerary.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="itinerary.pdf"
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAw
+IFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MjggPj4Kc3RyZWFtCkJUIC9GMSAxMSBU
+ZiA3MiA3NDAgVGQgKFNLWVdBUkQgQUlSIC0gSVRJTkVSQVJZKSBUaiBFVApCVCAvRjEgMTEgVGYg
+NzIgNzI1IFRkIChCb29raW5nIHJlZmVyZW5jZTogWEs3UTJQKSBUaiBFVApCVCAvRjEgMTEgVGYg
+NzIgNzEwIFRkICgpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTUgVGQgKFBhc3NlbmdlcjogTWF5
+YSBIb2xsaXMpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2ODAgVGQgKEZsaWdodDogU1cgMjE0KSBU
+aiBFVApCVCAvRjEgMTEgVGYgNzIgNjY1IFRkIChMaXNib24gXChMSVNcKSAtPiBQb3J0byBcKE9Q
+T1wpKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjUwIFRkIChTYXR1cmRheSwgTm92ZW1iZXIgNywg
+MjAyNikgVGogRVQKQlQgL0YxIDExIFRmIDcyIDYzNSBUZCAoRGVwYXJ0dXJlOiAwODowNSBBTSBX
+RVQpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MjAgVGQgKEFycml2YWw6IDA4OjU1IEFNIFdFVCkg
+VGogRVQKQlQgL0YxIDExIFRmIDcyIDYwNSBUZCAoU2VhdDogMTRBLCBFY29ub215KSBUaiBFVApC
+VCAvRjEgMTEgVGYgNzIgNTkwIFRkICgpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA1NzUgVGQgKFBs
+ZWFzZSBhcnJpdmUgOTAgbWludXRlcyBiZWZvcmUgZGVwYXJ0dXJlLikgVGogRVQKZW5kc3RyZWFt
+CmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQg
+L0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyA+PgplbmRvYmoKNiAwIG9iago8
+PCAvVGl0bGUgKEl0aW5lcmFyeSBYSzdRMlApIC9Qcm9kdWNlciAoZml4dHVyZS1nZW5lcmF0b3Ip
+ID4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAg
+biAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAw
+MDAgbiAKMDAwMDAwMDkyMCAwMDAwMCBuIAowMDAwMDAxMDE3IDAwMDAwIG4gCnRyYWlsZXIKPDwg
+L1NpemUgNyAvUm9vdCAxIDAgUiAvSW5mbyA2IDAgUiA+PgpzdGFydHhyZWYKMTA5NAolJUVPRg==
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/calendar; name="flight.ics"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="flight.ics"
+
+QkVHSU46VkNBTEVOREFSDQpWRVJTSU9OOjIuMA0KUFJPRElEOi0vL0V4YW1wbGUgRml4dHVyZXMv
+L0ZsaWdodC8vRU4NCkJFR0lOOlZFVkVOVA0KVUlEOnN3MjE0LXhrN3EycEBza3l3YXJkLWFpci5l
+eGFtcGxlLmNvbQ0KRFRTVEFNUDoyMDI2MTAxNFQwODE0MjJaDQpEVFNUQVJUOjIwMjYxMTA3VDA4
+MDUwMFoNCkRURU5EOjIwMjYxMTA3VDA4NTUwMFoNClNVTU1BUlk6U1cgMjE0OiBMaXNib24gdG8g
+UG9ydG8NCkRFU0NSSVBUSU9OOkJvb2tpbmcgWEs3UTJQXCwgc2VhdCAxNEENCkxPQ0FUSU9OOkxp
+c2JvbiBBaXJwb3J0IChMSVMpDQpFTkQ6VkVWRU5UDQpFTkQ6VkNBTEVOREFSDQo=
+------=_fixture-boundary-7d3a9f2c--

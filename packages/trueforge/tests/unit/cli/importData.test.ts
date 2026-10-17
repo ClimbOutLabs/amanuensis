@@ -35,7 +35,7 @@ interface Calls {
   audits: { userId: string; description: string }[];
 }
 
-function fakeDeps(options: { importError?: Error; auditError?: Error } = {}) {
+function fakeDeps(options: { importError?: Error; auditError?: Error; modelReady?: boolean } = {}) {
   const calls: Calls = { opened: 0, closed: 0, imports: [], audits: [] };
   const session: ImportDataSession = {
     owner: OWNER,
@@ -57,6 +57,7 @@ function fakeDeps(options: { importError?: Error; auditError?: Error } = {}) {
       calls.opened += 1;
       return Promise.resolve(session);
     },
+    searchModelReady: () => Promise.resolve(options.modelReady ?? true),
   };
   return { deps, calls };
 }
@@ -159,6 +160,26 @@ describe('aman import-data', () => {
     expect(await createImportData(deps)({ args: ['--in', archivePath], io })).toBe(0);
     expect(io.err.join('')).toContain('audit row was not written: audit table locked');
     expect(JSON.parse(io.out.join(''))).toMatchObject({ user_id: OWNER, chats: 3 });
+  });
+
+  it('says whether the search model is on disk with --check-ready, without opening the instance', async () => {
+    for (const [modelReady, word] of [
+      [true, 'ready'],
+      [false, 'downloading'],
+    ] as const) {
+      const { deps, calls } = fakeDeps({ modelReady });
+      const io = fakeIo();
+      expect(await createImportData(deps)({ args: ['--check-ready'], io })).toBe(0);
+      expect(JSON.parse(io.out.join(''))).toEqual({ search_model: word });
+      expect(calls.opened).toBe(0);
+    }
+  });
+
+  it('refuses --check-ready beside an import option', async () => {
+    const { deps } = fakeDeps();
+    await expect(
+      createImportData(deps)({ args: ['--check-ready', '--in', archivePath], io: fakeIo() }),
+    ).rejects.toThrow('--check-ready takes no other options.');
   });
 
   it('prints its usage for --help', async () => {

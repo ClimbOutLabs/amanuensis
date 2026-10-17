@@ -26,6 +26,15 @@ async function withLogsOnStderr<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The import refuses until this is true; the app downloads the model at boot, so the installer polls this first. */
+export async function isSearchModelReady(): Promise<boolean> {
+  const [{ default: configuration }, { isEmbeddingModelCached }] = await Promise.all([
+    import('../../config'),
+    import('../../runtime/memory/embeddingModel'),
+  ]);
+  return isEmbeddingModelCached(configuration.MEMORY_EMBEDDINGS_MODEL_DIR);
+}
+
 /**
  * Server config validates the environment when it is imported, so it is loaded only here, after the
  * command line has been accepted. Writes to the standalone instance's SQLite database and its
