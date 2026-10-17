@@ -1330,6 +1330,15 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     }
   }
 
+  // A send the card cannot show exactly as it will go out is refused: approval must cover all of it.
+  if (extraction.unsendable !== null) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail: extraction.unsendable,
+      sensitive_read: false,
+    });
+  }
+
   // Extractor fallback: unverifiable destination on an external-service action.
   if (extraction.destination_unverifiable) {
     return autoDenyDecision({

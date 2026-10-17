@@ -16,6 +16,8 @@
  * Tier 3 with the destination marked unknown.
  */
 
+import { containsHiddenCharacters, isHiddenCodePoint } from './hiddenCharacters';
+
 export interface ExtractedCardFields {
   destination: string | null;
   recipient: string | null;
@@ -99,20 +101,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** True for code points that can hide or fake text: controls, bidi controls, zero-width and line separators. */
-function needsEscape(codePoint: number): boolean {
-  return (
-    codePoint <= 0x1f ||
-    (codePoint >= 0x7f && codePoint <= 0x9f) ||
-    codePoint === 0x061c ||
-    (codePoint >= 0x200b && codePoint <= 0x200f) ||
-    (codePoint >= 0x2028 && codePoint <= 0x202e) ||
-    (codePoint >= 0x2060 && codePoint <= 0x2069) ||
-    codePoint === 0xfeff ||
-    (codePoint >= 0xd800 && codePoint <= 0xdfff)
-  );
-}
-
 /**
  * Makes model-controlled text safe to show: characters that can hide or fake text become visible
  * `\u{XXXX}` tokens. Display only; nothing that is sent or hashed passes through here. Newlines are
@@ -125,7 +113,7 @@ export function escapeDisplayText(text: string, options?: { keepNewlines?: boole
     const codePoint = char.codePointAt(0) ?? 0;
     if (keepNewlines && codePoint === 0x0a) {
       out += char;
-    } else if (needsEscape(codePoint)) {
+    } else if (isHiddenCodePoint(codePoint)) {
       out += `\\u{${codePoint.toString(16).toUpperCase().padStart(4, '0')}}`;
     } else {
       out += char;
@@ -253,11 +241,12 @@ function leadingCodePoints(text: string, count: number): { head: string; rest: n
   return { head: points.slice(0, count).join(''), rest: Math.max(0, points.length - count) };
 }
 
-function keyDisplay(key: string): string {
+function keyDisplay(key: string): { text: string; cut: boolean } {
   const { head, rest } = leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS);
   const shown = `${head}${rest > 0 ? '...' : ''}`;
   // A key that is not plain is quoted, so it can never pass for a gutter or a separate line.
-  return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
+  const text = PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
+  return { text, cut: rest > 0 };
 }
 
 function renderOutboundLines(
@@ -274,7 +263,9 @@ function renderOutboundLines(
     // Continuation lines carry a fixed gutter, so a value can never begin a line that reads like `key: value`.
     const [first = '', ...more] = `${shown}${marker}`.split('\n');
     const hint = typeHint(value);
-    const label = `${keyDisplay(key)}${hint === null ? '' : ` (${hint})`}`;
+    const keyShown = keyDisplay(key);
+    truncated ||= keyShown.cut;
+    const label = `${keyShown.text}${hint === null ? '' : ` (${hint})`}`;
     return [`${label}: ${first}`, ...more.map(line => `${OUTBOUND_GUTTER}${line}`)].join('\n');
   });
   return { lines, truncated };
@@ -283,7 +274,7 @@ function renderOutboundLines(
 /**
  * Every argument the connector will receive, one line each, built from the server's canonical params
  * so a model-written description can never stand in for what is sent. Every key is always listed
- * and recipient values are never cut; other values are capped, and `truncated` says whether any was.
+ * and recipient values are never cut; other values and over-long keys are capped, and `truncated` says whether any was.
  */
 export function renderOutboundArguments(params: Record<string, unknown>): { text: string | null; truncated: boolean } {
   if (Object.keys(params).length === 0) {
@@ -296,6 +287,46 @@ export function renderOutboundArguments(params: Record<string, unknown>): { text
     text = rendered.lines.join('\n');
   }
   return { text, truncated: rendered.truncated };
+}
+
+const HIDDEN_SEND_REFUSAL = "This message contains hidden characters, so Aman won't send it.";
+const LONG_KEY_SEND_REFUSAL = "This message has a field name too long to show in full, so Aman won't send it.";
+
+/** Tools that deliver or stage mail; every part of their arguments must be fully visible. */
+const MAIL_WORDS = ['email', 'mail', 'gmail', 'reply', 'forward', 'draft'];
+
+/** True when a recipient value, at any depth, holds a hidden character. */
+function hasHiddenRecipient(value: unknown, depth = 0): boolean {
+  if (Array.isArray(value)) {
+    return depth <= NESTED_RECIPIENT_MAX_DEPTH && value.some(item => hasHiddenRecipient(item, depth + 1));
+  }
+  if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
+    return false;
+  }
+  return Object.entries(value).some(([key, field]) =>
+    isRecipientKey(key) ? containsHiddenCharacters(field) : hasHiddenRecipient(field, depth + 1),
+  );
+}
+
+/**
+ * Why a send cannot be shown on its card exactly as it will go out, or null. Mail is refused on any
+ * hidden character; other sends only on a hidden recipient, since hidden text elsewhere is shown as codes.
+ */
+function unsendableReason(input: {
+  params: Record<string, unknown>;
+  words: string;
+  external_service: boolean;
+  connector: boolean;
+}): string | null {
+  const mail = hasPhrase(input.words, ...MAIL_WORDS);
+  if (!input.external_service && !mail) {
+    return null;
+  }
+  if (mail ? containsHiddenCharacters(input.params) : hasHiddenRecipient(input.params)) {
+    return HIDDEN_SEND_REFUSAL;
+  }
+  const keyIsCut = Object.keys(input.params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0);
+  return input.connector && keyIsCut ? LONG_KEY_SEND_REFUSAL : null;
 }
 
 /** Host (with any port) of an http(s) URL, or null when the value is not one. */
@@ -488,6 +519,8 @@ export interface ExtractionResult {
   external_service: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
+  /** Why a send cannot be shown to the user exactly as it will go out, or null. Such a send is refused, never carded. */
+  unsendable: string | null;
 }
 
 /**
@@ -509,15 +542,22 @@ export function extractCardFields(input: {
     entry?.external_service ?? EXTERNAL_SERVICE_FRAGMENTS.some(f => input.tool_name.toLowerCase().includes(f));
   const base = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
   const destinationUnverifiable = externalService && base.destination === null && base.recipient === null;
+  const words = nameWords(input.tool_name);
+  const unsendable = unsendableReason({
+    params: input.canonical_params,
+    words,
+    external_service: externalService,
+    connector: input.tool_type === 'mcp',
+  });
   if (input.tool_type !== 'mcp') {
     return {
       fields: base,
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
       connector_what: null,
+      unsendable,
     };
   }
-  const words = nameWords(input.tool_name);
   // Deleting or installing is described by the classifier's own destructive and install cards.
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
     ? undefined
@@ -540,6 +580,7 @@ export function extractCardFields(input: {
     fields,
     destination_unverifiable: destinationUnverifiable,
     external_service: externalService,
+    unsendable,
     connector_what:
       family === undefined
         ? null
