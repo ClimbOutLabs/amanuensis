@@ -1099,72 +1099,69 @@ function rebuildSummaryBlock(input: {
   return { block: `<summary>\n${parts.join('\n\n')}\n</summary>`, missing };
 }
 
-/** The reply's visible text plus, separately, the thinking some servers put the whole answer in. */
-function replyTexts(output: RawAssistantMessage): { answer: string; thinking: string } {
-  const thinkingBlocks = (output.thinking_blocks ?? []).flatMap(block =>
-    block.type === 'thinking' ? [block.thinking] : [],
-  );
-  const thinking = thinkingBlocks.length > 0 ? thinkingBlocks.join('\n') : (output.reasoning_content ?? '');
-  return { answer: formatAssistantContent(output.content), thinking };
-}
-
-/** Thinking often drafts the block more than once; only the last complete one is the answer. */
-function lastSummaryBlock(text: string): string {
-  const end = text.lastIndexOf('</summary>');
-  const start = end === -1 ? -1 : text.lastIndexOf('<summary>', end);
-  return start === -1 ? text : text.slice(start, end + '</summary>'.length);
+/**
+ * The inside of the reply when it is exactly one <summary> envelope and nothing else. Partial
+ * acceptance only trusts the model's own answer in this shape; text around or beside a block
+ * could be quoted from the transcript.
+ */
+function strictEnvelopeBody(text: string): string | undefined {
+  const trimmed = text.trim();
+  const open = '<summary>';
+  const close = '</summary>';
+  if (
+    !trimmed.startsWith(open) ||
+    !trimmed.endsWith(close) ||
+    trimmed.indexOf(open, open.length) !== -1 ||
+    trimmed.indexOf(close) !== trimmed.length - close.length
+  ) {
+    return undefined;
+  }
+  return trimmed.slice(open.length, trimmed.length - close.length);
 }
 
 type SummaryEvaluation =
-  | { summary: string; missingSections: string[]; fromThinking: boolean }
+  | { summary: string; missingSections: string[] }
   | { reason: NonNullable<ContextCompactionEvent['reason']>; modelOutput: string };
 
-function evaluateSummaryText(input: {
-  text: string;
-  requiredSections: readonly string[];
-  essentialSections: readonly string[];
-  userText: string;
-}): { summary: string; missingSections: string[] } | { reason: NonNullable<ContextCompactionEvent['reason']> } {
-  const strict = validateCompactionSummary(input.text, input.requiredSections, input.userText);
-  if (strict.reason === undefined) {
-    return { summary: strict.summary, missingSections: [] };
-  }
-  // Salvage the envelope first, then accept a missing optional section; every check runs again
-  // on the rebuilt block, so a self-referential goal is still rejected.
-  const rebuilt = rebuildSummaryBlock({
-    content: input.text,
-    requiredSections: input.requiredSections,
-    essentialSections: input.essentialSections,
-    rejectEmptyEssential: true,
-  });
-  if (rebuilt !== undefined) {
-    const revalidated = validateCompactionSummary(rebuilt.block, input.requiredSections, input.userText);
-    if (revalidated.reason === undefined) {
-      return { summary: revalidated.summary, missingSections: rebuilt.missing };
-    }
-  }
-  return { reason: strict.reason };
-}
-
-/** Judges one model reply: the visible answer first, then the thinking when the answer holds no summary. */
+/** Judges one model reply. Only the visible answer is read; thinking is never a source of summaries. */
 function evaluateSummaryReply(input: {
   output: RawAssistantMessage;
   requiredSections: readonly string[];
   essentialSections: readonly string[];
   userText: string;
 }): SummaryEvaluation {
-  const { answer, thinking } = replyTexts(input.output);
-  const fromAnswer = evaluateSummaryText({ ...input, text: answer });
-  if ('summary' in fromAnswer) {
-    return { ...fromAnswer, fromThinking: false };
+  const answer = formatAssistantContent(input.output.content);
+  const strict = validateCompactionSummary(answer, input.requiredSections, input.userText);
+  if (strict.reason === undefined) {
+    return { summary: strict.summary, missingSections: [] };
   }
-  if (thinking.trim() !== '') {
-    const fromThinking = evaluateSummaryText({ ...input, text: lastSummaryBlock(thinking) });
-    if ('summary' in fromThinking) {
-      return { ...fromThinking, fromThinking: true };
+  // A reply with every section but a damaged envelope is rebuilt; a partial one (an optional
+  // section left out) is accepted only inside a strict envelope. Every check runs again on the
+  // rebuilt block, so a self-referential goal is still rejected.
+  const salvaged = salvageCompactionSummary(answer, input.requiredSections);
+  if (salvaged !== undefined) {
+    const revalidated = validateCompactionSummary(salvaged, input.requiredSections, input.userText);
+    if (revalidated.reason === undefined) {
+      return { summary: revalidated.summary, missingSections: [] };
     }
   }
-  return { reason: fromAnswer.reason, modelOutput: answer };
+  const body = strictEnvelopeBody(answer);
+  const rebuilt =
+    body === undefined
+      ? undefined
+      : rebuildSummaryBlock({
+          content: body,
+          requiredSections: input.requiredSections,
+          essentialSections: input.essentialSections,
+          rejectEmptyEssential: true,
+        });
+  if (rebuilt !== undefined) {
+    const revalidated = validateCompactionSummary(rebuilt.block, input.requiredSections, input.userText);
+    if (revalidated.reason === undefined) {
+      return { summary: revalidated.summary, missingSections: rebuilt.missing };
+    }
+  }
+  return { reason: strict.reason, modelOutput: answer };
 }
 
 export class ContextCompaction implements PreLLMAgentContextProcessor {
@@ -1563,9 +1560,9 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         summary = evaluation.summary;
         validationReason = undefined;
         // Section names only, never their content.
-        if (evaluation.missingSections.length > 0 || evaluation.fromThinking || isRetry) {
+        if (evaluation.missingSections.length > 0 || isRetry) {
           this.logger?.warn(
-            `Compaction summary accepted (mode: ${mode}, retry: ${String(isRetry)}, from_thinking: ${String(evaluation.fromThinking)}, missing_sections: [${evaluation.missingSections.join(',')}])`,
+            `Compaction summary accepted (mode: ${mode}, retry: ${String(isRetry)}, missing_sections: [${evaluation.missingSections.join(',')}])`,
           );
         }
         break;
