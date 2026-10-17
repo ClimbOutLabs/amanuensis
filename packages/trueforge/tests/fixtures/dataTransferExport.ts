@@ -47,6 +47,7 @@ export async function exportInstanceArchive<TTransaction>({
     scheduleStore: stores.scheduleStore,
     globalSettingsStore: stores.globalSettingsStore,
     sentinelSettingsStore: stores.sentinelSettingsStore,
+    auditStore: stores.auditStore,
     turnArtifactStore: stores.turnArtifactStore,
     mcpServerStore: stores.mcpServerStore,
     listAgents: async () =>

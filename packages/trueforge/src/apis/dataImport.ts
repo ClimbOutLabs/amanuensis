@@ -152,6 +152,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           spaceStore: deps.spaceStore,
           scheduleStore: deps.scheduleStore,
           globalSettingsStore: deps.globalSettingsStore,
+          auditStore: deps.sentinelAuditStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
           agentStore,

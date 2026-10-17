@@ -24,6 +24,7 @@ import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
 import type { IScheduleStore } from '../../src/db/scheduleStore';
+import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../src/db/sessionCustom';
 import type { ISpaceStore } from '../../src/db/spaceStore';
@@ -91,6 +92,54 @@ export const SEED_HISTORY: Record<string, SeedChatHistory> = {
   },
 };
 
+export const SEED_DEFAULT_CHAT_MODEL = 'source-host/chat-model';
+
+/** Permission history of the seeded owner, with the dates the source recorded. */
+export const SEED_AUDIT = [
+  {
+    id: 'audit-1',
+    conversation_id: SEED_IDS.sessionMain,
+    tier: 3,
+    tool_name: 'reporter-server__send_report',
+    description: 'Send the report to the team.',
+    outcome: 'approved',
+    auto_deny_reason: null,
+    created_at: '2026-09-01T08:00:20.000Z',
+  },
+  {
+    id: 'audit-2',
+    conversation_id: SEED_IDS.sessionMain,
+    tier: 2,
+    tool_name: 'reporter-server__search',
+    description: 'Search the web.',
+    outcome: 'denied',
+    auto_deny_reason: null,
+    created_at: '2026-09-02T09:00:10.000Z',
+  },
+  {
+    id: 'audit-3',
+    conversation_id: '',
+    tier: 1,
+    tool_name: 'data_export',
+    description: 'Exported an earlier copy.',
+    outcome: 'logged',
+    auto_deny_reason: null,
+    created_at: '2026-09-04T10:00:00.000Z',
+  },
+] as const;
+
+/** Persona choices made in the seeded main chat, oldest first. */
+export const SEED_PERSONA_ACTIVATIONS = [
+  { id: 'activation-1', turn_id: null, persona_id: SEED_IDS.personaChef, persona_name: 'Chef', source: 'explicit' },
+  {
+    id: 'activation-2',
+    turn_id: 'session-1-turn-2',
+    persona_id: SEED_IDS.personaResearcher,
+    persona_name: 'Researcher',
+    source: 'invocation',
+  },
+] as const;
+
 export const SEED_MEMORY = {
   curated: '# About\n\nPrefers dark mode and short answers.',
   keptEntryTimestamp: '2026-10-01T09:00:00.000Z',
@@ -109,6 +158,7 @@ export interface DataTransferSeedStores<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  auditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
 }
@@ -432,6 +482,16 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     updated_by: userId,
   });
 
+  for (const activation of SEED_PERSONA_ACTIVATIONS) {
+    await stores.personaStore.recordPersonaActivation({
+      tenant_id: tenantId,
+      session_id: SEED_IDS.sessionMain,
+      ...activation,
+      model_name: 'test-provider/test-model',
+    });
+  }
+  await stores.auditStore.importRecords({ tenant_id: tenantId, created_by: userId, records: SEED_AUDIT });
+
   const knowledgeDbPath = personaKnowledgeLocation({
     knowledgeDir: input.knowledgeDir,
     tenantId,
@@ -547,6 +607,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     }),
   });
 
+  await stores.globalSettingsStore.setSetting({ key: 'default_chat_model', value: SEED_DEFAULT_CHAT_MODEL });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_summarize_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });
   await stores.sentinelSettingsStore.patch({

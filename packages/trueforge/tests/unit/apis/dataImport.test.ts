@@ -8,6 +8,7 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
+import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -93,6 +94,7 @@ describe('Data import route', () => {
       scheduleStore: new SqliteScheduleStore(db),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+      auditStore: new SentinelAuditStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
     };
@@ -192,7 +194,9 @@ describe('Data import route', () => {
     expect(body.data.summary).toContain(
       'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
     );
-    expect(body.data.summary).toContain('Not imported: model keys, connector sign-ins and keys, and safety settings');
+    expect(body.data.summary).toContain(
+      'Not imported: model keys, connector sign-ins and keys, your own skills and registered repositories, and your safety settings',
+    );
 
     // Everything landed owned by bob with ids kept, schedules off, and the
     // dcr connector reading "needs credentials".

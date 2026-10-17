@@ -25,6 +25,7 @@ import {
   type CreatedBySubject,
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
+import { Kysely } from 'kysely';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -36,6 +37,7 @@ import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
 import { normalizeZipEntryName } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
@@ -59,6 +61,7 @@ import {
 import { assertInstanceEmpty, assertNoIdCollisions, type PreflightDeps } from './importPreflight';
 import {
   ImportAgentsFileSchema,
+  ImportAuditFileSchema,
   ImportConnectorsFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
@@ -69,6 +72,7 @@ import {
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
   type ImportAgentRecord,
+  type ImportAuditRecord,
   type ImportConnectorRecord,
   type ImportFolderRecord,
   type ImportManifest,
@@ -86,6 +90,8 @@ import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArch
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Permission history is imported with the same commit as the rest, and never removed again. */
+  auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -245,6 +251,7 @@ interface ArchiveContents {
   schedules: ImportScheduleRecord[];
   connectors: ImportConnectorRecord[];
   settings: ImportSettingsFile;
+  audit: ImportAuditRecord[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
 }
@@ -305,6 +312,8 @@ function loadArchive(input: {
     schedules: section('schedules.json', ImportSchedulesFileSchema),
     connectors: section('connectors.json', ImportConnectorsFileSchema),
     settings: section('settings.json', ImportSettingsFileSchema),
+    // Absent from exports made before permission history travelled.
+    audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
     files,
     sourceTenantId: manifest.tenant_id,
   };
@@ -598,7 +607,17 @@ function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
 
-function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'>, connectorNames: string[]): string {
+function buildSummary({
+  result,
+  connectorNames,
+  auditEntries,
+  standInAgentNames,
+}: {
+  result: Omit<DataImportResult, 'summary' | 'schedules_off'>;
+  connectorNames: string[];
+  auditEntries: number;
+  standInAgentNames: string[];
+}): string {
   const counts = [
     pluralize(result.chats, 'chat', 'chats'),
     pluralize(result.memories, 'memory', 'memories'),
@@ -609,14 +628,22 @@ function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'
       ? pluralize(0, 'schedule', 'schedules')
       : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
   ];
-  return (
-    `Imported ${counts.join(', ')}. ` +
-    'Chats keep their dates and totals; personas, spaces, folders and schedules show the import time. ' +
-    (connectorNames.length === 0
+  return [
+    `Imported ${counts.join(', ')}.`,
+    'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time.',
+    auditEntries === 0
       ? ''
-      : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent in Settings when you want it. `) +
-    'Not imported: model keys, connector sign-ins and keys, and safety settings (the prompt-injection screens, Always allow choices, search and offline settings). Set those up in Settings.'
-  );
+      : `${pluralize(auditEntries, 'permission history entry', 'permission history entries')} came along.`,
+    standInAgentNames.length === 0
+      ? ''
+      : `Also created ${pluralize(standInAgentNames.length, 'stand-in agent', 'stand-in agents')} (${standInAgentNames.join(', ')}) because a chat or schedule refers to an agent the export does not include. Open the Agents page and give each one a model before you use it.`,
+    connectorNames.length === 0
+      ? ''
+      : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
+    'Not imported: model keys, connector sign-ins and keys, your own skills and registered repositories, and your safety settings. In Settings, open Permissions to set offline mode, Always allow and web search again, and Memory to turn the recall and tool-output checks back on.',
+  ]
+    .filter(part => part !== '')
+    .join(' ');
 }
 
 interface AgentPlan {
@@ -781,7 +808,7 @@ async function importArchive<TTransaction>(
 ): Promise<DataImportResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
-  const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings } = contents;
+  const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
   const connectors = normalizeImportedConnectors(contents.connectors);
   const connectorNames = new Set(connectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
@@ -1028,6 +1055,20 @@ async function importArchive<TTransaction>(
         );
       }
 
+      for (const entry of sessions) {
+        for (const activation of entry.persona_activations) {
+          await deps.personaStore.recordPersonaActivation(
+            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
+            tx,
+          );
+        }
+      }
+
+      if (!(tx instanceof Kysely)) {
+        throw new Error('The import transaction is not a database transaction.');
+      }
+      await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
+
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
         await deps.personalizationStore.upsertProfile(
@@ -1189,10 +1230,12 @@ async function importArchive<TTransaction>(
     };
     return {
       ...result,
-      summary: buildSummary(
+      summary: buildSummary({
         result,
-        connectors.map(connector => connector.name),
-      ),
+        connectorNames: connectors.map(connector => connector.name),
+        auditEntries: audit.length,
+        standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
+      }),
     };
   } catch (cause) {
     // Files are removed by their planned paths (checked absent beforehand); ids only by what this run created.

@@ -119,6 +119,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           spaceStore: new SqliteSpaceStore(db),
           scheduleStore: new SqliteScheduleStore(db),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          auditStore: audit,
           turnArtifactStore: new SqliteTurnArtifactStore(db),
           mcpServerStore: new SqliteMcpServerStore(db),
           agentStore: new SqliteAgentStore(db),

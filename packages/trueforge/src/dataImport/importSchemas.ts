@@ -30,8 +30,11 @@ import { z } from 'zod';
 import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
-import { KnowledgeDocumentStatusSchema, KnowledgeSourceKindSchema } from '../schemas/personaKnowledge';
-import { ScheduleManifestSchema } from '../schemas/schedule';
+import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
+import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
+import { PersonalizationProfileSchema, validatePersonalizationContent } from '../schemas/personalization';
+import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedule';
+import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
 
@@ -183,10 +186,17 @@ export const ImportArtifactRecordSchema = z.object({
 });
 export type ImportArtifactRecord = z.infer<typeof ImportArtifactRecordSchema>;
 
+/** One persona choice from a chat's history; the importing owner's chat id replaces the archived one. */
+const ImportPersonaActivationSchema = z.object(
+  PersonaActivationSchema.omit({ session_id: true, created_at: true }).shape,
+);
+
 export const ImportSessionEntrySchema = z.object({
   session: ImportSessionRecordSchema,
   turns: z.array(z.object({ turn: ImportTurnRecordSchema, events: z.array(ImportEventSchema) })),
   artifacts: z.array(ImportArtifactRecordSchema),
+  /** Absent from exports made before persona choices travelled. */
+  persona_activations: z.array(ImportPersonaActivationSchema).default([]),
 });
 export type ImportSessionEntry = z.infer<typeof ImportSessionEntrySchema>;
 export const ImportSessionsFileSchema = z.array(ImportSessionEntrySchema);
@@ -215,32 +225,14 @@ export const ImportAgentRecordSchema = z.object({
 export type ImportAgentRecord = z.infer<typeof ImportAgentRecordSchema>;
 export const ImportAgentsFileSchema = z.array(ImportAgentRecordSchema);
 
-export const ImportPersonaRecordSchema = z.object({
-  tenant_id: z.string(),
-  id: z.string().min(1),
-  created_by: z.string(),
-  display_name: z.string().min(1),
-  aliases: z.array(z.string()),
-  instructions: z.string(),
-  model_name: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  updated_by: z.string(),
-});
+/** Persona text is rendered into every prompt, so a record carries the same content checks as one typed in the app. */
+export const ImportPersonaRecordSchema = z
+  .object({ tenant_id: z.string(), ...PersonaSchema.shape })
+  .superRefine(validatePersonaContentNames);
 export type ImportPersonaRecord = z.infer<typeof ImportPersonaRecordSchema>;
 
 export const ImportKnowledgeDocumentSchema = z.object({
-  id: z.string().min(1),
-  title: z.string(),
-  title_explicit: z.boolean(),
-  source_kind: KnowledgeSourceKindSchema,
-  source_label: z.string(),
-  source_url: z.string().nullable(),
-  status: KnowledgeDocumentStatusSchema,
-  status_message: z.string().nullable(),
-  chunk_count: z.number().int().nonnegative(),
-  created_at: z.string(),
-  updated_at: z.string(),
+  ...PersonaKnowledgeDocumentSchema.shape,
   chunks: z.array(z.object({ chunk_index: z.number().int().nonnegative(), text: z.string() })),
 });
 export type ImportKnowledgeDocument = z.infer<typeof ImportKnowledgeDocumentSchema>;
@@ -254,22 +246,8 @@ export const ImportPersonasFileSchema = z.array(
 export type ImportPersonasFile = z.infer<typeof ImportPersonasFileSchema>;
 
 export const ImportPersonalizationFileSchema = z
-  .object({
-    tenant_id: z.string(),
-    created_by: z.string(),
-    revision: z.number().int(),
-    digest: z.string(),
-    created_at: z.string(),
-    updated_at: z.string(),
-    updated_by: z.string(),
-    assistant_name: z.string().nullable(),
-    assistant_identity: z.string().nullable(),
-    voice_guidance: z.string().nullable(),
-    user_profile: z.string().nullable(),
-    pinned_preferences: z.array(z.string()),
-    learned_profile: z.string().nullable(),
-    learning_enabled: z.boolean(),
-  })
+  .object({ tenant_id: z.string(), ...PersonalizationProfileSchema.shape })
+  .superRefine(validatePersonalizationContent)
   .nullable();
 export type ImportPersonalizationFile = z.infer<typeof ImportPersonalizationFileSchema>;
 
@@ -296,7 +274,7 @@ export const ImportScheduleRecordSchema = z.object({
   agent_name: z.string().nullable(),
   name: z.string().min(1),
   manifest: ScheduleManifestSchema,
-  status: z.enum(['active', 'paused']),
+  status: ScheduleStatusSchema,
   created_by_subject: CreatedBySubjectSchema,
   created_at: z.string(),
   updated_at: z.string(),
@@ -321,3 +299,11 @@ export const ImportSettingsFileSchema = z.object({
   permission_settings: SentinelUserSettingsSchema,
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;
+
+/** One permission-history row; dates are written back, so a bad one fails before any write. */
+export const ImportAuditRecordSchema = z.object({
+  ...SentinelAuditRecordSchema.shape,
+  created_at: ArchivedInstantSchema,
+});
+export type ImportAuditRecord = z.infer<typeof ImportAuditRecordSchema>;
+export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);

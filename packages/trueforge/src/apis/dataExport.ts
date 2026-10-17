@@ -127,6 +127,7 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
               scheduleStore: deps.scheduleStore,
               globalSettingsStore: deps.globalSettingsStore,
               sentinelSettingsStore: deps.sentinelSettingsStore,
+              auditStore: deps.sentinelAuditStore,
               turnArtifactStore: deps.turnArtifactStore,
               mcpServerStore,
               listAgents: () =>

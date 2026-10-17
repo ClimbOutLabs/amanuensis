@@ -28,6 +28,7 @@ import { PostgresSessionStore } from '../../../src/db/postgres/session-store/Pos
 import { PostgresSpaceStore } from '../../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresTurnArtifactStore } from '../../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PgDatabase } from '../../../src/db/postgres/types';
+import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -73,6 +74,7 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     scheduleStore: new SqliteScheduleStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    auditStore: new SentinelAuditStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
@@ -105,6 +107,7 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     scheduleStore: new PostgresScheduleStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    auditStore: new SentinelAuditStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
   };

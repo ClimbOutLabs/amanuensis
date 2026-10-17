@@ -2,8 +2,10 @@
  * Streams one user's data export archive: one JSON file per section, the
  * memory tree as Markdown, and uploaded files only when requested. Never
  * exported: model providers and their keys, OAuth tokens, registered OAuth
- * clients, approval tokens, always-allow grants, the audit log, sandbox
- * state, schedule run history, and anything another user owns.
+ * clients, approval tokens, always-allow grants, skills and registered
+ * repositories, sandbox state, schedule run history, and anything another
+ * user owns. The owner's own permission history (audit rows) and each chat's
+ * persona choices do travel.
  *
  * Every JSON value and every text file passes both secret layers before it
  * is written. Sections are produced item by item, so peak memory is bounded
@@ -29,6 +31,7 @@ import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
+import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -58,6 +61,9 @@ export const EXPORT_FORMAT = 'aman-export';
 export const EXPORT_SCHEMA_VERSION = 1;
 
 const PAGE_LIMIT = 200;
+
+/** Persona choices read per chat; a chat records one per turn at most. */
+const PERSONA_ACTIVATION_LIMIT = 100_000;
 
 /** Same bound the memory vault API uses for one list call. */
 const MEMORY_LIST_TIMEOUT_MS = 10_000;
@@ -101,6 +107,7 @@ export interface DataExportDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
@@ -288,7 +295,22 @@ export async function runDataExport<TTransaction>(
       }
       // Artifact rows are write-once, so their last change is their creation.
       const artifactRows = artifacts.map(artifact => ({ ...artifact, updated_at: artifact.created_at }));
-      yield withoutDeploymentBoundFields(toPlainJson({ session, turns: turnsWithEvents, artifacts: artifactRows }));
+      // Newest first in the store; the archive keeps them oldest first so a replay lands in order.
+      const personaActivations = (
+        await deps.personaStore.listSessionPersonaActivations({
+          tenant_id: tenantId,
+          session_id: session.session_id,
+          limit: PERSONA_ACTIVATION_LIMIT,
+        })
+      ).reverse();
+      yield withoutDeploymentBoundFields(
+        toPlainJson({
+          session,
+          turns: turnsWithEvents,
+          artifacts: artifactRows,
+          persona_activations: personaActivations,
+        }),
+      );
       if (subject.includeUploads) {
         uploadedBlobs.push(...artifacts.map(artifact => ({ sessionId: session.session_id, artifact })));
       }
@@ -396,6 +418,23 @@ export async function runDataExport<TTransaction>(
     permission_settings: permissionSettings,
     instance: instanceSettings,
   });
+
+  // audit.json: this user's permission history, oldest first.
+  async function* auditEntries(): AsyncIterable<unknown> {
+    for (let offset = 0; ; offset += PAGE_LIMIT) {
+      const page = await deps.auditStore.listOwned({
+        tenant_id: tenantId,
+        created_by: subjectId,
+        limit: PAGE_LIMIT,
+        offset,
+      });
+      yield* page;
+      if (page.length < PAGE_LIMIT) {
+        return;
+      }
+    }
+  }
+  await writeJsonArrayEntry(context, 'audit.json', auditEntries());
 
   const memory = await writeMemoryEntries(context, personas);
 
