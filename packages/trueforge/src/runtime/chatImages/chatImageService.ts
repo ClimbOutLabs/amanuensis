@@ -12,8 +12,10 @@ import {
   type OutboundGuardVerdict,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
+import { PRIVATE_DATA_READ_STATE_KEY } from '@truefoundry/trueforge-core/core/capabilities/builtins/PrivateDataRead';
 
 import type { ChatImageOrigin, ChatImageWithData, IChatImageStore } from '../../db/chatImageStore';
+import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import type {
   ChatImageOutcome,
@@ -22,7 +24,7 @@ import type {
   TurnImageList,
   TurnImagesResult,
 } from '../../schemas/chatImages';
-import { emailImageUrls, normalizeImageLink, replyImageUrls } from './imageLinks';
+import { normalizeImageLink, replyImageUrls } from './imageLinks';
 import { CHAT_IMAGE_OUTPUT_MIME } from './imageSniff';
 import { CHAT_IMAGE_USER_MAX_BYTES } from './limits';
 import type { ImageReencoder } from './reencodeInSandbox';
@@ -67,7 +69,7 @@ interface TurnRef {
 
 export interface ChatImageServiceDeps {
   store: IChatImageStore;
-  sessionStore: Pick<ISessionStore, 'listTurnEvents'>;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listTurnEvents' | 'getTurn'>;
   turnArtifactStore: Pick<ITurnArtifactStore, 'listArtifacts' | 'getArtifact' | 'getBlob'>;
   reencode: ImageReencoder;
   sentinel: Pick<SentinelServices, 'audit' | 'isOffline' | 'searchWithoutAsking' | 'outboundSecrets'>;
@@ -90,6 +92,14 @@ function hostOf(url: string): string {
 }
 
 export function createChatImageService(deps: ChatImageServiceDeps) {
+  /** The flag the search classifier saves once a chat has read mail; it carries over from turn to turn. */
+  async function chatReadPrivateData(ref: TurnRef): Promise<boolean> {
+    const turn = await deps.sessionStore.getTurn({ session_id: ref.session_id, turn_id: ref.turn_id });
+    return Object.values(turn?.snapshot.threads ?? {}).some(
+      thread => thread.capability_state?.[PRIVATE_DATA_READ_STATE_KEY] === true,
+    );
+  }
+
   async function storeLocal(input: {
     ref: TurnRef;
     source_key: string;
@@ -233,13 +243,9 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     approved: boolean;
   }): Promise<TurnImagesResult> {
     const facts = await readTurnImageFacts({ sessionStore: deps.sessionStore, ...input.ref });
-    const html = facts.emailBodies.get(input.tool_call_id);
-    if (html === undefined) {
-      throw new ChatImageNotFoundError('No such email in this turn.');
-    }
-    const urls = emailImageUrls(html);
-    if (urls.length === 0) {
-      return { status: 'done', images: [] };
+    const urls = facts.emailImageLinks.get(input.tool_call_id);
+    if (urls === undefined) {
+      throw new ChatImageNotFoundError('No email with linked images in this turn.');
     }
     // Email images always ask: loading one tells the sender the email was opened.
     if (!input.approved) {
@@ -293,6 +299,7 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
       url,
       searchWithoutAsking: await deps.sentinel.searchWithoutAsking(ref.owner),
       guardPassed: guardVerdict({ url, secrets: await deps.sentinel.outboundSecrets(ref.owner) }).ok,
+      privateDataRead: facts.readPrivateData || (await chatReadPrivateData(ref)),
       silentShown: await deps.store.countTurnImages({
         tenant_id: ref.owner.tenant_id,
         session_id: ref.session_id,
@@ -321,9 +328,7 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
         artifacts: artifacts
           .filter(row => row.status === 'stored' && IMAGE_NAME.test(row.name))
           .map(row => ({ path: row.path, name: row.name })),
-        emails: [...facts.emailBodies]
-          .map(([tool_call_id, html]) => ({ tool_call_id, count: emailImageUrls(html).length }))
-          .filter(email => email.count > 0),
+        emails: [...facts.emailImageLinks].map(([tool_call_id, links]) => ({ tool_call_id, count: links.length })),
       };
     },
 

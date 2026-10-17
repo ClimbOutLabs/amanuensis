@@ -1,4 +1,8 @@
 import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
+import { htmlImageLinks } from '@truefoundry/trueforge-core/core/email/gmail/htmlText';
+import { GMAIL_READ_TOOL_NAMES, READ_EMAIL_TOOL_NAME } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
+
+import { CHAT_IMAGE_MAX_PER_EMAIL } from './limits';
 
 /** What a turn's stored events say about the images it may show. Nothing here comes from the client. */
 export interface TurnImageFacts {
@@ -8,13 +12,14 @@ export interface TurnImageFacts {
   replyTexts: string[];
   /** Results of searches the designated provider ran without asking. */
   silentSearchResults: string[];
-  /** HTML body of each email the turn read, by tool call id. */
-  emailBodies: Map<string, string>;
+  /** Web image links of each email the turn read, by tool call id. */
+  emailImageLinks: Map<string, string[]>;
+  /** The turn called a tool that reads private data (mail), so web images ask like searches do. */
+  readPrivateData: boolean;
 }
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 50;
-const EMAIL_READ_TOOL = 'read_email';
 
 function assistantText(content: unknown): string {
   if (typeof content === 'string') {
@@ -51,16 +56,24 @@ function toolResultPayload(content: string): unknown {
   return typeof result === 'string' ? (parseJson(result) ?? result) : result;
 }
 
-function emailHtml(payload: unknown): string | undefined {
-  if (
-    typeof payload === 'object' &&
-    payload !== null &&
-    'bodyHtml' in payload &&
-    typeof payload.bodyHtml === 'string'
-  ) {
-    return payload.bodyHtml;
+/**
+ * The image links of an email read result: the Gmail tools list them as `linked_images`; the older Gmail
+ * connector returns the HTML body, which is read here instead.
+ */
+function emailImageLinks(payload: unknown): string[] {
+  if (typeof payload !== 'object' || payload === null) {
+    return [];
   }
-  return undefined;
+  if ('linked_images' in payload && Array.isArray(payload.linked_images)) {
+    const values: unknown[] = payload.linked_images;
+    return values
+      .filter((value): value is string => typeof value === 'string' && /^https?:\/\//i.test(value))
+      .slice(0, CHAT_IMAGE_MAX_PER_EMAIL);
+  }
+  if ('bodyHtml' in payload && typeof payload.bodyHtml === 'string') {
+    return htmlImageLinks({ source: payload.bodyHtml, max: CHAT_IMAGE_MAX_PER_EMAIL });
+  }
+  return [];
 }
 
 export async function readTurnImageFacts(input: {
@@ -85,7 +98,13 @@ export async function readTurnImageFacts(input: {
     }
   }
 
-  const facts: TurnImageFacts = { uploads: [], replyTexts: [], silentSearchResults: [], emailBodies: new Map() };
+  const facts: TurnImageFacts = {
+    uploads: [],
+    replyTexts: [],
+    silentSearchResults: [],
+    emailImageLinks: new Map(),
+    readPrivateData: false,
+  };
   const silentSearchCalls = new Set<string>();
   const emailCalls = new Set<string>();
   for (const event of events) {
@@ -102,14 +121,15 @@ export async function readTurnImageFacts(input: {
     } else if (event.type === 'model.message') {
       facts.replyTexts.push(assistantText(event.content));
       for (const call of event.tool_calls ?? []) {
-        if (call.tool_info.type !== 'mcp') {
-          continue;
-        }
-        if (call.tool_info.silent_search_query !== undefined) {
+        const name = call.tool_info.name;
+        if (call.tool_info.type === 'mcp' && call.tool_info.silent_search_query !== undefined) {
           silentSearchCalls.add(call.id);
         }
-        if (call.tool_info.name === EMAIL_READ_TOOL) {
+        if (name === READ_EMAIL_TOOL_NAME) {
           emailCalls.add(call.id);
+        }
+        if (GMAIL_READ_TOOL_NAMES.some(readTool => readTool === name)) {
+          facts.readPrivateData = true;
         }
       }
     } else if (event.type === 'tool.response.v2' || event.type === 'tool.response') {
@@ -117,9 +137,9 @@ export async function readTurnImageFacts(input: {
         facts.silentSearchResults.push(event.content);
       }
       if (emailCalls.has(event.tool_call_id)) {
-        const html = emailHtml(toolResultPayload(event.content));
-        if (html !== undefined) {
-          facts.emailBodies.set(event.tool_call_id, html);
+        const links = emailImageLinks(toolResultPayload(event.content));
+        if (links.length > 0) {
+          facts.emailImageLinks.set(event.tool_call_id, links);
         }
       }
     }

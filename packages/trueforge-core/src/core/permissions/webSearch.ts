@@ -189,14 +189,15 @@ export function hasReadPrivateData(state: WebSearchTurnState): boolean {
 
 /**
  * Whether a remote image a reply links may load without asking, by the same rules as a silent fetch
- * through the designated search provider: searches run without asking, the outbound guard passes,
- * the turn has not used its silent allowance, and the link is exactly one this turn's searches
- * returned. Returns the reason it asks, or null when it may load silently.
+ * through the designated search provider: searches run without asking, the outbound guard passes, the
+ * chat has not read private data, the turn has not used its silent allowance, and the link is exactly
+ * one this turn's searches returned. Returns the reason it asks, or null when it may load silently.
  */
 export function remoteImageAskReason(input: {
   url: string;
   searchWithoutAsking: boolean;
   guardPassed: boolean;
+  privateDataRead: boolean;
   silentShown: number;
   state: WebSearchTurnState;
 }): SearchAskReason | null {
@@ -205,6 +206,9 @@ export function remoteImageAskReason(input: {
   }
   if (!input.guardPassed) {
     return 'mcp_search_guard';
+  }
+  if (input.privateDataRead) {
+    return 'mcp_search_after_private_read';
   }
   if (input.silentShown >= SILENT_SEARCH_LIMIT) {
     return 'mcp_search_limit';

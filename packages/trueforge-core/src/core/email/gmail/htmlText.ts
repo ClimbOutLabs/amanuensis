@@ -303,3 +303,67 @@ export function htmlToText(source: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
+
+/** Longest image address kept; longer ones are dropped rather than cut. */
+const MAX_IMAGE_LINK_CHARS = 2048;
+
+/** The `src` value of one `<img ...>` tag; the name must stand alone, so `data-src` does not count. */
+function imageSource(tag: string): string | null {
+  const lower = tag.toLowerCase();
+  let at = lower.indexOf('src', 4);
+  while (at !== -1) {
+    const before = lower[at - 1];
+    if (before === ' ' || before === '\t' || before === '\n' || before === '\r' || before === '/') {
+      let cursor = at + 3;
+      while (lower[cursor] === ' ' || lower[cursor] === '\t' || lower[cursor] === '\n' || lower[cursor] === '\r') {
+        cursor += 1;
+      }
+      if (lower[cursor] === '=') {
+        cursor += 1;
+        while (lower[cursor] === ' ' || lower[cursor] === '\t' || lower[cursor] === '\n' || lower[cursor] === '\r') {
+          cursor += 1;
+        }
+        const quote = tag[cursor];
+        if (quote === '"' || quote === "'") {
+          const end = tag.indexOf(quote, cursor + 1);
+          return end === -1 ? null : tag.slice(cursor + 1, end);
+        }
+        let end = cursor;
+        while (end < tag.length && !/[\s>]/.test(tag.charAt(end))) {
+          end += 1;
+        }
+        return tag.slice(cursor, end);
+      }
+    }
+    at = lower.indexOf('src', at + 3);
+  }
+  return null;
+}
+
+/**
+ * The web addresses of an HTML body's `<img src>` tags, once each and in order, at most `max`. Inline
+ * (`cid:`) and `data:` images are attachments, not links, and CSS backgrounds and `srcset` are not read.
+ * Linear in the input like the rest of this module.
+ */
+export function htmlImageLinks(input: { source: string; max: number }): string[] {
+  const html = input.source.length > MAX_HTML_CHARS ? input.source.slice(0, MAX_HTML_CHARS) : input.source;
+  const links: string[] = [];
+  let at = indexOfLower({ text: html, needle: '<img', from: 0 });
+  while (at !== -1 && links.length < input.max) {
+    const end = html.indexOf('>', at);
+    if (end === -1) {
+      break;
+    }
+    const tag = html.slice(at, end + 1);
+    const boundary = tag.charCodeAt(4);
+    if (!isNameChar(boundary)) {
+      const raw = imageSource(tag);
+      const link = raw === null ? '' : decodeEntities(raw).trim();
+      if (/^https?:\/\//i.test(link) && link.length <= MAX_IMAGE_LINK_CHARS && !links.includes(link)) {
+        links.push(link);
+      }
+    }
+    at = indexOfLower({ text: html, needle: '<img', from: end + 1 });
+  }
+  return links;
+}

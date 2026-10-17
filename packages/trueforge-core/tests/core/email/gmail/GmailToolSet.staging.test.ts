@@ -142,6 +142,42 @@ describe('download_attachment through the real staging helper', () => {
   });
 });
 
+describe('download_attachment pictures', () => {
+  it('also returns a picture as an image block for the host, and a document as text only', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+    const { tools } = await build({
+      stager: {
+        stageAttachment: input =>
+          Promise.resolve({ filename: input.filename, path: `/w/${input.filename}`, sandboxCreated: undefined }),
+      },
+      routes: [
+        route(
+          '/messages/m1',
+          message({
+            id: 'm1',
+            body: 'see attached',
+            attachments: [
+              { id: 'a1', filename: 'photo.png', mimeType: 'image/png', size: png.length },
+              { id: 'a2', filename: 'report.pdf', mimeType: 'application/pdf', size: 3 },
+            ],
+          }),
+        ),
+        route('/messages/m1/attachments/a1', {
+          size: png.length,
+          data: png.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+        }),
+        route('/messages/m1/attachments/a2', { size: 3, data: b64url('pdf') }),
+      ],
+    });
+    const picture = await tools.callTool(download('a1'));
+    const pictureBlocks = 'result' in picture ? picture.result.content : [];
+    expect(pictureBlocks).toContainEqual({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+    expect(JSON.parse(text(picture)).path).toBe('/w/photo.png');
+    const document = await tools.callTool(download('a2'));
+    expect('result' in document ? document.result.content.map(block => block.type) : []).toEqual(['text']);
+  });
+});
+
 describe('download_attachment refusals', () => {
   const tiny = (count: number) =>
     attachmentMessage(

@@ -83,6 +83,9 @@ interface GmailToolSetOptions {
   listDeadlineMs: number;
 }
 
+/** Attachment types the chat may show as pictures; anything else stays a file in the sandbox. */
+const CHAT_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
 /** Every error is cleaned on the way out too, so no error path can carry raw mail text to the model. */
 function errorResult(error: string) {
   return toolResultResponse({ text: JSON.stringify(neutralizeDeep({ error })), isError: true });
@@ -502,7 +505,7 @@ export class GmailToolSet extends LocalToolMCP {
         ordinal: this.#stagedSizes.length + 1,
       });
       this.#stagedSizes.push(bytes.length);
-      return jsonResult(
+      const response = jsonResult(
         {
           account: this.#options.account,
           untrusted_content: UNTRUSTED_NOTICE,
@@ -516,6 +519,20 @@ export class GmailToolSet extends LocalToolMCP {
         },
         staged.sandboxCreated,
       );
+      // A picture also goes to the host as an image block, which the chat shows after re-encoding it;
+      // the model reads only the text above.
+      return CHAT_IMAGE_MIME_TYPES.has(attachment.mimeType.toLowerCase())
+        ? {
+            ...response,
+            result: {
+              ...response.result,
+              content: [
+                ...response.result.content,
+                { type: 'image' as const, data: bytes.toString('base64'), mimeType: attachment.mimeType.toLowerCase() },
+              ],
+            },
+          }
+        : response;
     } catch (error) {
       return error instanceof InvalidFileInputError || error instanceof SandboxFileUploadError
         ? this.#stagingFailure(error)

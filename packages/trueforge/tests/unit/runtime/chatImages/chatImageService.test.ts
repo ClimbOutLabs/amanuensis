@@ -1,7 +1,9 @@
-import type { PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
+import type { PersistedTurnEvent, TurnRecord } from '@truefoundry/trueforge-core/agent-session';
 import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
+import { PRIVATE_DATA_READ_STATE_KEY } from '@truefoundry/trueforge-core/core/capabilities/builtins/PrivateDataRead';
 import { Response as UndiciResponse } from 'undici';
 
+import type { TurnCustom } from '../../../../src/db/sessionCustom';
 import { ChatImageNotFoundError, createChatImageService } from '../../../../src/runtime/chatImages/chatImageService';
 import type { ReencodeOutcome } from '../../../../src/runtime/chatImages/reencodeInSandbox';
 import { EXAMPLE_COM_ADDRESS } from '../../../fixtures/exampleComAddress';
@@ -79,8 +81,42 @@ function toolResponse(input: { id: string; tool_call_id: string; result: unknown
 const EMAIL_HTML =
   '<p>Sale!</p><img src="https://example.com/pixel.gif"><img src="https://example.org/banner.png"><img src="cid:logo">';
 
+/** A stored turn whose main thread carries the flag the search classifier saves after a mail read. */
+function turnWithPrivateRead(): TurnRecord<TurnCustom> {
+  return {
+    turn_id: 't1',
+    session_id: 's1',
+    first_turn_id: 't0',
+    ancestor_ids: ['t0'],
+    previous_turn_id: 't0',
+    state: { status: 'running' },
+    input: [],
+    snapshot: {
+      threads: {
+        main: {
+          thread_id: 'main',
+          context: [],
+          current_context_usage: { prompt_tokens: 0, completion_tokens: 0 },
+          parent: null,
+          agent_info: null,
+          completion: null,
+          capability_state: { [PRIVATE_DATA_READ_STATE_KEY]: true },
+          tool_call_memo: undefined,
+          task_state: undefined,
+        },
+      },
+      mcp_servers: null,
+      sandbox_info: null,
+    },
+    created_at: new Date(CREATED),
+    updated_at: new Date(CREATED),
+    custom: null,
+  };
+}
+
 function setup(options: {
   events?: PersistedTurnEvent[];
+  storedTurn?: TurnRecord<TurnCustom>;
   offline?: boolean;
   searchWithoutAsking?: boolean;
   reencode?: ReencodeOutcome;
@@ -95,6 +131,7 @@ function setup(options: {
     store,
     sessionStore: {
       listTurnEvents: () => Promise.resolve({ data: events, pagination: { limit: 200 } }),
+      getTurn: () => Promise.resolve(options.storedTurn),
     },
     turnArtifactStore: artifacts,
     reencode: () => {
@@ -240,6 +277,22 @@ describe('email images', () => {
     expect(env.fetched).toEqual([]);
   });
 
+  it('reads the linked images the Gmail tools list', async () => {
+    const env = setup({
+      events: [
+        modelMessage({ id: 'e1', content: '', calls: [{ id: 'mail-2', name: 'read_email' }] }),
+        toolResponse({
+          id: 'e2',
+          tool_call_id: 'mail-2',
+          result: { id: 'm2', linked_images: ['https://example.com/logo.png', 'javascript:alert(1)'] },
+        }),
+      ],
+    });
+    await expect(env.service.listTurnImages(ref)).resolves.toMatchObject({
+      emails: [{ tool_call_id: 'mail-2', count: 1 }],
+    });
+  });
+
   it('rejects a tool call that is not an email read of this turn', async () => {
     const env = setup({ events });
     await expect(
@@ -273,6 +326,25 @@ describe('reply images', () => {
     expect(env.fetched).toEqual([returned]);
     expect(env.audits).toMatchObject([{ outcome: 'ran', tier: 1 }]);
     expect([...env.store.images.values()][0]?.origin).toBe('remote_silent');
+  });
+
+  it('asks once this turn read mail, as a search would', async () => {
+    const events = [
+      modelMessage({ id: 'e0', content: '', calls: [{ id: 'mail-0', name: 'read_email' }] }),
+      ...searchEvents(`![harbor](${returned})`),
+    ];
+    const env = setup({ events });
+    await expect(
+      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
+    ).resolves.toMatchObject({ status: 'ask' });
+    expect(env.fetched).toEqual([]);
+  });
+
+  it('asks once an earlier turn of the chat read mail', async () => {
+    const env = setup({ events: searchEvents(`![harbor](${returned})`), storedTurn: turnWithPrivateRead() });
+    await expect(
+      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
+    ).resolves.toMatchObject({ status: 'ask' });
   });
 
   it('asks for a link no search returned', async () => {

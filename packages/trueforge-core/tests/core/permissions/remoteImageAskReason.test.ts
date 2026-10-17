@@ -16,6 +16,7 @@ const base = {
   url: returned,
   searchWithoutAsking: true,
   guardPassed: true,
+  privateDataRead: false,
   silentShown: 0,
 };
 
@@ -33,10 +34,11 @@ describe('remoteImageAskReason', () => {
     expect(remoteImageAskReason({ ...base, state: createWebSearchTurnState() })).toBe('mcp_search_unreturned_url');
   });
 
-  it('asks when searches are set to ask, the guard trips, or the turn used its allowance', () => {
+  it('asks when searches are set to ask, the guard trips, the chat read private data, or the turn used its allowance', () => {
     const state = stateWithResults([returned]);
     expect(remoteImageAskReason({ ...base, searchWithoutAsking: false, state })).toBe('mcp_search_setting_ask');
     expect(remoteImageAskReason({ ...base, guardPassed: false, state })).toBe('mcp_search_guard');
+    expect(remoteImageAskReason({ ...base, privateDataRead: true, state })).toBe('mcp_search_after_private_read');
     expect(remoteImageAskReason({ ...base, silentShown: SILENT_SEARCH_LIMIT, state })).toBe('mcp_search_limit');
   });
 });

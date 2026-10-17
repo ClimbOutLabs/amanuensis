@@ -67,7 +67,10 @@ async function buildApp() {
       },
       chatImages: createChatImageService({
         store,
-        sessionStore: { listTurnEvents: () => Promise.resolve({ data: [], pagination: { limit: 200 } }) },
+        sessionStore: {
+          listTurnEvents: () => Promise.resolve({ data: [], pagination: { limit: 200 } }),
+          getTurn: () => Promise.resolve(undefined),
+        },
         turnArtifactStore: new FakeTurnArtifactStore(),
         reencode: () => Promise.resolve({ ok: false, reason: 'sandbox_unavailable' }),
         sentinel: {

@@ -4,6 +4,7 @@ import { decodeEntities } from './htmlText';
 import {
   headerOf,
   labelIdsOf,
+  linkedImagesOf,
   listAttachments,
   MAX_RAW_HEADER_CHARS,
   rawHeaderOf,
@@ -59,6 +60,8 @@ function envelope(context: ResultContext) {
 /** Most messages of one thread a result lists, and most attachments it names per message. */
 const MAX_THREAD_MESSAGES = 60;
 const MAX_ATTACHMENTS_LISTED = 20;
+/** Web images a read email lists for the chat to offer; the chat shows at most this many per email. */
+const MAX_LINKED_IMAGES = 20;
 
 /** Most labels a row names, and the longest label id kept. */
 const MAX_LABELS_LISTED = 30;
@@ -322,6 +325,9 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
   const listed = fitAttachments({ message: input.message, budget });
   const note = attachmentsNote({ context: input.context, listed: listed.attachments.length > 0 || listed.omitted > 0 });
   budget.spend(neutralizeDeep(note));
+  // Listed so the chat can offer to show them; nothing is fetched unless the person says so.
+  const linkedImages = linkedImagesOf({ message: input.message, max: MAX_LINKED_IMAGES });
+  budget.spend(linkedImages);
   const read = readBody({ message: input.message, maxChars: bodyChars(budget.left) });
   const bounded = fitText({ text: read.body, left: budget.left });
   return {
@@ -329,6 +335,7 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
     attachments: listed.attachments,
     ...(listed.omitted > 0 ? { attachments_omitted: listed.omitted } : {}),
     ...note,
+    ...(linkedImages.length > 0 ? { linked_images: linkedImages } : {}),
     body: bounded.text,
     body_truncated: bounded.truncated || read.cut,
   };
