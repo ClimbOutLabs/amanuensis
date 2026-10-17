@@ -86,6 +86,7 @@ import {
   splitCompoundSegments,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  writeTargetTouchesSandboxTools,
   type FileDigest,
   type PathResolution,
   type TrackedExecutableScope,
@@ -1073,6 +1074,40 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
+  // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
+  if (
+    writeTargetTouchesSandboxTools({
+      p: target,
+      cwd: identityCwd,
+      roots: [ctx.workspace_cwd],
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return tier3Decision({
+      card: {
+        plain_what: `Save \`${target}\` in a folder where this workspace keeps programs it can run.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone:
+          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: 'sandbox_tool_write',
+      reason_detail: 'Writes into the sandbox tool folders always require approval.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
   return decideTier2({
     ctx,
     action,
@@ -1472,6 +1507,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
+    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
   });
   if (offline) {
     if (extraction.external_service) {
@@ -1495,6 +1531,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return autoDenyDecision({
       reason: 'destination_unverifiable',
       reason_detail: 'External-service action with no verifiable destination; never carded.',
+      sensitive_read: false,
+    });
+  }
+
+  // A send whose card would hide a recipient or cut its content is refused: approval must cover all of it.
+  if (extraction.incomplete_send !== null) {
+    return autoDenyDecision({
+      reason: 'incomplete_send_card',
+      reason_detail: extraction.incomplete_send.model_message,
+      owner_message: extraction.incomplete_send.owner_message,
       sensitive_read: false,
     });
   }
@@ -1601,6 +1647,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     readOnlyHint &&
     action.mcp_hints.open_world_hint === false &&
+    !extraction.sends &&
     !sensitiveReadHit(action.canonical_params)
   ) {
     if (action.mcp_first_party === true) {
@@ -1643,7 +1690,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const recognized = extraction.connector_what !== null;
   return tier3Decision({
     card,
-    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason: extraction.sends ? 'connector_send' : recognized ? 'connector_outbound' : 'unrecognized_tool',
     reason_detail: recognized
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',

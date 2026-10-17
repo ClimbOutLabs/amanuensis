@@ -63,7 +63,7 @@ export function commandPath(platform: LocalSandboxPlatform): string {
   return COMMAND_PATH_BY_PLATFORM[platform];
 }
 
-/** Cwd-relative venv created at local sandbox init (host `python -m venv`). */
+/** Cwd-relative venv, built inside the sandbox at init. */
 export const SANDBOX_VENV_DIR = '.venv';
 
 function sandboxVenvPath(sandboxRootPath: string): string {

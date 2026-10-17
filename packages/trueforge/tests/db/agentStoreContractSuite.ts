@@ -52,6 +52,22 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     expect(byId).toEqual(created);
   });
 
+  it('createAgent keeps a caller-supplied id', async () => {
+    const store = getStore();
+    const created = await store.createAgent({
+      id: 'agent-kept-01',
+      tenant_id: TENANT,
+      created_by_subject: CREATED_BY_SUBJECT,
+      name: 'kept',
+      description: 'Keeps its id.',
+      manifest: manifest(),
+      external_id: null,
+    });
+
+    expect(created.id).toBe('agent-kept-01');
+    expect(await store.getAgent({ tenant_id: TENANT, id: 'agent-kept-01' })).toEqual(created);
+  });
+
   it('getAgent returns undefined for unknown id or name', async () => {
     const store = getStore();
     expect(await store.getAgent({ tenant_id: TENANT, id: 'missing' })).toBeUndefined();

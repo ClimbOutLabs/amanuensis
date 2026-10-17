@@ -111,6 +111,7 @@ function storeWith(values: Map<string, GlobalSettingRecord>): IGlobalSettingsSto
     deleteSetting: async input => {
       values.delete(input.key);
     },
+    compareAndSetSetting: async () => false,
   };
 }
 
@@ -174,6 +175,7 @@ describe('readMemorySummarizeSetting', () => {
         throw new Error('db down');
       },
       deleteSetting: async () => {},
+      compareAndSetSetting: async () => false,
     };
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: failing, logger: silentLogger });
     expect(setting.overridden).toBe(false);

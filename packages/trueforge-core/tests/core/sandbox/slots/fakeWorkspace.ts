@@ -34,7 +34,9 @@ export function fakeWorkspaceAgent(
 ): { agent: FakeAgent; files: Map<string, Buffer> } {
   const files = new Map<string, Buffer>();
 
-  function runShell(command: string): ShellAnswer {
+  function runShell(sent: string): ShellAnswer {
+    // Host-written commands arrive with the trusted PATH set first; the stand-in answers the command itself.
+    const command = sent.replace(/^PATH=[^;]*; export PATH; /, '');
     const answered = answerShell(command);
     if (answered !== undefined) {
       return answered;

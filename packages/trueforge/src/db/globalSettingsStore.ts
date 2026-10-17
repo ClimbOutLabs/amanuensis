@@ -19,6 +19,14 @@ export interface SetGlobalSettingInput {
   value: string;
 }
 
+export interface CompareAndSetGlobalSettingInput {
+  key: string;
+  /** The value the row must hold now, or null when the key must be absent. */
+  expected: string | null;
+  /** The value to store, or null to remove the row. */
+  value: string | null;
+}
+
 /**
  * Durable global settings. `setSetting` upserts by key so a retried write
  * overwrites its own prior row rather than conflicting with it.
@@ -30,4 +38,6 @@ export interface IGlobalSettingsStore<TTransaction = never> {
   setSetting(input: SetGlobalSettingInput, transaction?: TTransaction): Promise<GlobalSettingRecord>;
   /** Removes the setting row for a key; a no-op when nothing is stored for it. */
   deleteSetting(input: GetGlobalSettingInput, transaction?: TTransaction): Promise<void>;
+  /** Writes only when the row still holds `expected`, in one statement; returns whether it wrote. */
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput, transaction?: TTransaction): Promise<boolean>;
 }

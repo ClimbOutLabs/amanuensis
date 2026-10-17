@@ -230,6 +230,7 @@ export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } 
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
+export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
 export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
@@ -306,6 +307,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
 export type {

@@ -395,6 +395,10 @@
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
           },
+          "can_chat_allow": {
+            "description": "Whether the user may approve this tool for the rest of the chat.",
+            "type": "boolean"
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"
@@ -1788,12 +1792,12 @@
           "tokens_after": {
             "description": "Estimated context tokens after this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "tokens_before": {
             "description": "Estimated context tokens before this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "type": {
             "description": "A context-compaction attempt completed.",
@@ -2419,6 +2423,15 @@
         "required": [
           "schedule_run_id"
         ],
+        "type": "object"
+      },
+      "ExportDataRequest": {
+        "properties": {
+          "include_uploads": {
+            "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "ExportMemoryVaultResponse": {
@@ -3604,6 +3617,82 @@
         },
         "required": [
           "results"
+        ],
+        "type": "object"
+      },
+      "ImportDataResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImportDataResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ImportDataResult": {
+        "properties": {
+          "agents": {
+            "description": "Agents imported with their original ids.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chats": {
+            "description": "Chats imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connectors": {
+            "description": "Connectors imported, without credentials.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "folders": {
+            "description": "Chat folders imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memories": {
+            "description": "Memories imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "personas": {
+            "description": "Personas imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules": {
+            "description": "Schedules imported; all arrive switched off.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules_off": {
+            "description": "True when schedules were imported; imported schedules are always off until turned on.",
+            "type": "boolean"
+          },
+          "spaces": {
+            "description": "Spaces imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "summary": {
+            "description": "Plain-words summary of what was imported and what was not.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chats",
+          "memories",
+          "personas",
+          "spaces",
+          "schedules",
+          "folders",
+          "agents",
+          "connectors",
+          "schedules_off",
+          "summary"
         ],
         "type": "object"
       },
@@ -13415,6 +13504,177 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/data/export": {
+      "post": {
+        "description": "Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The export archive (zip). A failed export drops the connection instead of ending the archive."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is missing or invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is not application/json."
+          }
+        },
+        "summary": "Export my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "export_data"
+      }
+    },
+    "/api/v1/data/import": {
+      "post": {
+        "description": "Admin only. Imports an export archive into a fresh instance. The archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.",
+        "requestBody": {
+          "content": {
+            "application/zip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDataResponse"
+                }
+              }
+            },
+            "description": "The import finished; the summary says what arrived and what did not."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is not a valid export, or was made by a newer version."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This instance already has data, or an import is already running; imports only run into a fresh instance."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is larger than the import limit."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not application/zip."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge index is still downloading; retry in a few minutes."
+          }
+        },
+        "summary": "Import my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "import_data"
       }
     },
     "/api/v1/mcp-servers": {
