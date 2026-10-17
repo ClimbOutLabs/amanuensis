@@ -32,6 +32,31 @@ async function resolveStoredValue(value: string): Promise<string | undefined> {
   }
 }
 
+const AUTH_SCHEME = /^(bearer|basic|token)\s+(\S+)$/i;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * A header value together with its bare credential, so a key sent without its scheme word is still
+ * matched. A Basic credential also yields its decoded `user:password` and each half.
+ */
+function headerCredentialForms(value: string): string[] {
+  const match = AUTH_SCHEME.exec(value.trim());
+  const scheme = match?.[1]?.toLowerCase();
+  const credential = match?.[2];
+  if (scheme === undefined || credential === undefined) {
+    return [value];
+  }
+  const forms = [value, credential];
+  if (scheme === 'basic' && BASE64.test(credential)) {
+    const decoded = Buffer.from(credential, 'base64').toString('utf8');
+    const separator = decoded.indexOf(':');
+    if (separator > 0 && !decoded.includes('\uFFFD')) {
+      forms.push(decoded, decoded.slice(0, separator), decoded.slice(separator + 1));
+    }
+  }
+  return forms;
+}
+
 async function collectSecrets(input: {
   sources: OutboundSecretSources;
   tenant_id: string;
@@ -45,6 +70,7 @@ async function collectSecrets(input: {
     sources.googleConnections.get({ tenant_id, created_by }),
   ]);
   const raw: string[] = [...sources.configured()];
+  const headerValues: string[] = [];
   if (google !== null) {
     raw.push(google.client_secret, google.refresh_token);
   }
@@ -60,7 +86,7 @@ async function collectSecrets(input: {
   for (const server of servers) {
     const auth = server.manifest.auth;
     if (auth?.type === 'header') {
-      raw.push(...Object.values(auth.headers));
+      headerValues.push(...Object.values(auth.headers));
     } else if (auth?.type === 'oauth_client') {
       raw.push(auth.client_secret);
     }
@@ -80,8 +106,14 @@ async function collectSecrets(input: {
       raw.push(client.client.clientSecret);
     }
   }
-  const resolved = await Promise.all(raw.map(resolveStoredValue));
-  return [...new Set(resolved.filter((value): value is string => value !== undefined && value !== ''))];
+  const [resolved, resolvedHeaders] = await Promise.all([
+    Promise.all(raw.map(resolveStoredValue)),
+    Promise.all(headerValues.map(resolveStoredValue)),
+  ]);
+  const headerForms = resolvedHeaders.flatMap(value => (value === undefined ? [] : headerCredentialForms(value)));
+  return [
+    ...new Set([...resolved, ...headerForms].filter((value): value is string => value !== undefined && value !== '')),
+  ];
 }
 
 /**

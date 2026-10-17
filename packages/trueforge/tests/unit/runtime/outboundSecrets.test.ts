@@ -1,8 +1,34 @@
+import {
+  appendOutboundTrace,
+  checkOutboundStrings,
+  collectOutboundStrings,
+  type OutboundGuardRule,
+} from '@truefoundry/trueforge-core/core/permissions/outboundGuard';
 import type { IMcpServerStore, McpServerRecord } from '../../../src/db/mcpServerStore';
 import type { ModelProviderRecord } from '../../../src/db/modelProviderStore';
 import { createOutboundSecretSource, type OutboundSecretSources } from '../../../src/runtime/outboundSecrets';
 
 const alice = { tenant_id: 't1', created_by: 'alice' };
+const headerKey = ['synthetic', 'connector', 'key', 'a1B2c3D4e5F6g7'].join('-');
+const basicUser = 'synthetic-basic-user';
+const basicPassword = ['synthetic', 'basic', 'pass', 'h8I9j0'].join('-');
+const basicCredential = Buffer.from(`${basicUser}:${basicPassword}`).toString('base64');
+
+/** Runs one search through the outbound guard and returns the trace the next search sees. */
+function search(input: { query: string; secrets: readonly string[]; earlier: string }): {
+  rule: OutboundGuardRule | undefined;
+  earlier: string;
+} {
+  const strings = collectOutboundStrings({ query: input.query });
+  if (strings === undefined) {
+    throw new Error('test arguments must be inspectable');
+  }
+  const verdict = checkOutboundStrings({ strings, secrets: input.secrets, earlier: input.earlier });
+  return {
+    rule: verdict.ok ? undefined : verdict.rule,
+    earlier: appendOutboundTrace({ earlier: input.earlier, strings }),
+  };
+}
 
 function mcpRecord(id: string, manifest: McpServerRecord['manifest']): McpServerRecord {
   return {
@@ -37,7 +63,14 @@ function sources(overrides: Partial<OutboundSecretSources> = {}): OutboundSecret
       name: 'header-mcp',
       url: 'https://header.example/mcp',
       description: 'd',
-      auth: { type: 'header', headers: { Authorization: 'Bearer synthetic-header-0002' } },
+      auth: { type: 'header', headers: { Authorization: `Bearer ${headerKey}` } },
+    }),
+    mcpRecord('srv-basic', {
+      type: 'remote',
+      name: 'basic-mcp',
+      url: 'https://basic.example/mcp',
+      description: 'd',
+      auth: { type: 'header', headers: { Authorization: `basic ${basicCredential}` } },
     }),
     mcpRecord('srv-oauth', {
       type: 'remote',
@@ -121,7 +154,13 @@ describe('createOutboundSecretSource', () => {
       new Set([
         'synthetic-configured-0004',
         'synthetic-provider-key-0001',
-        'Bearer synthetic-header-0002',
+        `Bearer ${headerKey}`,
+        headerKey,
+        `basic ${basicCredential}`,
+        basicCredential,
+        `${basicUser}:${basicPassword}`,
+        basicUser,
+        basicPassword,
         'synthetic-client-secret-0003',
         'synthetic-access-0006',
         'synthetic-refresh-0007',
@@ -171,5 +210,52 @@ describe('createOutboundSecretSource', () => {
     const source = createOutboundSecretSource(sources({ modelProviders: { listProviders } }));
     await Promise.all([source(alice), source(alice), source(alice)]);
     expect(listProviders).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a header value with no auth scheme whole', async () => {
+    const plain = mcpRecord('srv-plain', {
+      type: 'remote',
+      name: 'plain-mcp',
+      url: 'https://plain.example/mcp',
+      description: 'd',
+      auth: { type: 'header', headers: { 'x-api-key': 'synthetic-plain-header-0011' } },
+    });
+    const secrets = await createOutboundSecretSource(
+      sources({
+        mcpServers: { listServers: () => Promise.resolve([plain]), getClient: () => Promise.resolve(undefined) },
+      }),
+    )(alice);
+    expect(secrets).toContain('synthetic-plain-header-0011');
+  });
+});
+
+describe('outbound guard over the secrets this server holds', () => {
+  it('holds a connector key split across three searches', async () => {
+    const secrets = await createOutboundSecretSource(sources())(alice);
+    const pieces = [headerKey.slice(0, 14), headerKey.slice(14, 28), headerKey.slice(28)];
+    let earlier = '';
+    const rules: (OutboundGuardRule | undefined)[] = [];
+    for (const piece of pieces) {
+      const result = search({ query: piece, secrets, earlier });
+      rules.push(result.rule);
+      earlier = result.earlier;
+    }
+    expect(rules).toEqual([undefined, undefined, 'server_secret']);
+  });
+
+  it('holds a bare connector key in one search', async () => {
+    const secrets = await createOutboundSecretSource(sources())(alice);
+    expect(search({ query: `docs for ${headerKey}`, secrets, earlier: '' }).rule).toBe('server_secret');
+  });
+
+  it('holds a Basic credential, encoded or decoded', async () => {
+    const secrets = await createOutboundSecretSource(sources())(alice);
+    expect(search({ query: basicCredential, secrets, earlier: '' }).rule).toBe('server_secret');
+    expect(search({ query: `login ${basicPassword}`, secrets, earlier: '' }).rule).toBe('server_secret');
+  });
+
+  it('lets an ordinary search through', async () => {
+    const secrets = await createOutboundSecretSource(sources())(alice);
+    expect(search({ query: 'how to rotate a connector key', secrets, earlier: '' }).rule).toBeUndefined();
   });
 });
