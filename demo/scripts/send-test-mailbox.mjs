@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Sends the synthetic test mailbox fixtures over SMTP to a test mailbox.
+// Sends the demo set (demo/fixtures/mailbox/demo-set.json) over SMTP to a test
+// mailbox. Fixtures outside that list are never sent.
 //
 // Configuration comes only from environment variables or a gitignored
 // `.env.test-mailbox` file at the repo root (never committed):
@@ -17,15 +18,14 @@
 //   pnpm send-test-mailbox             send for real
 
 import { Buffer } from 'node:buffer';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import path from 'node:path';
 import { connect as tlsConnect } from 'node:tls';
 import { fileURLToPath } from 'node:url';
-import { parseEnvFile } from './test-mailbox-env.mjs';
+import { loadDemoSet, parseEnvFile } from './test-mailbox-env.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const fixtureDir = path.join(rootDir, 'demo', 'fixtures', 'mailbox');
 const envFile = path.join(rootDir, '.env.test-mailbox');
 
 function loadConfig() {
@@ -112,42 +112,6 @@ function smtpSession(socket) {
   return { command, greeting, socket };
 }
 
-function parseHeaders(raw) {
-  const headers = {};
-  const head = raw.split('\r\n\r\n')[0] ?? '';
-  let current = '';
-  for (const line of head.split('\r\n')) {
-    if (/^\s/.test(line) && current !== '') {
-      headers[current] += ` ${line.trim()}`;
-    } else {
-      const idx = line.indexOf(':');
-      if (idx > 0) {
-        current = line.slice(0, idx).trim().toLowerCase();
-        headers[current] = line.slice(idx + 1).trim();
-      }
-    }
-  }
-  return headers;
-}
-
-function listFixtures() {
-  return readdirSync(fixtureDir)
-    .filter(name => name.endsWith('.eml'))
-    .sort()
-    .map(name => {
-      const raw = readFileSync(path.join(fixtureDir, name), 'utf8');
-      const headers = parseHeaders(raw);
-      return {
-        name,
-        from: headers.from ?? '(unknown)',
-        subject: headers.subject ?? '(no subject)',
-        date: headers.date ?? '(no date)',
-        bytes: Buffer.byteLength(raw, 'utf8'),
-        raw,
-      };
-    });
-}
-
 async function sendAll({ config, fixtures }) {
   const rawSocket = config.secure
     ? tlsConnect({ host: config.host, port: config.port })
@@ -199,12 +163,13 @@ async function sendAll({ config, fixtures }) {
     await session.command('DATA');
     // Dot-stuffing: lines starting with a dot get an extra dot.
     const stuffed = fixture.raw
+      .toString('utf8')
       .replace(/\r\n/g, '\n')
       .split('\n')
       .map(line => (line.startsWith('.') ? `.${line}` : line))
       .join('\r\n');
     await session.command(`${stuffed}\r\n.`);
-    console.log(`sent ${fixture.name} -> ${config.to}`);
+    console.log(`sent ${fixture.file} -> ${config.to}`);
   }
   await session.command('QUIT');
   session.socket.end();
@@ -219,15 +184,12 @@ function main() {
     }
   }
 
-  const fixtures = listFixtures();
-  if (fixtures.length === 0) {
-    throw new Error(`no .eml fixtures found in ${fixtureDir}`);
-  }
+  const fixtures = loadDemoSet();
 
   if (dryRun) {
     console.log(`would send ${fixtures.length} messages:`);
     for (const fixture of fixtures) {
-      console.log(`  ${fixture.name} | from: ${fixture.from} | subject: ${fixture.subject} | ${fixture.bytes} bytes`);
+      console.log(`  ${fixture.file} | ${fixture.language} | ${fixture.subject} | ${String(fixture.raw.length)} bytes`);
     }
     return;
   }

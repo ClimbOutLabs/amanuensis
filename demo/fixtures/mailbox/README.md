@@ -38,7 +38,7 @@ binary attachments are committed; everything is embedded in the `.eml` files.
 ## Sending
 
 `demo/scripts/send-test-mailbox.mjs` (run with `pnpm send-test-mailbox`) delivers
-the fixtures over SMTP to a test mailbox. Recipient and SMTP settings come
+only the demo set (below) over SMTP to a test mailbox. Recipient and SMTP settings come
 from environment variables or a gitignored `.env.test-mailbox` file and are
 never committed (`pnpm test:private-data` fails if that file is ever
 tracked). Use `--dry-run` to print what would be sent.

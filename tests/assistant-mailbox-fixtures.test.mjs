@@ -5,15 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
-import { loadDemoSet } from '../demo/scripts/import-demo-mailbox.mjs';
+import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
 
-const fixtureDir = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'demo',
-  'fixtures',
-  'mailbox',
-);
+const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
 
 const EXPECTED_DEMO_SET = [
   '01-flight-confirmation.eml',

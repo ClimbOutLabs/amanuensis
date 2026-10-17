@@ -20,15 +20,12 @@
 //   pnpm demo:import-mailbox --dry-run   list what would be imported, no network
 //   pnpm demo:import-mailbox             import for real
 
-import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URLSearchParams } from 'node:url';
-import { TextDecoder } from 'node:util';
-import { parseEnvFile } from './test-mailbox-env.mjs';
+import { loadDemoSet, parseEnvFile } from './test-mailbox-env.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const defaultFixtureDir = path.join(rootDir, 'demo', 'fixtures', 'mailbox');
 const envFile = path.join(rootDir, '.env.test-mailbox');
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -44,43 +41,6 @@ export function loadConfig({ env = process.env, fileText } = {}) {
     refreshToken: get('TEST_MAILBOX_GMAIL_REFRESH_TOKEN'),
     expectedAddress: get('TEST_MAILBOX_TO'),
   };
-}
-
-export function loadDemoSet({ fixtureDir = defaultFixtureDir } = {}) {
-  const manifest = JSON.parse(readFileSync(path.join(fixtureDir, 'demo-set.json'), 'utf8'));
-  return manifest.files.map(({ file, language }) => {
-    const raw = readFileSync(path.join(fixtureDir, file));
-    const header = name => {
-      const match = new RegExp(`^${name}:[ \\t]*(.*(?:\\r?\\n[ \\t].*)*)`, 'im').exec(raw.toString('latin1'));
-      return match === null ? '' : match[1].replace(/\r?\n[ \t]+/g, ' ').trim();
-    };
-    return {
-      file,
-      language,
-      raw,
-      messageId: header('Message-ID'),
-      date: header('Date'),
-      subject: decodeHeaderWords(header('Subject')),
-    };
-  });
-}
-
-// Enough RFC 2047 decoding to show readable subjects in the summary.
-function decodeHeaderWords(value) {
-  return value
-    .replace(/\?=\s+=\?/g, '?==?')
-    .replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_, charset, encoding, text) => {
-      const bytes =
-        encoding.toUpperCase() === 'B'
-          ? Buffer.from(text, 'base64')
-          : Buffer.from(
-              text
-                .replace(/_/g, ' ')
-                .replace(/=([0-9A-Fa-f]{2})/g, (__, hex) => String.fromCharCode(parseInt(hex, 16))),
-              'latin1',
-            );
-      return new TextDecoder(charset).decode(bytes);
-    });
 }
 
 async function requestJson({ fetchImpl, url, init }) {

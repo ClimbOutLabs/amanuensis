@@ -3,15 +3,10 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, URL, URLSearchParams } from 'node:url';
-import { importDemoMailbox, loadConfig, loadDemoSet, summarize } from '../demo/scripts/import-demo-mailbox.mjs';
+import { importDemoMailbox, loadConfig, summarize } from '../demo/scripts/import-demo-mailbox.mjs';
+import { loadDemoSet } from '../demo/scripts/test-mailbox-env.mjs';
 
-const fixtureDir = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'demo',
-  'fixtures',
-  'mailbox',
-);
+const fixtureDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'demo', 'fixtures', 'mailbox');
 const messages = loadDemoSet({ fixtureDir });
 const quiet = () => undefined;
 
