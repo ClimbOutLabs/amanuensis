@@ -81,6 +81,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
+       aman password [--instance NAME] [--password-stdin]
+         sets a new owner password; run it on the computer where Aman is installed
 USAGE
 }
 
@@ -1581,6 +1583,10 @@ esac
 case "${1:-}" in
   doctor) shift ;;
   backup | upgrade) run_installer "$@" ;;
+  password)
+    shift
+    run_installer instance password "$@"
+    ;;
   -h | --help)
     usage
     exit 0

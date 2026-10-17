@@ -1565,6 +1565,23 @@ describe('aman backup and aman upgrade', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
   });
 
+  it('aman password runs the installer to set a new owner password, with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['password']).code, 0);
+    assert.equal(world.shim(['password', '--instance', 'main', '--password-stdin']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password`));
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password --instance main --password-stdin`));
+  });
+
+  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+    make();
+    const result = world.shim(['--help']);
+    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stderr, /on the computer where Aman is installed/);
+  });
+
   it('say plainly when the folder Aman was installed from is gone', () => {
     make();
     const result = world.shim(['backup']);

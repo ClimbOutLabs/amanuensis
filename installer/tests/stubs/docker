@@ -265,6 +265,11 @@ case "$cmd" in
         done
         exec "$STUB_REAL_NODE" "$qr" "$last"
         ;;
+      *"rm -f /var/dex/dex.db"*)
+        # Clearing the sign-in service's saved keys, which ends every session.
+        echo "$vol" >>"$S/dex_wipes"
+        exit 0
+        ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"

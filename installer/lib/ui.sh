@@ -337,10 +337,11 @@ ui_confirm() { # question y|n
   return 1
 }
 
-# Reads a secret without echo into VAR. Returns 1 at the end of the input.
+# Reads a secret without echo into VAR. Returns 1 at the end of the input. A label that ends in a colon is shown as is.
 ui_password() { # VAR label
-  local __value='' __rc=0 UI_FD=2
-  ui_prompt_head "$2 (not shown)"
+  local __value='' __rc=0 UI_FD=2 __label=$2
+  case "$__label" in *:) ;; *) __label="$__label (not shown)" ;; esac
+  ui_prompt_head "$__label"
   IFS= read -rs __value || __rc=1
   printf '\n' >&2
   printf -v "$1" '%s' "$__value"

@@ -4,6 +4,7 @@
 #        install.sh instance add|list|remove <name>
 #        install.sh instance demo-seed [--reset]
 #        install.sh instance refresh <name>
+#        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
 #        install.sh upgrade [--check] [--force]
@@ -120,6 +121,7 @@ Amanuensis installer
   install.sh instance remove <name> [--purge-data]
   install.sh instance demo-seed [--reset] [--instance NAME]
   install.sh instance refresh <name>
+  install.sh instance password [<name>]   set a new owner password and sign everyone out (run it on the computer where Aman is installed)
   install.sh backup [<name>]
   install.sh backups daily|off
   install.sh upgrade [--check] [--force]
@@ -140,8 +142,8 @@ Options
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
-  --instance NAME       the instance demo-seed applies to (default: the only one)
-  --password-stdin      read the owner password (otherwise one is generated and shown once) from the first line of stdin, before any prompt
+  --instance NAME       the instance demo-seed and password apply to (default: the only one)
+  --password-stdin      read the owner password (otherwise you are asked) from the first line of stdin, before any prompt
   --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
   --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
@@ -345,7 +347,8 @@ main() {
         remove) cmd_instance_remove ;;
         demo-seed) cmd_instance_demo_seed ;;
         refresh) cmd_instance_refresh ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|refresh" ;;
+        password) cmd_instance_password ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|refresh|password" ;;
       esac
       ;;
   esac
