@@ -1,4 +1,5 @@
 import { SentinelAuditStore } from '../../../../src/db/sentinelAuditStore';
+import { runSentinelAuditStoreContractSuite } from '../../sentinelAuditStoreContractSuite';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
 describe('SentinelAuditStore', () => {
@@ -101,4 +102,6 @@ describe('SentinelAuditStore', () => {
     expect(page2).toHaveLength(1);
     expect(page2[0]!.tool_name).toBe('tool_0');
   });
+
+  runSentinelAuditStoreContractSuite(() => store);
 });
