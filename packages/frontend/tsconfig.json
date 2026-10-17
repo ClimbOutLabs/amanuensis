@@ -21,6 +21,9 @@
     "paths": {
       "@truefoundry/trueforge-core/core/mcp/implementationPlanGrant": [
         "../trueforge-core/src/core/mcp/implementationPlanGrant.ts"
+      ],
+      "@truefoundry/trueforge-core/core/sandbox/driver/RunCodeSchemas": [
+        "../trueforge-core/src/core/sandbox/driver/RunCodeSchemas.ts"
       ]
     },
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo"

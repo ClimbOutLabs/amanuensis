@@ -1,4 +1,4 @@
-import { VERCEL_AI_PROVIDER_NAMES } from '@truefoundry/trueforge-core/core';
+import { TOKEN_BUDGET_SAFETY_MARGIN, VERCEL_AI_PROVIDER_NAMES } from '@truefoundry/trueforge-core/core';
 import { ModelProviderManifestSchema, modelProviderName } from '../../../src/schemas/modelProvider';
 
 const models = [{ model_id: 'a-model', name: 'a-model', properties: {} }];
@@ -100,5 +100,53 @@ describe('ModelProviderManifestSchema', () => {
       models: [{ model_id: 'a-model', name: 'a-model', properties: { vision: 'yes' } }],
     });
     expect(result.success).toBe(false);
+  });
+
+  // Reserving the whole context window for output leaves no room for input, so
+  // every turn fails the token pre-flight guard. The schema rejects it up front.
+  it('rejects max_output_tokens within the safety margin of context_length', () => {
+    const withProperties = (properties: Record<string, unknown>): boolean => {
+      const result = ModelProviderManifestSchema.safeParse({
+        auth: { api_key: 'k' },
+        type: 'anthropic',
+        models: [{ model_id: 'a-model', name: 'a-model', properties }],
+      });
+      return result.success;
+    };
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 })).toBe(false);
+    expect(withProperties({ context_length: 128000, max_output_tokens: 200000 })).toBe(false);
+    // The runtime guard also holds back a safety margin, so the boundary sits below the context length.
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 - TOKEN_BUDGET_SAFETY_MARGIN })).toBe(
+      false,
+    );
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 - TOKEN_BUDGET_SAFETY_MARGIN - 1 })).toBe(
+      true,
+    );
+    expect(withProperties({ context_length: 128000, max_output_tokens: 4096 })).toBe(true);
+    // Either limit alone is fine; the guard only applies to the combination.
+    expect(withProperties({ context_length: 128000 })).toBe(true);
+    expect(withProperties({ max_output_tokens: 4096 })).toBe(true);
+    expect(withProperties({})).toBe(true);
+  });
+
+  it('reports a clear message when max output covers the context window', () => {
+    const result = ModelProviderManifestSchema.safeParse({
+      auth: { api_key: 'k' },
+      type: 'anthropic',
+      models: [
+        {
+          model_id: 'a-model',
+          name: 'a-model',
+          properties: { context_length: 8000, max_output_tokens: 8000 },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map(issue => issue.message);
+      expect(messages).toContain(
+        'Max output tokens must be less than the context length (8,000) minus a small reserve.',
+      );
+    }
   });
 });
