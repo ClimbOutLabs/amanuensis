@@ -403,7 +403,7 @@ export type {
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
-export { recordClassificationAudit } from './permissions/audit';
+export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
   canonicalShellForm,

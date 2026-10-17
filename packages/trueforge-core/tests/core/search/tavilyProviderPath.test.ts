@@ -8,6 +8,7 @@ import {
 import { isCallToolResponseResult, type CallToolResponse } from '../../../src/core/mcp/IMCPServer';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { isSearchHoldCardText } from '../../../src/core/permissions/searchHoldText';
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
 import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
@@ -96,7 +97,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(card?.plain_what).not.toMatch(/endpoint/);
     expect(card?.plain_what).not.toContain('/search');
     expect(card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
-    expect(card?.plain_what).toContain('2 Tavily credits');
+    expect(card?.plain_what).toMatch(/uses 2 Tavily credits\.$/);
     expect(card?.destination_host).toBe('api.tavily.com');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
     expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
@@ -115,7 +116,11 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier3_card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
     expect(info.tier3_card?.destination_host).toBe('api.tavily.com');
-    expect(info.tier3_card?.why_asked_again).toMatch(/no search result this turn returned/);
+    expect(info.tier3_card?.plain_what).toMatch(
+      /Held because it names a link that no search result this turn returned\.$/,
+    );
+    expect(info.tier3_card?.why_asked_again).toBeNull();
+    expect(isSearchHoldCardText(info.tier3_card?.plain_what ?? '')).toBe(true);
   });
 
   it("lets an extract name only links that this turn's search returned", async () => {
@@ -133,7 +138,15 @@ describe('Tavily through the designated search provider path', () => {
     const leaking = { name: 'tavily_search', arguments: { query: 'doctor server-held-secret-value' } };
     const info = await h.toolSet.toolCallInfo(leaking);
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.why_asked_again).toMatch(/Held for approval/);
+    const card = info.tier3_card;
+    expect(card?.plain_what).toContain('2 Tavily credits');
+    expect(card?.plain_what).toMatch(/Held because it contains one of this computer's keys\.$/);
+    expect(card?.why_asked_again).toBeNull();
+    // The UI shows the masked outbound text instead of the model's raw arguments only for a card it recognizes.
+    expect(isSearchHoldCardText(card?.plain_what ?? '')).toBe(true);
+    for (const text of [card?.plain_what, card?.outbound_text, info.audit_description]) {
+      expect(text ?? '').not.toContain('server-held-secret-value');
+    }
     expect(await refusedWithoutSending(h.toolSet.callTool(leaking))).toBe(true);
     expect(h.sent).toEqual([]);
   });
