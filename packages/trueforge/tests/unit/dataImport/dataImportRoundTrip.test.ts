@@ -3,7 +3,7 @@
  * import into an empty instance on the other backend for a new owner, export
  * again, and prove the two exports match apart from dates, the new owner, the
  * schedules-off rule, store-minted connector and knowledge-document ids, the
- * trust mark and safety settings import never carries over, and the turn that was running at export time landing cancelled.
+ * trust mark and permission settings import never carries over, and the turn that was running at export time landing cancelled.
  *
  * The Postgres side engages when PG_STORE_TESTS_ADMIN_URL is set (the local
  * test Postgres); without it the suite skips.
@@ -262,10 +262,9 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     return personas;
   }
   if (name === 'settings.json') {
-    // Import never carries safety settings over, so only the other instance settings can match.
+    // Import never carries permission settings over, so only the instance settings can match.
     const instance = recordsAt(recordAt(normalized, name)['instance'], 'instance');
-    const kept = instance.filter(setting => !stringAt(setting['key'], 'key').endsWith('_screen_enabled'));
-    return { instance: sortBy(kept, setting => stringAt(setting['key'], 'key')) };
+    return { instance: sortBy(instance, setting => stringAt(setting['key'], 'key')) };
   }
   if (name === 'connectors.json') {
     const connectors = sortBy(recordsAt(normalized, name), connector => stringAt(connector['name'], 'name'));

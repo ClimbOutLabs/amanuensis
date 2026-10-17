@@ -18,6 +18,8 @@ export interface ExportDataSession {
     userId: string;
     includeUploads: boolean;
     includeInstanceData: boolean;
+    /** A dotenv file's text whose credential values are blanked as well, such as an old stack's settings. */
+    secretsEnvText: string | undefined;
     out: Writable;
   }): Promise<DataExportResult>;
   /** Records one export (or failed attempt) in the audit log, with the actor `cli`. */
