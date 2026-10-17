@@ -83,9 +83,9 @@ describe('owner sign-in with the installer settings', () => {
   it('turns away any other email, however the login service vouches for it', async () => {
     const { claims, oidc, EmailNotAllowedError } = await loadAuth(INSTALLER_ENV);
     for (const email of [GUEST, 'owner@demo.example.evil.test', 'x-owner@demo.example', 'owner@demo.example.']) {
-      expect(() => claims.toRequestContext({ claims: { email }, config: oidc, user_credential: 'jwt' })).toThrow(
-        EmailNotAllowedError,
-      );
+      expect(() =>
+        claims.toRequestContext({ claims: { email, email_verified: true }, config: oidc, user_credential: 'jwt' }),
+      ).toThrow(EmailNotAllowedError);
     }
   });
 
@@ -121,7 +121,12 @@ describe('owner sign-in with the installer settings', () => {
 
   it('turns away a token that names a subject but carries no email', async () => {
     const { claims, oidc, EmailNotAllowedError } = await loadAuth(INSTALLER_ENV);
-    for (const tokenClaims of [{ sub: 'owner' }, { sub: OWNER }, { email: '' }, { email: 42 }]) {
+    for (const tokenClaims of [
+      { sub: 'owner', email_verified: true },
+      { sub: OWNER, email_verified: true },
+      { email: '', email_verified: true },
+      { email: 42, email_verified: true },
+    ]) {
       expect(() => claims.toRequestContext({ claims: tokenClaims, config: oidc, user_credential: 'jwt' })).toThrow(
         EmailNotAllowedError,
       );
@@ -142,6 +147,18 @@ describe('owner sign-in with the installer settings', () => {
       Object.entries(INSTALLER_ENV).filter(([key]) => key !== 'OIDC_ALLOWED_EMAILS'),
     );
     await expect(loadAuth(withoutAllowed)).rejects.toThrow(/is empty; it must hold one address/);
+  });
+
+  it("refuses to start with any sign-in service but Aman's own", async () => {
+    for (const issuer of ['https://login.microsoftonline.com/tenant/v2.0', 'https://idp.example.com/oauth2/default']) {
+      await expect(loadAuth({ ...INSTALLER_ENV, OIDC_ISSUER_URL: issuer })).rejects.toThrow(
+        'Aman uses its own sign-in. Outside sign-in services are not supported.',
+      );
+    }
+    await expect(loadAuth({ ...INSTALLER_ENV, STANDALONE: 'false' })).resolves.toBeDefined();
+    await expect(
+      loadAuth({ ...INSTALLER_ENV, STANDALONE: 'false', OIDC_ISSUER_URL: 'https://idp.example.com/oauth2/default' }),
+    ).rejects.toThrow(/Outside sign-in services are not supported/);
   });
 
   it('asks the login service for the email claim', async () => {

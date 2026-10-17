@@ -708,7 +708,7 @@ fix_checkout() {
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
-  local name=$1 file mode dir
+  local name=$1 file mode dir extra
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
@@ -725,31 +725,13 @@ check_instance_config() {
       return
     fi
   done
-  find_extra_users "$dir" "$name"
-  if [ -n "$EXTRA_USERS" ]; then
-    record "$name" config warn "More than the owner can sign in: ${EXTRA_USERS}." \
+  extra=$(extra_sign_in_users "${AMAN_HOME}/state/instances/${name}.conf" "$dir")
+  if [ -n "$extra" ]; then
+    record "$name" config warn "More than the owner can sign in: ${extra}." \
       "$INSTANCE_FIX"
     return
   fi
   record "$name" config ok "The settings files exist and are private to you." ""
-}
-
-# Sets EXTRA_USERS to the sign-in users beyond the owner that an earlier version let `instance add-user` add: their
-# allowed emails (anything but the owner's, a pattern included, from every line since Compose reads the last), else the
-# names behind leftover password hashes in dex.env. Hashes are never printed. Empty when only the owner can sign in.
-find_extra_users() { # instance dir, instance name
-  local owner allowed
-  owner=$(registry_value "$2" owner_email)
-  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null)
-  EXTRA_USERS=$(printf '%s\n' "$allowed" | tr ',' '\n' | awk -v owner="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" '
-    { e = tolower($0); gsub(/^[ \t]+|[ \t]+$/, "", e) }
-    NR == 1 && owner == "" { owner = e }
-    e != "" && e != owner && !seen[e]++ { list = list (list == "" ? "" : ", ") e }
-    END { print list }')
-  if [ -z "$EXTRA_USERS" ]; then
-    EXTRA_USERS=$(sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "${1}/dex.env" 2>/dev/null |
-      tr '[:upper:]_' '[:lower:]-' | awk 'NF { if (n++) printf ", "; printf "%s", $0 }')
-  fi
 }
 
 # What a container is, in words for a person: "the main app" for the app of instance main.
@@ -1421,6 +1403,7 @@ doctor_repair() { # kind
         continue
       fi
     else
+      check_instance_config "$name"
       check_instance_containers "$name"
     fi
     text_checks "$name"

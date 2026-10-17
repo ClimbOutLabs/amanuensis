@@ -10,7 +10,7 @@ import type { OIDCConfig } from '../../../src/config';
 
 function config(overrides: Partial<OIDCConfig> = {}): OIDCConfig {
   return {
-    OIDC_ISSUER_URL: 'https://example.okta.com/oauth2/default',
+    OIDC_ISSUER_URL: 'https://login.example.test/dex',
     OIDC_CLIENT_ID: 'client-id',
     OIDC_CLIENT_SECRET: 'client-secret',
     OIDC_USER_REFERENCE_CLAIM: 'sub',

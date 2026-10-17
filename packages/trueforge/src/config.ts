@@ -765,6 +765,19 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
 }
 
+/** Aman signs people in through its own sign-in service (Dex), which always serves its issuer at `/dex`. */
+export function assertOwnSignInIssuer(issuerUrl: string): void {
+  let path: string;
+  try {
+    path = new URL(issuerUrl).pathname.replace(/\/+$/, '');
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (path !== '/dex') {
+    throw new Error('Aman uses its own sign-in. Outside sign-in services are not supported.');
+  }
+}
+
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
 function parseAuthCookieSuffix(raw: string | undefined): string {
   const value = raw?.trim() ?? '';
@@ -795,6 +808,7 @@ function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig 
     );
   }
   assertOidcIssuerTransportAllowed(issuerUrl);
+  assertOwnSignInIssuer(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -820,7 +834,7 @@ function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig 
 // ============================================================================
 
 export interface OIDCConfig {
-  /** e.g. an Okta custom authorization server, or an Azure AD tenant's v2.0 endpoint. Env: `OIDC_ISSUER_URL`. */
+  /** Address of Aman's own sign-in service. Env: `OIDC_ISSUER_URL`. */
   OIDC_ISSUER_URL: string;
   /** Client ID for the OIDC client;*/
   OIDC_CLIENT_ID: string;
@@ -845,7 +859,6 @@ export interface OIDCConfig {
   OIDC_ADMIN_ROLE_VALUE: string;
   /** Comma-separated OAuth scopes for the authorization request. Env: `OIDC_SCOPES`.
    * Optional; defaults to "openid,profile,email". Whitespace around entries is stripped.
-   * Okta `groups` claims require the `groups` scope; Azure AD app roles typically omit it.
    */
   OIDC_SCOPES: string[];
   /**
@@ -2431,7 +2444,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   if (requirement.standalone) {
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
-        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -2478,7 +2491,7 @@ export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn)
       `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses; it must hold one. ${fix}`,
     );
   }
-  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address, not a pattern. ${fix}`);
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address. ${fix}`);
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });

@@ -73,13 +73,18 @@ env_managed_set() {
 
 # Removes every KEY= line of an instance .env outside the managed block, so the managed value is the one Compose reads.
 env_drop_outside_block() { # env key
-  local env=$1 key=$2 line inblock=0
+  local env=$1 key=$2 line bare inblock=0
   [ -f "$env" ] || return 0
   {
     while IFS= read -r line || [ -n "$line" ]; do
+      # Compose reads `export KEY=` and indented lines too.
+      bare=${line#"${line%%[![:space:]]*}"}
+      case "$bare" in export[[:space:]]*) bare=${bare#export}; bare=${bare#"${bare%%[![:space:]]*}"} ;; esac
       case "$line" in
         '# >>> managed by the installer'*) inblock=1 ;;
         '# <<< end of managed block'*) inblock=0 ;;
+      esac
+      case "$bare" in
         "$key="*) [ "$inblock" = 1 ] || continue ;;
       esac
       printf '%s\n' "$line"

@@ -6,6 +6,42 @@ SANDBOX_NODE_MINOR=14
 
 lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# ---- who besides the owner can sign in --------------------------------------------------------------------------
+# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
+# allowed email each. The installer removes them and the doctor reports them, both through this one rule.
+
+# What to call the sign-in users of an instance beyond its owner, comma separated: their emails, else the names behind
+# leftover records and password hashes. Empty when only the owner can sign in. Every OIDC_ALLOWED_EMAILS line counts
+# because Compose reads the last one, wherever it sits. Hashes are never printed.
+extra_sign_in_users() { # registry file, instance folder
+  local reg=$1 dir=$2 owner emails names
+  owner=$(sed -n 's/^owner_email=//p' "$reg" 2>/dev/null | head -n 1)
+  # With the record gone, the first allowed email is taken for the owner's.
+  if [ -z "$owner" ]; then
+    owner=$(sed -n 's/^\(export[ \t]*\)\{0,1\}OIDC_ALLOWED_EMAILS=//p' "$dir/.env" 2>/dev/null | head -n 1 | cut -d, -f1)
+    owner=$(printf '%s' "$owner" | awk '{ gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, ""); print }')
+  fi
+  emails=$(
+    {
+      sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
+      sed -n 's/^\(export[ \t]*\)\{0,1\}OIDC_ALLOWED_EMAILS=//p' "$dir/.env" 2>/dev/null | tr ',' '\n'
+    } | awk -v owner="$(lowercase "$owner")" '
+      { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
+      e != "" && e != owner && !seen[e]++ { print e }'
+  )
+  if [ -n "$emails" ]; then
+    names=$emails
+  else
+    names=$(
+      {
+        sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
+        sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | tr '[:upper:]_' '[:lower:]-'
+      } | awk '!seen[$0]++'
+    )
+  fi
+  printf '%s\n' "$names" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }'
+}
+
 # True when the Node.js on this computer is new enough to run the sandbox setup.
 sandbox_node_ok() {
   local v major minor

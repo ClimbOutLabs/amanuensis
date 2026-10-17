@@ -708,55 +708,15 @@ instance_env_repair() {
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
-# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
-# allowed email each. The next install, upgrade or refresh removes them.
-
-# The emails other than the owner's in any OIDC_ALLOWED_EMAILS line of instance NAME's .env, or in a user record,
-# lower case, one per line. Every line counts because Compose reads the last one, wherever it sits.
-instance_extra_emails() { # name
-  local name=$1 owner env
-  owner=$(lowercase "$(reg_get "$name" owner_email)")
-  env="$(instance_dir "$name")/.env"
-  {
-    sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$(reg_file "$name")"
-    if [ -f "$env" ]; then sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "$env" | tr ',' '\n'; fi
-  } | awk -v owner="$owner" '{ e = tolower($0); gsub(/^[ \t]+|[ \t]+$/, "", e); if (e != "" && e != owner && !seen[e]++) print e }'
-}
-
-# The names of the users an earlier version added: user records and leftover hash variables (DEX_USER_PASSWORD_HASH_JUDGE_TWO
-# is judge-two), one per line.
-instance_extra_names() { # name
-  local name=$1 dex_env
-  dex_env="$(instance_dir "$name")/dex.env"
-  {
-    sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")"
-    if [ -f "$dex_env" ]; then
-      sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dex_env" | tr '[:upper:]_' '[:lower:]-'
-    fi
-  } | awk '!seen[$0]++'
-}
-
-# What to call the extra users of instance NAME: their emails, else their names, comma separated. Empty when there are none.
-instance_extra_list() { # name
-  local list
-  list=$(instance_extra_emails "$1")
-  [ -n "$list" ] || list=$(instance_extra_names "$1")
-  printf '%s\n' "$list" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }'
-}
-
-instance_has_extra_users() { # name
-  [ -n "$(instance_extra_list "$1")" ]
-}
-
 # Removes every sign-in user but the owner from instance NAME, says which and logs it. Returns 1 when there was nothing
 # to remove. The order keeps a crash safe: records, then the allowed emails, then dex.yaml with the owner only, and only
 # then the hashes dex.env still holds, so Dex never points at a hash that is gone. The caller restarts the instance.
 instance_enforce_single_owner() { # name
   local name=$1 dir list key line env
-  instance_has_extra_users "$name" || return 1
   dir=$(instance_dir "$name")
   env="$dir/.env"
-  list=$(instance_extra_list "$name")
+  list=$(extra_sign_in_users "$(reg_file "$name")" "$dir")
+  [ -n "$list" ] || return 1
   while IFS= read -r key; do
     reg_unset "$name" "$key"
   done < <(sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")

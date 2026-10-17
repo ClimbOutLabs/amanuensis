@@ -40,7 +40,7 @@ Point the client at your server's `baseUrl`, and pass a `token` only when the se
     </CodeGroup>
   </Tab>
   <Tab title="OIDC login">
-    When [OIDC login](/authentication/overview) is on, every HTTP request needs an **ID token** from your identity provider, sent as `Authorization: Bearer <id_token>`:
+    When [OIDC login](/authentication/overview) is on, every HTTP request needs an **ID token** from Aman's sign-in service, sent as `Authorization: Bearer <id_token>`:
 
     ```typescript wrap
     import { TrueForge } from '@truefoundry/trueforge-sdk';
@@ -54,10 +54,10 @@ Point the client at your server's `baseUrl`, and pass a `token` only when the se
 
     **Where to get the ID token:**
 
-    - **From your identity provider** — run a standard OIDC Authorization Code flow against your IdP (the same one TrueForge is configured with) and read the `id_token` from the response. Most IdPs also expose a CLI or token tool for scripts and CI.
-    - **From a browser session** — after you sign in to the TrueForge UI, your IdP has already issued an ID token; reuse one from that same flow.
+    - **From the sign-in service** — run a standard OIDC Authorization Code flow against Aman's sign-in service (the one TrueForge is configured with) and read the `id_token` from the response.
+    - **From a browser session** — after you sign in to the TrueForge UI, the sign-in service has already issued an ID token; reuse one from that same flow.
 
-    There's no device-code or client-credentials flow yet, so keep ID token lifetimes short at the IdP and refresh as needed. A missing or expired token against an OIDC-enabled server returns `401`.
+    There's no device-code or client-credentials flow yet, so keep ID token lifetimes short and refresh as needed. A missing or expired token against an OIDC-enabled server returns `401`.
   </Tab>
 </Tabs>
 

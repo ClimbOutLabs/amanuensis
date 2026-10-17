@@ -1253,6 +1253,19 @@ describe('why an instance does not run', () => {
     assert.match(fixed.stdout, /Instance main is fixed/);
   });
 
+  it('--fix renders again when the containers are healthy but more than the owner can sign in', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=owner@x.invalid,extra@x.invalid\n');
+    const dir = path.join(world.home, 'state', 'instances');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'main.conf'), 'name=main\nowner_email=owner@x.invalid\n');
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
+  });
+
   it('fix asks first and changes nothing when the answer is not yes', () => {
     make();
     const repo = world.sandbox();

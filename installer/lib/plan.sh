@@ -322,7 +322,7 @@ report_blockers_and_exit() {
 
 # Read-only look at what exists, turned into plan lines and download entries. Runs after plan_preflight.
 plan_build() {
-  local name have_release=0 expected_app expected_stt
+  local name extra have_release=0 expected_app expected_stt
   if [ -f "$RELEASE_DIR/release.json" ]; then
     have_release=1
   fi
@@ -366,9 +366,8 @@ plan_build() {
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
-      if instance_has_extra_users "$name"; then
-        plan_add todo "Remove $(instance_extra_list "$name") from instance $name"
-      fi
+      extra=$(extra_sign_in_users "$(reg_file "$name")" "$(instance_dir "$name")")
+      if [ -n "$extra" ]; then plan_add todo "Remove $extra from instance $name"; fi
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
