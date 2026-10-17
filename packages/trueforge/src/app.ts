@@ -368,6 +368,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
   mountCatalogLogos(app, {
     logos: [...deps.modelCatalog.list(), ...deps.mcpCatalog.list()].map(entry => entry.logo),
+    authMiddleware: createUiSessionAuthMiddleware(deps.authenticator),
   });
 
   app.route(

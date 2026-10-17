@@ -1,4 +1,5 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
 
 export const CATALOG_LOGOS_PREFIX = '/catalog-logos';
 
@@ -24,12 +25,12 @@ function logoOrigin(logo: string): string | undefined {
 
 /**
  * Serves catalog logos from the app's own origin so the shell CSP never has to admit the assets
- * host. Only simple image paths on origins the shipped catalogs already name are fetched, and the
- * route is unauthenticated because `<img>` requests cannot carry a bearer token.
+ * host. Only simple image paths on origins the shipped catalogs already name are fetched. Logos only
+ * appear after sign-in, so `authMiddleware` gates the route; `<img>` loads carry the session cookie.
  */
 export function mountCatalogLogos(
   app: OpenAPIHono,
-  options: { logos: Iterable<string | undefined>; fetchFn?: typeof fetch },
+  options: { logos: Iterable<string | undefined>; authMiddleware: MiddlewareHandler; fetchFn?: typeof fetch },
 ): void {
   const fetchFn = options.fetchFn ?? fetch;
   const origins = new Set<string>();
@@ -67,7 +68,7 @@ export function mountCatalogLogos(
     }
   }
 
-  app.get(`${CATALOG_LOGOS_PREFIX}/:scheme/:host/*`, async c => {
+  app.get(`${CATALOG_LOGOS_PREFIX}/:scheme/:host/*`, options.authMiddleware, async c => {
     const { scheme, host } = c.req.param();
     const filePath = c.req.path.slice(`${CATALOG_LOGOS_PREFIX}/${scheme}/${host}`.length);
     if ((scheme !== 'https' && scheme !== 'http') || !LOGO_PATH_RE.test(filePath)) {
