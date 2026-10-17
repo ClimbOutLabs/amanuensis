@@ -121,7 +121,7 @@ test_backup_with_a_lost_settings_file() {
   rm "$AMAN_HOME/instances/main/dex.env"
   run_install backup
   assert_rc 0
-  assert_contains "$ERR" "The settings file dex.env of main is missing, so this backup does not include it."
+  assert_flat_contains "$ERR" "The settings file dex.env of main is missing, so this backup does not include it."
   local dir
   dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
   assert_file "$dir/main/env"
