@@ -2237,8 +2237,10 @@ describe('Sandbox provider-owned paths', () => {
 
     expect(ocrCommands).toHaveLength(3);
     for (const command of ocrCommands) {
-      expect(command).not.toMatch(/tesseract [^;]*\|\s*head/);
-      expect(command).toMatch(/tesseract [^;]+ > "\$raw_text_file"; head -c/);
+      // The page is read into a file and then cut, so a Tesseract failure is not hidden behind head.
+      expect(command).not.toMatch(/--psm 6 [^;]*\|/);
+      expect(command).toMatch(/tesseract [^;]+ --psm 6 > "\$raw_text_file"; head -c/);
+      expect(command).toContain('export OMP_THREAD_LIMIT=1');
     }
   });
 
@@ -2265,7 +2267,7 @@ describe('Sandbox provider-owned paths', () => {
     ).rejects.toThrow('(exit code 1): tesseract failed');
   });
 
-  it('adds OCR language flags to Tesseract commands when configured', async () => {
+  it('picks OCR languages per page and falls back to the configured ones', async () => {
     const ocrCommands: string[] = [];
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
       if (params.command.startsWith('realpath -e --')) {
@@ -2289,7 +2291,9 @@ describe('Sandbox provider-owned paths', () => {
     });
 
     expect(ocrCommands).toHaveLength(1);
-    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+-l\s+deu\+fra\s+--psm\s+6/);
+    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+--psm\s+0/);
+    expect(ocrCommands[0]).toContain("*) wanted='deu fra';;");
+    expect(ocrCommands[0]).toMatch(/tesseract\s+"[^"]+\.png"\s+stdout\s+-l\s+"\$ocr_languages"\s+--psm\s+6/);
   });
 
   it('exposes apply_patch as a structured approval-gated edit', async () => {

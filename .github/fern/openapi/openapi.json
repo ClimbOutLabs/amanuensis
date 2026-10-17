@@ -633,6 +633,36 @@
         ],
         "type": "object"
       },
+      "BeginGoogleConsentRequest": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/GoogleClientCredentials"
+          },
+          "features": {
+            "description": "Features to ask for. Features already granted are kept.",
+            "items": {
+              "$ref": "#/components/schemas/GoogleFeature"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "features"
+        ],
+        "type": "object"
+      },
+      "BeginGoogleConsentResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleConsentStart"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "BindSessionRepositoryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1515,6 +1545,36 @@
         ],
         "type": "object"
       },
+      "CheckGoogleClientRequest": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/GoogleClientCredentials"
+          },
+          "registered_redirect_uris": {
+            "description": "Authorized redirect URIs listed in a Web client file; empty when unknown.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "client",
+          "registered_redirect_uris"
+        ],
+        "type": "object"
+      },
+      "CheckGoogleClientResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleClientCheck"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ClientTimezoneInput": {
         "description": "IANA timezone name of the client (e.g. \"America/Los_Angeles\"), typically Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local time from get_current_datetime and in the ambient current-date context. An unrecognized name and an omitted field both fall back to UTC.",
         "minLength": 1,
@@ -1536,6 +1596,19 @@
             "$ref": "#/components/schemas/InputTokensCompactionTrigger"
           }
         },
+        "type": "object"
+      },
+      "CompleteGoogleConsentRequest": {
+        "properties": {
+          "address": {
+            "description": "The whole address copied from the browser bar after consent; its code and state are read here.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
         "type": "object"
       },
       "ConfiguredMCPServer": {
@@ -2232,6 +2305,29 @@
         "properties": {},
         "type": "object"
       },
+      "DisconnectGoogleResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DisconnectGoogleResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DisconnectGoogleResult": {
+        "properties": {
+          "revocation_confirmed": {
+            "description": "False when Google did not confirm the revocation. The login is removed from Aman either way.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revocation_confirmed"
+        ],
+        "type": "object"
+      },
       "DocumentIngestionEvent": {
         "properties": {
           "created_at": {
@@ -2502,6 +2598,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetGoogleConnectionStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleConnectionStatus"
           }
         },
         "required": [
@@ -3054,6 +3161,169 @@
         ],
         "type": "object"
       },
+      "GoogleClientCheck": {
+        "properties": {
+          "ok": {
+            "description": "True when no problem was found.",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleClientProblem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "problems"
+        ],
+        "type": "object"
+      },
+      "GoogleClientCredentials": {
+        "properties": {
+          "client_id": {
+            "description": "The user's own Google OAuth client id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "client_secret": {
+            "description": "The user's own Google OAuth client secret.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "client_type": {
+            "$ref": "#/components/schemas/GoogleClientType"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "type": "object"
+      },
+      "GoogleClientProblem": {
+        "properties": {
+          "code": {
+            "description": "Stable problem code.",
+            "enum": [
+              "invalid_client_id",
+              "invalid_client_secret",
+              "wrong_client_type",
+              "redirect_uri_not_registered",
+              "client_not_found",
+              "unverified_response"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "description": "Plain-language explanation and next step.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "GoogleClientType": {
+        "enum": [
+          "desktop",
+          "web"
+        ],
+        "type": "string"
+      },
+      "GoogleConnectionStatus": {
+        "properties": {
+          "account_email": {
+            "description": "The connected Google address; null when not connected or unknown.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "description": "False on a demo instance, where Google cannot be connected.",
+            "type": "boolean"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleFeatureStatus"
+            },
+            "type": "array"
+          },
+          "has_saved_client": {
+            "description": "Whether a Google client is already saved, so adding a feature needs no retyping.",
+            "type": "boolean"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/GoogleSetupInfo"
+          },
+          "state": {
+            "description": "needs_reconnect: Google no longer accepts the stored login; connect again.",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reconnect"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "account_email",
+          "features",
+          "has_saved_client",
+          "available",
+          "setup"
+        ],
+        "type": "object"
+      },
+      "GoogleConsentStart": {
+        "properties": {
+          "authorization_url": {
+            "description": "The Google consent address to open in the browser.",
+            "type": "string"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/GoogleSetupInfo"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "setup"
+        ],
+        "type": "object"
+      },
+      "GoogleFeature": {
+        "enum": [
+          "gmail_read",
+          "gmail_compose"
+        ],
+        "type": "string"
+      },
+      "GoogleFeatureStatus": {
+        "properties": {
+          "feature": {
+            "$ref": "#/components/schemas/GoogleFeature"
+          },
+          "granted": {
+            "description": "Whether Google granted the scope behind this feature.",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "Plain-language name of what the feature allows.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "label",
+          "granted"
+        ],
+        "type": "object"
+      },
       "GoogleGeminiModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -3088,6 +3358,37 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "GoogleSetupInfo": {
+        "properties": {
+          "client_type": {
+            "description": "The kind of Google client this install needs.",
+            "enum": [
+              "desktop",
+              "web"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to.",
+            "enum": [
+              "web",
+              "loopback",
+              "paste"
+            ],
+            "type": "string"
+          },
+          "redirect_uri": {
+            "description": "The exact redirect URI to register (Web client) or that the consent returns to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "client_type",
+          "redirect_uri"
         ],
         "type": "object"
       },
@@ -8849,6 +9150,42 @@
         },
         "type": "object"
       },
+      "TestGoogleConnectionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TestGoogleConnectionResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "TestGoogleConnectionResult": {
+        "properties": {
+          "account_email": {
+            "description": "The connected address when the test passed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "not_connected",
+              "needs_reconnect",
+              "unreachable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "account_email"
+        ],
+        "type": "object"
+      },
       "TextContent": {
         "properties": {
           "text": {
@@ -9037,6 +9374,9 @@
               "null"
             ]
           },
+          "email": {
+            "$ref": "#/components/schemas/Tier3Email"
+          },
           "outbound_text": {
             "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
             "type": [
@@ -9095,6 +9435,86 @@
           "outbound_truncated"
         ],
         "type": "object"
+      },
+      "Tier3Email": {
+        "description": "The message an email action sends or saves, shown in full.",
+        "properties": {
+          "action": {
+            "description": "What happens to the message: sent, saved as a draft, or a saved draft changed.",
+            "enum": [
+              "send",
+              "save",
+              "change"
+            ],
+            "type": "string"
+          },
+          "bcc": {
+            "description": "Hidden copy recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "The whole message text, exactly as it will be sent.",
+            "type": "string"
+          },
+          "cc": {
+            "description": "Copied recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "replaces": {
+            "description": "The saved draft a change replaces, or null.",
+            "properties": {
+              "subject": {
+                "description": "Subject of the draft being replaced.",
+                "type": "string"
+              },
+              "to": {
+                "description": "Recipients of the draft being replaced.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "subject",
+              "to"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Subject line.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body",
+          "replaces"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Timezone": {
         "default": "UTC",
@@ -20668,6 +21088,387 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/user/settings/google/disconnect": {
+      "post": {
+        "description": "Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisconnectGoogleResponse"
+                }
+              }
+            },
+            "description": "The login was removed; says whether Google confirmed the revocation."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Disconnect Google",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "disconnect"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/begin": {
+      "post": {
+        "description": "Starts a consent with PKCE for the features asked for and returns the Google address to open.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BeginGoogleConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeginGoogleConsentResponse"
+                }
+              }
+            },
+            "description": "The consent address."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The client cannot be used, no saved client exists to reuse, or sending was asked for without reading."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Start connecting Google",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "begin_consent"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/callback": {
+      "get": {
+        "description": "Browser redirect target for the consent. The browser lands here and sees a short page.",
+        "parameters": [
+          {
+            "description": "Authorization code from Google.",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "description": "Authorization code from Google.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "State echoed back by Google.",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "description": "State echoed back by Google.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by Google when the user declined.",
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "description": "Set by Google when the user declined.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Result page."
+          },
+          "400": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Declined, expired or mismatched."
+          }
+        },
+        "summary": "Google consent callback",
+        "tags": [
+          "Personalization"
+        ],
+        "x-excluded": true,
+        "x-fern-ignore": true
+      }
+    },
+    "/api/v1/user/settings/google/oauth/check-client": {
+      "post": {
+        "description": "Checks the client id, secret and type, then asks Google for a dry authorization request. Nothing is stored.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckGoogleClientRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckGoogleClientResponse"
+                }
+              }
+            },
+            "description": "Problems found, if any."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Check a Google OAuth client",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "check_client"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/complete": {
+      "post": {
+        "description": "For a browser that cannot reach this server: reads the code and state from the pasted address.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteGoogleConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGoogleConnectionStatusResponse"
+                }
+              }
+            },
+            "description": "Connection status after consent."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The address has no code, or the consent expired or does not match."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Finish connecting Google with a pasted address",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "complete_consent"
+      }
+    },
+    "/api/v1/user/settings/google/status": {
+      "get": {
+        "description": "Whether the caller’s Google account is connected, what it may do, and how this install is set up.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGoogleConnectionStatusResponse"
+                }
+              }
+            },
+            "description": "Connection status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          }
+        },
+        "summary": "Google connection status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
+    "/api/v1/user/settings/google/test": {
+      "post": {
+        "description": "Checks the stored login against Google and names the account.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestGoogleConnectionResponse"
+                }
+              }
+            },
+            "description": "Test outcome."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Test the Google connection",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "test_connection"
       }
     },
     "/api/v1/user/settings/sentinel": {
