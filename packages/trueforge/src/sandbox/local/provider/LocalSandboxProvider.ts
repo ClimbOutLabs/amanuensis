@@ -54,6 +54,7 @@ import {
   srtHostBinaryNames,
   type LocalSandboxPlatform,
   type SessionResult,
+  type SrtHostBinaryPaths,
 } from '../core/hostRun.js';
 import { XferFileInfoSchema, type XferFileInfo } from '../schemas/xferFileInfo.js';
 
@@ -97,7 +98,14 @@ export interface LocalSandboxSupportProbeAttempt {
 }
 
 export type LocalSandboxSupportResult =
-  | { supported: true; platform: LocalSandboxPlatform; shell: string; python: string }
+  | {
+      supported: true;
+      platform: LocalSandboxPlatform;
+      shell: string;
+      python: string;
+      /** Linux only: the helpers SRT must run by absolute path. */
+      hostBinaries?: SrtHostBinaryPaths | undefined;
+    }
   | {
       supported: false;
       reason: string;
@@ -324,6 +332,13 @@ export class LocalSandboxProvider implements SandboxProvider {
       });
     }
 
+    const resolvedHost = new Map(hostAttempts.map(attempt => [attempt.name, attempt.resolved]));
+    const bwrap = resolvedHost.get('bwrap');
+    const socat = resolvedHost.get('socat');
+    const rg = resolvedHost.get('rg');
+    const hostBinaries: SrtHostBinaryPaths | undefined =
+      bwrap === undefined || socat === undefined || rg === undefined ? undefined : { bwrap, socat, rg };
+
     const srtDeps = await checkSrtHostDependencies();
     if (srtDeps.errors.length > 0) {
       return unsupported({
@@ -342,6 +357,7 @@ export class LocalSandboxProvider implements SandboxProvider {
       if (!alreadyInitialized) {
         await initSrt({
           platform,
+          hostBinaries,
           ...(socketParentPath === undefined ? {} : { codeModeSocketParentPath: socketParentPath }),
         });
       }
@@ -426,7 +442,7 @@ export class LocalSandboxProvider implements SandboxProvider {
         });
       }
 
-      return { supported: true, platform, shell, python };
+      return { supported: true, platform, shell, python, ...(hostBinaries === undefined ? {} : { hostBinaries }) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const seen = [...attempts, ...pythonAttempts];
@@ -509,6 +525,7 @@ export class LocalSandboxProvider implements SandboxProvider {
     await initSrt({
       platform: this.support.platform,
       codeModeSocketParentPath: this.codeModeSocketParentPath,
+      hostBinaries: this.support.hostBinaries,
     });
     throwIfSignalAborted(signal);
     this.srtInitialized = true;

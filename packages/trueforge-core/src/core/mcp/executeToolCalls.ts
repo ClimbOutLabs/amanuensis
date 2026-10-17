@@ -1513,6 +1513,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
+            ...(toolCall.tool_info.git_remote_precondition === undefined
+              ? {}
+              : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
           },
         );
       };

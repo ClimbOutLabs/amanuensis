@@ -11,6 +11,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
+import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
 
 export interface MCPAuthRequired {
   servers: MCPServerAuthInfo[];
@@ -22,6 +23,8 @@ export interface ToolInvocationContext {
   dispatch_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
+  /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
+  git_remote_precondition?: GitRemotePrecondition | undefined;
   /**
    * the turn's abort signal. Tools with bounded multi-phase work (e.g.
    * run_code's explicit image-provisioning step) observe it so a cancelled
