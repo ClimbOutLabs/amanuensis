@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 
-# /// script
-# dependencies = ["pydantic==2.12.5"]
-# ///
-
 """Materialize skill directories into TFY_SKILLS_DIR (default /opt/tfy/skills).
 
 Reads `.tfy-requested-skills.json` (uploaded by the host), installs each entry under
@@ -73,6 +69,7 @@ Env:
 from __future__ import annotations
 
 import errno
+import json
 import os
 import re
 import shutil
@@ -83,10 +80,9 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal
+from dataclasses import asdict, dataclass, field
+from typing import Any, ClassVar
 from abc import ABC, abstractmethod
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 DEFAULT_SKILLS_DIR = "/opt/tfy/skills"
 STATE_FILE_NAME = ".tfy-skill-downloader-state.json"
@@ -125,60 +121,76 @@ def skill_dir(name: str) -> Path | None:
     return SKILLS_ROOT / name
 
 
-class GitSkill(BaseModel):
+class ValidationError(ValueError):
+    """A requested or recorded entry does not have the expected shape."""
+
+
+def _object(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValidationError(f"{label} must be an object")
+    return value
+
+
+def _string(data: dict[str, Any], key: str, label: str, default: str | None = None) -> str:
+    """Read a string field; unknown keys are ignored, a missing one takes `default` or is an error."""
+    if key not in data:
+        if default is None:
+            raise ValidationError(f"{label}: field {key!r} is required")
+        return default
+    value = data[key]
+    if not isinstance(value, str):
+        raise ValidationError(f"{label}: field {key!r} must be a string")
+    return value
+
+
+def _non_empty_string(data: dict[str, Any], key: str, label: str) -> str:
+    value = _string(data, key, label)
+    if not value:
+        raise ValidationError(f"{label}: field {key!r} must not be empty")
+    return value
+
+
+@dataclass
+class GitSkill:
     """A git skill to materialize: `name`, `url`, `path`, and mount `ref` (branch, tag, or object id).
     This script resolves `ref` via `git ls-remote` in the sandbox, then sparse-fetches the resolved
     object id. The url and ref are format-validated here (defense in depth) so an unexpected value
     can't be interpreted as a git option or reach a non-public host."""
 
-    model_config = ConfigDict(extra="ignore")
-
     name: str
     url: str
-    path: str = ""
+    path: str
     # Branch, tag, or full object id from the agent_spec mount (resolved in-sandbox before fetch).
     ref: str
 
-    @field_validator("url")
     @classmethod
-    def _validate_url(cls, v: str) -> str:
+    def validated(cls, *, name: str, url: str, path: str, ref: str) -> GitSkill:
         # Only the two public hosts the gateway supports. Anchoring on the "https://<host>/" prefix
         # blocks non-https schemes (file://, ext::, ssh) and any other host, so this URL can't be
         # turned into an SSRF/local-file/command vector once it reaches `git`.
-        if not (v.startswith("https://github.com/") or v.startswith("https://gitlab.com/")):
-            raise ValueError(f"git skill url must be a github.com/gitlab.com https URL: {v!r}")
-        return v
-
-    @field_validator("ref")
-    @classmethod
-    def _validate_ref(cls, v: str) -> str:
-        if not v or ".." in v.split("/") or not GIT_REF_RE.match(v):
-            raise ValueError(f"git skill ref is invalid: {v!r}")
-        if v.replace("/", "") == "":
-            raise ValueError(f"git skill ref must not consist only of slashes: {v!r}")
-        return v
-
-    @field_validator("path")
-    @classmethod
-    def _validate_path(cls, v: str) -> str:
+        if not (url.startswith("https://github.com/") or url.startswith("https://gitlab.com/")):
+            raise ValidationError(f"git skill url must be a github.com/gitlab.com https URL: {url!r}")
+        if not ref or ".." in ref.split("/") or not GIT_REF_RE.match(ref):
+            raise ValidationError(f"git skill ref is invalid: {ref!r}")
+        if ref.replace("/", "") == "":
+            raise ValidationError(f"git skill ref must not consist only of slashes: {ref!r}")
         # Relative subpath within the repo. Reject absolute paths and ".." segments so it can't
         # escape the repo root. Leading/trailing slashes are stripped (repo root == ""). A leading
         # "-" is safe because subdirs are fed to `git sparse-checkout set` via stdin, never as args.
-        if v.startswith("/"):
-            raise ValueError(f"git skill path must be relative: {v!r}")
-        stripped = v.strip("/")
+        if path.startswith("/"):
+            raise ValidationError(f"git skill path must be relative: {path!r}")
+        stripped = path.strip("/")
         if stripped and ".." in stripped.split("/"):
-            raise ValueError(f"git skill path must not contain '..': {v!r}")
-        return stripped
+            raise ValidationError(f"git skill path must not contain '..': {path!r}")
+        return cls(name=name, url=url, path=stripped, ref=ref)
 
 
-class DownloadedGitSkill(BaseModel):
+@dataclass
+class DownloadedGitSkill:
     """A git skill recorded on disk: its dir name, the object id it was installed at, and the repo
     path it was installed from. The ref lets a later run skip re-downloading when the requested
     pin is unchanged; the path is part of the identity so that changing the path at the same
     pin still triggers a re-download instead of serving the previously-installed layout."""
-
-    model_config = ConfigDict(extra="ignore")
 
     name: str
     # Installed object id; empty = unknown → reinstall. Name still tracked for cleanup.
@@ -186,50 +198,103 @@ class DownloadedGitSkill(BaseModel):
     # Installed repo path ("" = root); mismatch vs requested forces reinstall.
     path: str = ""
 
+    @classmethod
+    def parse(cls, value: Any) -> DownloadedGitSkill:
+        data = _object(value, "downloaded git skill")
+        label = "downloaded git skill"
+        return cls(
+            name=_string(data, "name", label),
+            ref=_string(data, "ref", label, default=""),
+            path=_string(data, "path", label, default=""),
+        )
 
-class DownloadedRegistrySkill(BaseModel):
+
+@dataclass
+class DownloadedRegistrySkill:
     """A registry skill recorded on disk: its FQN and name."""
-
-    model_config = ConfigDict(extra="ignore")
 
     fqn: str
     name: str
 
+    @classmethod
+    def parse(cls, value: Any) -> DownloadedRegistrySkill:
+        data = _object(value, "downloaded registry skill")
+        label = "downloaded registry skill"
+        return cls(fqn=_string(data, "fqn", label), name=_string(data, "name", label))
 
-class SkillDownloaderState(BaseModel):
-    model_config = ConfigDict(extra="ignore")
 
+def _list(data: dict[str, Any], key: str, label: str) -> list[Any]:
+    value = data.get(key, [])
+    if not isinstance(value, list):
+        raise ValidationError(f"{label}: field {key!r} must be a list")
+    return value
+
+
+@dataclass
+class SkillDownloaderState:
     # Keep git and registry installs in separate lists (do not merge into one discriminated
     # array). Each SkillSource already reads/writes only its own rows, and the persisted
     # identities differ: git skip/reinstall keys on name + resolved object id + path;
     # registry keys on fqn + name. A shared list would add type filters with no load-path win.
-    downloaded_git_skills: list[DownloadedGitSkill] = Field(default_factory=list)
-    downloaded_registry_skills: list[DownloadedRegistrySkill] = Field(default_factory=list)
+    downloaded_git_skills: list[DownloadedGitSkill] = field(default_factory=list)
+    downloaded_registry_skills: list[DownloadedRegistrySkill] = field(default_factory=list)
+
+    @classmethod
+    def parse_json(cls, text: str) -> SkillDownloaderState:
+        data = _object(json.loads(text), "state")
+        return cls(
+            downloaded_git_skills=[
+                DownloadedGitSkill.parse(entry) for entry in _list(data, "downloaded_git_skills", "state")
+            ],
+            downloaded_registry_skills=[
+                DownloadedRegistrySkill.parse(entry)
+                for entry in _list(data, "downloaded_registry_skills", "state")
+            ],
+        )
 
 
-class RequestedGitSkill(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+@dataclass
+class RequestedGitSkill:
+    type: ClassVar[str] = "git"
 
-    type: Literal["git"] = "git"
     name: str
     url: str
-    path: str = ""
+    path: str
     ref: str
+
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> RequestedGitSkill:
+        label = "git skill"
+        return cls(
+            name=_string(data, "name", label),
+            url=_string(data, "url", label),
+            path=_string(data, "path", label, default=""),
+            ref=_string(data, "ref", label),
+        )
 
     def resolve(self) -> GitSkill:
         try:
-            return GitSkill(name=self.name, url=self.url, path=self.path, ref=self.ref)
+            return GitSkill.validated(name=self.name, url=self.url, path=self.path, ref=self.ref)
         except ValidationError as e:
             sys.exit(f"Invalid git entry in {REQUESTED_FILE_NAME}: {e}")
 
 
-class RequestedRegistrySkill(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+@dataclass
+class RequestedRegistrySkill:
+    type: ClassVar[str] = "registry"
 
-    type: Literal["registry"] = "registry"
     name: str
-    fqn: str = Field(min_length=1)
-    presigned_url: str = Field(min_length=1)
+    fqn: str
+    presigned_url: str
+
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> RequestedRegistrySkill:
+        label = "registry skill"
+        return cls(
+            name=_string(data, "name", label),
+            fqn=_non_empty_string(data, "fqn", label),
+            presigned_url=_non_empty_string(data, "presigned_url", label),
+        )
 
     def resolve(self) -> RequestedRegistrySkill:
         if skill_dir(self.name) is None:
@@ -238,30 +303,41 @@ class RequestedRegistrySkill(BaseModel):
 
 
 RequestedSkill = RequestedGitSkill | RequestedRegistrySkill
+REQUESTED_SKILL_TYPES: dict[str, type[RequestedGitSkill] | type[RequestedRegistrySkill]] = {
+    RequestedGitSkill.type: RequestedGitSkill,
+    RequestedRegistrySkill.type: RequestedRegistrySkill,
+}
 
 
-class RequestedSkillsFileContent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    skills: list[Annotated[RequestedSkill, Field(discriminator="type")]] = Field(
-        default_factory=list
-    )
+def parse_requested_skills(text: str) -> list[RequestedSkill]:
+    """Each entry is chosen by its `type`; unknown keys are ignored and a missing list means none."""
+    data = _object(json.loads(text), "requested skills")
+    skills: list[RequestedSkill] = []
+    for index, value in enumerate(_list(data, "skills", "requested skills")):
+        entry = _object(value, f"skills[{index}]")
+        skill_type = entry.get("type")
+        parser = REQUESTED_SKILL_TYPES.get(skill_type) if isinstance(skill_type, str) else None
+        if parser is None:
+            raise ValidationError(f"skills[{index}]: unknown skill type {skill_type!r}")
+        skills.append(parser.parse(entry))
+    return skills
 
 
 def load_state() -> SkillDownloaderState:
     if not STATE_PATH.is_file():
         return SkillDownloaderState()
     try:
-        return SkillDownloaderState.model_validate_json(STATE_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError, ValidationError):
-        # ValueError covers UnicodeDecodeError from corrupt/non-UTF-8 state in agent-writable skills dir.
+        return SkillDownloaderState.parse_json(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # ValueError covers bad JSON, a bad shape and UnicodeDecodeError from corrupt state in the
+        # agent-writable skills dir.
         return SkillDownloaderState()
 
 
 def save_state(state: SkillDownloaderState) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_name(STATE_PATH.name + ".tmp")
-    tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
     os.replace(tmp, STATE_PATH)
 
 
@@ -643,7 +719,7 @@ class GitSkillSource(SkillSource):
 
 
 # Add a third skill type:
-# 1. RequestedFooSkill + resolve() + union member (RequestedSkill)
+# 1. RequestedFooSkill + parse() + resolve(), union member (RequestedSkill) and REQUESTED_SKILL_TYPES entry
 # 2. FooSkillSource with reconcile / download
 # 3. Append FooSkillSource() to SKILL_SOURCES (order = install order)
 # 4. Wire type: 'foo' on the host (SkillMounter)
@@ -659,13 +735,13 @@ def load_requested_skills() -> dict[str, list[Any]]:
     if not path.is_file():
         return buckets
     try:
-        requested = RequestedSkillsFileContent.model_validate_json(path.read_text(encoding="utf-8"))
+        requested = parse_requested_skills(path.read_text(encoding="utf-8"))
     except OSError as e:
         sys.exit(f"Could not read {REQUESTED_FILE_NAME}: {e}")
-    except ValidationError as e:
+    except ValueError as e:
         sys.exit(f"Invalid {REQUESTED_FILE_NAME}: {e}")
 
-    for item in requested.skills:
+    for item in requested:
         buckets[item.type].append(item.resolve())
     return buckets
 

@@ -1127,8 +1127,8 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: 'Use a tool that is allowed in this conversation or change strategy.',
-              suggested_action: 'change_strategy',
+              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',
@@ -1508,6 +1508,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
+            ...(toolCall.tool_info.git_remote_precondition === undefined
+              ? {}
+              : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
           },
         );
       };

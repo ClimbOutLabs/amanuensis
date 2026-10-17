@@ -4,6 +4,7 @@
 #        install.sh instance add|list|remove <name>
 #        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
+#        install.sh instance import <name> <file.zip>
 #        install.sh instance refresh <name>
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -63,6 +64,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/users.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
+# shellcheck source=lib/import.sh
+. "$INSTALLER_DIR/lib/import.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -127,6 +130,7 @@ Amanuensis installer
   install.sh instance remove-user <name> [--instance NAME]
   install.sh instance list-users [--instance NAME]
   install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
+  install.sh instance import <name> <file.zip>   restore a data export into a fresh instance (stops its app meanwhile)
   install.sh instance refresh <name>
   install.sh backup [<name>]
   install.sh backups daily|off
@@ -239,6 +243,7 @@ parse_args() {
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
+          4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
@@ -311,6 +316,7 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  import_on_exit
   lock_release
   exit "$rc"
 }
@@ -322,8 +328,10 @@ main() {
   set_paths
   trap on_exit EXIT
   check_demo_options
+  check_import_options
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
     if [ "$OPT_TLS" = caddy ]; then
@@ -363,8 +371,9 @@ main() {
         remove-user) cmd_instance_remove_user ;;
         list-users) cmd_instance_list_users ;;
         demo-seed) cmd_instance_demo_seed ;;
+        import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|refresh" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|import|refresh" ;;
       esac
       ;;
   esac

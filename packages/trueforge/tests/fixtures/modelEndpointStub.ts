@@ -4,9 +4,12 @@ function sse(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
-/** An OpenAI-compatible chat endpoint that answers every call with `content` and reports `usage` for it. */
+/**
+ * An OpenAI-compatible chat endpoint that answers every call with `content` and reports `usage`
+ * for it. Without `usage` it answers but reports nothing, like a provider that omits usage.
+ */
 export async function startModelEndpointStub(options: {
-  usage: { prompt_tokens: number; completion_tokens: number };
+  usage?: { prompt_tokens: number; completion_tokens: number };
   content?: string;
 }): Promise<{ server: Server; baseUrl: string }> {
   const { usage, content = 'hello' } = options;
@@ -15,9 +18,11 @@ export async function startModelEndpointStub(options: {
     const base = { id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: 1, model: 'stub' };
     res.write(sse({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] }));
     res.write(sse({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }));
-    res.write(
-      sse({ ...base, choices: [], usage: { ...usage, total_tokens: usage.prompt_tokens + usage.completion_tokens } }),
-    );
+    if (usage !== undefined) {
+      res.write(
+        sse({ ...base, choices: [], usage: { ...usage, total_tokens: usage.prompt_tokens + usage.completion_tokens } }),
+      );
+    }
     res.write('data: [DONE]\n\n');
     res.end();
   });

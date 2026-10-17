@@ -516,3 +516,15 @@ describe('parseUserSettings', () => {
     });
   });
 });
+
+describe('chat scope offer', () => {
+  const ref = { id: 'call-1', tier: 3, tier3_card: { plain_what: 'Read a note.' } };
+
+  it('reads the server flag in either spelling and leaves it absent when not sent', () => {
+    const read = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [{ ...ref, ...extra }] })[0];
+    expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
+    expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
+    expect(read({})).not.toHaveProperty('chatAllowOffered');
+  });
+});

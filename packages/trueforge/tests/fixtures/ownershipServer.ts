@@ -231,19 +231,20 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   const googleConnectionStore = new SqliteGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -252,6 +253,7 @@ async function startSqlite(): Promise<OwnershipServer> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
@@ -309,19 +311,20 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelSettingsStore = new PostgresSentinelSettingsStore(db);
   const mcpToolGrantStore = new PostgresMcpToolGrantStore(db);
   const googleConnectionStore = new PostgresGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -330,6 +333,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
