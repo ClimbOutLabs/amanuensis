@@ -635,6 +635,8 @@ describe('links', () => {
     }
     const third = await fetchTier(h, pages[2] ?? '');
     expect(third.tier).toBe(3);
+    expect(third.tier3_card?.plain_what).toContain('Held because this turn already fetched 2 pages from that site');
+    expect(third.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'read_page', arguments: { url: pages[2] } });
     expect(JSON.stringify(refused)).toContain('already fetched 2 pages from that site');
     expect((await fetchTier(h, other)).tier).toBe(1);
@@ -946,7 +948,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
+    expect(after.tier3_card?.plain_what).toContain('Held because this chat read something private');
+    expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain('has read something private');
+    expect(JSON.stringify(refused)).toContain('read something private, like a key or a secrets file');
   });
 });

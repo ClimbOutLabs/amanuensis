@@ -23,7 +23,6 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_limit',
   'mcp_search_unreturned_url',
   'mcp_search_host_limit',
-  'mcp_search_private_read',
   'mcp_search_after_private_read',
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];

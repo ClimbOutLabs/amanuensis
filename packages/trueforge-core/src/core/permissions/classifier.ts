@@ -1406,8 +1406,12 @@ async function classifySearchProviderTool(input: {
       'this chat read your email or calendar, and a search could carry it out',
     );
   }
+  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
   if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
-    return held('mcp_search_private_read', 'this chat has read something private');
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read something private, like a key or a secrets file, and a search could carry it out',
+    );
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
