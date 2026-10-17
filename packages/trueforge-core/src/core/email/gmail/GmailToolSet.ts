@@ -8,17 +8,18 @@ import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
-import { classifyHostToolCall } from '../../permissions/classifier';
+import { classifyHostToolCall, messageForDisplay } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
-import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
+import { checkCodeOf, hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
 import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
+import { buildSendReceiptEvent, type NotSentReason, type SendReceiptResult } from './receiptEvents';
 import {
   getDraftResult,
   listDraftsResult,
@@ -225,7 +226,7 @@ export class GmailToolSet extends LocalToolMCP {
             'Send a saved draft. The only way to send. The user always sees the whole message and is asked first; a draft with attachments or formatting, or one that is very long, cannot be sent.',
           schema: DraftIdSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#sendDraft(input),
+          handler: (input, _decision, context) => this.#sendDraft({ input, toolCallId: context?.tool_call_id }),
         }),
       );
     }
@@ -590,12 +591,29 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  /** Sends only the text the user was shown: the draft is read again and must still hash to the reviewed text. */
-  async #sendDraft(input: z.infer<typeof DraftIdSchema>) {
+  /** Attaches the receipt event the chat turns the approval card into; absent when the call has no id to answer. */
+  #withReceipt<T extends object>(input: { response: T; toolCallId: string | undefined; result: SendReceiptResult }) {
+    const { toolCallId } = input;
+    return toolCallId === undefined
+      ? input.response
+      : { ...input.response, events: [buildSendReceiptEvent({ tool_call_id: toolCallId, result: input.result })] };
+  }
+
+  /**
+   * Sends only the text the user was shown: the draft is read again and must still hash to the reviewed text.
+   * Every ending leaves a receipt event built from what the gate verified, never from model text.
+   */
+  async #sendDraft({ input, toolCallId }: { input: z.infer<typeof DraftIdSchema>; toolCallId: string | undefined }) {
+    const notSent = (reason: NotSentReason, response: ReturnType<typeof errorResult>) =>
+      this.#withReceipt({ response, toolCallId, result: { outcome: 'not_sent', reason } });
+    let gmailAsked = false;
     try {
       const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
       if (reviewed === undefined) {
-        return errorResult('This send needs your OK again. Nothing was sent. Ask to send the draft again.');
+        return notSent(
+          'needs_ok_again',
+          errorResult('This send needs your OK again. Nothing was sent. Ask to send the draft again.'),
+        );
       }
       const assessed = assessDraft({
         message: await this.#liveDraft(input.draft_id),
@@ -603,23 +621,42 @@ export class GmailToolSet extends LocalToolMCP {
         forSend: true,
       });
       if (!assessed.ok) {
-        return errorResult(assessed.reason);
+        return notSent('cannot_send', errorResult(assessed.reason));
       }
-      if (reviewed !== hashDraft(assessed.draft)) {
-        return errorResult(
-          'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
+      const hash = hashDraft(assessed.draft);
+      if (reviewed !== hash) {
+        return notSent(
+          'draft_changed',
+          errorResult(
+            'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
+          ),
         );
       }
+      gmailAsked = true;
       const sent = await this.#options.api.sendDraft(input.draft_id);
-      return jsonResult({
-        account: this.#options.account,
-        draft_id: input.draft_id,
-        message_id: sent.id,
-        thread_id: sent.threadId,
-        status: 'sent',
+      return this.#withReceipt({
+        response: jsonResult({
+          account: this.#options.account,
+          draft_id: input.draft_id,
+          message_id: sent.id,
+          thread_id: sent.threadId,
+          status: 'sent',
+        }),
+        toolCallId,
+        result: {
+          outcome: 'sent',
+          sent_at: new Date().toISOString(),
+          sent_message_id: sent.id,
+          check_code: checkCodeOf(hash),
+          message: messageForDisplay(assessed.draft),
+        },
       });
     } catch (error) {
-      return failureResult(error);
+      const response = failureResult(error);
+      // A server error after the request went out leaves the outcome unknown; only a refusal is "not sent".
+      const unconfirmed = gmailAsked && error instanceof GmailApiError && error.status >= 500;
+      const reason: NotSentReason = unconfirmed ? 'unconfirmed' : gmailAsked ? 'gmail_refused' : 'cannot_send';
+      return notSent(reason, response);
     }
   }
 }

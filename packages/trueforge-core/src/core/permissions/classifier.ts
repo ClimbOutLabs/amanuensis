@@ -13,7 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import type { ReviewableDraft } from '../email/gmail/draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
 import {
   GMAIL_SERVER_ID,
   isGmailReadToolName,
@@ -1340,6 +1340,17 @@ function cardSubject(subject: string): string {
   return `"${cut.replace(/"/g, '\\"')}"`;
 }
 
+/** The message text as a card shows it. The send receipt shows this same text, so both read it from here. */
+export function messageForDisplay(content: ReviewableDraft) {
+  return {
+    to: content.to.map(address => escapeDisplayText(address)),
+    cc: content.cc.map(address => escapeDisplayText(address)),
+    bcc: content.bcc.map(address => escapeDisplayText(address)),
+    subject: escapeDisplayText(content.subject),
+    body: escapeDisplayText(content.body, { keepNewlines: true }),
+  };
+}
+
 /**
  * The approval card for a Gmail write, built from the message as the host holds it (the draft Gmail stores
  * for a send, the content the call will write for a draft), never from model prose. The whole message is on
@@ -1390,11 +1401,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     outbound_truncated: false,
     email: {
       action: kind,
-      to: content.to.map(address => escapeDisplayText(address)),
-      cc: content.cc.map(address => escapeDisplayText(address)),
-      bcc: content.bcc.map(address => escapeDisplayText(address)),
-      subject: escapeDisplayText(content.subject),
-      body: escapeDisplayText(content.body, { keepNewlines: true }),
+      ...messageForDisplay(content),
+      check_code: kind === 'send' ? checkCodeOf(hashDraft(content)) : null,
       replaces:
         replaces === undefined
           ? null

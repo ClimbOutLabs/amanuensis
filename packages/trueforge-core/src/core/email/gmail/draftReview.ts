@@ -28,6 +28,17 @@ export function hashDraft(draft: ReviewableDraft): string {
   return createHash('sha256').update(stableStringify(draft)).digest('hex');
 }
 
+/** Characters of the hash a person is shown; enough to compare by eye, not a security boundary. */
+const CHECK_CODE_LENGTH = 6;
+
+/**
+ * The short code printed on a send card and again on its receipt. It is cut from the same hash the send gate
+ * binds, so a receipt carrying the card's code shows the message that was approved was the one sent.
+ */
+export function checkCodeOf(hash: string): string {
+  return hash.slice(0, CHECK_CODE_LENGTH).toUpperCase();
+}
+
 interface ReviewKey {
   tenant_id: string;
   created_by: string;
