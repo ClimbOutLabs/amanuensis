@@ -965,6 +965,7 @@ describe('ToolCallContainer: held search request', () => {
       outbound_text: 'query: how do I rotate ws••••••3x safely',
       destination_host: null,
       outbound_truncated: false,
+      email: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
