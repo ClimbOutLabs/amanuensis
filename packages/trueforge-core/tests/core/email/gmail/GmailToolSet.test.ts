@@ -1,4 +1,3 @@
-import { DraftReviewLedger } from '../../../../src/core/email/gmail/draftReview';
 import { GmailApi } from '../../../../src/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/gmail/GmailToolSet';
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
@@ -105,7 +104,6 @@ describe('GmailToolSet reads', () => {
       features: ['gmail_read'],
       attachmentStager: undefined,
       sentinel: createSentinelHostContext({ ...OWNER, conversation_id: 'c1' }),
-      reviews: new DraftReviewLedger(),
       listDeadlineMs: 60_000,
     });
     const response = await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } });

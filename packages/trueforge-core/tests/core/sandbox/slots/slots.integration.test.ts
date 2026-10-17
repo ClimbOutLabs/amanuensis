@@ -25,7 +25,7 @@ import { MAX_BYTES_PER_DOCUMENT } from '../../../../src/documents/documentExtrac
 import { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../../../../src/documents/ocrLanguages';
 import { cjkCollectionPdf, unicodeTextPdf, unicodeTextPdfPages } from '../../documents/syntheticFiles';
 import { makeSilentLogger } from '../../harnessMocks';
-import { FAMILY_FIXTURES, missingForFamily, renderFamilyPng, type ScriptFamily } from './liveFixtures';
+import { FAMILY_FIXTURES, missingForFamily, renderFamilyPng, SCRIPT_FAMILIES } from './liveFixtures';
 
 const SLOTS_DIR = process.env['AMAN_SLOTS_TEST_DIR'];
 const SLOT_COUNT = Number.parseInt(process.env['AMAN_SLOTS_TEST_COUNT'] ?? '1', 10);
@@ -512,30 +512,27 @@ describe('reading attachments on sandbox slots (live agents)', () => {
 
   // One case per script family. The images are drawn on the machine running this test, which needs python3
   // with Pillow and the fonts named in liveFixtures.ts; a family that cannot be drawn is reported and skipped.
-  test.each(Object.keys(FAMILY_FIXTURES) as ScriptFamily[])(
-    "OCR reads a scanned %s image with that script's languages",
-    async family => {
-      if (SLOTS_DIR === undefined) {
-        return;
-      }
-      const missing = missingForFamily(family);
-      if (missing !== undefined) {
-        console.warn(`OCR case for ${family} skipped: ${missing}`);
-        return;
-      }
-      const { sandbox } = liveSandbox();
-      const { document, text } = await readBack({
-        sandbox,
-        filename: `${family}.png`,
-        bytes: renderFamilyPng(family),
-        mime: 'image/png',
-      });
-      const fixture = FAMILY_FIXTURES[family];
-      expect(document?.extraction_mode).toBe('ocr');
-      expect((text.match(fixture.script) ?? []).length).toBeGreaterThan(20);
-      for (const word of fixture.expected) {
-        expect(text).toContain(word);
-      }
-    },
-  );
+  test.each(SCRIPT_FAMILIES)("OCR reads a scanned %s image with that script's languages", async family => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const missing = missingForFamily(family);
+    if (missing !== undefined) {
+      console.warn(`OCR case for ${family} skipped: ${missing}`);
+      return;
+    }
+    const { sandbox } = liveSandbox();
+    const { document, text } = await readBack({
+      sandbox,
+      filename: `${family}.png`,
+      bytes: renderFamilyPng(family),
+      mime: 'image/png',
+    });
+    const fixture = FAMILY_FIXTURES[family];
+    expect(document?.extraction_mode).toBe('ocr');
+    expect((text.match(fixture.script) ?? []).length).toBeGreaterThan(20);
+    for (const word of fixture.expected) {
+      expect(text).toContain(word);
+    }
+  });
 });

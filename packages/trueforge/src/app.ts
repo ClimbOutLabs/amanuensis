@@ -86,6 +86,7 @@ import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -590,7 +591,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   // authenticated, including the browser callback, whose redirect carries the cookie that ties it to the
   // user who started the consent.
   app.route(
-    '/api/v1/user/settings/google',
+    GOOGLE_ROUTES_BASE_PATH,
     withAuth(
       createGoogleRouter({
         fetchImpl: undefined,
