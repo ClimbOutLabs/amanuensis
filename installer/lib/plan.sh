@@ -254,7 +254,7 @@ print_plan() {
   if sandbox_needed; then
     ui_hint "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)."
   else
-    ui_hint "Run code and reading attachments stay off (installed with --no-sandbox). To turn them on later, run aman doctor sandbox --fix."
+    ui_hint "Run code and reading attachments stay off (installed with --no-sandbox). To turn it on later, run aman doctor sandbox --fix."
   fi
 }
 
