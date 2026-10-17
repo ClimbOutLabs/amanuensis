@@ -4,6 +4,8 @@
 #        install.sh instance add|list|remove <name>
 #        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
+#        install.sh instance import <name> <file.zip> [--display-name NAME]
+#        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -63,6 +65,10 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/users.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
+# shellcheck source=lib/import.sh
+. "$INSTALLER_DIR/lib/import.sh"
+# shellcheck source=lib/migrate.sh
+. "$INSTALLER_DIR/lib/migrate.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -127,6 +133,10 @@ Amanuensis installer
   install.sh instance remove-user <name> [--instance NAME]
   install.sh instance list-users [--instance NAME]
   install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
+  install.sh instance import <name> <file.zip> [--display-name NAME]
+                                  back up the instance, then restore a data export into it (stops its app meanwhile)
+  install.sh migrate --from-compose <folder> [--user ID]
+                                  export your data from an old docker compose Aman in that folder, which is only read
   install.sh instance refresh <name>
   install.sh backup [<name>]
   install.sh backups daily|off
@@ -168,6 +178,9 @@ Options
                         --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
+  --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
+  --from-compose DIR    with migrate, the folder the old docker compose Aman runs from
+  --user ID             with migrate, the old sign-in id to move when more than one person has chats there
   --print-root-steps    print the root steps for installing Docker and stop
   --print-network       print every host the installer may contact and stop
   --print-proxy-requirements  print what a reverse proxy in front of an instance must do and stop
@@ -218,12 +231,12 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user | --display-name | --from-compose | --user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=* | --display-name=* | --from-compose=* | --user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -233,12 +246,13 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
+          4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
@@ -274,6 +288,9 @@ set_option() {
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
     --demo-user) OPT_DEMO_USER=$2 ;;
+    --display-name) OPT_DISPLAY_NAME=$2 ;;
+    --from-compose) OPT_FROM_COMPOSE=$2 ;;
+    --user) OPT_MIGRATE_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -311,6 +328,8 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  import_on_exit
+  migrate_on_exit
   lock_release
   exit "$rc"
 }
@@ -322,8 +341,11 @@ main() {
   set_paths
   trap on_exit EXIT
   check_demo_options
+  check_import_options
+  check_migrate_options
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
     if [ "$OPT_TLS" = caddy ]; then
@@ -354,6 +376,7 @@ main() {
     command) cmd_command ;;
     tls) cmd_tls ;;
     upgrade) cmd_upgrade ;;
+    migrate) cmd_migrate ;;
     instance)
       case "$SUBCOMMAND" in
         add) cmd_instance_add ;;
@@ -363,8 +386,9 @@ main() {
         remove-user) cmd_instance_remove_user ;;
         list-users) cmd_instance_list_users ;;
         demo-seed) cmd_instance_demo_seed ;;
+        import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|refresh" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|import|refresh" ;;
       esac
       ;;
   esac

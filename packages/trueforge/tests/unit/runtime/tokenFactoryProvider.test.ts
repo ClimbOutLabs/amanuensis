@@ -113,7 +113,33 @@ describe('ensureEnvManagedTokenFactoryProvider', () => {
     const records = await store.listProviders({ tenant_id: TENANT });
     expect(records).toHaveLength(1);
     expect(records[0]?.manifest.auth?.api_key).toBe('sk-rotated');
-    expect(records[0]?.manifest.models.map(model => model.model_id)).toEqual(['Qwen/Qwen3-235B-A22B-Instruct-2507']);
+    expect(records[0]?.manifest.models.map(model => model.model_id)).toEqual([
+      'Qwen/Qwen3-235B-A22B-Instruct-2507',
+      'nvidia/nemotron-3-super-120b-a12b',
+      'openai/gpt-oss-120b',
+    ]);
+  });
+
+  it('keeps a model an earlier boot registered, so a role still pointing at the old default resolves', async () => {
+    const { store } = await createStores();
+    await ensureEnvManagedTokenFactoryProvider({ store, tenant_id: TENANT, settings, logger });
+
+    await ensureEnvManagedTokenFactoryProvider({
+      store,
+      tenant_id: TENANT,
+      settings: { ...settings, cheaperModel: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B' },
+      logger,
+    });
+
+    const provider = await store.getProvider({ tenant_id: TENANT, name: 'tokenfactory', model_name: 'gpt-oss-120b' });
+    expect(provider?.manifest.models.find(model => model.name === 'gpt-oss-120b')?.model_id).toBe(
+      'openai/gpt-oss-120b',
+    );
+    expect((await store.listModels({ tenant_id: TENANT })).map(model => model.name)).toEqual([
+      'tokenfactory/nemotron-3-super-120b-a12b',
+      'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
+      'tokenfactory/gpt-oss-120b',
+    ]);
   });
 
   it('registers one model when the cheaper model equals the default', async () => {

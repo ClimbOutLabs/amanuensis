@@ -3,6 +3,7 @@
 import type { BaseClientOptions } from "../../../../BaseClient.js";
 import { normalizeClientOptionsWithAuth, type NormalizedClientOptionsWithAuth } from "../../../../BaseClient.js";
 import * as core from "../../../../core/index.js";
+import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
@@ -10,6 +11,7 @@ import { ModelProvidersClient } from "../resources/modelProviders/client/Client.
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
+import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
 
 export declare namespace SettingsClient {
@@ -25,7 +27,9 @@ export class SettingsClient {
     protected _runCode: RunCodeClient | undefined;
     protected _sandboxProviders: SandboxProvidersClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _tokenFactoryUsage: TokenFactoryUsageClient | undefined;
     protected _toolOutputScreens: ToolOutputScreensClient | undefined;
+    protected _google: GoogleClient | undefined;
 
     constructor(options: SettingsClient.Options) {
 
@@ -60,7 +64,15 @@ export class SettingsClient {
         return (this._skills ??= new SkillsClient(this._options));
     }
 
+    public get tokenFactoryUsage(): TokenFactoryUsageClient {
+        return (this._tokenFactoryUsage ??= new TokenFactoryUsageClient(this._options));
+    }
+
     public get toolOutputScreens(): ToolOutputScreensClient {
         return (this._toolOutputScreens ??= new ToolOutputScreensClient(this._options));
+    }
+
+    public get google(): GoogleClient {
+        return (this._google ??= new GoogleClient(this._options));
     }
 }

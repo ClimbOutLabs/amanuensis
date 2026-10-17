@@ -219,6 +219,8 @@ export type ThemeConfig = {
   className?: string;
   icons?: IconMap;
   classNames?: ContentClassNames;
+  /** Load Google Sans from Google Fonts. Defaults to true; set false for hosts whose CSP keeps the page on its own origin. */
+  webFonts?: boolean;
 };
 
 export type BuiltInLayout = 'sidebar' | 'drawer' | 'dock' | 'widget';

@@ -6,9 +6,10 @@ import { every } from 'hono/combine';
 import { compress } from 'hono/compress';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { CATALOG_LOGOS_PREFIX } from './http/catalogLogos';
 
 /** Routes the server answers itself; never served from the build. /api covers every version below it. */
-const SERVER_PATH_PREFIXES = ['/api', '/healthz'];
+const SERVER_PATH_PREFIXES = ['/api', '/healthz', CATALOG_LOGOS_PREFIX];
 
 /** Only Vite's hashed asset names can be cached forever. */
 const HASHED_ASSET_PREFIX = '/assets/';
@@ -31,24 +32,23 @@ function applyShellTokens(options: { html: string; uiBasePath: string }): string
 }
 
 /**
- * Image, media and font Content-Security-Policy for the app shell. Defined once here and
- * mirrored in `packages/frontend/index.html`; a test asserts the two stay
- * equal because the static HTML file cannot import this constant.
+ * Content-Security-Policy for the app shell. Defined once here and mirrored in
+ * `packages/frontend/index.html`; a test asserts the two stay equal because the static HTML file
+ * cannot import this constant. No script-src: the shell's inline bootstrap script must keep running.
  */
-export const APP_SHELL_IMAGE_CSP = "img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:";
+export const APP_SHELL_CSP =
+  "img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data:; connect-src 'self'";
 
 function createShellResponse(options: { html: string; method: string }): Response {
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': REVALIDATE_CACHE_CONTROL,
     Vary: 'Accept-Encoding',
-    // Model-authored markdown can hide private data in a remote image URL. The
-    // chat component placeholder is the primary guard; this image, media and font
-    // policy is defense in depth so a slipped-through <img>, <video>, <audio>, or
-    // CSS @font-face URL still cannot fetch. Not a full default-src: the shell's
-    // inline bootstrap script and cross-origin API/tile hosts would break.
+    // Model-authored content can hide private data in a remote image, font, stylesheet, frame or
+    // fetch URL. The chat component placeholder is the primary guard; this policy is defense in
+    // depth so a slipped-through request still cannot leave the app origin.
     // no-referrer keeps the page URL out of any request that does go out.
-    'Content-Security-Policy': APP_SHELL_IMAGE_CSP,
+    'Content-Security-Policy': APP_SHELL_CSP,
     'Referrer-Policy': 'no-referrer',
   });
   if (options.method === 'HEAD') {

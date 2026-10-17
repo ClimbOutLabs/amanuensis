@@ -21,6 +21,7 @@ import {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
   type ExecResult,
   type SandboxBuild,
@@ -211,7 +212,8 @@ export class TFYSandboxProvider implements SandboxProvider {
         if (!response.ok) {
           const text = await response.text();
           this.logger.error(`Sandbox server returned ${String(response.status)}: ${text}`);
-          return { success: false, error: `Sandbox server returned ${String(response.status)}: ${text}` };
+          // The body can echo the request back, including credentials in `env`; the model gets the status only.
+          return { success: false, error: `Sandbox server returned ${String(response.status)}` };
         }
 
         const result = (await response.json()) as ExecResult;
@@ -237,7 +239,7 @@ export class TFYSandboxProvider implements SandboxProvider {
   private async getFileInfo(params: SandboxDownloadFileParams): Promise<SandboxFileInfo> {
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `stat -L --printf='{"size":%s,"type":"%F"}' ${shellEscape(params.path)}`,
+      command: withTrustedPath(`stat -L --printf='{"size":%s,"type":"%F"}' ${shellEscape(params.path)}`),
       signal: params.signal,
     });
 
@@ -263,7 +265,7 @@ export class TFYSandboxProvider implements SandboxProvider {
 
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `base64 -w0 ${shellEscape(params.path)}`,
+      command: withTrustedPath(`base64 -w0 ${shellEscape(params.path)}`),
       signal: params.signal,
     });
 
@@ -283,7 +285,7 @@ export class TFYSandboxProvider implements SandboxProvider {
 
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `echo ${shellEscape(encoded)} | base64 -d > ${escapedPath}`,
+      command: withTrustedPath(`echo ${shellEscape(encoded)} | base64 -d > ${escapedPath}`),
       signal: params.signal,
     });
     ensureExecSuccess(result);

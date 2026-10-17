@@ -221,6 +221,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
         <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
       </div>
 
+      {collapsed ? <OfflineIndicator compact /> : null}
+
       {collapsed ? null : (
         <>
           <OfflineIndicator />

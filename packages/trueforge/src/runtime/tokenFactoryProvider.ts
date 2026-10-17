@@ -72,7 +72,8 @@ export type EnvManagedProviderOutcome = 'skipped' | 'unchanged' | 'upserted';
 /**
  * Makes the `tokenfactory` provider record match the environment at startup. One row keyed by
  * `(tenant_id, name)` is replaced in place, so restarts never duplicate it; a rotated key or a
- * changed model takes effect on the next boot. A stream deadline set on an earlier record is kept.
+ * changed model takes effect on the next boot. A stream deadline and the models an earlier record
+ * carried are kept.
  */
 export async function ensureEnvManagedTokenFactoryProvider({
   store,
@@ -90,7 +91,14 @@ export async function ensureEnvManagedTokenFactoryProvider({
     return 'skipped';
   }
   const existing = await store.getProvider({ tenant_id, name: TOKEN_FACTORY_PROVIDER_NAME, model_name: '' });
-  const desired = buildEnvManagedTokenFactoryManifest({ ...settings, apiKey });
+  const built = buildEnvManagedTokenFactoryManifest({ ...settings, apiKey });
+  // Models an earlier boot registered stay listed, so roles, personas and agents that still point
+  // at a replaced default keep resolving after an upgrade or an env change.
+  const desiredNames = new Set(built.models.map(model => model.name));
+  const desired: ModelProviderManifest = {
+    ...built,
+    models: [...built.models, ...(existing?.manifest.models ?? []).filter(model => !desiredNames.has(model.name))],
+  };
   const manifest: ModelProviderManifest =
     existing?.manifest.stream_timeout === undefined || desired.type !== 'tokenfactory'
       ? desired

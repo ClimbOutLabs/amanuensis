@@ -21,6 +21,14 @@ import {
   type TokenFactoryBudget,
 } from '../../../src/runtime/tokenFactoryBudget';
 
+const SUPER = 'nvidia/nemotron-3-super-120b-a12b';
+const NANO = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
+
+/** One counted call of `tokens` input tokens on the Super model. */
+function counted(tokens: number): { model_id: string; input_tokens: number; output_tokens: number } {
+  return { model_id: SUPER, input_tokens: tokens, output_tokens: 0 };
+}
+
 async function createStore(): Promise<SqliteTokenFactoryUsageStore> {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -41,8 +49,8 @@ describe('createTokenFactoryBudget', () => {
     const store = await createStore();
     const budget = createTokenFactoryBudget({ store, cap: 1000, now: () => new Date('2026-10-15T09:00:00.000Z') });
 
-    await budget.record(400);
-    await budget.record(250);
+    await budget.record(counted(400));
+    await budget.record(counted(250));
 
     expect((await store.getUsage({ usage_date: '2026-10-15' }))?.used_tokens).toBe(650);
     await expect(budget.assertWithinCap()).resolves.toBeUndefined();
@@ -51,7 +59,7 @@ describe('createTokenFactoryBudget', () => {
   it('refuses with a typed 429 once the cap is reached, including exactly at the cap', async () => {
     const store = await createStore();
     const budget = createTokenFactoryBudget({ store, cap: 1000, now: () => new Date('2026-10-15T09:00:00.000Z') });
-    await budget.record(1000);
+    await budget.record(counted(1000));
 
     const refusal = await budget.assertWithinCap().then(
       () => undefined,
@@ -71,13 +79,13 @@ describe('createTokenFactoryBudget', () => {
     const store = await createStore();
     let current = new Date('2026-10-15T23:59:59.999Z');
     const budget = createTokenFactoryBudget({ store, cap: 500, now: () => current });
-    await budget.record(500);
+    await budget.record(counted(500));
     await expect(budget.assertWithinCap()).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
 
     current = new Date('2026-10-16T00:00:00.000Z');
     await expect(budget.assertWithinCap()).resolves.toBeUndefined();
 
-    await budget.record(120);
+    await budget.record(counted(120));
     expect((await store.getUsage({ usage_date: '2026-10-16' }))?.used_tokens).toBe(120);
     expect((await store.getUsage({ usage_date: '2026-10-15' }))?.used_tokens).toBe(500);
   });
@@ -85,24 +93,48 @@ describe('createTokenFactoryBudget', () => {
   it('keeps the count across a restart because it lives in the store', async () => {
     const store = await createStore();
     const now = () => new Date('2026-10-15T09:00:00.000Z');
-    await createTokenFactoryBudget({ store, cap: 300, now }).record(300);
+    await createTokenFactoryBudget({ store, cap: 300, now }).record(counted(300));
 
     await expect(createTokenFactoryBudget({ store, cap: 300, now }).assertWithinCap()).rejects.toBeInstanceOf(
       TokenFactoryDailyCapError,
     );
   });
 
-  it('has no cap and no store traffic when the cap is unset', async () => {
+  it('never refuses without a cap, and still counts usage per model for the daily view', async () => {
     const store = await createStore();
     const getUsage = jest.spyOn(store, 'getUsage');
-    const addUsage = jest.spyOn(store, 'addUsage');
-    const budget = createTokenFactoryBudget({ store, cap: undefined });
+    const budget = createTokenFactoryBudget({ store, cap: undefined, now: TODAY });
 
-    await budget.record(5_000_000_000);
+    await budget.record({ model_id: SUPER, input_tokens: 4_000_000_000, output_tokens: 1_000_000_000 });
+    await budget.record({ model_id: NANO, input_tokens: 90, output_tokens: 10 });
     await expect(budget.assertWithinCap()).resolves.toBeUndefined();
 
     expect(getUsage).not.toHaveBeenCalled();
-    expect(addUsage).not.toHaveBeenCalled();
+    expect(await budget.today()).toEqual({
+      usage_date: '2026-10-15',
+      cap_tokens: undefined,
+      used_tokens: 5_000_000_100,
+      models: [
+        {
+          usage_date: '2026-10-15',
+          model_id: SUPER,
+          input_tokens: 4_000_000_000,
+          output_tokens: 1_000_000_000,
+          calls: 1,
+        },
+        { usage_date: '2026-10-15', model_id: NANO, input_tokens: 90, output_tokens: 10, calls: 1 },
+      ],
+    });
+  });
+
+  it("reports the cap and today's counters, and an empty day before any call", async () => {
+    const store = await createStore();
+    const budget = createTokenFactoryBudget({ store, cap: 1000, now: TODAY });
+
+    expect(await budget.today()).toEqual({ usage_date: '2026-10-15', cap_tokens: 1000, used_tokens: 0, models: [] });
+
+    await budget.record({ model_id: SUPER, input_tokens: 300, output_tokens: 50 });
+    expect(await budget.today()).toMatchObject({ cap_tokens: 1000, used_tokens: 350 });
   });
 
   it('ignores a zero or negative token count', async () => {
@@ -110,8 +142,8 @@ describe('createTokenFactoryBudget', () => {
     const addUsage = jest.spyOn(store, 'addUsage');
     const budget = createTokenFactoryBudget({ store, cap: 100 });
 
-    await budget.record(0);
-    await budget.record(-5);
+    await budget.record(counted(0));
+    await budget.record({ model_id: SUPER, input_tokens: 0, output_tokens: 0 });
 
     expect(addUsage).not.toHaveBeenCalled();
   });
@@ -180,12 +212,12 @@ describe('TokenFactoryBudget.isExhausted', () => {
   it('is never true without a cap and true from the cap onward', async () => {
     const store = await createStore();
     const uncapped = createTokenFactoryBudget({ store, cap: undefined, now: TODAY });
-    await uncapped.record(1_000_000);
+    await uncapped.record(counted(1_000_000));
     expect(await uncapped.isExhausted()).toBe(false);
 
-    const capped = createTokenFactoryBudget({ store, cap: 500, now: TODAY });
+    const capped = createTokenFactoryBudget({ store: await createStore(), cap: 500, now: TODAY });
     expect(await capped.isExhausted()).toBe(false);
-    await capped.record(500);
+    await capped.record(counted(500));
     expect(await capped.isExhausted()).toBe(true);
   });
 });
@@ -200,7 +232,7 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
   it('re-checks the cap before every model call, so a turn stops mid-way once the cap is reached', async () => {
     const { store, budget } = await setup(1000);
     const build = jest.fn(() => scriptedClient({ chunks: [chunk({ input_tokens: 900, output_tokens: 100 })] }));
-    const llm = new TokenFactoryMeteredLLM({ role: 'primary', budget, logger: silentLogger, build });
+    const llm = new TokenFactoryMeteredLLM({ role: 'primary', modelId: SUPER, budget, logger: silentLogger, build });
 
     await drain(llm);
     expect(await usedToday(store)).toBe(1000);
@@ -221,9 +253,10 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
 
   it('applies the same check to the non-streaming calls compaction and helpers make', async () => {
     const { budget } = await setup(10);
-    await budget.record(10);
+    await budget.record(counted(10));
     const llm = new TokenFactoryMeteredLLM({
       role: 'primary',
+      modelId: SUPER,
       budget,
       logger: silentLogger,
       build: () => scriptedClient({ chunks: [] }),
@@ -238,6 +271,7 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
     const { store, budget } = await setup(10_000);
     const llm = new TokenFactoryMeteredLLM({
       role: 'primary',
+      modelId: SUPER,
       budget,
       logger: silentLogger,
       build: () =>
@@ -252,7 +286,13 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
   it('counts the usage a stream reported when the consumer abandons it, and closes the provider stream', async () => {
     const { store, budget } = await setup(10_000);
     const inner = scriptedClient({ chunks: [chunk(), chunk({ input_tokens: 70, output_tokens: 5 }), chunk()] });
-    const llm = new TokenFactoryMeteredLLM({ role: 'primary', budget, logger: silentLogger, build: () => inner });
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      modelId: SUPER,
+      budget,
+      logger: silentLogger,
+      build: () => inner,
+    });
 
     const stream = llm.create(BODY);
     await stream.next();
@@ -267,6 +307,7 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
     const { store, budget } = await setup(10_000);
     const llm = new TokenFactoryMeteredLLM({
       role: 'primary',
+      modelId: SUPER,
       budget,
       logger: silentLogger,
       build: ({ onFailover }) => {
@@ -289,6 +330,7 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
     const warn = jest.spyOn(silentLogger, 'warn');
     const llm = new TokenFactoryMeteredLLM({
       role: 'primary',
+      modelId: SUPER,
       budget: failing,
       logger: silentLogger,
       build: () => scriptedClient({ chunks: [chunk({ input_tokens: 5, output_tokens: 5 })] }),
@@ -298,11 +340,11 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
     expect(warn).toHaveBeenCalledWith('Token Factory usage could not be counted', expect.anything());
   });
 
-  it('is unlimited and writes nothing without a cap', async () => {
+  it('is unlimited without a cap and counts the call under the Token Factory model id', async () => {
     const store = await createStore();
-    const addUsage = jest.spyOn(store, 'addUsage');
     const llm = new TokenFactoryMeteredLLM({
       role: 'primary',
+      modelId: NANO,
       budget: createTokenFactoryBudget({ store, cap: undefined, now: TODAY }),
       logger: silentLogger,
       build: () => scriptedClient({ chunks: [chunk({ input_tokens: 9_000_000, output_tokens: 1 })] }),
@@ -310,7 +352,9 @@ describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
 
     await drain(llm);
 
-    expect(addUsage).not.toHaveBeenCalled();
+    expect(await store.listModelUsage({ usage_date: USAGE_DATE })).toEqual([
+      { usage_date: USAGE_DATE, model_id: NANO, input_tokens: 9_000_000, output_tokens: 1, calls: 1 },
+    ]);
   });
 });
 
@@ -321,6 +365,7 @@ describe('TokenFactoryMeteredLLM with Token Factory as the fallback (TOKEN_FACTO
     let failOver = false;
     const llm = new TokenFactoryMeteredLLM({
       role: 'fallback',
+      modelId: SUPER,
       budget,
       logger: silentLogger,
       build: ({ onFailover }) => {
@@ -346,39 +391,65 @@ describe('TokenFactoryMeteredLLM with Token Factory as the fallback (TOKEN_FACTO
     const build = jest.fn((_options: { withFailover: boolean; onFailover: () => void }) =>
       scriptedClient({ chunks: [chunk({ input_tokens: 80, output_tokens: 20 })] }),
     );
-    const llm = new TokenFactoryMeteredLLM({ role: 'fallback', budget, logger: silentLogger, build });
+    const llm = new TokenFactoryMeteredLLM({ role: 'fallback', modelId: SUPER, budget, logger: silentLogger, build });
 
     await drain(llm);
     expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ withFailover: true }));
 
-    await budget.record(100);
+    await budget.record(counted(100));
     await drain(llm);
     expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ withFailover: false }));
   });
 });
 
 describe('meterHelperLlm', () => {
-  it('limits and counts a helper call on the tokenfactory provider', async () => {
+  const identity = (provider: string) => ({ model_name: `${provider}/nano`, model_id: NANO, provider });
+
+  it('limits and counts a helper call on the tokenfactory provider, and records it under its role', async () => {
     const store = await createStore();
     const budget = createTokenFactoryBudget({ store, cap: 100, now: TODAY });
     const inner = scriptedClient({ chunks: [chunk({ input_tokens: 60, output_tokens: 40 })] });
-    const llm = meterHelperLlm({ llm: inner, providerType: 'tokenfactory', budget, logger: silentLogger });
+    const record = jest.fn();
+    const llm = meterHelperLlm({
+      llm: inner,
+      identity: identity('tokenfactory'),
+      role: 'summarization',
+      budget,
+      usage: { record },
+      logger: silentLogger,
+    });
 
     await llm.createNonStream({ messages: [{ role: 'user', content: 'hi' }] });
     expect(await usedToday(store)).toBe(100);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'summarization', identity: identity('tokenfactory') }),
+    );
 
     await expect(llm.createNonStream({ messages: [{ role: 'user', content: 'again' }] })).rejects.toBeInstanceOf(
       TokenFactoryDailyCapError,
     );
+    expect(record).toHaveBeenCalledTimes(1);
   });
 
-  it('hands any other provider back untouched', async () => {
+  it('records but never limits or counts a helper call on any other provider', async () => {
     const store = await createStore();
     const budget = createTokenFactoryBudget({ store, cap: 1, now: TODAY });
-    await budget.record(1);
-    const inner = scriptedClient({ chunks: [chunk({ input_tokens: 60, output_tokens: 40 })] });
+    await budget.record(counted(1));
+    const record = jest.fn();
+    const llm = meterHelperLlm({
+      llm: scriptedClient({ chunks: [chunk({ input_tokens: 60, output_tokens: 40 })] }),
+      identity: identity('custom'),
+      role: 'profile_learning',
+      budget,
+      usage: { record },
+      logger: silentLogger,
+    });
 
-    expect(meterHelperLlm({ llm: inner, providerType: 'custom', budget, logger: silentLogger })).toBe(inner);
+    await expect(llm.createNonStream({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeDefined();
+
+    expect(await usedToday(store)).toBe(1);
+    expect(record).toHaveBeenCalledTimes(1);
   });
 });
 

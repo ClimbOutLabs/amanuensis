@@ -210,14 +210,88 @@ describe('chat approval grants', () => {
   });
 });
 
+describe('chat grant key', () => {
+  it('differs by destination and recipient so one grant never covers a different target', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = ({ destination, recipient }: { destination: string | null; recipient: string | null }) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination,
+      recipient,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    });
+    const keyA = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://a.example', recipient: null }) });
+    const keyB = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://b.example', recipient: null }) });
+    const keyC = approvalGrantKey({ ...base, tier3_card: card({ destination: null, recipient: 'a@example.com' }) });
+    expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
+
+  it('bars durable scope when the tier has no reason, and keeps it for a plain read that names a recipient', () => {
+    const info: InternalToolCallInfo = { ...toolInfo('notes', 'list_events'), effect: 'inspect', tier: 3 };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+    const read = { ...info, tier_reason: 'unrecognized_tool' };
+    expect(allowsChatApproval(read)).toBe(true);
+    expect(allowsToolGrant(read)).toBe(true);
+  });
+
+  it('changes the key when only the host or only the recipient changes', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = (overrides: Partial<NonNullable<InternalToolCallInfo['tier3_card']>>) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+      ...overrides,
+    });
+    const keys = [
+      approvalGrantKey({ ...base, tier3_card: card({}) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'a.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'b.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'a@example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'b@example.com' }) }),
+    ];
+    expect(new Set(keys).size).toBe(5);
+  });
+
+  it('never admits a Tier 3 send-class call from a chat grant, even a forged one', () => {
+    const info: InternalToolCallInfo = {
+      ...toolInfo('notes', 'send_note'),
+      effect: 'inspect',
+      tier: 3,
+      tier_reason: 'external_service',
+    };
+    const effective = effectiveApprovalDecisions({
+      calls: [toolCall('call', info)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.has('call')).toBe(false);
+  });
+});
+
 describe('always-allow grant eligibility', () => {
   it('admits only a connector tool the host classified as inspection', () => {
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);
     expect(allowsToolGrant(toolInfo('notes', 'lookup_note'))).toBe(false);
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'edit' })).toBe(false);
-    expect(allowsToolGrant({ ...toolInfo('', 'current_datetime'), type: 'truefoundry-system', effect: 'inspect' })).toBe(
-      false,
-    );
+    expect(
+      allowsToolGrant({ ...toolInfo('', 'current_datetime'), type: 'truefoundry-system', effect: 'inspect' }),
+    ).toBe(false);
   });
 
   it('end-to-end: a real read-only MCP tool that omits openWorldHint is not eligible', async () => {

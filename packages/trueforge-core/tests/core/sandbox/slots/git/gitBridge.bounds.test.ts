@@ -86,7 +86,17 @@ describe('GitBridge keeps hostile input from using up the server', () => {
     if (plan === undefined) {
       throw new Error(`not a bridged command: ${command}`);
     }
-    return { command, plan, token: TOKEN, guest, sandboxId: 's1-test', cwd, timeoutSeconds: 60, signal };
+    return {
+      command,
+      plan,
+      token: TOKEN,
+      approvedRemotes: undefined,
+      guest,
+      sandboxId: 's1-test',
+      cwd,
+      timeoutSeconds: 60,
+      signal,
+    };
   }
 
   test('a clone is shallow unless the command asks for more history', async () => {

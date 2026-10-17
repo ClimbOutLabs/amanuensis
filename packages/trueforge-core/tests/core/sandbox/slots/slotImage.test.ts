@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SLOT_AGENT_VERSION, SLOT_PLATFORM, SLOT_RUNSC_VERSION } from '../../../../src/core/sandbox/slots/slotContract';
+import {
+  DEFAULT_OCR_LANGUAGES,
+  requiredOcrLanguages,
+  tesseractPackageFor,
+} from '../../../../src/documents/ocrLanguages';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..', '..');
 
@@ -20,6 +25,21 @@ describe('the slot image and the server agree on what is deployed', () => {
   test('the gVisor release in the Dockerfile is the one the server expects', () => {
     const release = captured(read('ops/sandbox-slot/Dockerfile'), /^ARG RUNSC_RELEASE=(\S+)$/m);
     expect(SLOT_RUNSC_VERSION).toBe(`runsc version release-${release}`);
+  });
+
+  test('the guest image has the tools and language data the document pipeline needs', () => {
+    const dockerfile = read('ops/sandbox-slot/Dockerfile');
+    const block = captured(
+      dockerfile,
+      /(apt-get install -y --no-install-recommends poppler-utils[\s\S]*?)&& apt-get clean/,
+    );
+    const installed = block.replace(/\\\n/g, ' ').split(/\s+/);
+    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; poppler-data maps CJK character codes to text.
+    expect(installed).toEqual(expect.arrayContaining(['poppler-utils', 'poppler-data', 'tesseract-ocr']));
+    // Every language the server may select, and script detection, has its data package in the image.
+    for (const language of requiredOcrLanguages(DEFAULT_OCR_LANGUAGES)) {
+      expect(installed).toContain(tesseractPackageFor(language));
+    }
   });
 
   test('the agent reports the build and platform the server expects', () => {
