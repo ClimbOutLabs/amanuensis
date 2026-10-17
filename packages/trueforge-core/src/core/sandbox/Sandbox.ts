@@ -5755,7 +5755,7 @@ export class Sandbox extends LocalToolMCP {
 
   /**
    * Resolves a staged upload to its real path. With `allowSnapshots` a private snapshot of an upload
-   * (see {@link createDocumentSnapshot}) is accepted too, which is what the text and OCR tools are given.
+   * (made by createDocumentSnapshot) is accepted too, which is what the text and OCR tools are given.
    */
   private async canonicalStagedFilePath(
     filePath: string,

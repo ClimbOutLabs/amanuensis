@@ -1,9 +1,9 @@
 /** The most pixels one image may have before it is not sent to OCR: a decompression bomb would exhaust the sandbox. */
 export const MAX_OCR_PIXELS = 50_000_000;
 
-export type SniffedImageFormat = 'png' | 'jpeg' | 'gif' | 'bmp' | 'webp' | 'tiff';
+type SniffedImageFormat = 'png' | 'jpeg' | 'gif' | 'bmp' | 'webp' | 'tiff';
 
-export interface SniffedImage {
+interface SniffedImage {
   format: SniffedImageFormat;
   width: number;
   height: number;

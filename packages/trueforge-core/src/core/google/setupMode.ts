@@ -11,8 +11,6 @@
 import { z } from 'zod';
 import { CLIENT_TYPES } from './clientJson.js';
 
-export const GOOGLE_CALLBACK_PATH = '/api/v1/user/settings/google/oauth/callback';
-
 /** Where a paste-mode consent ends: an address nothing serves, whose bar holds the code and state. */
 export const PASTE_REDIRECT_URI = 'http://127.0.0.1:53682/callback';
 
@@ -85,14 +83,19 @@ function isLoopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(hostname);
 }
 
-export function resolveGoogleSetup(input: { public_base_url: string; request_url: string }): GoogleSetupInfo {
+/** `callback_path` is where the server mounts the consent callback, which the host owns. */
+export function resolveGoogleSetup(input: {
+  public_base_url: string;
+  request_url: string;
+  callback_path: string;
+}): GoogleSetupInfo {
   const publicBase = publicHttpsBase(input.public_base_url);
   const request = new URL(input.request_url);
   if (publicBase !== null && new URL(publicBase).origin === request.origin) {
-    return { mode: 'web', client_type: 'web', redirect_uri: `${publicBase}${GOOGLE_CALLBACK_PATH}` };
+    return { mode: 'web', client_type: 'web', redirect_uri: `${publicBase}${input.callback_path}` };
   }
   if (isLoopbackHostname(request.hostname)) {
-    return { mode: 'loopback', client_type: 'desktop', redirect_uri: `${request.origin}${GOOGLE_CALLBACK_PATH}` };
+    return { mode: 'loopback', client_type: 'desktop', redirect_uri: `${request.origin}${input.callback_path}` };
   }
   return { mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI };
 }

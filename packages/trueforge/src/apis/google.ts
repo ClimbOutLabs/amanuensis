@@ -23,6 +23,7 @@ import {
   completeGoogleConsentRoute,
   disconnectGoogleRoute,
   getGoogleConnectionStatusRoute,
+  GOOGLE_CALLBACK_PATH,
   googleConsentCallbackRoute,
   testGoogleConnectionRoute,
 } from '../routes/googleRoutes';
@@ -153,7 +154,11 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     return { tenant_id: requestContext.tenant_id, created_by: requestContext.subject.id };
   };
   const setupFor = (c: Parameters<ResolveRequestContext>[0]) =>
-    resolveGoogleSetup({ public_base_url: configuration.PUBLIC_BASE_URL, request_url: browserUrlOf(c) });
+    resolveGoogleSetup({
+      public_base_url: configuration.PUBLIC_BASE_URL,
+      request_url: browserUrlOf(c),
+      callback_path: GOOGLE_CALLBACK_PATH,
+    });
 
   const statusHandler: RouteHandler<typeof getGoogleConnectionStatusRoute> = async c => {
     const record = await deps.googleConnectionStore.get(ownerOf(c));

@@ -1,10 +1,9 @@
-import { DraftReviewLedger } from '../../../../src/core/email/gmail/draftReview';
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/approvalGrant';
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
-import { build, json, route, sentDraft, text, type Route } from './harness';
+import { approvalProblem, approvedContext, build, json, route, sentDraft, text, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 
@@ -280,17 +279,35 @@ describe('send_draft', () => {
 
   it('sends the reviewed draft', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    const response = await tools.callTool(call, undefined, approvedContext(info));
     expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', message_id: 'sent-1', status: 'sent' });
     expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
     expect(google.bodies.at(-1)).toEqual({ id: 'd1' });
   });
 
-  it('will not send a draft nobody reviewed', async () => {
-    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+  it('will not send a draft nobody approved, by whatever route the call arrives', async () => {
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
     const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('needs your OK again');
+    expect(text(response)).toContain('was not approved');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('will not send when the draft no longer matches the card that was approved', async () => {
+    let live: GmailMessage = ORIGINAL;
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+        sendRoute,
+      ],
+    });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    live = plainDraft({ id: 'd-m1', threadId: 't9', to: 'mallory@example.com', subject: 'Lease', body: 'Other text.' });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(text(response)).toContain('changed after you approved it');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -302,21 +319,13 @@ describe('send_draft', () => {
       return undefined;
     };
     const { tools, google, sleeps } = await build({ features: [...COMPOSE], routes: [draftRoute(), dropped] });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    const response = await tools.callTool(call, undefined, approvedContext(info));
     expect(text(response)).toContain('The send may have gone through. Check your Sent folder before trying again.');
     expect(text(response)).not.toContain('busy');
     expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
     expect(sleeps).toEqual([]);
-  });
-
-  it('will not send twice on one review', async () => {
-    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const second = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(second)).toContain('needs your OK again');
-    expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
   });
 
   describe('a draft edited after the user saw it', () => {
@@ -344,33 +353,88 @@ describe('send_draft', () => {
       },
     ];
 
-    it.each(edits)('refuses when the $name changed, even if the card is rebuilt afterwards', async ({ edit }) => {
-      const reviewed = plainDraft({
-        id: 'd-m1',
-        threadId: 't9',
-        to: 'Grace <grace@example.com>, lin@example.com',
-        subject: 'Lease',
-        body: 'Thursday works.',
-      });
-      let live: GmailMessage = reviewed;
-      const { tools, google } = await build({
+    it.each(edits)(
+      'ends the approval when the $name changed, even if the card is rebuilt afterwards',
+      async ({ edit }) => {
+        const reviewed = plainDraft({
+          id: 'd-m1',
+          threadId: 't9',
+          to: 'Grace <grace@example.com>, lin@example.com',
+          subject: 'Lease',
+          body: 'Thursday works.',
+        });
+        let live: GmailMessage = reviewed;
+        const { tools, google, sentinel } = await build({
+          features: [...COMPOSE],
+          routes: [
+            url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+            sendRoute,
+          ],
+        });
+        const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+        const info = await tools.toolCallInfo(call);
+        live = plainDraft({
+          to: 'Grace <grace@example.com>, lin@example.com',
+          subject: 'Lease',
+          ...edit,
+        });
+        // Rebuilding the card after the edit must not replace what the user approved.
+        await tools.toolCallInfo(call);
+        expect(await approvalProblem({ tools, sentinel, info, call })).toContain('Approval invalid');
+        expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+      },
+    );
+
+    it('asks again with the new text after a denied card and an edit in Gmail, and then sends', async () => {
+      let live: GmailMessage = ORIGINAL;
+      const { tools, google, sentinel } = await build({
         features: [...COMPOSE],
         routes: [
           url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
           sendRoute,
         ],
       });
-      await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+      const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+      await tools.toolCallInfo(call);
+      // The owner denies that card and edits the draft in Gmail.
       live = plainDraft({
+        id: 'd-m1',
+        threadId: 't9',
         to: 'Grace <grace@example.com>, lin@example.com',
         subject: 'Lease',
-        ...edit,
+        body: 'Friday works better.',
       });
-      // Rebuilding the card after the edit must not replace what the user approved.
-      await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      expect(text(response)).toContain('changed after you reviewed it');
-      expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+      const second = await tools.toolCallInfo(call);
+      expect(second.tier3_card?.email?.body).toBe('Friday works better.');
+      expect(await approvalProblem({ tools, sentinel, info: second, call })).toBeUndefined();
+      const response = await tools.callTool(call, undefined, approvedContext(second));
+      expect(JSON.parse(text(response))).toMatchObject({ status: 'sent' });
+      expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
+    });
+
+    it('does not honour the approval of an older card if the draft is put back to what it showed', async () => {
+      const edited = plainDraft({
+        id: 'd-m1',
+        threadId: 't9',
+        to: 'Grace <grace@example.com>, lin@example.com',
+        subject: 'Lease',
+        body: 'Friday works better.',
+      });
+      let live: GmailMessage = ORIGINAL;
+      const { tools, sentinel } = await build({
+        features: [...COMPOSE],
+        routes: [
+          url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+          sendRoute,
+        ],
+      });
+      const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+      const first = await tools.toolCallInfo(call);
+      live = edited;
+      const second = await tools.toolCallInfo(call);
+      live = ORIGINAL;
+      expect(await approvalProblem({ tools, sentinel, info: second, call })).toContain('Approval invalid');
+      expect(await approvalProblem({ tools, sentinel, info: first, call })).toBeUndefined();
     });
 
     it('refuses when an attachment was added after review', async () => {
@@ -422,51 +486,6 @@ describe('send_draft', () => {
       expect(text(response)).toContain('cannot show you in full');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
-  });
-
-  it('fails closed after a restart, when the review is gone', async () => {
-    const first = await build({ features: [...COMPOSE], routes: [draftRoute()], reviews: new DraftReviewLedger() });
-    await first.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const restarted = await build({ features: [...COMPOSE], routes: [draftRoute()], reviews: new DraftReviewLedger() });
-    const response = await restarted.tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('This send needs your OK again.');
-    expect(text(response)).not.toContain('restarted');
-  });
-
-  it('asks again, without blaming a restart, when the review has expired', async () => {
-    let now = 1_000_000;
-    const { tools, google } = await build({
-      features: [...COMPOSE],
-      routes: [draftRoute()],
-      reviews: new DraftReviewLedger(() => now),
-    });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    now += 31 * 60 * 1000;
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('This send needs your OK again.');
-    expect(text(response)).not.toContain('restarted');
-    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
-  });
-
-  it('voids the review when the draft is changed through update_draft', async () => {
-    const { tools, google } = await build({
-      features: [...COMPOSE],
-      routes: [
-        draftRoute(),
-        url =>
-          url.pathname === '/gmail/v1/users/me/drafts/d1' && url.search === ''
-            ? json({ id: 'd1', message: { id: 'm', threadId: 't9' } })
-            : undefined,
-      ],
-    });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    await tools.callTool({
-      name: 'update_draft',
-      arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'New text.' },
-    });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('needs your OK again');
-    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
   describe('drafts that cannot be shown in full are refused before any card', () => {
@@ -545,7 +564,7 @@ describe('send_draft', () => {
       expect(info.pre_dispatch_failure?.message).toContain(says);
       expect(info.tier3_card).toBeFalsy();
       const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      expect(text(response)).toContain('needs your OK again');
+      expect(text(response)).toContain('"error"');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
   });
@@ -574,7 +593,7 @@ describe('send_draft', () => {
       expect(info.tier3_card).toBeFalsy();
       expect(info.pre_dispatch_failure?.message).toContain('too long to show you in full');
       const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      expect(text(response)).toContain('needs your OK again');
+      expect(text(response)).toContain('too long to show you in full');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
   });
@@ -613,7 +632,7 @@ describe('the approval a send waits for', () => {
     const call = {
       tool_name: 'send_draft',
       tool_type: info.type,
-      canonical_params: params,
+      canonical_params: (await tools.liveMintParams({ name: 'send_draft', arguments: params })) ?? params,
       tier: 3 as const,
       approval_token_id: info.approval_token_id ?? null,
       approval_binding: null,
