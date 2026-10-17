@@ -151,8 +151,16 @@ export const AgentInputUserMessageSchema = z
 export type AgentInputUserMessage = z.infer<typeof AgentInputUserMessageSchema>;
 
 // persisted to redis - thread_id is stripped
+/**
+ * A recorded decision applies only to the call it was issued for: it names that call's approval token and
+ * arguments hash, and a decision whose binding does not match the call in context is ignored. Contexts
+ * saved before the binding existed parse with null and are never honoured, so they ask again.
+ */
 export const AgentApprovalDecisionMessageSchema = UserToolApprovalMessageSchema.omit({
   thread_id: true,
+}).extend({
+  approval_token_id: z.string().nullable().default(null),
+  arguments_hash: z.string().nullable().default(null),
 });
 
 export const InputTokensBreakdownSchema = z.object({
@@ -646,6 +654,7 @@ export const ApprovalToolCallRefSchema = z
       .optional()
       .describe('Set when a scheduled run could not save this action for the owner, and why. It will not run.'),
     can_always_allow: z.boolean().optional().describe('Whether the owner may allow this tool for good.'),
+    can_chat_allow: z.boolean().optional().describe('Whether the user may approve this tool for the rest of the chat.'),
     expires_at: z.string().optional().describe('ISO 8601 time after which a held action can no longer be approved.'),
   })
   .openapi('ApprovalToolCallRef');

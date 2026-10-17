@@ -40,6 +40,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import type { ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
@@ -70,6 +71,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -79,6 +81,14 @@ import { submitRetainWithVerification, type SummarizeTurnContext } from '../runt
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import {
+  flushModelUsage,
+  modelIdentity,
+  TurnModelUsageLedger,
+  UsageRecordingLLM,
+  type ModelUsageDrainMember,
+  type TurnModelUsage,
+} from '../runtime/modelUsage';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
@@ -115,6 +125,16 @@ import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/t
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+
+/** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
+function turnHelperModelFqn(): string | undefined {
+  return envManagedHelperModelFqn({
+    apiKey: configuration.NEBIUS_API_KEY,
+    managedByTrueFoundry: isTrueFoundryModeEnabled(),
+    model: configuration.TOKEN_FACTORY_MODEL,
+    cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
+  });
+}
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
@@ -194,6 +214,8 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
 }
 
 export interface TurnsRouterDeps {
+  /** Shipped MCP catalog: tells a designated search provider's search tools and plumbing arguments. */
+  mcpCatalog: McpCatalog;
   sessions: Sessions<SessionCustom, TurnCustom>;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
@@ -213,7 +235,7 @@ export interface TurnsRouterDeps {
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
-  /** Per-instance daily Token Factory cap; a no-op without `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
+  /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
@@ -235,7 +257,13 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
+  | 'activeTurns'
+  | 'turnDrains'
+  | 'eventSubscriptions'
+  | 'logger'
+  | 'globalSettingsStore'
+  | 'mcpCatalog'
+  | 'tokenFactoryBudget'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -245,7 +273,7 @@ export type BeginTurnExecutionDeps = Pick<
   /** Fork-only: required unconditionally by createTurnResolver's memory/repository wiring. */
   tokenStore: IOAuthTokenStore;
   repositoryStore: IRepositoryStore;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
@@ -269,6 +297,7 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
+  mcpCatalog: McpCatalog;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -310,8 +339,11 @@ function createTurnResolver(deps: {
   toolOutputScreenEnabled: boolean;
   /** Limits and counts the turn's Token Factory calls against the daily cap. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Receives every model call the turn makes, for the usage shown under the answer. */
+  modelUsage: TurnModelUsage;
 }): SpaceTurnResourceResolver {
   const {
+    mcpCatalog,
     mcpServerStore,
     tokenStore,
     skillStore,
@@ -343,6 +375,7 @@ function createTurnResolver(deps: {
     clientTimezone,
     toolOutputScreenEnabled,
     tokenFactoryBudget,
+    modelUsage,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -351,7 +384,7 @@ function createTurnResolver(deps: {
     : {};
   return new SpaceTurnResourceResolver(
     {
-      llm: async name => {
+      llm: async (name, role) => {
         const resolved = await getModelDetails({
           tenant_id,
           name,
@@ -373,30 +406,61 @@ function createTurnResolver(deps: {
             ...(providerConfig.provider.type === 'tokenfactory' ? {} : metadataHeaders),
           },
         });
-        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) =>
-          new VercelAILLM({
+        const primaryIdentity = modelIdentity({ name, providerConfig: routed.providerConfig });
+        const fallbackConfig = routed.fallbackProviderConfig;
+        const fallbackIdentity =
+          fallbackConfig === undefined ? undefined : modelIdentity({ name, providerConfig: fallbackConfig });
+        // The identity is settled per call, because a call that failed over was answered by the fallback.
+        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) => {
+          let served = primaryIdentity;
+          const client = new VercelAILLM({
             providerConfig: withMetadataHeaders(routed.providerConfig),
-            ...(withFailover && routed.fallbackProviderConfig !== undefined
-              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig), onFallback: onFailover }
+            ...(withFailover && fallbackConfig !== undefined && fallbackIdentity !== undefined
+              ? {
+                  fallbackProviderConfig: withMetadataHeaders(fallbackConfig),
+                  onFallback: () => {
+                    served = fallbackIdentity;
+                    onFailover();
+                  },
+                }
               : {}),
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
           });
-        const role = tokenFactoryRole({
+          return new UsageRecordingLLM({
+            llm: client,
+            onCall: usage => {
+              modelUsage.record({ role, identity: served, usage });
+            },
+          });
+        };
+        const tokenFactoryRoleOfModel = tokenFactoryRole({
           primaryType: routed.providerConfig.provider.type,
-          fallbackType: routed.fallbackProviderConfig?.provider.type,
+          fallbackType: fallbackConfig?.provider.type,
         });
+        const tokenFactoryConfig =
+          tokenFactoryRoleOfModel === 'primary'
+            ? routed.providerConfig
+            : tokenFactoryRoleOfModel === 'fallback'
+              ? fallbackConfig
+              : undefined;
         // A new turn on a Token Factory model is refused up front once today's budget is gone; the
         // metered client re-checks before every model call after that.
-        if (role === 'primary') {
+        if (tokenFactoryRoleOfModel === 'primary') {
           await tokenFactoryBudget.assertWithinCap();
         }
         return {
           modelClient:
-            role === undefined
+            tokenFactoryRoleOfModel === undefined || tokenFactoryConfig === undefined
               ? buildClient({ withFailover: true, onFailover: () => undefined })
-              : new TokenFactoryMeteredLLM({ role, budget: tokenFactoryBudget, logger, build: buildClient }),
+              : new TokenFactoryMeteredLLM({
+                  role: tokenFactoryRoleOfModel,
+                  modelId: tokenFactoryConfig.model.id,
+                  budget: tokenFactoryBudget,
+                  logger,
+                  build: buildClient,
+                }),
           defaultModelParams: resolved.defaultModelParams,
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
@@ -427,7 +491,10 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
-          search_provider: connection.search_provider,
+          search_provider:
+            connection.search_provider === undefined
+              ? undefined
+              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -843,6 +910,8 @@ export interface DrainTurnEventsInput {
         summarize?: SummarizeTurnContext | undefined;
       }
     | undefined;
+  /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
+  modelUsage?: ModelUsageDrainMember | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
@@ -879,6 +948,7 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
     memory,
     artifacts,
     profileLearning,
+    modelUsage,
   } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
@@ -898,6 +968,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
+        // First, so the answer's usage is visible before the slower follow-up work below.
+        const flushUsage = async () => {
+          if (modelUsage !== undefined) {
+            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+          }
+        };
+        await flushUsage();
         if (memory !== undefined) {
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
@@ -928,6 +1005,8 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             logger,
           });
         }
+        // The summarization and profile learning calls above record after the first flush.
+        await flushUsage();
         if (artifacts !== undefined) {
           await resolveAndSubmitArtifactPersistence({
             ...artifacts,
@@ -967,6 +1046,7 @@ export interface TurnEventDrainInput {
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
+  modelUsage: ModelUsageDrainMember;
   memory?:
     | {
         client: MemoryClient;
@@ -1006,6 +1086,7 @@ export async function beginTurnExecution(params: {
     finalization_buffer_ms: 30_000,
   });
   const tenant_id = session.tenant_id;
+  const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
   // One read per turn: the persisted override (or env default) applies to the whole turn.
   const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
     globalSettingsStore: deps.globalSettingsStore,
@@ -1021,10 +1102,12 @@ export async function beginTurnExecution(params: {
     tenantId: tenant_id,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
     agentStore: deps.agentStore,
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
     memoryClientPresent: deps.memoryClient !== undefined,
+    helperFqn: turnHelperModelFqn(),
   });
   // Same one-read-per-turn contract for the recall screen: the Settings toggle's
   // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -1048,9 +1131,12 @@ export async function beginTurnExecution(params: {
     modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
+    helperFqn: turnHelperModelFqn(),
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
+    mcpCatalog: deps.mcpCatalog,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1081,6 +1167,7 @@ export async function beginTurnExecution(params: {
     toolOutputScreenEnabled,
     turnArtifactStore: deps.turnArtifactStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1124,6 +1211,7 @@ export async function beginTurnExecution(params: {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
+      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1663,6 +1751,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       legacyParentActivation,
       latestManualActivationAfterParent,
     });
+    const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
     const internalSources = await resolveTurnInternalSources({
       session,
       previousTurnId,
@@ -1674,6 +1763,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      helperFqn: turnHelperModelFqn(),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1778,10 +1869,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           eventStore: deps.sessionStore,
           modelProviderStore,
           tokenFactoryBudget: deps.tokenFactoryBudget,
+          modelUsage,
           memoryClient,
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
           userText: extractUserMessageText(body.input),
+          helperFqn: turnHelperModelFqn(),
           turnModelFqn: await resolveTurnModelFqn({
             tenantId: requestContext.tenant_id,
             personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
@@ -1808,10 +1901,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       tenantId: requestContext.tenant_id,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
+      helperFqn: turnHelperModelFqn(),
     });
 
     const abortController = new AbortController();
@@ -1836,6 +1931,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
+      mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,
@@ -1867,6 +1963,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
     });
 
     // First turn only: derive the title from the first user message. The store
@@ -2144,6 +2241,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
+      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
       memory:
         memoryClient === undefined
           ? undefined

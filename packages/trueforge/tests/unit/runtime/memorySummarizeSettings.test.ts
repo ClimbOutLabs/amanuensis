@@ -18,6 +18,7 @@ import {
   resolveMemorySummarizeEnabled,
   resolveTurnSummarizeContext,
 } from '../../../src/runtime/memorySummarizeSettings';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const silentLogger = createLogger({ silent: true });
@@ -250,6 +251,7 @@ describe('resolveTurnSummarizeContext', () => {
       tenantId: 'tenant-1',
       modelProviderStore: fakeModelProviderStore(),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
       agentStore: overrides.agentStore ?? fakeAgentStore(),
       personaModelName: undefined,
       sessionAgent: overrides.sessionAgent ?? inlineAgent(),
@@ -274,6 +276,7 @@ describe('resolveTurnSummarizeContext', () => {
       modelProviderStore,
       summarizationModelFqn: 'openai/gpt-4o',
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
     });
     expect(logged(lines, 'Turn summarization is active for this turn')).toBe(true);
   });

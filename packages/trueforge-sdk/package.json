@@ -473,6 +473,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
         },
+        "./settings/tokenFactoryUsage": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+        },
         "./settings/toolOutputScreens": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/toolOutputScreens/exports.d.mts",

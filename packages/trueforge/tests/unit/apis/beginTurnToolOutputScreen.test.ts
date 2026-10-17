@@ -9,6 +9,7 @@ import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import type {
   CompareAndSetGlobalSettingInput,
@@ -168,6 +169,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
+        mcpCatalog: McpCatalog.load(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,
