@@ -127,7 +127,10 @@ function autoDenyMessage(decision: TierDecision): string {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
     case 'incomplete_send_card':
-      return `Auto-denied: ${decision.reason_detail ?? 'the card cannot show everything that would be sent.'}`;
+      // The chat shows the owner only the model's reply by default, so the model is told what to say.
+      return `Auto-denied: ${decision.reason_detail ?? 'the card cannot show everything that would be sent.'}${
+        decision.owner_message === null ? '' : ` Then tell the user: "${decision.owner_message}"`
+      }`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     default:

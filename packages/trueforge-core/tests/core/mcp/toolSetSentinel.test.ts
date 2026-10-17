@@ -153,6 +153,7 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     const toolSet = makeToolSet({ tools: [reply], services: servicesWithGrants([]) });
     const info = await toolSet.toolCallInfo({ name: 'reply', arguments: { body: 'ok' } });
     expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    expect(info.pre_dispatch_failure?.message).toContain('Then tell the user: "Nothing was sent');
 
     const result = await executeToolCalls({
       assistantMessage: {
