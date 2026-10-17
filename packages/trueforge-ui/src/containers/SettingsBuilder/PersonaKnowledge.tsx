@@ -225,7 +225,7 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
         {loading ? (
           <p className="p-3 text-sm text-text-secondary">Loading library…</p>
         ) : documents.length === 0 ? (
-          <p className="p-3 text-sm text-text-secondary">Nothing here yet — add the first document below.</p>
+          <p className="p-3 text-sm text-text-secondary">Nothing here yet. Add the first document below.</p>
         ) : (
           documents.map(document => (
             <article key={document.id} className="border-b border-border p-3 last:border-b-0">
@@ -313,7 +313,7 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
               type="text"
               value={title}
               onChange={event => setTitle(event.target.value)}
-              placeholder="Title (optional — defaults to the file name)"
+              placeholder="Title (optional, defaults to the file name)"
               className="rounded-md border border-border bg-card-bg px-3 py-2 text-sm text-text-primary"
             />
           </div>
@@ -332,7 +332,7 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
               type="text"
               value={title}
               onChange={event => setTitle(event.target.value)}
-              placeholder="Title (optional — defaults to the page title)"
+              placeholder="Title (optional, defaults to the page title)"
               className="rounded-md border border-border bg-card-bg px-3 py-2 text-sm text-text-primary"
             />
             <p className="text-xs text-text-secondary">
