@@ -120,6 +120,10 @@ export const InternalToolCallInfoSchema = z.object({
     .object({
       kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
       message: z.string(),
+      owner_message: z
+        .string()
+        .optional()
+        .describe('One plain line shown to the owner instead of the generic message.'),
     })
     .optional()
     .describe('Host-only failure captured while preparing the call, before provider dispatch.'),

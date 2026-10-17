@@ -84,6 +84,8 @@ export interface TierDecision {
   escalated: boolean;
   /** Set when the action is auto-denied without a card. */
   auto_deny: AutoDenyReason | null;
+  /** One plain line for the owner when an auto-denied call needs more than the generic message, or null. */
+  owner_message: string | null;
   /** Populated for Tier 3 carded actions and for every Tier 2 action. */
   card: Tier3Card | null;
   /** Tier 2 member kind, for the per-kind relaxation lookup. */
@@ -129,6 +131,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
@@ -143,6 +146,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
@@ -224,12 +228,14 @@ export function tier3Decision(input: {
 export function autoDenyDecision(input: {
   reason: AutoDenyReason;
   reason_detail: string | null;
+  owner_message?: string | null | undefined;
   sensitive_read: boolean;
 }): TierDecision {
   return {
     ...baseDecision(),
     tier: 3,
     reason: 'auto_denied',
+    owner_message: input.owner_message ?? null,
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
     auto_deny: input.reason,

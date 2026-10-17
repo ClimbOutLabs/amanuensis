@@ -1343,7 +1343,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   if (extraction.incomplete_send !== null) {
     return autoDenyDecision({
       reason: 'incomplete_send_card',
-      reason_detail: extraction.incomplete_send,
+      reason_detail: extraction.incomplete_send.model_message,
+      owner_message: extraction.incomplete_send.owner_message,
       sensitive_read: false,
     });
   }

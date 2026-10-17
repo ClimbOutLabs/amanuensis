@@ -1116,10 +1116,7 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message:
-                toolCall.tool_info.tier_reason === 'incomplete_send_card'
-                  ? 'Nothing was sent: it could not be shown in full. Ask again with every recipient named and a shorter message.'
-                  : 'Use a tool that is allowed in this conversation or change strategy.',
+              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
               suggested_action: 'change_strategy',
             }
           : {

@@ -16,6 +16,8 @@
  * Tier 3 with the destination marked unknown.
  */
 
+import { createHash } from 'node:crypto';
+
 export interface ExtractedCardFields {
   destination: string | null;
   recipient: string | null;
@@ -29,6 +31,9 @@ export interface ExtractedCardFields {
 }
 
 export type CardFieldExtractor = (params: Record<string, unknown>) => ExtractedCardFields;
+
+/** Keys that set a forwarding address; also recipient keys. */
+const FORWARD_KEYS = ['forward', 'forward_to'];
 
 /** Param keys that can carry a recipient. `to` alone is never enough. */
 const RECIPIENT_KEYS = [
@@ -53,8 +58,7 @@ const RECIPIENT_KEYS = [
   'members',
   'emails',
   'webhook_url',
-  'forward',
-  'forward_to',
+  ...FORWARD_KEYS,
   'to_recipients',
   'participants',
 ];
@@ -266,16 +270,62 @@ function keyDisplay(key: string): string {
   return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
 }
 
-const ATTACHMENT_KEYS = new Set(['attachment', 'attachments']);
-const ATTACHMENT_BODY_KEYS = new Set(['content', 'data', 'body', 'base64']);
+const BASE64_PREFIX = /^data:[^,]*;base64,/;
+const BASE64_BLOB = /^[A-Za-z0-9+/]{64,}={0,2}$/;
+const ATTACHMENT_MAX_DEPTH = 6;
+
+function isAttachmentKey(key: string): boolean {
+  const normalized = normalizeKey(key);
+  return normalized.endsWith('attachment') || normalized.endsWith('attachments');
+}
+
+function base64Body(value: string): string {
+  return value.replace(BASE64_PREFIX, '').replace(/[\r\n]/g, '');
+}
+
+/** True for a string that is real base64 data, so its encoded bytes are what leaves, not readable text. */
+function isBase64Blob(value: string): boolean {
+  const body = base64Body(value);
+  return BASE64_BLOB.test(body) && body.length % 4 === 0 && Buffer.from(body, 'base64').toString('base64') === body;
+}
+
+function sizeLabel(bytes: number): string {
+  return bytes < 1024 ? `${String(bytes)} bytes` : `about ${String(Math.round(bytes / 1024))} KB`;
+}
+
+function blobSummary(value: string): string {
+  const body = base64Body(value);
+  const fingerprint = createHash('sha256').update(body).digest('hex').slice(0, 12);
+  return `(file data, ${sizeLabel(Buffer.from(body, 'base64').length)}, fingerprint ${fingerprint})`;
+}
+
+/** Replaces base64 file data under an attachment with its size and fingerprint; readable text stays as it is. */
+function summarizeFileData(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return isBase64Blob(value) ? blobSummary(value) : value;
+  }
+  if (depth > ATTACHMENT_MAX_DEPTH) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => summarizeFileData(item, depth + 1));
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, field]) => [key, summarizeFileData(field, depth + 1)]));
+}
 
 /**
- * Attachment bodies are bound into the approval but not printed: the card names each file and its size,
- * so a large attachment never counts against the length a send may have.
+ * File data is bound into the approval but not printed: the card gives each file's size and a fingerprint,
+ * so a large attachment never counts against the length a send may have. Text is never hidden this way.
  */
-function withAttachmentSizes(value: unknown): unknown {
+function withAttachmentSummaries(value: unknown, depth = 0): unknown {
+  if (depth > ATTACHMENT_MAX_DEPTH) {
+    return value;
+  }
   if (Array.isArray(value)) {
-    return value.map(withAttachmentSizes);
+    return value.map(item => withAttachmentSummaries(item, depth + 1));
   }
   if (!isRecord(value)) {
     return value;
@@ -283,9 +333,7 @@ function withAttachmentSizes(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => [
       key,
-      ATTACHMENT_BODY_KEYS.has(key.toLowerCase()) && typeof field === 'string'
-        ? `(${String(Array.from(field).length)} characters, not shown)`
-        : field,
+      isAttachmentKey(key) ? summarizeFileData(field) : withAttachmentSummaries(field, depth + 1),
     ]),
   );
 }
@@ -296,7 +344,7 @@ function renderOutboundLines(
 ): { lines: string[]; truncated: boolean } {
   let truncated = false;
   const lines = Object.entries(params).map(([key, value]) => {
-    const shownValue = ATTACHMENT_KEYS.has(key.toLowerCase()) ? withAttachmentSizes(value) : value;
+    const shownValue = isAttachmentKey(key) ? summarizeFileData(value) : withAttachmentSummaries(value);
     const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
     const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
     truncated ||= rest > 0;
@@ -423,21 +471,15 @@ interface ConnectorFamily {
   destination?: (params: Record<string, unknown>) => string | null;
 }
 
-const FORWARD_KEY_SET = new Set(['forward', 'forwardto']);
+const FORWARD_KEY_SET = new Set(FORWARD_KEYS.map(normalizeKey));
 
 /** True when any argument, at any depth, sets a forwarding address. */
-function hasForwardAction(value: unknown, depth = 0): boolean {
-  if (Array.isArray(value)) {
-    return depth <= NESTED_RECIPIENT_MAX_DEPTH && value.some(item => hasForwardAction(item, depth + 1));
-  }
-  if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
-    return false;
-  }
-  return Object.entries(value).some(([key, field]) =>
-    FORWARD_KEY_SET.has(normalizeKey(key))
-      ? typeof field === 'string' && field.trim() !== ''
-      : hasForwardAction(field, depth + 1),
-  );
+function hasForwardAction(params: Record<string, unknown>): boolean {
+  return hasArgument({
+    value: params,
+    keys: FORWARD_KEY_SET,
+    test: field => typeof field === 'string' && field.trim() !== '',
+  });
 }
 
 function repositoryLabel(params: Record<string, unknown>): string | null {
@@ -550,14 +592,14 @@ export interface ExtractionResult {
   /** The call sends data out (a send family, an external service, or a named recipient); it is never trusted by a hint or grant. */
   sends: boolean;
   /** Why a send cannot be shown to the user in full, or null. Such a send is refused, never carded. */
-  incomplete_send: string | null;
+  incomplete_send: IncompleteSend | null;
 }
 
 /** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
 const HIDDEN_SEND_PHRASES = ['reply_all', 'send_draft'];
 
-const DRAFT_KEY_SET = new Set(['draftid']);
-const REPLY_ALL_KEY_SET = new Set(['replyall']);
+const DRAFT_KEY_SET = new Set(['draft_id'].map(normalizeKey));
+const REPLY_ALL_KEY_SET = new Set(['reply_all'].map(normalizeKey));
 
 function isTruthyFlag(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -600,6 +642,13 @@ function hasHiddenSendArgument(params: Record<string, unknown>): boolean {
   );
 }
 
+interface IncompleteSend {
+  /** What the model is told, ending in the one thing to do. */
+  model_message: string;
+  /** One short plain line for the owner. */
+  owner_message: string;
+}
+
 function incompleteSend(input: {
   sends: boolean;
   params: Record<string, unknown>;
@@ -607,15 +656,27 @@ function incompleteSend(input: {
   needs_recipient: boolean;
   fields: ExtractedCardFields;
   truncated: boolean;
-}): string | null {
+}): IncompleteSend | null {
   if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES) || (input.sends && hasHiddenSendArgument(input.params))) {
-    return 'This tool sends to recipients or content that are filled in after approval, so the card cannot show them. Send a new message that names every recipient and includes its full text.';
+    return {
+      model_message:
+        'This tool sends to recipients or content that are filled in after approval, so the card cannot show them. Read the message first, then send it with every recipient named in `to` and `cc` and its full text written out.',
+      owner_message:
+        'Nothing was sent: it fills in who gets it after approval. Ask for a new message naming each person.',
+    };
   }
   if (input.sends && input.truncated) {
-    return 'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller parts, or tell the user it is too long to approve.';
+    return {
+      model_message:
+        'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller parts, or tell the user it is too long to approve.',
+      owner_message: 'Nothing was sent: it is too long to show you in full. Ask for a shorter message, or split it up.',
+    };
   }
   if (input.needs_recipient && input.fields.recipient === null) {
-    return 'The card cannot name who receives this. Name each recipient in `to` and try again.';
+    return {
+      model_message: 'The card cannot name who receives this. Name each recipient in `to` and try again.',
+      owner_message: 'Nothing was sent: it does not say who gets it. Ask the assistant to name each recipient.',
+    };
   }
   return null;
 }

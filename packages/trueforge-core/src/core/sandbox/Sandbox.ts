@@ -2333,6 +2333,7 @@ export class Sandbox extends LocalToolMCP {
         ? {}
         : {
             tier: sentinelStamp.tier,
+            tier_reason: sentinelStamp.tier_reason,
             tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
             tier2_kind: sentinelStamp.tier2_kind,
             approval_token_id: sentinelStamp.approval_token_id,

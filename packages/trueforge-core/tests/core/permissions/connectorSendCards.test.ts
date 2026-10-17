@@ -167,17 +167,19 @@ describe('attachments and refusal wording', () => {
         to: ['friend@example.com'],
         subject: 'Report',
         body: 'See attached',
-        attachments: [{ filename: 'report.pdf', mimeType: 'application/pdf', content: 'A'.repeat(500_000) }],
+        attachments: [
+          { filename: 'report.pdf', mimeType: 'application/pdf', content: Buffer.alloc(375_000, 7).toString('base64') },
+        ],
       }),
     );
     expect(decision.auto_deny).toBeNull();
     expect(decision.card?.outbound_truncated).toBe(false);
     expect(decision.card?.outbound_text).toContain('report.pdf');
-    expect(decision.card?.outbound_text).toContain('500000 characters, not shown');
+    expect(decision.card?.outbound_text).toContain('file data, about 366 KB, fingerprint');
   });
 
   test.each([
-    [mailCall('reply_all', { messageId: 'm1' }), 'names every recipient'],
+    [mailCall('reply_all', { messageId: 'm1' }), 'every recipient named'],
     [mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }), 'Name each recipient'],
     [
       mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }),
@@ -214,5 +216,56 @@ describe('hidden sends passed as arguments', () => {
     const decision = await classify(mailCall('send_message', { draftId: 'd1' }));
     expect(decision.tier).toBe(3);
     expect(decision.auto_deny).toBe('destination_unverifiable');
+  });
+});
+
+describe('attachment file data on the card', () => {
+  const sendWith = (attachments: Record<string, unknown>) =>
+    classify(
+      mailCall('send_email', { to: ['friend@example.com'], subject: 'Hi', body: 'See attached', ...attachments }),
+    );
+  const blob = (fill: number) => Buffer.alloc(30_000, fill).toString('base64');
+
+  test('plain text in an attachment is shown, and counts toward the cap', async () => {
+    const decision = await sendWith({
+      attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: 'meet me at noon by the old bridge' }],
+    });
+    expect(decision.card?.outbound_text).toContain('meet me at noon by the old bridge');
+    expectRefused(
+      await sendWith({
+        attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: 'word '.repeat(SEND_VALUE_MAX_CHARS) }],
+      }),
+    );
+  });
+
+  test('two different files of the same size look different', async () => {
+    const first = await sendWith({ attachments: [{ name: 'a.bin', contentBytes: blob(1) }] });
+    const second = await sendWith({ attachments: [{ name: 'a.bin', contentBytes: blob(2) }] });
+    expect(first.card?.outbound_text).not.toBe(second.card?.outbound_text);
+  });
+
+  test.each([
+    ['contentBytes under attachments', { attachments: [{ name: 'a.bin', contentBytes: blob(3) }] }],
+    ['file_attachments', { file_attachments: [{ filename: 'a.bin', content: blob(3) }] }],
+    ['a nested message.attachments', { message: { attachments: [{ filename: 'a.bin', file_data: blob(3) }] } }],
+    ['a bare base64 string', { attachments: [blob(3)] }],
+  ])('%s is summarised, not counted as text', async (_label, extra) => {
+    const decision = await sendWith(extra);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.outbound_text).toContain('file data, about 29 KB, fingerprint');
+    expect(decision.card?.outbound_truncated).toBe(false);
+  });
+});
+
+describe('the owner line for a refused send', () => {
+  test.each([
+    mailCall('reply_all', { messageId: 'm1' }),
+    mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }),
+    mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }),
+  ])('is one short plain line without the word card', async action => {
+    const line = (await classify(action)).owner_message;
+    expect(line).toMatch(/^Nothing was sent/);
+    expect(line?.length).toBeLessThan(120);
+    expect(line).not.toMatch(/card/i);
   });
 });
