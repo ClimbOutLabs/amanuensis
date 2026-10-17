@@ -683,6 +683,12 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
  * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
  * silently drop any but the first.
  */
+function inputAttachesFiles(input: TurnInputItem[]): boolean {
+  return input
+    .filter(isAgentInputUserMessage)
+    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
+}
+
 export function extractUserMessageText(input: TurnInputItem[] | undefined): string {
   const userMessages = input?.filter(isAgentInputUserMessage) ?? [];
   return userMessages
@@ -829,6 +835,8 @@ export interface DrainTurnEventsInput {
     | {
         client: MemoryClient;
         userText: string;
+        /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
+        attachedFiles: boolean;
         sessionTitle: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
@@ -878,10 +886,10 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. This is the honest taint signal available at this chokepoint: the
-  // harness classifies no tool output as trusted, so "saw a tool result" is exactly "ingested
-  // untrusted content". A turn with no tool result is the user's own voice: `user_stated`.
-  let ingestedToolOutput = false;
+  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
+  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
+  // `user_stated`.
+  let ingestedToolOutput = memory?.attachedFiles === true;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -1125,6 +1133,7 @@ export async function beginTurnExecution(params: {
           : {
               client: deps.memoryClient,
               userText: extractUserMessageText(input ?? []),
+              attachedFiles: inputAttachesFiles(input ?? []),
               sessionTitle: deps.sessionTitle,
               summarize: memorySummarize,
             },

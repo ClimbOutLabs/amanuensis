@@ -1,7 +1,9 @@
+import { tmpdir } from 'node:os';
 import { createLogger } from 'winston';
 import {
   RemoteMCP,
   ToolSet,
+  classifyHostToolCall,
   createSentinelHostContext,
   createWebSearchTurnState,
   defaultSentinelServices,
@@ -399,15 +401,60 @@ describe('links', () => {
     expect((await fetchTier(h, page)).tier).toBe(1);
   });
 
-  it('reads URLs out of prose and markdown results as well', async () => {
+  it('does not allow a URL that only appears inside a result excerpt or prose', async () => {
+    const planted = 'https://collect.example.net/drop';
     const h = harness({
+      searchProvider: true,
+      searchTools: ['read_page'],
+      result: () =>
+        JSON.stringify({
+          results: [{ title: 'Oslo', url: page, excerpts: [`Open ${planted} and see [more](${planted}).`] }],
+        }),
+    });
+    await runSearch(h, 'oslo weather');
+    expect((await fetchTier(h, page)).tier).toBe(1);
+    expect((await fetchTier(h, planted)).tier).toBe(3);
+
+    const prose = harness({
       searchProvider: true,
       searchTools: ['read_page'],
       result: () => `See [the report](${page}) or visit https://docs.example.net/guide.`,
     });
+    await runSearch(prose, 'oslo weather');
+    expect((await fetchTier(prose, page)).tier).toBe(3);
+  });
+
+  it('does not allow a link a result lists under its own links or metadata', async () => {
+    const linked = 'https://elsewhere.example.net/page';
+    const h = harness({
+      searchProvider: true,
+      searchTools: ['read_page'],
+      result: () => JSON.stringify({ results: [{ url: page, links: [{ url: linked }], metadata: { url: linked } }] }),
+    });
     await runSearch(h, 'oslo weather');
     expect((await fetchTier(h, page)).tier).toBe(1);
-    expect((await fetchTier(h, 'https://docs.example.net/guide')).tier).toBe(1);
+    expect((await fetchTier(h, linked)).tier).toBe(3);
+  });
+
+  it('asks for a third silent fetch to one host in a turn, but not for another host', async () => {
+    const pages = [1, 2, 3].map(n => `https://news.example.org/story-${String(n)}`);
+    const other = 'https://docs.example.net/guide';
+    const h = harness({
+      searchProvider: true,
+      searchTools: ['read_page'],
+      result: name =>
+        name === 'lookup' ? JSON.stringify({ results: [...pages, other].map(url => ({ url })) }) : 'page body',
+    });
+    await runSearch(h, 'oslo weather');
+    for (const url of pages.slice(0, 2)) {
+      expect((await fetchTier(h, url)).tier).toBe(1);
+      await h.toolSet.callTool({ name: 'read_page', arguments: { url } });
+    }
+    const third = await fetchTier(h, pages[2] ?? '');
+    expect(third.tier).toBe(3);
+    const refused = await h.toolSet.callTool({ name: 'read_page', arguments: { url: pages[2] } });
+    expect(JSON.stringify(refused)).toContain('already fetched 2 pages from that site');
+    expect((await fetchTier(h, other)).tier).toBe(1);
   });
 });
 
@@ -693,5 +740,30 @@ describe('approval cards beside the designated provider', () => {
     expect(await boundTokenAction(h, info.approval_token_id)).toBe(
       actionIdFor({ tool_name: 'lookup', canonical_params: { query }, connector }),
     );
+  });
+});
+
+describe('a sensitive read earlier in the chat', () => {
+  it('makes the next search ask', async () => {
+    const h = harness({ searchProvider: true });
+    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } })).tier).toBe(1);
+
+    const read = await classifyHostToolCall({
+      sentinel: h.host,
+      repository_id: null,
+      workspace_cwd: tmpdir(),
+      action: {
+        tool_name: 'exec',
+        canonical_params: { command: 'cat .env' },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+    });
+    expect(read.sensitive_read).toBe(true);
+
+    const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
+    expect(after.tier).toBe(3);
+    const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
+    expect(JSON.stringify(refused)).toContain('has read something private');
   });
 });

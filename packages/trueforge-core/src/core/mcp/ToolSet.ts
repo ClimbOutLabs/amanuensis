@@ -12,6 +12,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
+  countSilentFetches,
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
@@ -358,6 +359,7 @@ export class ToolSet implements IToolSet {
       const sent = collectOutboundStrings(params.arguments ?? {});
       if (sent !== undefined) {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+        countSilentFetches({ values: sent.values, state: turn });
       }
     }
 

@@ -180,7 +180,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         executionDeadline,
         logger: winston.createLogger({ silent: true }),
         turnDrains,
-        memory: { client: memoryClient, userText: 'hi', sessionTitle: undefined },
+        memory: { client: memoryClient, userText: 'hi', attachedFiles: false, sessionTitle: undefined },
         profileLearning,
         artifacts: {
           turnArtifactStore: new SqliteTurnArtifactStore(db),

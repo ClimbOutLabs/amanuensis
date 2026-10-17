@@ -190,7 +190,7 @@ describe('formatMemoryBlock', () => {
   it('drops whole items once the budget is exceeded and counts them', () => {
     // Each line is "[world, undated] " + 36 a's = 53 chars -> 13.25 estimated tokens. The fixed
     // overhead now also reserves room for the framing sentence (see MEMORY_FRAMING_SENTENCE)
-    // ahead of the wrapper tags and stats line; a budget of 150 leaves an item budget that fits 2
+    // ahead of the wrapper tags and stats line; a budget of 170 leaves an item budget that fits 2
     // whole items but not a 3rd, so 2 are dropped.
     const results = [
       { id: '1', type: 'world', text: 'a'.repeat(36) },
@@ -198,13 +198,13 @@ describe('formatMemoryBlock', () => {
       { id: '3', type: 'world', text: 'a'.repeat(36) },
       { id: '4', type: 'world', text: 'a'.repeat(36) },
     ];
-    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 135 });
+    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 170 });
 
     expect(formatted.includedItems).toBe(2);
     expect(formatted.droppedOverBudget).toBe(2);
     expect(formatted.block).toContain('; 2 dropped over budget)');
     expect(formatted.block.match(/^\[world, undated\]/gm)).toHaveLength(2);
-    expect(formatted.estimatedTokens).toBeLessThanOrEqual(135);
+    expect(formatted.estimatedTokens).toBeLessThanOrEqual(170);
   });
 
   it('reserves overhead for the wrapper tags and stats line so a tight budget drops everything rather than overflow', () => {
@@ -2025,5 +2025,93 @@ describe('hindsightMemoryCapability with recallEnabled', () => {
       stats: { outcome: 'skipped', reason: 'disabled_by_user' },
       sweep: { verified: 0, retried: 0, abandoned: 0, pending: 0 },
     });
+  });
+});
+
+describe('memory origin is kept and shown', () => {
+  it('tags a recalled item from read content as such, and leaves the user own memory untagged', () => {
+    const { block } = formatMemoryBlock({
+      results: [
+        {
+          id: '1',
+          type: 'world',
+          occurred_start: '2026-08-14',
+          text: 'from email',
+          metadata: { origin: 'tool_ingested' },
+        },
+        {
+          id: '2',
+          type: 'world',
+          occurred_start: '2026-08-14',
+          text: 'said by user',
+          metadata: { origin: 'user_stated' },
+        },
+      ],
+      entities: [],
+      budgetTokens: 2048,
+    });
+    expect(block).toContain('[world, 2026-08-14, from something Aman read] from email');
+    expect(block).toContain('[world, 2026-08-14] said by user');
+  });
+
+  it('tells the model that items from something Aman read are not the user words and not fact', () => {
+    expect(MEMORY_FRAMING_SENTENCE).toMatch(/from something Aman read/);
+    expect(MEMORY_FRAMING_SENTENCE).toMatch(/not .*user/i);
+  });
+
+  async function resubmittedOrigin(context: ContextMessage[]): Promise<unknown> {
+    const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
+    const retain = jest.fn().mockResolvedValue({ ok: true });
+    const capability = hindsightMemoryCapability({
+      client: makeClient({ getOperation, retain }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: 't-prev',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    await collect(processor.processPreLLM(makeExecution(context)));
+    expect(retain).toHaveBeenCalledTimes(1);
+    return retain.mock.calls[0]?.[0].items[0].metadata.origin;
+  }
+
+  it('keeps tool_ingested when a vanished retain is resubmitted for a turn that read a tool result', async () => {
+    const origin = await resubmittedOrigin([
+      { role: 'user', content: 'check my mail' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'x', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: 'email body' },
+      { role: 'assistant', content: 'You have one email.' },
+      { role: 'user', content: 'current question' },
+    ]);
+    expect(origin).toBe('tool_ingested');
+  });
+
+  it('keeps tool_ingested when the previous turn carried extracted document text', async () => {
+    const origin = await resubmittedOrigin([
+      { role: 'user', content: 'summarise this' },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: '<untrusted-document>Extracted text for a.docx</untrusted-document>' }],
+      },
+      { role: 'assistant', content: 'It is a note.' },
+      { role: 'user', content: 'current question' },
+    ]);
+    expect(origin).toBe('tool_ingested');
+  });
+
+  it('stamps user_stated when the previous turn read nothing', async () => {
+    const origin = await resubmittedOrigin([
+      { role: 'user', content: 'previous question' },
+      { role: 'assistant', content: 'previous answer' },
+      { role: 'user', content: 'current question' },
+    ]);
+    expect(origin).toBe('user_stated');
   });
 });
