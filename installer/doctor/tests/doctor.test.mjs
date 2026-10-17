@@ -1893,13 +1893,43 @@ describe('sandbox settings that are incomplete', () => {
     assert.ok(slots > refresh, 'the sandboxes were repaired after the settings were rewritten');
   });
 
-  it('an instance installed without the sandbox is left alone', () => {
+  it('tells an instance installed without the sandbox how to turn it on', () => {
     make();
     world.sandbox({ wired: [] });
     mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
     writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
     const result = world.shim(['doctor', 'sandbox']);
-    assert.equal(result.code, 0);
-    assert.match(result.stdout, /No instance has the sandbox/);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stdout.replace(/\s+/g, ' '),
+      /Instance main was installed without the sandbox, so running code and reading PDFs are off\. Next: Run aman doctor sandbox --fix/,
+    );
+    assert.doesNotMatch(result.stdout, /install\.sh --name/);
+    assert.doesNotMatch(result.stdout, /sandbox tools are not installed/);
+  });
+
+  it('says the same when the sandbox tools were never installed, and --fix runs the installer for that instance', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    const plain = world.shim(['doctor', 'sandbox']);
+    assert.match(plain.stdout, /Instance main was installed without the sandbox/);
+    assert.doesNotMatch(plain.stdout, /sandbox tools are not installed/);
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.ok(world.calls().some(line => line.includes(`install.sh --home ${world.home} --yes --name main`)));
+  });
+
+  it('--fix without --yes lets the installer show its own plan and ask', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix'], { input: 'y\n' });
+    const install = world.calls().find(line => line.includes('install.sh --home'));
+    assert.ok(install, fixed.stdout + fixed.stderr);
+    assert.ok(install.includes('--name main'));
+    assert.ok(!install.includes('--yes'), install);
   });
 });

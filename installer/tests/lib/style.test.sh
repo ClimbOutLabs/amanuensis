@@ -284,7 +284,7 @@ test_docker_output_stays_in_a_log() {
   assert_rc 0
   assert_not_contains "$OUT$ERR" "building with"
   assert_not_contains "$OUT$ERR" "Pulling from"
-  assert_flat_contains "$ERR" "Building the Aman app (the long step) log: $AMAN_HOME/state/logs/build-app.log"
+  assert_flat_contains "$ERR" "Building the Aman app (this might take a while) log: $AMAN_HOME/state/logs/build-app.log"
   assert_contains "$(cat "$AMAN_HOME/state/logs/build-app.log")" "building with"
   assert_mode "$AMAN_HOME/state/logs/build-app.log" 600
   assert_mode "$AMAN_HOME/state/logs" 700

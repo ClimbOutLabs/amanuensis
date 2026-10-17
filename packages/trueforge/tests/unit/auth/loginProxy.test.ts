@@ -13,9 +13,9 @@ interface UpstreamCall {
   body: string | undefined;
 }
 
-/** What the sign-in service shows again after a wrong password. */
+/** What the sign-in service shows again after a wrong password; the real service answers 401. */
 const PASSWORD_FORM = '<form method="post"><input name="login"><input type="password" name="password"></form>';
-const wrongPassword = () => new Response(PASSWORD_FORM, { status: 200, headers: { 'content-type': 'text/html' } });
+const wrongPassword = () => new Response(PASSWORD_FORM, { status: 401, headers: { 'content-type': 'text/html' } });
 
 describe('login proxy', () => {
   const realFetch = globalThis.fetch;
@@ -233,7 +233,7 @@ describe('login proxy', () => {
 
     it('locks an address out after repeated failures, with a wait that grows, and tells it how long', async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        expect((await login()).status).toBe(200);
+        expect((await login()).status).toBe(401);
       }
       const locked = await login();
       expect(locked.status).toBe(429);
@@ -242,11 +242,26 @@ describe('login proxy', () => {
       expect(calls).toHaveLength(5);
       clock += 31_000;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        expect((await login()).status).toBe(200);
+        expect((await login()).status).toBe(401);
       }
       const longer = await login();
       expect(longer.status).toBe(429);
       expect(longer.headers.get('retry-after')).toBe('60');
+    });
+
+    it.each([200, 401])('counts a wrong password the service answers with status %i', async status => {
+      answer = () => new Response(PASSWORD_FORM, { status, headers: { 'content-type': 'text/html' } });
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        expect((await login()).status).toBe(status);
+      }
+      expect((await login()).status).toBe(429);
+    });
+
+    it('does not count a 400 answer, even one that carries the form', async () => {
+      answer = () => new Response(PASSWORD_FORM, { status: 400, headers: { 'content-type': 'text/html' } });
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect((await login()).status).toBe(400);
+      }
     });
 
     it('does not count a password that was accepted, so a person who signs in often is never locked out', async () => {
@@ -261,7 +276,7 @@ describe('login proxy', () => {
         await login();
       }
       expect((await login()).status).toBe(429);
-      expect((await get('/dex/auth/local/login?back=&state=s')).status).toBe(200);
+      expect((await get('/dex/auth/local/login?back=&state=s')).status).toBe(401);
     });
 
     it('lets no more password attempts reach the sign-in service than the limit when many arrive at once', async () => {
@@ -301,7 +316,7 @@ describe('login proxy', () => {
       answer = wrongPassword;
       for (let round = 0; round < 3; round += 1) {
         for (let attempt = 0; attempt < 4; attempt += 1) {
-          expect((await post('owner%40example.com')).status).toBe(200);
+          expect((await post('owner%40example.com')).status).toBe(401);
         }
         answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
         expect((await post('member%40example.com')).status).toBe(303);
@@ -349,7 +364,7 @@ describe('login proxy', () => {
         expect((await login()).status).toBe(400);
       }
       answer = wrongPassword;
-      expect((await login()).status).toBe(200);
+      expect((await login()).status).toBe(401);
     });
 
     it('does not let junk posts from many addresses lock out a person who is signing in', async () => {
@@ -416,14 +431,14 @@ describe('login proxy', () => {
 
     it('limits how often one address can start a sign-in, which stores a request in the sign-in service', async () => {
       for (let attempt = 0; attempt < 30; attempt += 1) {
-        expect((await get('/dex/auth?client_id=x&state=s')).status).toBe(200);
+        expect((await get('/dex/auth?client_id=x&state=s')).status).toBe(401);
       }
       const res = await get('/dex/auth?client_id=x&state=s');
       expect(res.status).toBe(429);
       expect(res.headers.get('retry-after')).toBe('60');
-      expect((await get('/dex/static/main.css')).status).toBe(200);
+      expect((await get('/dex/static/main.css')).status).toBe(401);
       clock += 60_000;
-      expect((await get('/dex/auth/local?client_id=x')).status).toBe(200);
+      expect((await get('/dex/auth/local?client_id=x')).status).toBe(401);
     });
 
     it('makes everyone wait when many addresses fail together', async () => {
@@ -683,12 +698,12 @@ describe('login proxy in front of a public sign-in address', () => {
         { incoming: { socket: { remoteAddress } } },
       );
     for (let i = 0; i < 5; i += 1) {
-      expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(200);
+      expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(401);
     }
     expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(429);
-    expect((await post('127.0.0.1', '198.51.100.7')).status).toBe(200);
+    expect((await post('127.0.0.1', '198.51.100.7')).status).toBe(401);
     for (let i = 0; i < 5; i += 1) {
-      expect((await post('192.168.1.40', `10.0.0.${String(i)}`)).status).toBe(200);
+      expect((await post('192.168.1.40', `10.0.0.${String(i)}`)).status).toBe(401);
     }
     expect((await post('192.168.1.40', '10.9.9.9')).status).toBe(429);
   });
@@ -719,12 +734,12 @@ describe('login proxy in front of a public sign-in address', () => {
         { incoming: { socket: { remoteAddress } } },
       );
     for (let i = 0; i < 5; i += 1) {
-      expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(200);
+      expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(401);
     }
     expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(429);
-    expect((await post('::ffff:172.17.0.1', '198.51.100.7')).status).toBe(200);
+    expect((await post('::ffff:172.17.0.1', '198.51.100.7')).status).toBe(401);
     for (let i = 0; i < 5; i += 1) {
-      expect((await post('172.18.0.9', `10.0.0.${String(i)}`)).status).toBe(200);
+      expect((await post('172.18.0.9', `10.0.0.${String(i)}`)).status).toBe(401);
     }
     expect((await post('172.18.0.9', '10.9.9.9')).status).toBe(429);
   });
@@ -742,10 +757,10 @@ describe('login proxy in front of a public sign-in address', () => {
         { incoming: { socket: { remoteAddress } } },
       );
     for (let i = 0; i < 5; i += 1) {
-      expect((await post(`2001:db8:1:2:${String(i)}::${String(i + 1)}`)).status).toBe(200);
+      expect((await post(`2001:db8:1:2:${String(i)}::${String(i + 1)}`)).status).toBe(401);
     }
     expect((await post('2001:db8:1:2:ffff:aaaa:bbbb:cccc')).status).toBe(429);
-    expect((await post('2001:db8:1:3::1')).status).toBe(200);
+    expect((await post('2001:db8:1:3::1')).status).toBe(401);
   });
 
   it('needs the service to have the same path in both places', () => {
