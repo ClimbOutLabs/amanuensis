@@ -50,14 +50,18 @@ describe('maps config', () => {
     },
   );
 
-  it.each(['http://localhost:8080', 'http://127.0.0.1:8080', 'http://127.1.2.3', 'http://[::1]:8080'])(
-    'allows plain http on loopback: %s',
-    async url => {
-      process.env['MAPS_GEOCODER_URL'] = url;
-      const config = await loadConfig();
-      expect(config.MAPS_GEOCODER_URL).toBe(url);
-    },
-  );
+  it.each([
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://127.1.2.3',
+    'http://[::1]:8080',
+    'http://LOCALHOST:8080',
+    'http://[::ffff:127.0.0.1]:8080',
+  ])('allows plain http on loopback: %s', async url => {
+    process.env['MAPS_GEOCODER_URL'] = url;
+    const config = await loadConfig();
+    expect(config.MAPS_GEOCODER_URL).toBe(url);
+  });
 
   it('does not treat lookalike hosts as loopback', async () => {
     process.env['MAPS_GEOCODER_URL'] = 'http://localhost.evil.example';
