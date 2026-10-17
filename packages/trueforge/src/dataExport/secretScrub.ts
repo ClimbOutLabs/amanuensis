@@ -61,7 +61,7 @@ export function normalizeFieldName(key: string): string {
  * Export rule: a name ending in a credential word hides any value, numbers and flags included.
  * Anchoring keeps counts and descriptors (`input_tokens_breakdown`, `credential_type`) intact for import.
  */
-export function isExportCredentialField(key: string, value: unknown): boolean {
+function isExportCredentialField(key: string, value: unknown): boolean {
   const present = value !== null && value !== undefined && value !== '';
   return present && CREDENTIAL_SUFFIX.test(normalizeFieldName(key));
 }
