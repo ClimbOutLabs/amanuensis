@@ -89,7 +89,7 @@ describe('AgentSteps grouping', () => {
     expect(screen.getByRole('region', { name: '1 step · 1 tool' })).toBeInTheDocument();
   });
 
-  it('styles intermediate agent-step text muted and indented', async () => {
+  it('renders text written before a tool call as ordinary answer text outside the internals', async () => {
     renderMultiToolMessage(
       [
         { type: 'text', text: "I'll delegate this to a sub-agent." },
@@ -99,12 +99,9 @@ describe('AgentSteps grouping', () => {
       { expanded: true },
     );
     const intermediate = await screen.findByText("I'll delegate this to a sub-agent.");
-    // Inside the disclosure the trace carries its own indentation; the
-    // intermediate text is muted via text-text-secondary.
-    const stepTextWrap = intermediate.closest('.text-text-secondary');
-    expect(stepTextWrap).toHaveClass('mb-2', 'text-xs');
+    expect(intermediate.closest('.text-text-secondary')).toBeNull();
+    expect(intermediate.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
     const finalAnswer = screen.getByText('Here is the final answer.');
-    // Final answer renders outside the internals trace.
     expect(finalAnswer.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
   });
 });
