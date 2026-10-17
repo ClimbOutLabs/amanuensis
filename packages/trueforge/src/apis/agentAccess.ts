@@ -78,6 +78,40 @@ export async function resolveManagedAgentIds<TTransaction>(input: {
   return data.map(agent => agent.id);
 }
 
+/**
+ * Every agent the caller may manage. Unlike `resolveManagedAgentIds`, an `all` list scope is
+ * resolved per agent (standalone and OIDC allow managing only agents the caller created), so the
+ * result is the caller's agents on those instances too.
+ */
+export async function listManageableAgents<TTransaction>(input: {
+  store: IAgentStore<TTransaction>;
+  context: RequestContext;
+  authorizer: Authorizer;
+}): Promise<AgentRecord[]> {
+  const { store, context, authorizer } = input;
+  const access = await authorizer.listAgentAccess({ context, action: 'manage' });
+  const agents: AgentRecord[] = [];
+  let pageToken: string | undefined;
+  for (;;) {
+    const page = await store.listAgents({
+      tenant_id: context.tenant_id,
+      ...(access.kind === 'agent_external_ids' ? { external_ids: access.agent_external_ids } : {}),
+      agent_name: undefined,
+      limit: 200,
+      page_token: pageToken,
+    });
+    for (const agent of page.data) {
+      if (await authorizer.canAccessAgent({ context, action: 'manage', agent })) {
+        agents.push(agent);
+      }
+    }
+    if (page.pagination.next_page_token === undefined) {
+      return agents;
+    }
+    pageToken = page.pagination.next_page_token;
+  }
+}
+
 /** Related rows are readable by their creator or a manager of the bound named agent. */
 export async function canReadAgentBoundResource<TTransaction>(input: {
   store: IAgentStore<TTransaction>;

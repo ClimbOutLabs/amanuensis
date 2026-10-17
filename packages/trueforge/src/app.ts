@@ -2,7 +2,7 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -16,6 +16,7 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createDataExportRouter } from './apis/dataExport';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -276,6 +277,8 @@ export interface ServerDeps<TTransaction> {
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
   authorizer: Authorizer;
+  /** Exact secret values this server holds; Sentinel's outbound guard and the data export both read them. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -485,6 +488,29 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createMemoryVaultRouter({
         resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/data',
+    withAuth(
+      createDataExportRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        spaceStore: deps.spaceStore,
+        scheduleStore: deps.scheduleStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
+        turnArtifactStore: deps.turnArtifactStore,
+        tokenStore: deps.tokenStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        authorizer: deps.authorizer,
+        outboundSecrets: deps.outboundSecrets,
         logger: deps.logger,
       }),
       authMiddleware,

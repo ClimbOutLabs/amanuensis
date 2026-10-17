@@ -232,6 +232,21 @@ installer/install.sh upgrade           # back up, rebuild, restart, health-check
 
 Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
+### Exporting one person's data
+
+To move a person's chats (with their persona history), agents, personas, spaces, schedules, connectors (without credentials), settings, memory and audit log to another instance, export them from the old one. This is a command for whoever runs the instance; the app itself has no export button yet. The command reads the database and memory files directly, so it needs no sign-in and the instance must be running.
+
+```bash
+aman export-data --list-users                              # who owns chats, and how many
+aman export-data --user <id> --out ~/aman-export.zip       # one person's archive, written to this machine
+```
+
+Add `--instance NAME` when the machine runs more than one instance. The archive is written to the path you give on this machine (the folder must exist and the file must not), whole or not at all, and is never overwritten. An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds uploaded file bytes. The shared memory vaults and instance settings hold every member's memories, so they are left out unless sign-in is off or you pass `--include-instance-data` (use it only when exporting the owner); `--no-instance-data` leaves them out even then. Secrets are removed before anything is written, and the archive holds one person's data only, so treat it as private anyway.
+
+Model keys and connector sign-ins are not included. After you import, enter your model keys again and sign in to each connector again. The same sentence is in the archive's `README.txt` and `manifest.json` and in the command's output.
+
+An instance not installed with the installer can run the command inside its app image instead, with the same environment and data volumes as the running app: `aman export-data --user <id> --out <file.zip>`. `--migrate` first updates an older database to this version's schema, so back it up first (`aman backup`); it is not needed against the running app.
+
 ## What is off in this version
 
 Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.

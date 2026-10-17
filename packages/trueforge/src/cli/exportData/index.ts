@@ -1,0 +1,234 @@
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { createWriteStream, existsSync, statSync } from 'node:fs';
+import { rename, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { finished } from 'node:stream/promises';
+import { parseArgs } from 'node:util';
+
+import { AFTER_IMPORT_NOTICE } from '../../dataExport/afterImportNotice';
+import type { Command } from '../command';
+import { UsageError } from '../io';
+import type { ExportDataSession } from './session';
+import { looksLikeOldSchema } from './stores';
+
+const USAGE = `Usage: aman export-data --list-users
+       aman export-data --user <id> --out <file.zip> [--include-uploads] [--no-instance-data] [--migrate]
+
+Exports one user's data (chats, sessions, agents, personas, spaces, schedules, connectors without
+credentials, settings and memory) from this instance's database and memory files, with no sign-in.
+
+  --list-users          Print the user ids that own sessions, with their session counts
+  --user <id>           The user id from --list-users
+  --out <file.zip>      Where to write the archive; it is written whole or not at all, and never overwritten
+  --include-uploads     Also include uploaded file bytes
+  --include-instance-data  Also include the shared memory vaults and instance settings; the shared vault holds every member's memories, so use it only for the owner
+  --no-instance-data    Leave them out even when sign-in is off
+  --migrate             First update an older database to this version's schema (changes the database; back it up)
+
+Without sign-in, all data belongs to one user id, which --list-users always shows, and the shared vaults and instance settings are included for it.
+`;
+
+export interface ExportDataDeps {
+  /** Opens the instance's stores; only called once the command line has been accepted. */
+  open(options: { migrate: boolean }): Promise<ExportDataSession>;
+}
+
+/** Server config validates the environment on import, so the real wiring loads it only when asked. */
+const lazyDeps: ExportDataDeps = {
+  open: async options => (await import('./runtime')).openExportDataSession(options),
+};
+
+/** `parseArgs` errors are not `instanceof Error` everywhere (separate realms), so the message is read structurally. */
+function argumentErrorMessage(error: unknown): string {
+  const message: unknown = typeof error === 'object' && error !== null ? Reflect.get(error, 'message') : undefined;
+  return typeof message === 'string' && message !== '' ? message : 'Invalid arguments.';
+}
+
+function parseOptions(args: readonly string[]) {
+  try {
+    return parseArgs({
+      args: [...args],
+      options: {
+        'list-users': { type: 'boolean', default: false },
+        user: { type: 'string' },
+        out: { type: 'string' },
+        'include-uploads': { type: 'boolean', default: false },
+        'include-instance-data': { type: 'boolean', default: false },
+        'no-instance-data': { type: 'boolean', default: false },
+        migrate: { type: 'boolean', default: false },
+        help: { type: 'boolean', short: 'h', default: false },
+      },
+      allowPositionals: false,
+      strict: true,
+    }).values;
+  } catch (error) {
+    throw new UsageError(argumentErrorMessage(error), { cause: error });
+  }
+}
+
+/** A failure is reported as one plain line. */
+function oneLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'Unexpected error.';
+  const line = message.replace(/\s+/g, ' ').trim();
+  return line === '' ? 'Unexpected error.' : line;
+}
+
+function describeFailure({ error, migrate }: { error: unknown; migrate: boolean }): Error {
+  const message = oneLine(error);
+  const hint =
+    !migrate && looksLikeOldSchema(message)
+      ? ' The database looks older than this version; back it up and retry with --migrate.'
+      : '';
+  return new Error(`${message}${hint}`, { cause: error });
+}
+
+async function printJson({ io, value }: { io: { stdout(text: string): Promise<void> }; value: unknown }) {
+  await io.stdout(`${JSON.stringify(value)}\n`);
+}
+
+export function createExportData(deps: ExportDataDeps): Command {
+  return async ({ args, io }) => {
+    const options = parseOptions(args);
+    if (options.help) {
+      await io.stderr(USAGE);
+      return 0;
+    }
+    const listing = options['list-users'];
+    if (listing === (options.user !== undefined)) {
+      throw new UsageError('Use either --list-users, or --user <id> with --out <file.zip>.');
+    }
+    if (listing && (options.out !== undefined || options['include-uploads'] || options['no-instance-data'])) {
+      throw new UsageError('--list-users takes no other options except --migrate.');
+    }
+    const userId = options.user?.trim();
+    if (!listing && (userId === undefined || userId === '')) {
+      throw new UsageError('--user needs a user id; run --list-users to see them.');
+    }
+    if (!listing && (options.out === undefined || options.out.trim() === '')) {
+      throw new UsageError('Missing --out <file.zip>.');
+    }
+
+    // Everything that can be checked before the database is opened is checked here.
+    const target = options.out === undefined ? undefined : path.resolve(options.out);
+    if (target !== undefined) {
+      if (existsSync(target)) {
+        throw new Error(`${target} already exists; export-data never overwrites.`);
+      }
+      const directory = path.dirname(target);
+      if (!existsSync(directory) || !statSync(directory).isDirectory()) {
+        throw new Error(`The directory ${directory} does not exist.`);
+      }
+    }
+
+    const plan = userId !== undefined && target !== undefined ? { userId, target } : undefined;
+
+    let session: ExportDataSession;
+    try {
+      session = await deps.open({ migrate: options.migrate });
+    } catch (error) {
+      throw describeFailure({ error, migrate: options.migrate });
+    }
+    try {
+      const owners = await session.listOwners();
+      if (plan === undefined) {
+        await printJson({
+          io,
+          value: {
+            sign_in: session.signInOffUserId === undefined ? 'on' : 'off',
+            ...(session.signInOffUserId === undefined ? {} : { sign_in_off_user_id: session.signInOffUserId }),
+            users: owners,
+          },
+        });
+        return 0;
+      }
+      if (!owners.some(owner => owner.user_id === plan.userId)) {
+        throw new Error(`No sessions belong to the user "${plan.userId}". Run --list-users for the ids that do.`);
+      }
+      const result = await writeArchive({ session, userId: plan.userId, target: plan.target, options }).catch(
+        async (error: unknown) => {
+          // Best effort: the database that failed the export may be the one that cannot take the row.
+          await session
+            .recordAudit({ description: `Data export of user ${plan.userId} from the command line failed.` })
+            .catch(() => undefined);
+          throw error;
+        },
+      );
+      await session
+        .recordAudit({
+          description: `Exported data of user ${plan.userId} from the command line (${String(result.bytesWritten)} bytes).`,
+        })
+        .catch(async (error: unknown) => {
+          await io.stderr(`The export was written, but its audit row was not: ${oneLine(error)}\n`);
+        });
+      await printJson({
+        io,
+        value: {
+          user_id: plan.userId,
+          out: plan.target,
+          bytes: result.bytesWritten,
+          files: result.entries,
+          after_import: AFTER_IMPORT_NOTICE,
+        },
+      });
+      return 0;
+    } catch (error) {
+      if (error instanceof UsageError) {
+        throw error;
+      }
+      throw describeFailure({ error, migrate: options.migrate });
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  };
+}
+
+/** Writes beside the target and renames when whole, so a failure never leaves a partial archive. */
+async function writeArchive({
+  session,
+  userId,
+  target,
+  options,
+}: {
+  session: ExportDataSession;
+  userId: string;
+  target: string;
+  options: { 'include-uploads': boolean; 'include-instance-data': boolean; 'no-instance-data': boolean };
+}) {
+  const partial = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${randomBytes(6).toString('hex')}.partial`,
+  );
+  const file = createWriteStream(partial, { flags: 'wx', mode: 0o600 });
+  let fileError: unknown;
+  file.on('error', error => {
+    fileError = error;
+  });
+  try {
+    const result = await session.exportUser({
+      userId,
+      includeUploads: options['include-uploads'],
+      // The shared vault holds every member's memories: only the sole user of a sign-in-free instance, or an
+      // operator who asks, gets it.
+      includeInstanceData:
+        !options['no-instance-data'] && (options['include-instance-data'] || session.signInOffUserId === userId),
+      out: file,
+    });
+    file.end();
+    await finished(file);
+    await rename(partial, target);
+    return result;
+  } catch (error) {
+    // The file may still be opening; removing it before it has closed would let it reappear.
+    if (!file.closed) {
+      const closed = once(file, 'close');
+      file.destroy();
+      await closed;
+    }
+    await rm(partial, { force: true });
+    // A full or failing disk surfaces as a closed destination; report the disk.
+    throw fileError ?? error;
+  }
+}
+
+export const exportData: Command = createExportData(lazyDeps);

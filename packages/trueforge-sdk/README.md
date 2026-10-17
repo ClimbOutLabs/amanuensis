@@ -159,7 +159,7 @@ For example, `fs.ReadStream` has a `path` property which the SDK uses to retriev
 You can consume binary data from endpoints using the `BinaryResponse` type which lets you choose how to consume the data:
 
 ```typescript
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 const stream: ReadableStream<Uint8Array> = response.stream();
 // const arrayBuffer: ArrayBuffer = await response.arrayBuffer();
 // const blob: Blob = response.blob();
@@ -184,7 +184,7 @@ import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const stream = response.stream();
 const nodeStream = Readable.fromWeb(stream);
@@ -203,7 +203,7 @@ await pipeline(nodeStream, writeStream);
 ```ts
 import { writeFile } from 'fs/promises';
 
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const arrayBuffer = await response.arrayBuffer();
 await writeFile('path/to/file', Buffer.from(arrayBuffer));
@@ -219,7 +219,7 @@ await writeFile('path/to/file', Buffer.from(arrayBuffer));
 ```ts
 import { writeFile } from 'fs/promises';
 
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const blob = await response.blob();
 const arrayBuffer = await blob.arrayBuffer();
@@ -236,7 +236,7 @@ await writeFile('output.bin', Buffer.from(arrayBuffer));
 ```ts
 import { writeFile } from 'fs/promises';
 
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const bytes = await response.bytes();
 await writeFile('path/to/file', bytes);
@@ -257,7 +257,7 @@ await writeFile('path/to/file', bytes);
 <summary>ReadableStream (most-efficient)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const stream = response.stream();
 await Bun.write('path/to/file', stream);
@@ -271,7 +271,7 @@ await Bun.write('path/to/file', stream);
 <summary>ArrayBuffer</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const arrayBuffer = await response.arrayBuffer();
 await Bun.write('path/to/file', arrayBuffer);
@@ -285,7 +285,7 @@ await Bun.write('path/to/file', arrayBuffer);
 <summary>Blob</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const blob = await response.blob();
 await Bun.write('path/to/file', blob);
@@ -299,7 +299,7 @@ await Bun.write('path/to/file', blob);
 <summary>Bytes (UIntArray8)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const bytes = await response.bytes();
 await Bun.write('path/to/file', bytes);
@@ -320,7 +320,7 @@ await Bun.write('path/to/file', bytes);
 <summary>ReadableStream (most-efficient)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const stream = response.stream();
 const file = await Deno.open('path/to/file', { write: true, create: true });
@@ -335,7 +335,7 @@ await stream.pipeTo(file.writable);
 <summary>ArrayBuffer</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const arrayBuffer = await response.arrayBuffer();
 await Deno.writeFile('path/to/file', new Uint8Array(arrayBuffer));
@@ -349,7 +349,7 @@ await Deno.writeFile('path/to/file', new Uint8Array(arrayBuffer));
 <summary>Blob</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const blob = await response.blob();
 const arrayBuffer = await blob.arrayBuffer();
@@ -364,7 +364,7 @@ await Deno.writeFile('path/to/file', new Uint8Array(arrayBuffer));
 <summary>Bytes (UIntArray8)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const bytes = await response.bytes();
 await Deno.writeFile('path/to/file', bytes);
@@ -385,7 +385,7 @@ await Deno.writeFile('path/to/file', bytes);
 <summary>Blob (most-efficient)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const blob = await response.blob();
 const url = URL.createObjectURL(blob);
@@ -406,7 +406,7 @@ URL.revokeObjectURL(url);
 <summary>ReadableStream</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const stream = response.stream();
 const reader = stream.getReader();
@@ -437,7 +437,7 @@ URL.revokeObjectURL(url);
 <summary>ArrayBuffer</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const arrayBuffer = await response.arrayBuffer();
 const blob = new Blob([arrayBuffer]);
@@ -459,7 +459,7 @@ URL.revokeObjectURL(url);
 <summary>Bytes (UIntArray8)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const bytes = await response.bytes();
 const blob = new Blob([bytes]);
@@ -490,7 +490,7 @@ URL.revokeObjectURL(url);
 <summary>ReadableStream</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const stream = response.stream();
 const text = await new Response(stream).text();
@@ -504,7 +504,7 @@ const text = await new Response(stream).text();
 <summary>ArrayBuffer</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const arrayBuffer = await response.arrayBuffer();
 const text = new TextDecoder().decode(arrayBuffer);
@@ -518,7 +518,7 @@ const text = new TextDecoder().decode(arrayBuffer);
 <summary>Blob</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const blob = await response.blob();
 const text = await blob.text();
@@ -532,7 +532,7 @@ const text = await blob.text();
 <summary>Bytes (UIntArray8)</summary>
 
 ```ts
-const response = await client.sessions.downloadSandboxFile(...);
+const response = await client.data.exportData(...);
 
 const bytes = await response.bytes();
 const text = new TextDecoder().decode(bytes);

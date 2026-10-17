@@ -227,6 +227,7 @@ export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } 
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
+export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
 export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
@@ -422,6 +423,15 @@ export {
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
+export {
+  CREDENTIAL_LABEL,
+  JWT,
+  KEY_PREFIXES,
+  OUTBOUND_MIN_SECRET_LENGTH,
+  PASSCODE_THEN_DIGITS,
+  PASSWORD_LABEL,
+  PRIVATE_KEY_BLOCK,
+} from './permissions/outboundGuard';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

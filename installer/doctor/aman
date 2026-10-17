@@ -9,6 +9,7 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
+#   aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--include-instance-data]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -81,6 +82,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
+       aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--include-instance-data]
 USAGE
 }
 
@@ -1596,6 +1598,68 @@ run_installer() { # command args...
   exec bash "$installer" --home "$AMAN_HOME" "$@"
 }
 
+# aman export-data: runs the app container's export-data and brings the archive out to a folder on this machine.
+# Flags other than --instance and --out go to the in-image command unchanged.
+export_data() { # args...
+  local name="" out="" pass=() container="" line id state service tmp result rc=0 count
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        name=$2
+        shift
+        ;;
+      --out)
+        [ $# -ge 2 ] || die_usage "--out needs a file path."
+        out=$2
+        shift
+        ;;
+      *) pass+=("$1") ;;
+    esac
+    shift
+  done
+  if [ -z "$name" ]; then
+    count=0
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      name=$id
+      count=$((count + 1))
+    done < <(list_instances)
+    [ "$count" -ge 1 ] || die_usage "No instance found under ${AMAN_HOME}/instances."
+    [ "$count" -eq 1 ] || die_usage "There is more than one instance; say which with --instance NAME."
+  fi
+  case "$name" in
+    '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
+  esac
+  [ -d "${AMAN_HOME}/instances/${name}" ] || die_usage "No instance named \"${name}\" under ${AMAN_HOME}/instances."
+  command -v docker >/dev/null 2>&1 || { echo "Docker is not installed or not on this command's path." >&2; exit 1; }
+  while IFS='|' read -r id _ state _ service; do
+    if [ "$service" = "$APP_SERVICE" ] && [ "$state" = running ]; then container=$id; fi
+  done < <(docker ps --filter "label=com.docker.compose.project=aman-${name}" \
+    --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
+  [ -n "$container" ] || { printf 'Instance %s is not running. Start it, then export again.\n' "$name" >&2; exit 1; }
+
+  if [ -z "$out" ]; then
+    exec docker exec "$container" aman export-data "${pass[@]+"${pass[@]}"}"
+  fi
+  [ ! -e "$out" ] || { printf '%s already exists; export-data never overwrites.\n' "$out" >&2; exit 1; }
+  [ -d "$(dirname -- "$out")" ] || { printf 'The folder %s does not exist.\n' "$(dirname -- "$out")" >&2; exit 1; }
+  tmp="/tmp/aman-export-$$-${RANDOM}.zip"
+  result=$(docker exec "$container" aman export-data "${pass[@]+"${pass[@]}"}" --out "$tmp") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ -z "$result" ] || printf '%s\n' "$result" >&2
+    docker exec "$container" rm -f "$tmp" >/dev/null 2>&1 || true
+    exit "$rc"
+  fi
+  if ! (umask 077 && docker cp "${container}:${tmp}" "$out" >/dev/null); then
+    docker exec "$container" rm -f "$tmp" >/dev/null 2>&1 || true
+    echo "The archive was made but could not be copied to ${out}." >&2
+    exit 1
+  fi
+  docker exec "$container" rm -f "$tmp" >/dev/null 2>&1 || true
+  printf '%s\n' "${result//"$tmp"/$out}"
+}
+
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
 # the installer's folder to be safe to run, and it never runs from inside the installer's own run.
 renew_tls_if_due() {
@@ -1626,6 +1690,11 @@ esac
 case "${1:-}" in
   doctor) shift ;;
   backup | upgrade) run_installer "$@" ;;
+  export-data)
+    shift
+    export_data "$@"
+    exit 0
+    ;;
   -h | --help)
     usage
     exit 0

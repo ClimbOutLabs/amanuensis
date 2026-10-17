@@ -38,6 +38,13 @@ export interface ListSentinelAuditInput {
   offset: number;
 }
 
+export interface ListSentinelAuditByCreatorInput {
+  tenant_id: string;
+  created_by: string;
+  limit: number;
+  offset: number;
+}
+
 function toRecord(row: SentinelAuditDatabase['sentinel_audit']): SentinelAuditRecord {
   return {
     id: row.id,
@@ -54,6 +61,8 @@ function toRecord(row: SentinelAuditDatabase['sentinel_audit']): SentinelAuditRe
 /** Public API of the Sentinel audit store, for wiring without generic parameters. */
 export interface ISentinelAuditStore extends AuditLogWriter {
   list(input: ListSentinelAuditInput): Promise<SentinelAuditRecord[]>;
+  /** Everything one person caused, oldest first, including rows whose chat was deleted. */
+  listByCreator(input: ListSentinelAuditByCreatorInput): Promise<SentinelAuditRecord[]>;
 }
 
 /**
@@ -94,6 +103,20 @@ export class SentinelAuditStore implements ISentinelAuditStore {
       .where('created_by', '=', input.created_by)
       .where('conversation_id', '=', input.conversation_id)
       .orderBy('created_at', 'desc')
+      .limit(input.limit)
+      .offset(input.offset)
+      .execute();
+    return rows.map(toRecord);
+  }
+
+  async listByCreator(input: ListSentinelAuditByCreatorInput): Promise<SentinelAuditRecord[]> {
+    const rows = await this.#db
+      .selectFrom('sentinel_audit')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc')
       .limit(input.limit)
       .offset(input.offset)
       .execute();

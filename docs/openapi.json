@@ -2325,6 +2325,15 @@
         ],
         "type": "object"
       },
+      "ExportDataRequest": {
+        "properties": {
+          "include_uploads": {
+            "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ExportMemoryVaultResponse": {
         "properties": {
           "data": {
@@ -12787,6 +12796,72 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/data/export": {
+      "post": {
+        "description": "Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The export archive (zip). A failed export drops the connection instead of ending the archive."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is missing or invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is not application/json."
+          }
+        },
+        "summary": "Export my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "export_data"
       }
     },
     "/api/v1/mcp-servers": {
