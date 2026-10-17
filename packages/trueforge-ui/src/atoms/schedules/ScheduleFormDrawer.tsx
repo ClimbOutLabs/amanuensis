@@ -236,13 +236,13 @@ function ScheduleFormDrawerBody({
   };
 
   const title =
-    view.kind === 'test' ? 'Test Schedule' : isExternalEdit || isCreatedEdit ? 'Edit Schedule' : 'New Schedule';
+    view.kind === 'test' ? 'Test Schedule' : isExternalEdit || isCreatedEdit ? 'Edit Schedule' : 'New schedule';
   const description =
     view.kind === 'test'
-      ? `Recurring unattended runs of ${agentLabel}.`
+      ? `Repeating scheduled runs of ${agentLabel}.`
       : isExternalEdit || isCreatedEdit
-        ? 'Update cadence and task for this schedule.'
-        : 'Create a recurring unattended run for an agent.';
+        ? 'Change when this schedule runs and what it does.'
+        : 'Run an agent on a repeating schedule.';
 
   let footer: ReactNode;
   if (view.kind === 'test') {

@@ -87,7 +87,7 @@ const SkillSettings = () => {
   };
 
   if (!skillCatalog) {
-    return <p className="text-sm text-text-secondary">Skills catalog is not available.</p>;
+    return <p className="text-sm text-text-secondary">Could not load the skills catalog. Try again.</p>;
   }
 
   const handleSelect = (entry: SkillCatalogEntry) => {

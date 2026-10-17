@@ -40,6 +40,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import type { ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
@@ -195,6 +196,8 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
 }
 
 export interface TurnsRouterDeps {
+  /** Shipped MCP catalog: tells a designated search provider's search tools and plumbing arguments. */
+  mcpCatalog: McpCatalog;
   sessions: Sessions<SessionCustom, TurnCustom>;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
@@ -238,7 +241,13 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
+  | 'activeTurns'
+  | 'turnDrains'
+  | 'eventSubscriptions'
+  | 'logger'
+  | 'globalSettingsStore'
+  | 'mcpCatalog'
+  | 'tokenFactoryBudget'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -274,6 +283,7 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
+  mcpCatalog: McpCatalog;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -319,6 +329,7 @@ function createTurnResolver(deps: {
   tokenFactoryBudget: TokenFactoryBudget;
 }): SpaceTurnResourceResolver {
   const {
+    mcpCatalog,
     mcpServerStore,
     tokenStore,
     skillStore,
@@ -435,7 +446,10 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
-          search_provider: connection.search_provider,
+          search_provider:
+            connection.search_provider === undefined
+              ? undefined
+              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -1061,6 +1075,7 @@ export async function beginTurnExecution(params: {
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
+    mcpCatalog: deps.mcpCatalog,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1847,6 +1862,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
+      mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,

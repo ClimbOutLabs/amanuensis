@@ -21,8 +21,8 @@ function readableVaults(options: {
 }): SharingVault[] {
   const otherPersonas = options.personas
     .filter(other => other.id !== options.persona.id)
-    .map(other => ({ value: personaVaultNamespace(other.displayName), name: `${other.displayName}'s vault` }));
-  const topics = options.topics.map(topic => ({ value: topic.value, name: `the ${topic.label} vault` }));
+    .map(other => ({ value: personaVaultNamespace(other.displayName), name: `${other.displayName}'s collection` }));
+  const topics = options.topics.map(topic => ({ value: topic.value, name: `the ${topic.label} collection` }));
   return [...otherPersonas, ...topics];
 }
 
@@ -80,8 +80,8 @@ export function MemorySharing(props: {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-text-secondary">
-        Choose which vaults each persona can read. A persona always reads the shared vault; these toggles grant access
-        to additional vaults.
+        Choose which collections each persona can read. A persona always reads the shared collection; these toggles
+        grant access to additional collections.
       </p>
       {props.personas.map(persona => {
         const vaults = readableVaults({ persona, personas: props.personas, topics: props.namespaces });
@@ -89,7 +89,7 @@ export function MemorySharing(props: {
           <fieldset key={persona.id} className="rounded-xl border border-border bg-card-bg p-4">
             <legend className="px-1 text-sm font-medium text-text-primary">{persona.displayName}</legend>
             {vaults.length === 0 ? (
-              <p className="text-sm text-text-secondary">No other vaults to read yet.</p>
+              <p className="text-sm text-text-secondary">No other collections to read yet.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {vaults.map(vault => {
