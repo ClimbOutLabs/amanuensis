@@ -6331,6 +6331,17 @@
         ],
         "type": "object"
       },
+      "NotSentReason": {
+        "description": "Why nothing was sent. unconfirmed: Gmail did not answer, so the message may have gone through; the Sent folder says.",
+        "enum": [
+          "draft_changed",
+          "needs_ok_again",
+          "cannot_send",
+          "gmail_refused",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
       "OpenAIModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -7778,6 +7789,149 @@
         ],
         "type": "string"
       },
+      "SendReceiptMessage": {
+        "properties": {
+          "bcc": {
+            "description": "Hidden copy recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "The message text that was sent.",
+            "type": "string"
+          },
+          "cc": {
+            "description": "Copied recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "description": "Subject line.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipients, as the card showed them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body"
+        ],
+        "type": "object"
+      },
+      "SendReceiptNotSent": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_sent"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NotSentReason"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SendReceiptPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SendReceiptResult"
+          },
+          "tool_call_id": {
+            "description": "The send tool call whose approval card this answers.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when a send ends, sent or not.",
+            "enum": [
+              "aman.email.send_receipt"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "tool_call_id",
+          "result",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SendReceiptResult": {
+        "discriminator": {
+          "mapping": {
+            "not_sent": "#/components/schemas/SendReceiptNotSent",
+            "sent": "#/components/schemas/SendReceiptSent"
+          },
+          "propertyName": "outcome"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SendReceiptSent"
+          },
+          {
+            "$ref": "#/components/schemas/SendReceiptNotSent"
+          }
+        ]
+      },
+      "SendReceiptSent": {
+        "properties": {
+          "check_code": {
+            "description": "The code the approval card showed.",
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/SendReceiptMessage"
+          },
+          "outcome": {
+            "enum": [
+              "sent"
+            ],
+            "type": "string"
+          },
+          "sent_at": {
+            "description": "ISO 8601 time Gmail accepted the send.",
+            "type": "string"
+          },
+          "sent_message_id": {
+            "description": "Id of the message Gmail sent.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "sent_at",
+          "sent_message_id",
+          "check_code",
+          "message"
+        ],
+        "type": "object"
+      },
       "SentinelAuditRecord": {
         "properties": {
           "auto_deny_reason": {
@@ -8215,6 +8369,9 @@
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/SendReceiptPersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           }
         ]
@@ -8255,6 +8412,7 @@
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
+          "aman.email.send_receipt",
           "aman.sandbox.provisioning"
         ],
         "type": "string"
@@ -9268,6 +9426,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "check_code": {
+            "description": "Short code for a send, repeated on its receipt; null for a draft. Absent on older cards.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "replaces": {
             "description": "The saved draft a change replaces, or null.",
@@ -11049,6 +11214,7 @@
         "discriminator": {
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
+            "aman.email.send_receipt": "#/components/schemas/SendReceiptPersistedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
@@ -11122,6 +11288,9 @@
           },
           {
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/SendReceiptPersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
@@ -17197,7 +17366,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 19,
+              "maxItems": 20,
               "minItems": 1,
               "type": "array"
             }

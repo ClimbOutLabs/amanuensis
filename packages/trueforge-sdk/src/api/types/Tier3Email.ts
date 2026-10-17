@@ -14,6 +14,8 @@ export interface Tier3Email {
     body: string;
     /** Copied recipients. */
     cc: string[];
+    /** Short code for a send, repeated on its receipt; null for a draft. Absent on older cards. */
+    checkCode?: string | null;
     /** The saved draft a change replaces, or null. */
     replaces: TrueForge.Tier3EmailReplaces | null;
     /** Subject line. */

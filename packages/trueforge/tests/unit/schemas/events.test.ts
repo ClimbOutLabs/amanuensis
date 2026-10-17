@@ -1,6 +1,7 @@
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { MemoryRecallPersistedEventSchema } from '../../../src/schemas/memoryEvents';
 import { ProfileLearnedPersistedEventSchema } from '../../../src/schemas/profileLearningEvents';
+import { SendReceiptPersistedEventSchema } from '../../../src/schemas/sendReceiptEvents';
 import { ListTurnEventsResponseSchema } from '../../../src/schemas/turn';
 
 describe('wire event schemas', () => {
@@ -115,5 +116,35 @@ describe('wire event schemas', () => {
   it('accepts the context compaction event in the live streaming union', () => {
     const parsed = TurnStreamingEventSchema.safeParse(compactionEvent);
     expect(parsed.success).toBe(true);
+  });
+
+  const sentReceipt = {
+    type: 'aman.email.send_receipt',
+    id: 'evt_0000000000000000000000005',
+    created_at: '2026-09-01T10:00:00.000Z',
+    tool_call_id: 'call_1',
+    result: {
+      outcome: 'sent',
+      sent_at: '2026-09-01T09:12:00.000Z',
+      sent_message_id: 'm-sent-1',
+      check_code: 'A7F39C',
+      message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+    },
+  };
+  const notSentReceipt = {
+    ...sentReceipt,
+    id: 'evt_0000000000000000000000006',
+    result: { outcome: 'not_sent', reason: 'draft_changed' },
+  };
+
+  it.each([sentReceipt, notSentReceipt])('accepts the send receipt event everywhere it travels', event => {
+    expect(SendReceiptPersistedEventSchema.safeParse(event).success).toBe(true);
+    expect(TurnStreamingEventSchema.safeParse(event).success).toBe(true);
+    expect(ListTurnEventsResponseSchema.safeParse({ data: [event], pagination: { limit: 50 } }).success).toBe(true);
+  });
+
+  it('refuses a send receipt that claims a send without its message id', () => {
+    const { sent_message_id: _dropped, ...withoutId } = sentReceipt.result;
+    expect(SendReceiptPersistedEventSchema.safeParse({ ...sentReceipt, result: withoutId }).success).toBe(false);
   });
 });

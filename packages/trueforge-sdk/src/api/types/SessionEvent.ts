@@ -22,4 +22,5 @@ export type SessionEvent =
     | TrueForge.MemoryRecallPersistedEvent
     | TrueForge.ProfileLearnedPersistedEvent
     | TrueForge.SkillUsedPersistedEvent
+    | TrueForge.SendReceiptPersistedEvent
     | TrueForge.ProvisioningPersistedEvent;

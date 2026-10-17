@@ -42,6 +42,22 @@ function learnedProfileEventWithStringRevision(id: string) {
   return { ...learnedProfileEvent(id), revision: '1' };
 }
 
+function sendReceiptEvent(id: string) {
+  return {
+    type: 'aman.email.send_receipt' as const,
+    tool_call_id: 'call-send-1',
+    result: {
+      outcome: 'sent' as const,
+      sent_at: '2026-09-01T09:12:00.000Z',
+      sent_message_id: 'sent-1',
+      check_code: 'A7F39C',
+      message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+    },
+    id,
+    created_at: new Date().toISOString(),
+  };
+}
+
 function memoryRecallEvent(id: string) {
   return {
     type: 'aman.memory.recall' as const,
@@ -122,6 +138,34 @@ export function runCompletedTurnEventStoreContractSuite(params: {
     const { data } = await listEvents(store);
     expect(data).toHaveLength(before + 2);
     expect(data.map(event => event.id)).toEqual(expect.arrayContaining(['evt_learned', 'evt_recall']));
+  });
+
+  it('stores a send receipt and reads it back whole, so a reloaded chat can show it', async () => {
+    const store = params.createStore();
+    await seedDoneTurn(store);
+
+    const receipt = sendReceiptEvent('evt_receipt');
+    await store.appendEventsToDoneTurn({ session_id: SESSION_ID, turn_id: TURN_ID, events: [receipt] });
+
+    const { data } = await listEvents(store);
+    expect(data.find(event => event.id === 'evt_receipt')).toEqual(receipt);
+  });
+
+  it('refuses a send receipt that says sent without a message id', async () => {
+    const store = params.createStore();
+    await seedDoneTurn(store);
+    const before = (await listEvents(store)).data.length;
+    const { sent_message_id: _dropped, ...withoutId } = sendReceiptEvent('evt_bad_receipt').result;
+
+    await expect(
+      params.appendWidened({
+        session_id: SESSION_ID,
+        turn_id: TURN_ID,
+        events: [{ ...sendReceiptEvent('evt_bad_receipt'), result: withoutId }],
+      }),
+    ).rejects.toThrow(/aman\.email\.send_receipt is not a valid passthrough audit event/);
+
+    expect((await listEvents(store)).data).toHaveLength(before);
   });
 
   it('refuses a registered event type missing a required payload field and writes nothing', async () => {

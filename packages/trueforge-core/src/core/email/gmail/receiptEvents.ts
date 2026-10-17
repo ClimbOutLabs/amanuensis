@@ -37,18 +37,22 @@ export const SendReceiptMessageSchema = z
 
 export type SendReceiptMessage = z.infer<typeof SendReceiptMessageSchema>;
 
-const SentResultSchema = z.object({
-  outcome: z.literal('sent'),
-  sent_at: z.string().describe('ISO 8601 time Gmail accepted the send.'),
-  sent_message_id: z.string().describe('Id of the message Gmail sent.'),
-  check_code: z.string().describe('The code the approval card showed.'),
-  message: SendReceiptMessageSchema,
-});
+const SentResultSchema = z
+  .object({
+    outcome: z.literal('sent'),
+    sent_at: z.string().describe('ISO 8601 time Gmail accepted the send.'),
+    sent_message_id: z.string().describe('Id of the message Gmail sent.'),
+    check_code: z.string().describe('The code the approval card showed.'),
+    message: SendReceiptMessageSchema,
+  })
+  .openapi('SendReceiptSent');
 
-const NotSentResultSchema = z.object({
-  outcome: z.literal('not_sent'),
-  reason: NotSentReasonSchema,
-});
+const NotSentResultSchema = z
+  .object({
+    outcome: z.literal('not_sent'),
+    reason: NotSentReasonSchema,
+  })
+  .openapi('SendReceiptNotSent');
 
 export const SendReceiptResultSchema = z
   .discriminatedUnion('outcome', [SentResultSchema, NotSentResultSchema])
