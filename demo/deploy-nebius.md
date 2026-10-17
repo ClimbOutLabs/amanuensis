@@ -61,7 +61,7 @@ shred -u ~/tf.key
 
 ### Maya's mailbox (depends on unmerged work)
 
-The plan is Maya's real test Gmail account, filled with the invented emails from `test-fixtures/assistant-mailbox` in English, Portuguese and Spanish, plus two PDFs and a Word file, loaded by a `demo:import-mailbox` script. That script, the Portuguese emails and the `.docx` are being built elsewhere and are not on main yet. The Arabic, Hindi, Japanese, Sinhala, Chinese and Russian fixtures are left out. Check that the script exists on your commit before relying on this.
+The plan is Maya's real test Gmail account, filled with the invented emails from `demo/fixtures/mailbox` in English, Portuguese and Spanish, plus two PDFs and a Word file, loaded by a `demo:import-mailbox` script. That script, the Portuguese emails and the `.docx` are being built elsewhere and are not on main yet. The Arabic, Hindi, Japanese, Sinhala, Chinese and Russian fixtures are left out. Check that the script exists on your commit before relying on this.
 
 ## 5. Order on the day
 

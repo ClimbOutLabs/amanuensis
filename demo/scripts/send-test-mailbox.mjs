@@ -24,8 +24,8 @@ import { connect as tlsConnect } from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { parseEnvFile } from './test-mailbox-env.mjs';
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const fixtureDir = path.join(rootDir, 'test-fixtures', 'assistant-mailbox');
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const fixtureDir = path.join(rootDir, 'demo', 'fixtures', 'mailbox');
 const envFile = path.join(rootDir, '.env.test-mailbox');
 
 function loadConfig() {

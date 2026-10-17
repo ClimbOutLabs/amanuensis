@@ -5,13 +5,14 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
-import { loadDemoSet } from '../scripts/import-demo-mailbox.mjs';
+import { loadDemoSet } from '../demo/scripts/import-demo-mailbox.mjs';
 
 const fixtureDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
-  'test-fixtures',
-  'assistant-mailbox',
+  'demo',
+  'fixtures',
+  'mailbox',
 );
 
 const EXPECTED_DEMO_SET = [

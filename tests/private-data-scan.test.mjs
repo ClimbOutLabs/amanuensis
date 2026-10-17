@@ -162,7 +162,7 @@ test('scan flags a tracked .env.test-mailbox even with placeholder-only values',
       {
         file: '.env.test-mailbox',
         reasons: [
-          'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for scripts/send-test-mailbox.mjs and must stay local and untracked',
+          'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for demo/scripts/send-test-mailbox.mjs and must stay local and untracked',
         ],
       },
     ]);

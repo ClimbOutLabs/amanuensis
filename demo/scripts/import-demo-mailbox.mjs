@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-off import of the demo mailbox set (test-fixtures/assistant-mailbox/demo-set.json)
+// One-off import of the demo mailbox set (demo/fixtures/mailbox/demo-set.json)
 // into a throwaway Gmail account with users.messages.import. Messages keep their
 // Date header as the received time and land unread in the inbox.
 //
@@ -27,8 +27,8 @@ import { fileURLToPath, URLSearchParams } from 'node:url';
 import { TextDecoder } from 'node:util';
 import { parseEnvFile } from './test-mailbox-env.mjs';
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const defaultFixtureDir = path.join(rootDir, 'test-fixtures', 'assistant-mailbox');
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const defaultFixtureDir = path.join(rootDir, 'demo', 'fixtures', 'mailbox');
 const envFile = path.join(rootDir, '.env.test-mailbox');
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';

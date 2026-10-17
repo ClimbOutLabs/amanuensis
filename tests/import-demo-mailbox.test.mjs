@@ -3,13 +3,14 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, URL, URLSearchParams } from 'node:url';
-import { importDemoMailbox, loadConfig, loadDemoSet, summarize } from '../scripts/import-demo-mailbox.mjs';
+import { importDemoMailbox, loadConfig, loadDemoSet, summarize } from '../demo/scripts/import-demo-mailbox.mjs';
 
 const fixtureDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
-  'test-fixtures',
-  'assistant-mailbox',
+  'demo',
+  'fixtures',
+  'mailbox',
 );
 const messages = loadDemoSet({ fixtureDir });
 const quiet = () => undefined;

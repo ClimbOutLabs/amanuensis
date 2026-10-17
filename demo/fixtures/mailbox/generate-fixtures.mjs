@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Generate the synthetic test mailbox fixtures.
 //
-// Produces the .eml files in test-fixtures/assistant-mailbox/ with all
+// Produces the .eml files in demo/fixtures/mailbox/ with all
 // attachments embedded. Everything is fictional: invented names, companies,
 // addresses, phone numbers, booking codes and amounts, and only reserved
 // example domains (example.com, example.org, example.net).

@@ -76,7 +76,7 @@ const CREDENTIAL_PATTERNS = [
 const ENV_CANDIDATE_RE = /(^|\/)\.env(\.[^/]*)?$/i;
 const ENV_ALLOWED_NAME_RE = /^\.env\.(example|sample|template|test)(\.[^/]*)?$/i;
 
-// (e) The test mailbox sender's credentials file. scripts/send-test-mailbox.mjs
+// (e) The test mailbox sender's credentials file. demo/scripts/send-test-mailbox.mjs
 // reads SMTP credentials from a .env.test-mailbox file, which is local-only
 // and gitignored, but gitignore does not stop a force-add, and the generic
 // .env rule above only fires on populated non-placeholder values, so a copy
@@ -394,7 +394,7 @@ export function scanPrivateData({ rootDirectory = rootDir, treeish } = {}) {
     }
     if (basename === FORBIDDEN_TRACKED_BASENAME) {
       reasons.push(
-        'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for scripts/send-test-mailbox.mjs and must stay local and untracked',
+        'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for demo/scripts/send-test-mailbox.mjs and must stay local and untracked',
       );
     }
 
