@@ -232,10 +232,53 @@ describe('the outbound guard on the designated provider', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.pre_dispatch_failure).toBeUndefined();
-    expect(info.tier3_card?.plain_what).toContain(secret);
-    expect(info.tier3_card?.why_asked_again).toContain('secret this server holds');
+    expect(info.tier3_card?.plain_what).toContain('debug sy');
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
     expect(info.silent_search_query).toBeUndefined();
     expect(h.audit).toEqual([]);
+  });
+
+  it('shows the query with the key masked, and names what was caught in plain words', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
+    const card = info.tier3_card;
+    expect(card?.plain_what).toBe(
+      "Search the web through finder for: debug sy••••••11 now. Held because it contains one of this computer's keys.",
+    );
+    expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
+    expect(card?.why_asked_again).toBeNull();
+    expect(JSON.stringify(info)).not.toContain(secret);
+  });
+
+  it('hides a short key completely', async () => {
+    const short = 'abcd1234';
+    const h = harness({ searchProvider: true, secrets: [short] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `x ${short}` } });
+    expect(info.tier3_card?.plain_what).toContain('x ••••••.');
+    expect(JSON.stringify(info)).not.toContain(short);
+  });
+
+  it('hides the whole query when the key is not found in it as written', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    await runSearch(h, secret.slice(0, 14));
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(info.tier3_card?.plain_what).not.toContain(secret.slice(14));
+    expect(info.tier3_card?.outbound_text).not.toContain(secret.slice(14));
+    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+  });
+
+  it('keeps the key out of the audit log, for an approved search and for a held scheduled one', async () => {
+    const approved = harness({ searchProvider: true, secrets: [secret] });
+    await approved.toolSet.callTool({ name: 'lookup', arguments: { query: `debug ${secret}` } }, { status: 'allow' });
+    const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
+    await runSearch(scheduled, `debug ${secret}`);
+    expect(JSON.stringify([...approved.audit, ...scheduled.audit])).not.toContain(secret);
+  });
+
+  it('does not word a first-time hold as something the user has seen before', async () => {
+    const h = harness({ searchProvider: true, searchWithoutAsking: false });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
+    expect(info.tier3_card?.why_asked_again).toBeNull();
   });
 
   it('asks in a scheduled run too, so the run can hold it for the owner instead of denying it', async () => {
@@ -244,7 +287,7 @@ describe('the outbound guard on the designated provider', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.pre_dispatch_failure).toBeUndefined();
-    expect(info.tier3_card?.plain_what).toContain(secret);
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
     expect(h.dispatched).toEqual([]);
   });
 
@@ -279,7 +322,10 @@ describe('the loop breaker', () => {
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
     expect(next.tier).toBe(3);
     expect(next.is_approval_required).toBe(true);
-    expect(next.tier3_card?.why_asked_again).toContain(String(SILENT_SEARCH_LIMIT));
+    expect(next.tier3_card?.plain_what).toContain(
+      `Held because this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches`,
+    );
+    expect(next.tier3_card?.why_asked_again).toBeNull();
   });
 
   it('asks in a scheduled run too, so the run holds it', async () => {
@@ -606,7 +652,7 @@ describe('a secret sent in pieces over several searches', () => {
     await runSearch(chat, secret.slice(0, 14));
     const info = await chat.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.why_asked_again).toContain('secret this server holds');
+    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
 
     const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
     await runSearch(scheduled, secret.slice(0, 14));

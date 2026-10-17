@@ -75,6 +75,46 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.destination_host).toBeNull();
   });
 
+  describe('held search cards saved before the hold reason had its own place', () => {
+    const legacy = (card: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ tool_call_id: 'call-7', tier: 3, tier3_card: { plain_what: 'x', ...card } }],
+      })[0]?.card;
+
+    it('does not show a saved key, and says what was caught', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: debug synthetic-key-000111',
+        outbound_text: 'query: debug synthetic-key-000111',
+        why_asked_again: 'Held for approval: it contains a secret this server holds.',
+      });
+      expect(card?.plain_what).toBe(
+        "Search the web through finder. Held because it contains one of this computer's keys.",
+      );
+      expect(card?.outbound_text).toBeNull();
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('moves another hold reason out of "seen before" and keeps the query', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: oslo weather',
+        outbound_text: 'query: oslo weather',
+        why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
+      });
+      expect(card?.plain_what).toBe(
+        'Search the web through finder for: oslo weather. Held because this turn already ran 8 searches without asking.',
+      );
+      expect(card?.outbound_text).toBe('query: oslo weather');
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('leaves a real "seen before" reason alone', () => {
+      expect(legacy({ why_asked_again: 'the earlier approval expired' })?.why_asked_again).toBe(
+        'the earlier approval expired',
+      );
+    });
+  });
+
   it('parses outbound_text and destination_host from the card', () => {
     const event = {
       type: 'tool.approval_required',

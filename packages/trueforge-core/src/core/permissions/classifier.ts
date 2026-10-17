@@ -43,6 +43,7 @@ import {
   checkOutboundStrings,
   collectOutboundStrings,
   describeOutboundRule,
+  maskServerSecrets,
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
@@ -1184,6 +1185,9 @@ function externalServiceWhat(input: {
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
 const INSTALL_FRAGMENTS = ['install'];
 
+/** Stands in for a query text when a key could not be masked inside it. */
+const HIDDEN_QUERY = '(hidden)';
+
 /** Most characters of query text an approval card shows. */
 const SEARCH_CARD_TEXT_MAX = 1000;
 
@@ -1214,10 +1218,10 @@ async function holdSearchCall(input: {
   const server = action.mcp_server_name ?? 'the search provider';
   return tier3Decision({
     card: {
-      plain_what: `Search the web through ${server} for: ${shown}`,
+      plain_what: `Search the web through ${server} for: ${shown}${input.why === '' ? '' : `. Held because ${input.why}.`}`,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
-      why_asked_again: input.why === '' ? null : `Held for approval: ${input.why}.`,
+      why_asked_again: null,
       destination: action.mcp_server_name ?? null,
       recipient: null,
       amount: null,
@@ -1270,18 +1274,40 @@ async function classifySearchProviderTool(input: {
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
     holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields });
+  // The card, the stored turn and the audit row never carry a key this computer holds.
+  const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
+    const masked = maskServerSecrets({
+      params: action.canonical_params,
+      secrets,
+      earlier: ctx.web_search.sentText,
+    });
+    const maskedStrings = masked === undefined ? undefined : collectOutboundStrings(masked);
+    const outbound = masked === undefined ? undefined : renderOutboundArguments(masked);
+    return holdSearchCall({
+      action,
+      ctx,
+      reason: 'mcp_search_guard',
+      why: describeOutboundRule('server_secret'),
+      queryText: maskedStrings === undefined ? HIDDEN_QUERY : searchQueryText(maskedStrings),
+      fields: {
+        ...extraction.fields,
+        outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
+        outbound_truncated: outbound?.truncated ?? false,
+      },
+    });
+  };
 
   if (!(await ctx.services.searchWithoutAsking(owner))) {
     return held('mcp_search_setting_ask', '');
   }
+  const secrets = await ctx.services.outboundSecrets(owner);
   const verdict =
     strings === undefined
       ? ({ ok: false, rule: 'uninspectable' } as const)
-      : checkOutboundStrings({
-          strings,
-          secrets: await ctx.services.outboundSecrets(owner),
-          earlier: ctx.web_search.sentText,
-        });
+      : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
+  if (!verdict.ok && verdict.rule === 'server_secret') {
+    return heldWithoutKey(secrets);
+  }
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }

@@ -332,6 +332,52 @@ function containsServerSecret(input: { texts: readonly string[]; secrets: readon
   return false;
 }
 
+const SECRET_MASK = '••••••';
+/** A secret at least this long keeps its first and last two characters on screen; a shorter one shows none. */
+const MASK_REVEAL_MIN_LENGTH = 12;
+
+function maskSecretText(text: string): string {
+  return text.length >= MASK_REVEAL_MIN_LENGTH ? `${text.slice(0, 2)}${SECRET_MASK}${text.slice(-2)}` : SECRET_MASK;
+}
+
+/**
+ * Copy of tool arguments with every written-out spelling of a server-held secret masked, for text a
+ * user sees. Undefined when the secret is not found as written (split across values or calls, or
+ * hidden by spacing), so the caller hides the whole text instead of guessing which part to keep.
+ */
+export function maskServerSecrets(input: {
+  params: Record<string, unknown>;
+  secrets: readonly string[];
+  earlier?: string | undefined;
+}): Record<string, unknown> | undefined {
+  const spellings = input.secrets
+    .filter(secret => normalizeForScan(secret).length >= OUTBOUND_MIN_SECRET_LENGTH)
+    .flatMap(secretSpellings)
+    .filter(spelling => spelling !== '')
+    .sort((a, b) => b.length - a.length);
+  const maskString = (text: string): string =>
+    spellings.reduce((masked, spelling) => masked.split(spelling).join(maskSecretText(spelling)), text);
+  const visit = (node: unknown): unknown => {
+    if (typeof node === 'string') {
+      return maskString(node);
+    }
+    if (Array.isArray(node)) {
+      return node.map(visit);
+    }
+    if (typeof node === 'object' && node !== null) {
+      return Object.fromEntries(Object.entries(node).map(([key, child]) => [maskString(key), visit(child)]));
+    }
+    return node;
+  };
+  const masked = visit(input.params);
+  const strings = collectOutboundStrings(masked);
+  if (!isRecord(masked) || strings === undefined) {
+    return undefined;
+  }
+  const verdict = checkOutboundStrings({ strings, secrets: input.secrets, earlier: input.earlier });
+  return !verdict.ok && verdict.rule === 'server_secret' ? undefined : masked;
+}
+
 /** Most characters of earlier outbound text kept to catch a secret sent in pieces across calls. */
 export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
 
@@ -406,7 +452,7 @@ export function checkOutboundStrings(input: {
 export function describeOutboundRule(rule: OutboundGuardRule): string {
   switch (rule) {
     case 'server_secret':
-      return 'it contains a secret this server holds';
+      return "it contains one of this computer's keys";
     case 'private_key':
       return 'it contains a private key';
     case 'jwt':
@@ -424,4 +470,8 @@ export function describeOutboundRule(rule: OutboundGuardRule): string {
     case 'uninspectable':
       return 'its arguments are too large to inspect';
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

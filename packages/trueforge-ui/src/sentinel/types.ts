@@ -205,11 +205,35 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
   return record[snake] === true || record[camel] === true;
 }
 
+const LEGACY_HOLD_PREFIX = 'Held for approval: ';
+const LEGACY_KEY_HOLD = `${LEGACY_HOLD_PREFIX}it contains a secret this server holds.`;
+const SEARCH_QUERY_MARKER = ' for: ';
+
+// Search cards saved before the hold reason moved into plain_what: the reason was filed as
+// "seen before", and a held key was written out in full. The key is not recoverable here, so the
+// whole query is dropped for that case.
+function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
+  const reason = card.why_asked_again;
+  if (reason === null || !reason.startsWith(LEGACY_HOLD_PREFIX)) return card;
+  if (reason === LEGACY_KEY_HOLD) {
+    const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
+    const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
+    return {
+      ...card,
+      plain_what: `${heading}. Held because it contains one of this computer's keys.`,
+      why_asked_again: null,
+      outbound_text: null,
+    };
+  }
+  const because = reason.slice(LEGACY_HOLD_PREFIX.length).replace(/\.$/, '');
+  return { ...card, plain_what: `${card.plain_what}. Held because ${because}.`, why_asked_again: null };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
-  return {
+  return readSavedHoldReason({
     plain_what,
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
@@ -221,7 +245,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
-  };
+  });
 }
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
