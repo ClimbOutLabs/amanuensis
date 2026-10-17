@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_OCR_LANGUAGES,
+  DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -1463,8 +1465,8 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_PRICES: ModelPrices;
   /**
-   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
-   * unless it is true, so it can never touch a real instance.
+   * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
+   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
@@ -1519,8 +1521,9 @@ export interface SharedServerConfiguration {
    */
   PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
-   * Space-separated Tesseract language codes for OCR operations.
-   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
+   * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
+   * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
+   * ignored. Default: English, Portuguese, Spanish, French, German, Italian and Dutch. Env: `DOCUMENT_OCR_LANGUAGES`.
    */
   DOCUMENT_OCR_LANGUAGES: string;
   /**
@@ -1771,7 +1774,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
-    defaultValue: 2048,
+    defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
@@ -2115,7 +2118,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
     defaultValue: 3_600_000,
   }),
-  DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
+  DOCUMENT_OCR_LANGUAGES:
+    getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),

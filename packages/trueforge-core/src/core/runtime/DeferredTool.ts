@@ -82,21 +82,26 @@ const callToolSchema = z.object({
   input: z.record(z.string(), z.unknown()).default({}).describe('Arguments to pass to the tool.'),
 });
 
+export type CallToolWrapper = z.infer<typeof callToolSchema>;
+
 /**
- * Extract the inner tool input from a deferred `call_tool` wrapper's arguments.
+ * Parse a deferred `call_tool` wrapper's arguments.
  *
  * Mirrors the unwrap branch of DeferredTool.toolCallInfo: when mint classified
  * the underlying tool, the approval token covers (underlying_name, input), so
- * the verifier must hash the same inner input. Returns undefined when the
- * wrapper does not parse: mint then classified the wrapper itself, and the
- * verifier must hash the wrapper too.
+ * the verifier must hash the same inner input and confirm the wrapper still
+ * names that tool and server. Returns undefined when the wrapper does not
+ * parse: mint then classified the wrapper itself, and the verifier must hash
+ * the wrapper too.
  */
-export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+export function tryParseCallToolWrapper(wrapperArgs: Record<string, unknown>): CallToolWrapper | undefined {
   const parsed = callToolSchema.safeParse(wrapperArgs);
-  if (!parsed.success) {
-    return undefined;
-  }
-  return parsed.data.input;
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The inner tool input of a deferred `call_tool` wrapper, or undefined when the wrapper does not parse. */
+export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+  return tryParseCallToolWrapper(wrapperArgs)?.input;
 }
 
 interface ResolvedServerTools {
@@ -275,6 +280,19 @@ export class DeferredTool extends LocalToolMCP {
         text: JSON.stringify({
           error: `'${toolName}' is a host tool, not a tool on the requested MCP server, so the approval given does not cover it. Call ${toolName} directly.`,
         }),
+        isError: true,
+      });
+    }
+    // Only a call that needs no approval is routed. Anything else must be called directly, so the host classifies
+    // it, shows its own card and checks its own approval; a connector's generic card would not cover it.
+    const info = await hostSet.toolCallInfo({ name: toolName, arguments: args });
+    if (
+      (info.tier !== undefined && info.tier > 1) ||
+      info.is_approval_required === true ||
+      info.pre_dispatch_failure !== undefined
+    ) {
+      return toolResultResponse({
+        text: JSON.stringify({ error: `'${toolName}' is a built-in tool, so call ${toolName} directly.` }),
         isError: true,
       });
     }
