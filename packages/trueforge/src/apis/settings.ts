@@ -18,6 +18,7 @@ import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
+import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
@@ -89,6 +90,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     '/run-code',
     createRunCodeRouter({
       backend: () => configuration.SANDBOX_BACKEND,
+      sandboxDisabledByInstaller,
       imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
       ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
     }),

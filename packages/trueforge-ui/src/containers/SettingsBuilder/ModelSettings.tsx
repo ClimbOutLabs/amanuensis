@@ -309,7 +309,7 @@ const ModelSettings = () => {
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
-              Add Custom Provider
+              Add custom provider
             </Button.Secondary>
           </div>
 
@@ -535,7 +535,7 @@ const ModelSettings = () => {
               if (editingProvider) return handleReplaceKey(editingProvider, draft);
               if (editingCatalogEntry) return handleCreateFromCatalog(editingCatalogEntry, draft);
             }}
-            title={editingProvider ? 'Edit Provider Details' : 'Configure Provider Details'}
+            title={editingProvider ? 'Edit provider' : 'Add provider'}
             initialBaseUrl={
               editingProvider
                 ? (editingProvider.baseUrl ?? '')
@@ -579,8 +579,8 @@ const ModelSettings = () => {
             <div className="px-5 py-5">
               <p className="text-sm text-text-secondary">
                 {modelCatalog.deleteModelProvider
-                  ? `It is the only model on ${lastModelPendingDelete?.provider.name ?? 'this provider'}. A provider needs at least one model, so removing it removes the provider too.`
-                  : `It is the only model on ${lastModelPendingDelete?.provider.name ?? 'this provider'}. A provider needs at least one model. Add another model first, or remove the provider.`}
+                  ? `This is ${lastModelPendingDelete?.provider.name ?? 'this provider'}'s only model. Removing it removes the provider too.`
+                  : `This is ${lastModelPendingDelete?.provider.name ?? 'this provider'}'s only model. Add another model first, or remove the provider.`}
               </p>
             </div>
             <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">

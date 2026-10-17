@@ -98,7 +98,7 @@ describe('host request context', () => {
       output: {
         role: 'assistant',
         content:
-          '<summary>\n## goal\ncontinue\n## done_so_far\nnone\n## in_flight_work\nnone\n## remaining_work\nnone\n## current_blocker\nnone\n## bound_repository_state\nnone\n</summary>',
+          '<summary>\n## goal\ncontinue\n## done_so_far\nnone\n## user_request\ncontinue\n## workspace\nnone\n## findings\nnone\n## in_flight_work\nnone\n## remaining_work\nnone\n## current_blocker\nnone\n## bound_repository_state\nnone\n</summary>',
       },
       usage: getEmptyUsage(),
     });

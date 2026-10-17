@@ -5,15 +5,22 @@ function statusRequest({
   imageConfigured,
   readiness,
   backend = 'docker',
+  sandboxDisabledByInstaller = false,
 }: {
   imageConfigured: boolean;
   readiness: DriverReadiness | Error;
   backend?: 'docker' | 'slots';
+  sandboxDisabledByInstaller?: boolean;
 }) {
   const ensureReady = jest.fn((_signal: AbortSignal) =>
     readiness instanceof Error ? Promise.reject(readiness) : Promise.resolve(readiness),
   );
-  const router = createRunCodeRouter({ imageConfigured: () => imageConfigured, ensureReady, backend: () => backend });
+  const router = createRunCodeRouter({
+    imageConfigured: () => imageConfigured,
+    ensureReady,
+    backend: () => backend,
+    sandboxDisabledByInstaller: () => sandboxDisabledByInstaller,
+  });
   router.onError((_error, c) => c.json({ error: { message: 'Internal server error' } }, 500));
   return { ensureReady, response: router.request('/status') };
 }
@@ -24,6 +31,17 @@ describe('GET /status', () => {
     const res = await response;
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: { state: 'not_configured', backend: 'docker' } });
+    expect(ensureReady).not.toHaveBeenCalled();
+  });
+
+  it('reports an installer instance without a sandbox as disabled', async () => {
+    const { ensureReady, response } = statusRequest({
+      imageConfigured: false,
+      readiness: { ready: true },
+      sandboxDisabledByInstaller: true,
+    });
+    const res = await response;
+    expect(await res.json()).toEqual({ data: { state: 'disabled', backend: 'slots' } });
     expect(ensureReady).not.toHaveBeenCalled();
   });
 

@@ -329,6 +329,7 @@ export * from "./SessionEventFiveDisposition.js";
 export * from "./SessionEventFour.js";
 export * from "./SessionEventFourDisposition.js";
 export * from "./SessionEventItem.js";
+export * from "./SessionEventType.js";
 export * from "./SessionFolder.js";
 export * from "./SessionMetadata.js";
 export * from "./SessionMetrics.js";
