@@ -9,6 +9,7 @@ import { McpAuthRequiredEvent } from "./McpAuthRequiredEvent.js";
 import { McpInitializeEvent } from "./McpInitializeEvent.js";
 import { MemoryRecallPersistedEvent } from "./MemoryRecallPersistedEvent.js";
 import { ModelMessageEvent } from "./ModelMessageEvent.js";
+import { ModelUsagePersistedEvent } from "./ModelUsagePersistedEvent.js";
 import { ProfileLearnedPersistedEvent } from "./ProfileLearnedPersistedEvent.js";
 import { ProvisioningPersistedEvent } from "./ProvisioningPersistedEvent.js";
 import { SandboxCreatedEvent } from "./SandboxCreatedEvent.js";
@@ -24,8 +25,8 @@ import { ToolResponseRequiredEvent } from "./ToolResponseRequiredEvent.js";
 import { TurnCreatedEvent } from "./TurnCreatedEvent.js";
 import { TurnDoneEvent } from "./TurnDoneEvent.js";
 
-export const SessionEvent: core.serialization.Schema<serializers.SessionEvent.Raw, TrueForge.SessionEvent> = core.serialization.undiscriminatedUnion([TurnCreatedEvent, TurnDoneEvent, ModelMessageEvent, ToolExecutionStartedEvent, SessionEventFour, SessionEventFive, ToolResponseEvent, ThreadCreatedEvent, ThreadDoneEvent, McpAuthRequiredEvent, McpInitializeEvent, SandboxCreatedEvent, DocumentIngestionEvent, ToolApprovalRequiredEvent, ToolResponseRequiredEvent, ContextCompactionEvent, MemoryRecallPersistedEvent, ProfileLearnedPersistedEvent, SkillUsedPersistedEvent, ProvisioningPersistedEvent]);
+export const SessionEvent: core.serialization.Schema<serializers.SessionEvent.Raw, TrueForge.SessionEvent> = core.serialization.undiscriminatedUnion([TurnCreatedEvent, TurnDoneEvent, ModelMessageEvent, ToolExecutionStartedEvent, SessionEventFour, SessionEventFive, ToolResponseEvent, ThreadCreatedEvent, ThreadDoneEvent, McpAuthRequiredEvent, McpInitializeEvent, SandboxCreatedEvent, DocumentIngestionEvent, ToolApprovalRequiredEvent, ToolResponseRequiredEvent, ContextCompactionEvent, MemoryRecallPersistedEvent, ProfileLearnedPersistedEvent, SkillUsedPersistedEvent, ProvisioningPersistedEvent, ModelUsagePersistedEvent]);
 
 export declare namespace SessionEvent {
-    export type Raw = TurnCreatedEvent.Raw | TurnDoneEvent.Raw | ModelMessageEvent.Raw | ToolExecutionStartedEvent.Raw | SessionEventFour.Raw | SessionEventFive.Raw | ToolResponseEvent.Raw | ThreadCreatedEvent.Raw | ThreadDoneEvent.Raw | McpAuthRequiredEvent.Raw | McpInitializeEvent.Raw | SandboxCreatedEvent.Raw | DocumentIngestionEvent.Raw | ToolApprovalRequiredEvent.Raw | ToolResponseRequiredEvent.Raw | ContextCompactionEvent.Raw | MemoryRecallPersistedEvent.Raw | ProfileLearnedPersistedEvent.Raw | SkillUsedPersistedEvent.Raw | ProvisioningPersistedEvent.Raw;
+    export type Raw = TurnCreatedEvent.Raw | TurnDoneEvent.Raw | ModelMessageEvent.Raw | ToolExecutionStartedEvent.Raw | SessionEventFour.Raw | SessionEventFive.Raw | ToolResponseEvent.Raw | ThreadCreatedEvent.Raw | ThreadDoneEvent.Raw | McpAuthRequiredEvent.Raw | McpInitializeEvent.Raw | SandboxCreatedEvent.Raw | DocumentIngestionEvent.Raw | ToolApprovalRequiredEvent.Raw | ToolResponseRequiredEvent.Raw | ContextCompactionEvent.Raw | MemoryRecallPersistedEvent.Raw | ProfileLearnedPersistedEvent.Raw | SkillUsedPersistedEvent.Raw | ProvisioningPersistedEvent.Raw | ModelUsagePersistedEvent.Raw;
 }

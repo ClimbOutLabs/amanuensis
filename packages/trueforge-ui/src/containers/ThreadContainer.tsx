@@ -16,6 +16,7 @@ import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvid
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
 import { MemoryTurnContextProvider } from './MemoryTurnContextProvider.js';
+import { ModelUsageTurnProvider } from './ModelUsageTurnProvider.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
 import { ResumeUnavailableContainer } from './ResumeUnavailableContainer.js';
 import { TerminalErrorContainer } from './TerminalErrorContainer.js';
@@ -101,56 +102,60 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
 
   return (
     <MemoryTurnContextProvider>
-      <DocumentIngestionStatusProvider>
-        <SentinelStateProvider>
-          <ComposerBusyProvider>
-            <AvatarActivityBridge />
-            <ApprovalFocusProvider>
-              <ThreadPrimitive.Root asChild>
-                <ThreadRootShell>
-                  <ThreadPrimitive.Viewport asChild autoScroll>
-                    <ThreadViewportShell isEmpty={isEmpty}>
-                      {isEmpty && <WelcomeScreen heading={welcomeHeading} />}
-                      {isEmpty && !isLoading && composer}
-                      {isLoading ? (
-                        <MessageListSkeleton />
-                      ) : (
-                        !isEmpty && (
-                          <>
-                            <HistoryLoaderContainer />
-                            <PendingApprovalsBanner />
-                            <MessageGroup>
-                              <ThreadPrimitive.Messages>
-                                {({ message }) => (
-                                  <AnimatedMessageShell animate={initialPaintDone.current}>
-                                    <ThreadMessage isEditing={message.role === 'user' && message.composer.isEditing} />
-                                  </AnimatedMessageShell>
-                                )}
-                              </ThreadPrimitive.Messages>
-                              <TerminalErrorContainer />
-                              <ResumeUnavailableContainer />
-                            </MessageGroup>
-                          </>
-                        )
-                      )}
-                    </ThreadViewportShell>
-                  </ThreadPrimitive.Viewport>
+      <ModelUsageTurnProvider>
+        <DocumentIngestionStatusProvider>
+          <SentinelStateProvider>
+            <ComposerBusyProvider>
+              <AvatarActivityBridge />
+              <ApprovalFocusProvider>
+                <ThreadPrimitive.Root asChild>
+                  <ThreadRootShell>
+                    <ThreadPrimitive.Viewport asChild autoScroll>
+                      <ThreadViewportShell isEmpty={isEmpty}>
+                        {isEmpty && <WelcomeScreen heading={welcomeHeading} />}
+                        {isEmpty && !isLoading && composer}
+                        {isLoading ? (
+                          <MessageListSkeleton />
+                        ) : (
+                          !isEmpty && (
+                            <>
+                              <HistoryLoaderContainer />
+                              <PendingApprovalsBanner />
+                              <MessageGroup>
+                                <ThreadPrimitive.Messages>
+                                  {({ message }) => (
+                                    <AnimatedMessageShell animate={initialPaintDone.current}>
+                                      <ThreadMessage
+                                        isEditing={message.role === 'user' && message.composer.isEditing}
+                                      />
+                                    </AnimatedMessageShell>
+                                  )}
+                                </ThreadPrimitive.Messages>
+                                <TerminalErrorContainer />
+                                <ResumeUnavailableContainer />
+                              </MessageGroup>
+                            </>
+                          )
+                        )}
+                      </ThreadViewportShell>
+                    </ThreadPrimitive.Viewport>
 
-                  {!isLoading && !isEmpty && (
-                    <ThreadComposerAreaShell isEmpty={isEmpty}>
-                      <ThreadPrimitive.ScrollToBottom asChild>
-                        <ScrollToBottomButton />
-                      </ThreadPrimitive.ScrollToBottom>
-                      <ThreadImplementationPlanGrantControls />
-                      {composer}
-                    </ThreadComposerAreaShell>
-                  )}
-                </ThreadRootShell>
-              </ThreadPrimitive.Root>
-            </ApprovalFocusProvider>
-          </ComposerBusyProvider>
-        </SentinelStateProvider>
-      </DocumentIngestionStatusProvider>
+                    {!isLoading && !isEmpty && (
+                      <ThreadComposerAreaShell isEmpty={isEmpty}>
+                        <ThreadPrimitive.ScrollToBottom asChild>
+                          <ScrollToBottomButton />
+                        </ThreadPrimitive.ScrollToBottom>
+                        <ThreadImplementationPlanGrantControls />
+                        {composer}
+                      </ThreadComposerAreaShell>
+                    )}
+                  </ThreadRootShell>
+                </ThreadPrimitive.Root>
+              </ApprovalFocusProvider>
+            </ComposerBusyProvider>
+          </SentinelStateProvider>
+        </DocumentIngestionStatusProvider>
+      </ModelUsageTurnProvider>
     </MemoryTurnContextProvider>
   );
 }

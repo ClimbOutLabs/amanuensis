@@ -8188,6 +8188,62 @@ await client.settings.skills.delete("name");
 </dl>
 </details>
 
+## Settings TokenFactoryUsage
+<details><summary><code>client.settings.tokenFactoryUsage.<a href="/src/api/resources/settings/resources/tokenFactoryUsage/client/Client.ts">get</a>() -> TrueForge.GetTokenFactoryUsageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.tokenFactoryUsage.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TokenFactoryUsageClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings ToolOutputScreens
 <details><summary><code>client.settings.toolOutputScreens.<a href="/src/api/resources/settings/resources/toolOutputScreens/client/Client.ts">get</a>() -> TrueForge.GetToolOutputScreenResponse</code></summary>
 <dl>

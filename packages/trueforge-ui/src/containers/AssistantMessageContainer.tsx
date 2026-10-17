@@ -15,15 +15,19 @@ import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
+import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
+import { ModelUsageLine } from '../atoms/agent-chat/ModelUsageLine.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
+import { useModelUsageVisible } from '../utils/modelUsageDisplayPreference.js';
 import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
 import { useMemoryTurnContext, useMemoryTurnContextStatus } from './MemoryTurnContextProvider.js';
 import { MessageImageContainer } from './MessageImageContainer.js';
+import { useModelUsageSummary } from './ModelUsageTurnProvider.js';
 import { NeedsYourOkContainer } from './NeedsYourOkContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
@@ -96,16 +100,19 @@ function buildInternalsSummary({
   toolCount,
   thinkingCount,
   recalledItems,
+  helperCalls,
 }: {
   toolCount: number;
   thinkingCount: number;
   recalledItems: number;
+  helperCalls: number;
 }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
   if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
+  if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   return segments.join(' · ');
 }
 
@@ -148,6 +155,10 @@ export function AssistantMessageContainer() {
   const memoryContext = useMemoryTurnContext(turnId);
   const { hasError: memoryContextHasError, retry: retryMemoryContext } = useMemoryTurnContextStatus();
   const ingestionStatusLine = useDocumentIngestionStatusLine(turnId);
+  // Display only: the server records usage whether or not the line is shown.
+  const { visible: modelUsageVisible } = useModelUsageVisible();
+  const recordedUsage = useModelUsageSummary(turnId);
+  const modelUsage = modelUsageVisible && !isMessageRunning ? recordedUsage : undefined;
 
   const parts = useAuiState(s => s.message.parts);
 
@@ -168,6 +179,9 @@ export function AssistantMessageContainer() {
   const recalledItems = memoryVisible ? (recall?.stats.items ?? 0) : 0;
   const hasMemory = memoryVisible || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
+  // Helper calls are agent details like the recalled memory: listed when the chat switch is on.
+  const helperUsage =
+    agentDetailsVisible && modelUsage !== undefined && modelUsage.helperCalls > 0 ? modelUsage : undefined;
 
   // Turn-level state (memory, live label) is hosted by the first run; a turn with no folded run
   // gets a leading row instead.
@@ -191,7 +205,9 @@ export function AssistantMessageContainer() {
       (isHost && (recallOutcomeBad || memoryFailed)) ||
       phase === 'waiting-for-approval';
     const showMemory = isHost && hasMemory;
-    const trivial = !isLive && run.toolCount === 0 && run.thinkingCount === 0 && !showMemory && !attention;
+    const showUsage = isHost && helperUsage !== undefined;
+    const trivial =
+      !isLive && run.toolCount === 0 && run.thinkingCount === 0 && !showMemory && !showUsage && !attention;
     if (trivial) return null;
 
     // A paused-for-approval turn is not "running" but still needs a live label —
@@ -210,6 +226,7 @@ export function AssistantMessageContainer() {
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
           recalledItems: isHost ? recalledItems : 0,
+          helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
         liveLabel={liveLabel}
         isRunning={isLive}
@@ -227,6 +244,7 @@ export function AssistantMessageContainer() {
             agentDetailsVisible={agentDetailsVisible}
           />
         )}
+        {showUsage && helperUsage !== undefined && <ModelUsageDetails summary={helperUsage} />}
         {children !== undefined && (
           <AgentStepsContainer
             toolCount={run.toolCount}
@@ -299,6 +317,7 @@ export function AssistantMessageContainer() {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {modelUsage !== undefined && <ModelUsageLine summary={modelUsage} />}
         <NeedsYourOkContainer parts={parts} />
       </AssistantMessageBubble>
     </MessagePrimitive.Root>

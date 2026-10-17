@@ -1421,6 +1421,10 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // model call after a ModelStreamFault and wants a shorter context under it.
     const overThreshold =
       execution.forceCompaction === true || contextTokens + promptTokens >= this.compactionThresholdTokens;
+    // Debug while under threshold keeps routine turns quiet; info marks a compaction decision.
+    this.logger?.[overThreshold ? 'info' : 'debug'](
+      `compaction pre-LLM check: contextTokens=${String(contextTokens)} promptTokens=${String(promptTokens)} thresholdTokens=${String(this.compactionThresholdTokens)} forceCompaction=${String(execution.forceCompaction === true)} overThreshold=${String(overThreshold)}`,
+    );
     if (execution.signal?.aborted) {
       // Compaction was due but the turn was cancelled before it could run. Record the skip so
       // it stays visible instead of silently vanishing; nothing changed, so tokens are unchanged.
