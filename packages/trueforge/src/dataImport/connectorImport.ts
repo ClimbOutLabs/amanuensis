@@ -1,5 +1,6 @@
 import type { AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 
+import type { McpServerRecord } from '../db/mcpServerStore';
 import type { McpServerManifest } from '../schemas/mcpServer';
 import { DataImportError } from './importError';
 import type { ImportConnectorRecord } from './importSchemas';
@@ -52,6 +53,35 @@ export function normalizeImportedConnectors(connectors: readonly ImportConnector
       },
     };
   });
+}
+
+/**
+ * Leaves out the export's copy of the default web search connector this instance keeps. A connector
+ * by that name with another address or a sign-in is the old owner's own, so the import refuses
+ * instead of dropping it.
+ */
+export function withoutKeptConnector({
+  connectors,
+  kept,
+}: {
+  connectors: readonly ImportedConnector[];
+  kept: McpServerRecord | undefined;
+}): ImportedConnector[] {
+  const copy = kept === undefined ? undefined : connectors.find(connector => connector.name === kept.name);
+  if (kept === undefined || copy === undefined) {
+    return [...connectors];
+  }
+  const sameConnector =
+    copy.manifest.type === kept.manifest.type &&
+    copy.manifest.url === kept.manifest.url &&
+    copy.manifest.auth === undefined;
+  if (!sameConnector) {
+    throw new DataImportError(
+      `The connector "${kept.name}" in this export differs from the web search connector this instance already has by that name, so nothing was imported. Remove that connector in Settings, then import again.`,
+      409,
+    );
+  }
+  return connectors.filter(connector => connector !== copy);
 }
 
 /** Imported connectors start unused: an agent keeps no attachment to them until the owner adds it. */

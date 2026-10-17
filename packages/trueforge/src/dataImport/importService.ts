@@ -16,7 +16,8 @@
  *
  * Every imported record belongs to the importing user. Ids are kept, so
  * links inside chats keep working. Schedules arrive switched off. Connectors
- * arrive unattached, without credentials, trust marks or search and memory roles.
+ * arrive unattached, without credentials, trust marks or search and memory roles;
+ * the instance's untouched default web search connector stays as it is.
  * Safety settings are never taken from an archive.
  */
 import {
@@ -58,7 +59,7 @@ import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
-import { detachConnectors, normalizeImportedConnectors } from './connectorImport';
+import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { DataImportError } from './importError';
 import {
   compensate,
@@ -72,7 +73,13 @@ import {
   UnreadableImportMarkerError,
   type ImportLedger,
 } from './importLedger';
-import { assertInstanceEmpty, assertNoIdCollisions, findInstanceData, type PreflightDeps } from './importPreflight';
+import {
+  assertInstanceEmpty,
+  assertNoIdCollisions,
+  findDefaultSearchConnector,
+  findInstanceData,
+  type PreflightDeps,
+} from './importPreflight';
 import {
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
@@ -846,6 +853,10 @@ async function importArchive<TTransaction>(
 
   // --- Reads only: nothing is written until every check below has passed. ---
   await assertInstanceEmpty(deps, { tenantId, subjectId, scope });
+  const newConnectors = withoutKeptConnector({
+    connectors,
+    kept: await findDefaultSearchConnector(deps, tenantId),
+  });
 
   const agentPlan = planAgents(contents);
   await assertNoIdCollisions(deps, {
@@ -1170,7 +1181,7 @@ async function importArchive<TTransaction>(
         );
       }
 
-      for (const connector of connectors) {
+      for (const connector of newConnectors) {
         await deps.mcpServerStore.createServer(
           {
             tenant_id: tenantId,
@@ -1255,7 +1266,7 @@ async function importArchive<TTransaction>(
       ...result,
       summary: buildSummary({
         result,
-        connectorNames: connectors.map(connector => connector.name),
+        connectorNames: newConnectors.map(connector => connector.name),
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,

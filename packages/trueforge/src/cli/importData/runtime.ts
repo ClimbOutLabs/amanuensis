@@ -41,6 +41,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     { runDataImport },
     { getSharedEmbeddingModel, isEmbeddingModelCached },
     { SentinelAuditStore },
+    { McpCatalog },
   ] = await Promise.all([
     import('../../config'),
     import('../../auth/identity'),
@@ -50,6 +51,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../dataImport/importService'),
     import('../../runtime/memory/embeddingModel'),
     import('../../db/sentinelAuditStore'),
+    import('../../catalog/McpCatalog'),
   ]);
   if (!configuration.STANDALONE) {
     throw new Error('import-data writes to the standalone (SQLite) instance only. Set STANDALONE=true.');
@@ -107,6 +109,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   const embeddingModel = getSharedEmbeddingModel({ modelDir });
   const logger = stderrLogger();
   const audit = new SentinelAuditStore(db);
+  const mcpCatalog = McpCatalog.load();
 
   return {
     owner,
@@ -123,6 +126,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           turnArtifactStore: new SqliteTurnArtifactStore(db),
           mcpServerStore: new SqliteMcpServerStore(db),
           agentStore: new SqliteAgentStore(db),
+          mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),
           memoryTarget: { kind: 'markdown', markdownDir: configuration.MEMORY_MARKDOWN_DIR },
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,

@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Transaction } from 'kysely';
 import { createLogger } from 'winston';
 
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
@@ -141,6 +142,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
+    mcpCatalog: McpCatalog.load(),
     withTransaction: instance.withTransaction,
     memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,

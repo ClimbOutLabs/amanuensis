@@ -3,10 +3,12 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isUntouchedDefaultSearchConnector } from '../catalog/defaultSearchConnector';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import type { IAgentStore } from '../db/agentStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
-import type { IPersonaStore } from '../db/personaStore';
+import type { IMcpServerStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -31,6 +33,8 @@ export interface PreflightDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   agentStore: IAgentStore<TTransaction>;
+  /** Tells the web search connector every new instance is given apart from the owner's own. */
+  mcpCatalog: McpCatalog;
   memoryTarget: MemoryImportTarget;
 }
 
@@ -63,6 +67,39 @@ function isPristineProfile(profile: {
     profile.learned_profile === null &&
     profile.pinned_preferences.length === 0
   );
+}
+
+/**
+ * Connectors the owner added or changed. The default web search connector, still exactly as the
+ * instance was given it, is not one: a fresh instance has it, and the import leaves it in place.
+ */
+async function ownConnectors<TTransaction>(
+  deps: PreflightDeps<TTransaction>,
+  tenantId: string,
+): Promise<{ own: McpServerRecord[]; defaultSearch: McpServerRecord | undefined }> {
+  const own: McpServerRecord[] = [];
+  let defaultSearch: McpServerRecord | undefined;
+  for (const record of await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined })) {
+    const untouched = await isUntouchedDefaultSearchConnector({
+      record,
+      catalog: deps.mcpCatalog,
+      clientStore: deps.mcpServerStore,
+    });
+    if (untouched) {
+      defaultSearch = record;
+    } else {
+      own.push(record);
+    }
+  }
+  return { own, defaultSearch };
+}
+
+/** The untouched default web search connector the import keeps, when the instance has it. */
+export async function findDefaultSearchConnector<TTransaction>(
+  deps: PreflightDeps<TTransaction>,
+  tenantId: string,
+): Promise<McpServerRecord | undefined> {
+  return (await ownConnectors(deps, tenantId)).defaultSearch;
 }
 
 /** True when the target tenant's Markdown vault holds memory content in any file outside `ignored`. */
@@ -107,7 +144,8 @@ async function markdownMemoryHasContent(input: {
 /**
  * Every kind of data the instance already holds, leaving out the items in
  * `ignoring`. A personalization profile the app created on first sign-in
- * (nothing filled in) does not count; the import replaces it. Global and
+ * (nothing filled in) does not count; the import replaces it. The default web
+ * search connector, untouched, does not count; the import keeps it. Global and
  * permission settings do not count either: the import only fills settings the
  * instance has not set.
  */
@@ -192,7 +230,7 @@ export async function findInstanceData<TTransaction>(
     }
     agentToken = agentPage.pagination.next_page_token;
   } while (agentToken !== undefined);
-  if ((await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined })).length > 0) {
+  if ((await ownConnectors(deps, tenantId)).own.length > 0) {
     found.push('connectors');
   }
   if (deps.memoryTarget.kind === 'markdown') {

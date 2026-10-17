@@ -13,6 +13,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import { resolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import { DataImportError } from '../dataImport/importError';
 import type { MemoryImportTarget } from '../dataImport/importPreflight';
@@ -48,6 +49,7 @@ export interface DataImportRouterDeps<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
   resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
+  mcpCatalog: McpCatalog;
   withTransaction: WithTransaction<TTransaction>;
   authorizer: Authorizer;
   logger: Logger;
@@ -156,6 +158,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
           agentStore,
+          mcpCatalog: deps.mcpCatalog,
           withTransaction: deps.withTransaction,
           memoryTarget,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,

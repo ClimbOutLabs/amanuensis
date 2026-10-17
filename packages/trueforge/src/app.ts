@@ -539,6 +539,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
       resolveAgentStore: deps.resolveAgentStore,
+      mcpCatalog: deps.mcpCatalog,
       withTransaction: deps.withTransaction,
       authorizer: deps.authorizer,
       logger: deps.logger,

@@ -7,6 +7,8 @@ import { sql, type Transaction } from 'kysely';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
+import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DataImportError } from '../../../src/dataImport/importError';
@@ -36,7 +38,7 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
-import { resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
+import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
 import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import {
   SEED_AUDIT,
@@ -121,6 +123,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     auditStore: instance.stores.auditStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
+    mcpCatalog: McpCatalog.load(),
     withTransaction: callback => instance.db.transaction().execute(callback),
     memoryTarget: memoryTarget ?? { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,
@@ -1808,6 +1811,181 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       );
       const curated = await readFile(join(target.memoryDir, TENANT, 'MEMORY.md'), 'utf8');
       expect(curated).toContain(SEED_MEMORY.curated);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+type ConnectorEdit = Partial<Omit<RemoteMcpServerManifest, 'type' | 'name'>>;
+
+/** Saves the default web search connector the way a new instance is given it, with optional edits. */
+async function addDefaultSearchConnector(instance: Instance, edit: ConnectorEdit = {}) {
+  const seeded = defaultSearchConnector(McpCatalog.load());
+  if (seeded === undefined) {
+    throw new Error('The shipped catalog has no keyless search preset.');
+  }
+  return instance.stores.mcpServerStore.upsertServer({
+    tenant_id: TENANT,
+    name: seeded.name,
+    manifest: { ...seeded.manifest, ...edit },
+    first_party: false,
+  });
+}
+
+async function connectorRows(instance: Instance) {
+  return instance.stores.mcpServerStore.listServers({ tenant_id: TENANT, names: undefined });
+}
+
+describe('runDataImport keeps the default web search connector a new instance is given', () => {
+  it('imports into an instance whose only data is that connector, and leaves it as it was', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search');
+    try {
+      const seeded = await addDefaultSearchConnector(target);
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.connectors).toBe(3);
+      expect(result.summary).toContain('dcr-connector, header-connector, plain-connector.');
+      const kept = (await connectorRows(target)).find(row => row.name === seeded.name);
+      expect(kept).toEqual(seeded);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it("leaves out the export's own copy of that connector instead of clashing with it", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search-copy');
+    try {
+      const seeded = await addDefaultSearchConnector(target);
+      const copy = connectorRecord(seeded.name, { ...seeded.manifest, description: 'Older catalog text.' });
+      const tampered = await withConnectors(archive, [
+        copy,
+        connectorRecord('plain-one', { url: 'https://plain.example.com/mcp' }),
+      ]);
+      const result = await runDataImport(importDeps(target), importRequest(tampered));
+      expect(result.connectors).toBe(1);
+      expect(result.summary).toContain('no agent attached to them: plain-one.');
+      const rows = await connectorRows(target);
+      expect(rows.map(row => row.name).sort()).toEqual([seeded.name, 'plain-one'].sort());
+      expect(rows.find(row => row.name === seeded.name)).toEqual(seeded);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it.each<[string, ConnectorEdit]>([
+    ['another address', { url: 'https://elsewhere.example.com/mcp' }],
+    ['a sign-in', { auth: { type: 'dcr' } }],
+  ])('refuses an export connector of that name with %s and writes nothing', async (_label, edit) => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search-clash');
+    try {
+      const seeded = await addDefaultSearchConnector(target);
+      const tampered = await withConnectors(archive, [connectorRecord(seeded.name, { ...seeded.manifest, ...edit })]);
+      const error = await importError(target, tampered);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain(`"${seeded.name}"`);
+      expect(await connectorRows(target)).toEqual([seeded]);
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it.each<[string, ConnectorEdit]>([
+    ['its address changed', { url: 'https://search.parallel.ai/mcp/v2' }],
+    ['a key in its address', { url: 'https://search.parallel.ai/mcp?key=owner-key' }],
+    ['a header added', { auth: { type: 'header', headers: { Authorization: 'Bearer owner-key' } } }],
+    ['a sign-in added', { auth: { type: 'dcr' } }],
+    ['its description edited', { description: 'My own search.' }],
+    ['the search role turned off', { search_provider: false }],
+    ['another search tool allowed', { search_tools: ['web_search', 'web_fetch', 'web_crawl'] }],
+  ])('still refuses that connector with %s', async (_label, edit) => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search-edited');
+    try {
+      await addDefaultSearchConnector(target, edit);
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('already has connectors');
+      expect(await chatsOf(target, 'bob')).toHaveLength(0);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('still refuses that connector once it holds a sign-in client or a trust mark', async () => {
+    const { source, archive } = await seededArchive();
+    const withClient = await makeInstance('target-default-search-client');
+    const trusted = await makeInstance('target-default-search-trusted');
+    try {
+      const seeded = await addDefaultSearchConnector(withClient);
+      await withClient.stores.mcpServerStore.saveClient({
+        id: seeded.id,
+        record: {
+          server: {
+            authorizationEndpoint: 'https://auth.example.com/authorize',
+            tokenEndpoint: 'https://auth.example.com/token',
+            codeChallengeMethodsSupported: ['S256'],
+          },
+          client: { clientId: 'owner-client', clientSecret: 'owner-secret' },
+        },
+      });
+      expect(await importError(withClient, archive)).toMatchObject({ status: 409 });
+
+      const plain = await addDefaultSearchConnector(trusted);
+      await trusted.stores.mcpServerStore.upsertServer({
+        tenant_id: TENANT,
+        name: plain.name,
+        manifest: plain.manifest,
+        first_party: true,
+      });
+      expect(await importError(trusted, archive)).toMatchObject({ status: 409 });
+    } finally {
+      await source.close();
+      await withClient.close();
+      await trusted.close();
+    }
+  });
+
+  it('still refuses when any other connector sits beside it', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search-extra');
+    try {
+      await addDefaultSearchConnector(target);
+      await target.stores.mcpServerStore.createServer({
+        tenant_id: TENANT,
+        name: 'owner-extra',
+        manifest: { type: 'remote', name: 'owner-extra', url: 'https://extra.example.com/mcp', description: 'Mine.' },
+        first_party: false,
+      });
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('already has connectors');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('cleans up after an interrupted import even when the connector was added after it stopped', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-default-search-recover');
+    try {
+      await leaveInterruptedImport(target, archive);
+      // An upgraded instance is given the connector on its next start, with the leftovers still there.
+      const seeded = await addDefaultSearchConnector(target);
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.chats).toBe(3);
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+      expect((await connectorRows(target)).find(row => row.name === seeded.name)).toEqual(seeded);
     } finally {
       await source.close();
       await target.close();
