@@ -33,10 +33,6 @@ export interface SessionTipInfo {
 export interface LastCompactionStatus {
   /** ISO 8601 timestamp of the compaction event. */
   createdAt: string;
-  /** Estimated context tokens before the compaction attempt. */
-  tokensBefore: number;
-  /** Estimated context tokens after the compaction attempt. */
-  tokensAfter: number;
   /** Whether the compaction applied, was skipped, or fell back to truncation. */
   outcome: TrueForgeApi.ContextCompactionEventOutcome;
 }
@@ -246,8 +242,6 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
       if (event.type !== 'agent.context.compaction') continue;
       return {
         createdAt: event.createdAt,
-        tokensBefore: event.tokensBefore,
-        tokensAfter: event.tokensAfter,
         outcome: event.outcome,
       };
     }

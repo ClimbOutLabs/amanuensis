@@ -1,8 +1,9 @@
 'use client';
 
+import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   hasSessionResync,
@@ -42,7 +43,7 @@ function useModelProperties(): { contextLength: number | null; maxOutputTokens: 
 /**
  * Latest context compaction status for the active session.
  * Polls the persisted session events so the status survives page reloads;
- * refreshes whenever the session changes. Also fetches the most recent
+ * refreshes whenever the session changes or a turn ends. Also fetches the most recent
  * turn's input tokens, which is the actual number the model saw last.
  */
 export function useCompactionStatus(): CompactionStatusResult {
@@ -52,6 +53,18 @@ export function useCompactionStatus(): CompactionStatusResult {
   const [lastCompaction, setLastCompaction] = useState<LastCompactionStatus | null>(null);
   const [liveTokens, setLiveTokens] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // A turn ending can trigger a compaction, so refresh then too, not only
+  // when the session changes. Otherwise the status line stays stale until reload.
+  const isRunning = useThreadIsRunning();
+  const [turnEndCount, setTurnEndCount] = useState(0);
+  const wasRunningRef = useRef(false);
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning) {
+      setTurnEndCount(count => count + 1);
+    }
+    wasRunningRef.current = isRunning;
+  }, [isRunning]);
 
   useEffect(() => {
     if (sessionId == null || sessionId.length === 0) {
@@ -77,7 +90,7 @@ export function useCompactionStatus(): CompactionStatusResult {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, server]);
+  }, [sessionId, server, turnEndCount]);
 
   return { contextLimit, liveTokens, maxOutputTokens, lastCompaction, loading };
 }

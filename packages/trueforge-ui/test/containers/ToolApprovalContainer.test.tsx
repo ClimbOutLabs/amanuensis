@@ -71,7 +71,7 @@ function ToolApprovalBarProbe({
 }
 
 const options: ToolApprovalOption[] = [
-  { id: 'allow-once', label: 'Allow once', isAllow: true },
+  { id: 'allow-once', label: 'Approve', isAllow: true },
   { id: 'allow-session', label: 'Allow session', isAllow: true },
   { id: 'reject-now', label: 'Reject now', isAllow: false },
   {
@@ -113,7 +113,7 @@ describe('ToolApprovalContainer', () => {
     expect(probe).toHaveAttribute('data-approve-variants', 'primary|secondary');
     expect(probe).toHaveAttribute('data-deny-requires-reason', 'false|true');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     fireEvent.click(screen.getByRole('button', { name: 'Reject now' }));
     expect(onSelectOption).toHaveBeenNthCalledWith(1, 'allow-once');
     expect(onSelectOption).toHaveBeenNthCalledWith(2, 'reject-now');
@@ -139,12 +139,12 @@ describe('ToolApprovalContainer', () => {
     expect(screen.getByTestId('approval-probe')).toHaveAttribute('data-tool-name', 'shell');
   });
 
-  it('explains that a submitted plan only becomes reusable with Allow in this chat', () => {
+  it('explains that a submitted plan only becomes reusable with Approve for this chat', () => {
     renderSubject(vi.fn(), { toolName: 'submit_implementation_plan' });
 
     expect(screen.getByTestId('approval-probe')).toHaveAttribute(
       'data-guidance',
-      'Allow in this chat activates this exact plan until revoked. Allow once approves only this submission.',
+      'Approve for this chat turns this exact plan on until you revoke it. Approve covers only this submission.',
     );
   });
 
@@ -153,7 +153,7 @@ describe('ToolApprovalContainer', () => {
 
     expect(screen.getByTestId('approval-probe')).toHaveAttribute(
       'data-guidance',
-      'Allow once approves this edit even when it is outside an active plan. The host rechecks the target before dispatch; if an earlier attempt was blocked as stale, it was not dispatched, so read the target again before approving this retry. For a bounded set of edits and checks, ask the agent to submit an implementation plan.',
+      'Approve covers this edit even when it is outside an active plan. The host rechecks the target before dispatch; if an earlier attempt was blocked as stale, it was not dispatched, so read the target again before approving this retry. For a bounded set of edits and checks, ask the agent to submit an implementation plan.',
     );
   });
 
@@ -174,7 +174,7 @@ describe('ToolApprovalContainer', () => {
 
     expect(screen.getByTestId('approval-probe')).toHaveAttribute(
       'data-guidance',
-      'Allow once approves this edit even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.',
+      'Approve covers this edit even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.',
     );
   });
 
