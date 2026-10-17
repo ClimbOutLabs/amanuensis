@@ -1,5 +1,5 @@
 import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
-import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
+import type { CallToolResolvedResponse, IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 
@@ -27,7 +27,9 @@ function call(name: string): InternalEnrichedAssistantMessage {
   };
 }
 
-function returning(content: unknown[]): IToolSet {
+type ResultContent = CallToolResolvedResponse['result']['content'];
+
+function returning(content: ResultContent): IToolSet {
   const base = toolResultResponse({ text: '' });
   return {
     name: 'mail',
@@ -40,7 +42,7 @@ function returning(content: unknown[]): IToolSet {
   };
 }
 
-async function run(content: unknown[]) {
+async function run(content: ResultContent) {
   const result = await executeToolCalls({
     assistantMessage: call('download_attachment'),
     toolMapping: new Map([['download_attachment', { toolSet: returning(content), originalToolName: 'download_attachment' }]]),
@@ -73,11 +75,15 @@ describe('tool result images', () => {
   });
 
   it('skips malformed image blocks', async () => {
-    const result = await run([
-      { type: 'text', text: 'ok' },
-      { type: 'image', data: 42, mimeType: 'image/png' },
-      { type: 'image', data: PNG_BASE64 },
-    ]);
+    // Parsed rather than typed: a provider can send blocks that break the MCP schema.
+    const malformed: ResultContent = JSON.parse(
+      JSON.stringify([
+        { type: 'text', text: 'ok' },
+        { type: 'image', data: 42, mimeType: 'image/png' },
+        { type: 'image', data: PNG_BASE64 },
+      ]),
+    );
+    const result = await run(malformed);
     expect(result.images).toEqual([]);
   });
 });
