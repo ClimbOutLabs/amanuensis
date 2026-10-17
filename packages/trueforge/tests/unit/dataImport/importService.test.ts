@@ -144,6 +144,12 @@ function importRequest(archive: Buffer, userId = 'bob', maxBytes = 1024 * 1024 *
   };
 }
 
+/** A request into its own tenant, so an import a failed test leaves stuck cannot block later tests. */
+function isolatedImportRequest(archive: Buffer, tenantId: string) {
+  const request = importRequest(archive);
+  return { ...request, subject: { ...request.subject, tenantId } };
+}
+
 /** Rebuilds an archive with one mutation applied to its entries. */
 async function repack(archive: Buffer, mutate: (entries: Map<string, Buffer>) => void): Promise<Buffer> {
   const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
@@ -172,6 +178,11 @@ async function seededArchive(includeUploads = true): Promise<{ source: Instance;
   const archive = await exportArchive(source, includeUploads);
   return { source, archive };
 }
+
+afterEach(() => {
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
 
 describe('runDataImport', () => {
   it('imports a full export into an empty instance for a new owner', async () => {
@@ -710,15 +721,26 @@ async function importError(instance: Instance, archive: Buffer, deps = importDep
   return runDataImport(deps, importRequest(archive)).catch((caught: unknown) => caught);
 }
 
-/**
- * Advances fake timers in small steps, letting real I/O run between them, until `promise` settles or
- * `limitMs` of fake time has passed.
- */
-async function driveFakeClock<T>(
-  promise: Promise<T>,
-  limitMs: number,
-): Promise<{ settled: true; value: T } | { settled: false }> {
-  let outcome: { settled: true; value: T } | { settled: false } = { settled: false };
+// Captured before any test installs fake timers, so the budgets below count real time.
+const realNow = Date.now;
+/** How long a fake-clock test waits on real I/O before calling it a stall; well under the suite timeout. */
+const REAL_WAIT_MS = 60_000;
+/** How long cleanup waits for an import a failed test left running. */
+const CLEANUP_WAIT_MS = 30_000;
+
+type Settlement<T> = { settled: true; value: T } | { settled: false };
+
+/** Runs `step` until `promise` settles or `budgetMs` of real time passes; a rejection is rethrown. */
+async function settleWithin<T>({
+  promise,
+  budgetMs,
+  step,
+}: {
+  promise: Promise<T>;
+  budgetMs: number;
+  step: () => Promise<void>;
+}): Promise<Settlement<T>> {
+  let outcome: Settlement<T> = { settled: false };
   let failure: { error: unknown } | undefined;
   promise.then(
     value => {
@@ -728,7 +750,8 @@ async function driveFakeClock<T>(
       failure = { error };
     },
   );
-  for (let elapsed = 0; elapsed <= limitMs; elapsed += 100) {
+  const deadline = realNow() + budgetMs;
+  while (realNow() <= deadline) {
     if (failure !== undefined) {
       throw failure.error;
     }
@@ -736,9 +759,30 @@ async function driveFakeClock<T>(
       return outcome;
     }
     await new Promise(resolve => setImmediate(resolve));
-    await jest.advanceTimersByTimeAsync(100);
+    await step();
   }
   return outcome;
+}
+
+/**
+ * Advances fake timers in small steps, letting real I/O run between them. Real time bounds it because
+ * slow I/O, not fake time, decides how many steps a run needs.
+ */
+function driveFakeClock<T>(promise: Promise<T>, budgetMs = REAL_WAIT_MS): Promise<Settlement<T>> {
+  return settleWithin({ promise, budgetMs, step: () => jest.advanceTimersByTimeAsync(100) });
+}
+
+/** Waits on real I/O alone, leaving fake time where it is. */
+function awaitRealIo<T>(promise: Promise<T>): Promise<Settlement<T>> {
+  return settleWithin({ promise, budgetMs: REAL_WAIT_MS, step: () => Promise.resolve() });
+}
+
+/** Lets an import a failed fake-clock test left running finish, so later tests find the tenant free. */
+async function settleLeftoverImport(run: Promise<unknown>): Promise<void> {
+  await driveFakeClock(
+    run.catch(() => undefined),
+    CLEANUP_WAIT_MS,
+  );
 }
 
 /** An import that failed and could not remove what it wrote, as an interrupted process leaves it. */
@@ -1465,17 +1509,21 @@ describe('runDataImport failure handling', () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-long-commit');
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    const slowCommit: WithTransaction<Tx> = callback =>
+      target.db.transaction().execute(async tx => {
+        await new Promise(resolve => setTimeout(resolve, 3 * IMPORT_HEARTBEAT_MS));
+        return await callback(tx);
+      });
+    const run = runDataImport(
+      { ...importDeps(target), withTransaction: slowCommit },
+      isolatedImportRequest(archive, 'tenant-long-commit'),
+    );
     try {
-      const slowCommit: WithTransaction<Tx> = callback =>
-        target.db.transaction().execute(async tx => {
-          await new Promise(resolve => setTimeout(resolve, 3 * IMPORT_HEARTBEAT_MS));
-          return await callback(tx);
-        });
-      const run = runDataImport({ ...importDeps(target), withTransaction: slowCommit }, importRequest(archive));
       // Renewals fire while the transaction is open; a renewal that waits for it would stall the run for good.
-      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+      expect(await driveFakeClock(run)).toMatchObject({ settled: true, value: { chats: 3 } });
       expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
     } finally {
+      await settleLeftoverImport(run);
       jest.useRealTimers();
       await source.close();
       await target.close();
@@ -1486,45 +1534,61 @@ describe('runDataImport failure handling', () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-renewal');
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
-    try {
-      let reachedKnowledge: () => void = () => undefined;
-      const reached = new Promise<void>(resolve => {
-        reachedKnowledge = resolve;
-      });
-      let release: () => void = () => undefined;
-      const gate = new Promise<void>(resolve => {
-        release = resolve;
-      });
-      const run = runDataImport(
-        {
-          ...importDeps(target),
-          knowledgeEmbedder: {
-            ensureReady: () => Promise.resolve(true),
-            embedPassages: async texts => {
-              reachedKnowledge();
-              await gate;
-              return texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5));
-            },
+    let reachedKnowledge: () => void = () => undefined;
+    const reached = new Promise<void>(resolve => {
+      reachedKnowledge = resolve;
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const settings = target.stores.globalSettingsStore;
+    let recording = false;
+    const renewals: Promise<boolean>[] = [];
+    const write = settings.compareAndSetSetting.bind(settings);
+    jest.spyOn(settings, 'compareAndSetSetting').mockImplementation((input, transaction) => {
+      const written = write(input, transaction);
+      if (recording) {
+        renewals.push(written);
+      }
+      return written;
+    });
+    const run = runDataImport(
+      {
+        ...importDeps(target),
+        knowledgeEmbedder: {
+          ensureReady: () => Promise.resolve(true),
+          embedPassages: async texts => {
+            reachedKnowledge();
+            await gate;
+            return texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5));
           },
         },
-        importRequest(archive),
-      );
-      await driveFakeClock(reached, 40 * IMPORT_HEARTBEAT_MS);
+      },
+      isolatedImportRequest(archive, 'tenant-renewal'),
+    );
+    try {
+      // Racing the run surfaces an early failure instead of waiting on a gate it never reaches.
+      const parked = Promise.race([reached.then(() => 'parked at the embedder'), run.then(() => 'finished')]);
+      expect(await awaitRealIo(parked)).toEqual({ settled: true, value: 'parked at the embedder' });
       const heartbeat = async () => {
-        const record = await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
+        const record = await settings.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
         return Date.parse(
           stringAt(recordAt(JSON.parse(record?.value ?? 'null'), 'marker')['heartbeat_at'], 'heartbeat'),
         );
       };
       const before = await heartbeat();
-      await driveFakeClock(
-        new Promise(resolve => setTimeout(resolve, 2 * IMPORT_HEARTBEAT_MS)),
-        3 * IMPORT_HEARTBEAT_MS,
-      );
+      recording = true;
+      await jest.advanceTimersByTimeAsync(IMPORT_HEARTBEAT_MS);
+      // One interval is one renewal; its write is real I/O that fake time does not wait for.
+      expect(renewals).toHaveLength(1);
+      expect(await awaitRealIo(Promise.all(renewals))).toEqual({ settled: true, value: [true] });
       expect(await heartbeat()).toBeGreaterThan(before);
       release();
-      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+      expect(await driveFakeClock(run)).toMatchObject({ settled: true, value: { chats: 3 } });
     } finally {
+      release();
+      await settleLeftoverImport(run);
       jest.useRealTimers();
       await source.close();
       await target.close();

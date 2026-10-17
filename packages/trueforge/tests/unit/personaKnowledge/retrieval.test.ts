@@ -250,4 +250,36 @@ describe('retrievePersonaKnowledge', () => {
     // needs to neutralize the section tag and the CDATA terminator.
     expect(result?.block).toContain('Benign passage text.');
   });
+
+  it('isolates libraries per persona: retrieval never returns another persona\u2019s documents', async () => {
+    const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-isolation-'));
+    seedLibrary(knowledgeDir, 'persona-a', [
+      { text: 'Persona A library fact: the Lisbon apartment costs 2900 euros.', title: 'Lisbon notes' },
+    ]);
+    seedLibrary(knowledgeDir, 'persona-b', [
+      { text: 'Persona B library fact: the Madrid apartment costs 4000 euros.', title: 'Madrid notes' },
+    ]);
+
+    const base = {
+      tenantId: 'default',
+      question: 'How much does the apartment cost?',
+      knowledgeDir,
+      modelDir: path.join(knowledgeDir, 'models'),
+      logger,
+    };
+    // The mocked model embeds every chunk as the same unit vector, so scoring
+    // cannot separate the personas: only the per-persona database can.
+    const forA = await retrievePersonaKnowledge({ ...base, personaId: 'persona-a' });
+    const forB = await retrievePersonaKnowledge({ ...base, personaId: 'persona-b' });
+
+    expect(forA?.hits).toHaveLength(1);
+    expect(forA?.hits[0]?.title).toBe('Lisbon notes');
+    expect(forA?.block).not.toContain('Madrid notes');
+    expect(forB?.hits).toHaveLength(1);
+    expect(forB?.hits[0]?.title).toBe('Madrid notes');
+    expect(forB?.block).not.toContain('Lisbon notes');
+
+    // A persona with no library gets nothing, not a neighbor's documents.
+    await expect(retrievePersonaKnowledge({ ...base, personaId: 'persona-c' })).resolves.toBeUndefined();
+  });
 });

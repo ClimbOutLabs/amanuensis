@@ -128,9 +128,10 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
   // Preset is uncontrolled: the stored preset wins, else the host config, else 'trueforge'.
   const [preset, setPresetState] = useState<ThemePreset>(() => readStoredPreset() ?? theme?.preset ?? 'trueforge');
 
+  const webFonts = theme?.webFonts;
   useLayoutEffect(() => {
-    ensureStyles();
-  }, []);
+    ensureStyles(undefined, { webFonts });
+  }, [webFonts]);
 
   useLayoutEffect(() => {
     if (theme?.mode !== undefined) {
