@@ -91,6 +91,7 @@ import {
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
+import { plainReaderFailure } from './readerFailure';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
@@ -5882,9 +5883,16 @@ export class Sandbox extends LocalToolMCP {
       timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    ensureExecSuccess(result);
     if (!result.success) {
-      throw new Error('Unreachable: Word text result was not successful');
+      throw new Error(result.error);
+    }
+    if (result.response.exitCode !== 0) {
+      // The reader's output can quote the file; the server log keeps it, the person gets a plain sentence.
+      this.logger.warn('Word document reader failed', {
+        exit_code: result.response.exitCode,
+        output: result.response.result.slice(0, 2000),
+      });
+      throw new Error(plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }));
     }
     return { text: parseWordTextOutput({ output: result.response.result, marker }) };
   }

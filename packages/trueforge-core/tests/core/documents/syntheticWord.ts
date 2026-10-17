@@ -2,16 +2,6 @@
 import { Document, Packer, Paragraph, Table, TableCell, TableRow } from 'docx';
 import { execFileSync } from 'node:child_process';
 
-/** The sandbox reads Word files with python-docx; tests that run the real reader need the same on the host. */
-export function hostCanReadWord(): boolean {
-  try {
-    execFileSync('python3', ['-I', '-c', 'import docx, lxml'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function paragraph(text: string): Paragraph {
   return new Paragraph({ text });
 }
