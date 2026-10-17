@@ -128,19 +128,33 @@ describe('HtmlArtifactPreview', () => {
     unmount();
   });
 
-  it('allows opening the HTML in a new tab when not read-only', async () => {
+  it('never opens the artifact in a new tab or blob URL', async () => {
     const htmlBlob = new Blob(['<html><body>Hello World</body></html>'], { type: 'text/html' });
     const mockOpen = vi.fn();
+    const createObjectURL = vi.fn();
     window.open = mockOpen;
+    URL.createObjectURL = createObjectURL;
 
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={false} />);
 
-    await waitFor(() => {
-      const openButton = screen.getByLabelText(/Open test.html in new tab/);
-      expect(openButton).toBeInTheDocument();
-      fireEvent.click(openButton);
-      expect(mockOpen).toHaveBeenCalled();
-    });
+    await screen.findByTestId('aui-html-preview-iframe');
+    expect(screen.queryByLabelText(/new tab/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Expand test.html/));
+    expect(mockOpen).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(screen.getByTestId('aui-html-preview-iframe')).toHaveAttribute('sandbox', 'allow-scripts');
+  });
+
+  it('calls onDownload only when the download button is clicked', async () => {
+    const htmlBlob = new Blob(['<html><body>Hello World</body></html>'], { type: 'text/html' });
+    const onDownload = vi.fn();
+
+    render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" onDownload={onDownload} />);
+
+    await screen.findByTestId('aui-html-preview-iframe');
+    expect(onDownload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText(/Download test.html/));
+    expect(onDownload).toHaveBeenCalledTimes(1);
   });
 
   it('does not show controls when read-only', async () => {
@@ -149,7 +163,7 @@ describe('HtmlArtifactPreview', () => {
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={true} />);
 
     await waitFor(() => {
-      expect(screen.queryByLabelText(/Open test.html in new tab/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/new tab/i)).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/Expand test.html/)).not.toBeInTheDocument();
     });
   });
@@ -200,5 +214,50 @@ describe('HtmlArtifactPreview image CSP', () => {
       expect(srcdoc).toContain('img-src data:;');
       expect(srcdoc).not.toMatch(/img-src[^;]*https:/);
     });
+  });
+});
+
+async function renderedSrcdoc(html: string): Promise<string> {
+  render(<HtmlArtifactPreview content={new Blob([html], { type: 'text/html' })} filename="t.html" />);
+  const iframe = await screen.findByTestId('aui-html-preview-iframe');
+  return iframe.getAttribute('srcdoc') ?? '';
+}
+
+describe('HtmlArtifactPreview CSP placement', () => {
+  const CSP_META = '<meta http-equiv="Content-Security-Policy"';
+
+  it('allows only data: fonts', async () => {
+    const srcdoc = await renderedSrcdoc('<html><head></head><body>x</body></html>');
+    expect(srcdoc).toContain('font-src data:;');
+    expect(srcdoc).not.toMatch(/font-src[^;]*https:/);
+  });
+
+  it('inserts the app CSP first even when the content carries its own CSP meta', async () => {
+    const own = `${CSP_META} content="default-src * 'unsafe-inline'">`;
+    const srcdoc = await renderedSrcdoc(`<html><head>${own}</head><body>x</body></html>`);
+    const first = srcdoc.indexOf(CSP_META);
+    const second = srcdoc.indexOf(CSP_META, first + 1);
+    expect(second).toBeGreaterThan(first);
+    expect(srcdoc.slice(first, second)).toContain('default-src &#39;none&#39;');
+  });
+
+  it('inserts the app CSP before a looser meta that precedes any head tag', async () => {
+    const loose = `${CSP_META} content="font-src https:">`;
+    const srcdoc = await renderedSrcdoc(`${loose}<p>x</p>`);
+    expect(srcdoc.indexOf(CSP_META)).toBeLessThan(srcdoc.indexOf(loose));
+    expect(srcdoc.trimStart().startsWith(CSP_META)).toBe(true);
+  });
+
+  it('matches a differently spelled CSP meta without letting it come first', async () => {
+    const loose = '<META HTTP-EQUIV=\'content-security-policy\' CONTENT="default-src *">';
+    const srcdoc = await renderedSrcdoc(`<!DOCTYPE html><html><head>${loose}</head><body></body></html>`);
+    expect(srcdoc.indexOf('default-src &#39;none&#39;')).toBeLessThan(srcdoc.indexOf(loose));
+  });
+
+  it('keeps the doctype first so the page does not fall into quirks mode', async () => {
+    const srcdoc = await renderedSrcdoc('<!DOCTYPE html><html><head></head><body>x</body></html>');
+    expect(srcdoc.trimStart().toLowerCase().startsWith('<!doctype html>')).toBe(true);
+    expect(srcdoc.toLowerCase().indexOf('<!doctype')).toBeLessThan(srcdoc.indexOf(CSP_META));
+    expect(srcdoc.indexOf(CSP_META)).toBeLessThan(srcdoc.indexOf('<html'));
   });
 });

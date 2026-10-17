@@ -8,12 +8,14 @@ import { cn } from './lib/cn.js';
 export type HtmlArtifactPreviewProps = {
   /** HTML content blob to render. */
   content: Blob;
-  /** Filename for display and new tab. */
+  /** Filename for display. */
   filename: string;
   /** Called to fetch related files (CSS, JS, images) from the same directory. */
   onFetchRelatedFile?: (path: string) => Promise<Blob>;
   /** Maximum total bytes to inline for related assets before falling back to link-only. */
   maxInliningBytes?: number;
+  /** Saves the file to the user's device; only ever called from the download button. */
+  onDownload?: () => void;
   /** When true, only the download link is shown (no preview). */
   readOnly?: boolean;
 };
@@ -23,12 +25,12 @@ const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
 /**
  * CSP meta tag policy for the sandboxed iframe.
  * - Allows inline scripts and styles from the document itself
- * - Allows images from data: URIs only; fonts from data: URIs and https: URLs
- * - Blocks all network connections (connect-src none)
+ * - Allows images and fonts from data: URIs only; nothing here can reach the network
+ * - Blocks all network connections (connect-src falls back to default-src 'none')
  * - Blocks framing
  */
 const CSP_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data: https:; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'none'";
 
 interface AssetToInline {
   originalUrl: string;
@@ -192,11 +194,25 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => map[char] || char);
 }
 
+const LEADING_DOCTYPE_RE = /^(?:\s*<!--[\s\S]*?-->)*\s*<!doctype[^>]*>/i;
+
+/**
+ * Puts the app's CSP meta ahead of everything the content can say, after only a leading doctype
+ * (anything before it would push the page into quirks mode). Policies in later metas can only
+ * tighten this one, so content cannot widen it however it spells its own tag.
+ */
+function insertPolicyFirst(htmlText: string): string {
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
+  const doctype = LEADING_DOCTYPE_RE.exec(htmlText)?.[0] ?? '';
+  return `${doctype}${cspMeta}${htmlText.slice(doctype.length)}`;
+}
+
 export function HtmlArtifactPreview({
   content,
   filename,
   onFetchRelatedFile,
   maxInliningBytes = DEFAULT_MAX_INLINING_BYTES,
+  onDownload,
   readOnly,
 }: HtmlArtifactPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -213,22 +229,7 @@ export function HtmlArtifactPreview({
       try {
         let htmlText = await blobToText(content);
 
-        // Inject CSP meta tag at the top of the document
-        if (!htmlText.includes('<meta http-equiv="Content-Security-Policy"')) {
-          const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
-          // Find insertion point after <head> or at document start
-          const headMatch = htmlText.match(/<head[^>]*>/i);
-          if (headMatch) {
-            htmlText = htmlText.replace(headMatch[0], headMatch[0] + '\n' + cspMeta);
-          } else {
-            const htmlMatch = htmlText.match(/<html[^>]*>/i);
-            if (htmlMatch) {
-              htmlText = htmlText.replace(htmlMatch[0], htmlMatch[0] + '\n<head>' + cspMeta + '</head>');
-            } else {
-              htmlText = cspMeta + '\n' + htmlText;
-            }
-          }
-        }
+        htmlText = insertPolicyFirst(htmlText);
 
         // Inline relative assets if fetch function is provided
         if (onFetchRelatedFile) {
@@ -260,16 +261,6 @@ export function HtmlArtifactPreview({
     };
   }, [content, filename, onFetchRelatedFile, maxInliningBytes]);
 
-  // Open HTML in new tab via Blob URL
-  const handleOpenInNewTab = () => {
-    if (srcdoc == null) return;
-    const blob = new Blob([srcdoc], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    // Note: URL.revokeObjectURL is not called here to allow the tab to load;
-    // browsers clean up automatically when the tab closes
-  };
-
   if (error) {
     return (
       <div
@@ -292,7 +283,7 @@ export function HtmlArtifactPreview({
     );
   }
 
-  const previewHeight = isExpanded ? '600px' : '400px';
+  const previewHeight = isExpanded ? '75vh' : '25rem';
 
   return (
     <div
@@ -308,17 +299,19 @@ export function HtmlArtifactPreview({
         <div className="flex shrink-0 items-center gap-1">
           {!readOnly && (
             <>
-              <button
-                onClick={handleOpenInNewTab}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
-                  'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
-                )}
-                title="Open in new tab"
-                aria-label={`Open ${filename} in new tab`}
-              >
-                <Icon name="external-link" size={12} className="shrink-0" />
-              </button>
+              {onDownload && (
+                <button
+                  onClick={onDownload}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
+                    'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
+                  )}
+                  title="Download"
+                  aria-label={`Download ${filename}`}
+                >
+                  <Icon name="download" size={12} className="shrink-0" />
+                </button>
+              )}
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className={cn(
