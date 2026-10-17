@@ -82,21 +82,26 @@ const callToolSchema = z.object({
   input: z.record(z.string(), z.unknown()).default({}).describe('Arguments to pass to the tool.'),
 });
 
+export type CallToolWrapper = z.infer<typeof callToolSchema>;
+
 /**
- * Extract the inner tool input from a deferred `call_tool` wrapper's arguments.
+ * Parse a deferred `call_tool` wrapper's arguments.
  *
  * Mirrors the unwrap branch of DeferredTool.toolCallInfo: when mint classified
  * the underlying tool, the approval token covers (underlying_name, input), so
- * the verifier must hash the same inner input. Returns undefined when the
- * wrapper does not parse: mint then classified the wrapper itself, and the
- * verifier must hash the wrapper too.
+ * the verifier must hash the same inner input and confirm the wrapper still
+ * names that tool and server. Returns undefined when the wrapper does not
+ * parse: mint then classified the wrapper itself, and the verifier must hash
+ * the wrapper too.
  */
-export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+export function tryParseCallToolWrapper(wrapperArgs: Record<string, unknown>): CallToolWrapper | undefined {
   const parsed = callToolSchema.safeParse(wrapperArgs);
-  if (!parsed.success) {
-    return undefined;
-  }
-  return parsed.data.input;
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The inner tool input of a deferred `call_tool` wrapper, or undefined when the wrapper does not parse. */
+export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+  return tryParseCallToolWrapper(wrapperArgs)?.input;
 }
 
 interface ResolvedServerTools {

@@ -2036,27 +2036,41 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * The arguments a call is classified and approved over: structured-edit calls pass through the same
+   * normalisation the dispatch handlers apply, here at proposal time, so the approval card and the
+   * path extraction see exactly the arguments `handleApplyPatch`/`handleReplaceText`/`handleWriteFile`
+   * will act on.
+   */
+  private proposedCall(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): {
+    requestedCwd: string | undefined;
+    cwd: string | undefined;
+    effectiveArguments: Record<string, unknown> | undefined;
+  } {
+    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
+    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    const structuredEditToolName = structuredEditToolNameFor(params.name);
+    if (structuredEditToolName === undefined || params.arguments === undefined) {
+      return { requestedCwd, cwd, effectiveArguments: params.arguments };
+    }
+    const normalization = normalizeStructuredEditArguments({
+      toolName: structuredEditToolName,
+      args: params.arguments,
+      cwd: cwd ?? '',
+      repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
+    });
+    return { requestedCwd, cwd, effectiveArguments: normalization.args };
+  }
+
+  mintCanonicalParams(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): Record<string, unknown> {
+    return toJsonSafeParams(this.proposedCall(params).effectiveArguments ?? {});
+  }
+
   override async toolCallInfo(
     params: Parameters<LocalToolMCP['toolCallInfo']>[0],
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
-    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
-    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
-    // Every structured-edit tool call's arguments pass through the same normalisation the
-    // dispatch handlers apply, here at proposal time, so the approval card (built from `info`
-    // below) and the structured-edit path extraction further down see exactly the arguments
-    // `handleApplyPatch`/`handleReplaceText`/`handleWriteFile` will act on.
-    const structuredEditToolName = structuredEditToolNameFor(params.name);
-    let effectiveArguments = params.arguments;
-    if (structuredEditToolName !== undefined && params.arguments !== undefined) {
-      const normalization = normalizeStructuredEditArguments({
-        toolName: structuredEditToolName,
-        args: params.arguments,
-        cwd: cwd ?? '',
-        repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
-      });
-      effectiveArguments = normalization.args;
-    }
+    const { requestedCwd, cwd, effectiveArguments } = this.proposedCall(params);
     const effectiveParams = { ...params, arguments: effectiveArguments };
     const info = await super.toolCallInfo(effectiveParams, resolveUnderlyingTool);
     const command = commandFromToolArguments(effectiveArguments);
