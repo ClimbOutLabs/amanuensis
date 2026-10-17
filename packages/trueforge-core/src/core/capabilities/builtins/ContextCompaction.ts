@@ -1111,7 +1111,7 @@ function strictEnvelopeBody(text: string): string | undefined {
   if (
     !trimmed.startsWith(open) ||
     !trimmed.endsWith(close) ||
-    trimmed.indexOf(open, open.length) !== -1 ||
+    trimmed.slice(open.length).includes(open) ||
     trimmed.indexOf(close) !== trimmed.length - close.length
   ) {
     return undefined;
