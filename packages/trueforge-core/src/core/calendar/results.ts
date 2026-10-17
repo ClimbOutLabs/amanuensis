@@ -16,6 +16,11 @@ const MAX_PAGE_TOKEN_CHARS = 512;
 /** Tokens one event's description may take when the whole event is read. */
 const DESCRIPTION_TOKENS = 2000;
 const MAX_GUESTS_LISTED = 50;
+/** Tokens one short text field (title, place, name, address, id) of a whole event may take. */
+const FIELD_TOKENS = 100;
+const MAX_REPEAT_RULES = 10;
+const MORE_NOTE =
+  'Some details were shortened or left out because the event is very large (and more). Ask about a specific part to see it.';
 
 export interface CalendarResultContext {
   account: string;
@@ -78,10 +83,9 @@ function whenOf(input: { start: EventTime | undefined; end: EventTime | undefine
   };
 }
 
-function eventView(input: { event: CalendarEvent; zone: string; full: boolean }) {
-  const { event, zone, full } = input;
+function eventView(input: { event: CalendarEvent; zone: string }) {
+  const { event, zone } = input;
   const description = descriptionText(event.description ?? '');
-  const guests = event.attendees ?? [];
   return {
     id: event.id,
     title: event.summary === undefined || event.summary === '' ? '(no title)' : event.summary,
@@ -90,7 +94,6 @@ function eventView(input: { event: CalendarEvent; zone: string; full: boolean })
     ...(whenOf({ start: event.start, end: event.end, zone }) ?? { all_day: false, date: '', start: '', end: '' }),
     recurring: event.recurringEventId !== undefined || (event.recurrence?.length ?? 0) > 0,
     ...(event.recurringEventId === undefined ? {} : { recurring_event_id: event.recurringEventId }),
-    ...(full && event.recurrence !== undefined ? { repeats: event.recurrence } : {}),
     ...(event.location === undefined || event.location === '' ? {} : { location: event.location }),
     ...(event.organizer === undefined
       ? {}
@@ -98,24 +101,8 @@ function eventView(input: { event: CalendarEvent; zone: string; full: boolean })
           organizer: event.organizer.displayName ?? event.organizer.email ?? '',
           organizer_is_you: event.organizer.self === true,
         }),
-    guest_count: guests.length,
-    ...(full
-      ? {
-          guests: guests.slice(0, MAX_GUESTS_LISTED).map(guest => ({
-            name: guest.displayName ?? '',
-            email: guest.email ?? '',
-            response: guest.responseStatus ?? 'needsAction',
-            ...(guest.self === true ? { is_you: true } : {}),
-            ...(guest.optional === true ? { optional: true } : {}),
-          })),
-          ...(guests.length > MAX_GUESTS_LISTED ? { guests_not_listed: guests.length - MAX_GUESTS_LISTED } : {}),
-        }
-      : {}),
-    ...(description === ''
-      ? {}
-      : full
-        ? { description: truncateToTokens({ text: description, maxTokens: DESCRIPTION_TOKENS }).text }
-        : { description: snippetOf(description) }),
+    guest_count: event.attendees?.length ?? 0,
+    ...(description === '' ? {} : { description: snippetOf(description) }),
   };
 }
 
@@ -131,7 +118,7 @@ export function listEventsResult(input: {
   const budget = new TokenBudget(MAX_TOKENS_PER_CALL - RESULT_OVERHEAD_TOKENS);
   const shown: unknown[] = [];
   for (const event of input.events) {
-    const view = neutralizeDeep(eventView({ event, zone: input.context.zone, full: false }));
+    const view = neutralizeDeep(eventView({ event, zone: input.context.zone }));
     if (!budget.tryAdd(view)) {
       break;
     }
@@ -151,6 +138,86 @@ export function listEventsResult(input: {
   };
 }
 
+function clip(value: string): string {
+  const flat = String(neutralizeDeep(value));
+  return truncateToTokens({ text: flat, maxTokens: FIELD_TOKENS }).text;
+}
+
+/**
+ * The whole event, bounded like every other connector read. The fixed fields are cut first, then the repeat
+ * rules, the guests and the description only get what is left of the call's budget, so the answer stays inside
+ * it however large the invite. Anything left out is said so.
+ */
 export function getEventResult(input: { context: CalendarResultContext; event: CalendarEvent }) {
-  return { ...envelope(input.context), event: eventView({ event: input.event, zone: input.context.zone, full: true }) };
+  const { event, context } = input;
+  const budget = new TokenBudget(MAX_TOKENS_PER_CALL - RESULT_OVERHEAD_TOKENS);
+  const { description: _snippet, ...base } = eventView({
+    event: {
+      ...event,
+      id: clip(event.id),
+      ...(event.status === undefined ? {} : { status: clip(event.status) }),
+      ...(event.eventType === undefined ? {} : { eventType: clip(event.eventType) }),
+      ...(event.summary === undefined ? {} : { summary: clip(event.summary) }),
+      ...(event.location === undefined ? {} : { location: clip(event.location) }),
+      ...(event.recurringEventId === undefined ? {} : { recurringEventId: clip(event.recurringEventId) }),
+      ...(event.organizer === undefined
+        ? {}
+        : {
+            organizer: {
+              ...event.organizer,
+              ...(event.organizer.displayName === undefined ? {} : { displayName: clip(event.organizer.displayName) }),
+              ...(event.organizer.email === undefined ? {} : { email: clip(event.organizer.email) }),
+            },
+          }),
+    },
+    zone: context.zone,
+  });
+  budget.spend(base);
+
+  let omitted = false;
+  const repeats: string[] = [];
+  for (const rule of (event.recurrence ?? []).slice(0, MAX_REPEAT_RULES)) {
+    const shown = clip(rule);
+    if (!budget.tryAdd(shown)) {
+      break;
+    }
+    repeats.push(shown);
+  }
+  omitted ||= repeats.length < (event.recurrence?.length ?? 0);
+
+  // The description keeps its own share, so a long guest list cannot crowd it out.
+  const guestBudget = new TokenBudget(Math.max(0, budget.left - DESCRIPTION_TOKENS));
+  const guests: unknown[] = [];
+  for (const guest of (event.attendees ?? []).slice(0, MAX_GUESTS_LISTED)) {
+    const view = {
+      name: clip(guest.displayName ?? ''),
+      email: clip(guest.email ?? ''),
+      response: clip(guest.responseStatus ?? 'needsAction'),
+      ...(guest.self === true ? { is_you: true } : {}),
+      ...(guest.optional === true ? { optional: true } : {}),
+    };
+    if (!guestBudget.tryAdd(view)) {
+      break;
+    }
+    guests.push(view);
+  }
+  budget.spend(guests);
+  const guestCount = event.attendees?.length ?? 0;
+  omitted ||= guests.length < guestCount;
+
+  const text = String(neutralizeDeep(descriptionText(event.description ?? '')));
+  const description = truncateToTokens({ text, maxTokens: Math.min(DESCRIPTION_TOKENS, Math.max(0, budget.left)) });
+  omitted ||= description.truncated;
+
+  return {
+    ...envelope(context),
+    event: {
+      ...base,
+      ...(repeats.length === 0 ? {} : { repeats }),
+      guests,
+      ...(guests.length < guestCount ? { guests_not_listed: guestCount - guests.length } : {}),
+      ...(description.text === '' ? {} : { description: description.text }),
+      ...(omitted ? { note: MORE_NOTE } : {}),
+    },
+  };
 }
