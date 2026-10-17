@@ -72,7 +72,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
             placeholder="Zara"
             onChange={event => onChange({ ...draft, display_name: event.target.value })}
           />
-          <p className="mt-1 text-xs text-text-secondary">Typing “Zara, …” or “ask Zara …” hands the turn to them.</p>
+          <p className="mt-1 text-xs text-text-secondary">Type “Zara, …” to talk to them for the rest of the chat.</p>
         </div>
         <div>
           <label htmlFor="persona-aliases" className="mb-1.5 block text-sm font-medium text-text-primary">
@@ -85,7 +85,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
             placeholder="Z, Zara Quinn"
             onChange={event => onAliasesTextChange(event.target.value)}
           />
-          <p className="mt-1 text-xs text-text-secondary">Comma separated. Each must be unique across every persona.</p>
+          <p className="mt-1 text-xs text-text-secondary">Comma-separated. Each name must be unique.</p>
         </div>
       </div>
 
@@ -122,7 +122,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
           onChange={event => onChange({ ...draft, instructions: event.target.value })}
         />
         <p className="mt-1 text-xs text-text-secondary">
-          Added as one section of the system prompt. It cannot change your tools, approvals, or safety policy.
+          Shapes how this persona answers. It cannot change your tools, approvals, or safety rules.
         </p>
       </div>
 
@@ -221,8 +221,8 @@ const PersonaSettings = () => {
         </Button>
       </div>
       <p className="mb-2 text-sm text-text-secondary">
-        Name a persona in a message — “Zara, …”, “ask Zara …”, “let me talk to Zara” — and the rest of that chat answers
-        as Zara, on Zara’s model, with the same history. Mentioning the name in ordinary prose does not switch anything.
+        Mention a persona by name (“Zara, …”) and the rest of that chat answers as Zara, on Zara’s model, with the same
+        history. Using the name in ordinary prose does not switch.
       </p>
 
       {(loadError ?? error) ? (

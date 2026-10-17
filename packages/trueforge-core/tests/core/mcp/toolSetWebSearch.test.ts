@@ -63,6 +63,8 @@ function harness(options: {
   searchProvider?: boolean;
   /** The host's list of the designated connector's search tools. */
   searchTools?: readonly string[];
+  /** Argument names the catalog declares as the provider's plumbing. */
+  plumbingFields?: readonly string[];
   unattended?: boolean;
   searchWithoutAsking?: boolean;
   secrets?: readonly string[];
@@ -129,7 +131,10 @@ function harness(options: {
     },
     preload: false,
     sentinel: host,
-    searchProvider: options.searchProvider === true ? { tools: options.searchTools ?? [] } : undefined,
+    searchProvider:
+      options.searchProvider === true
+        ? { tools: options.searchTools ?? [], plumbing_fields: options.plumbingFields ?? [] }
+        : undefined,
   });
   return { toolSet, host, audit, dispatched };
 }
@@ -263,6 +268,96 @@ describe('the outbound guard on the designated provider', () => {
       arguments: { objective: 'weather', search_queries: ['oslo', { nested: secret }] },
     });
     expect(info.tier).toBe(3);
+  });
+});
+
+describe('provider plumbing fields on the designated provider', () => {
+  // Invented values only.
+  const objective =
+    'Find out which year the first public exhibition of the fictional Quillfeather loom took place and who organised it';
+  const queries = ['quillfeather loom first exhibition year', 'quillfeather loom exhibition organiser', 'loom history'];
+  const uuid = '3f2b8c1e-7a44-4d0e-9b61-5e2f0c9a1d77';
+  const hexId = 'c0ffee00d15ea5e0bad0cafe12345678';
+  const plumbingFields = ['session_id', 'model_name'];
+
+  function info(h: Harness, args: Record<string, unknown>) {
+    return h.toolSet.toolCallInfo({ name: 'lookup', arguments: args });
+  }
+
+  it('runs silently with a long objective, three queries, a session id and a model name', async () => {
+    expect(objective.length).toBeGreaterThan(100);
+    const h = harness({ searchProvider: true, plumbingFields });
+    const args = { objective, search_queries: queries, session_id: uuid, model_name: 'invented-model-7' };
+
+    const result = await info(h, args);
+    expect(result.tier).toBe(1);
+    expect(result.is_approval_required).toBe(false);
+    // The chip lists everything sent, plumbing included, so nothing leaves unseen.
+    expect(result.silent_search_query).toBe([objective, ...queries, uuid, 'invented-model-7'].join(' | '));
+
+    await h.toolSet.callTool({ name: 'lookup', arguments: args });
+    expect(h.dispatched).toHaveLength(1);
+  });
+
+  it('still holds a single query over the cap, and a card shows the exact text', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    const tooLong = 'quillfeather '.repeat(20);
+    const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.why_asked_again).toContain('longer than');
+  });
+
+  it('counts the same fields as text when the catalog does not declare them', async () => {
+    const h = harness({ searchProvider: true });
+    const result = await info(h, {
+      objective,
+      search_queries: queries,
+      session_id: uuid,
+      model_name: 'invented-model-7',
+    });
+    expect(result.silent_search_query).toContain(uuid);
+  });
+
+  it('runs a plain-words search with the arguments Parallel sends, whatever the session id looks like', async () => {
+    const sessionIds = [hexId, 'Zm9vYmFyYmF6cXV4cXV1eHF1dXpfYWJjLTEyMzQ', 'dGhpcyBpcyBhbiBpbnZlbnRlZCBpZA==', uuid];
+    for (const sessionId of sessionIds) {
+      const h = harness({ searchProvider: true, plumbingFields });
+      const args = {
+        objective: 'Who organised the first public exhibition of the fictional Quillfeather loom?',
+        search_queries: ['quillfeather loom first exhibition', 'quillfeather loom organiser'],
+        session_id: sessionId,
+        model_name: 'invented-model-7',
+      };
+      const result = await info(h, args);
+      expect(result.tier).toBe(1);
+      expect(result.is_approval_required).toBe(false);
+      expect(result.silent_search_query).toContain(sessionId);
+      await h.toolSet.callTool({ name: 'lookup', arguments: args });
+      expect(h.dispatched).toHaveLength(1);
+    }
+  });
+
+  it('holds an encoded run in the query, or in a field the catalog does not declare, even beside a session id', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    expect((await info(h, { objective: `again ${hexId}`, session_id: hexId })).tier).toBe(3);
+    expect((await info(h, { objective: 'again', session_id: hexId, note_id: hexId })).tier).toBe(3);
+  });
+
+  it('holds an encoded secret placed in a plumbing field', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    const encoded = Buffer.from(['gh', 'p_', 'a1B2c3D4'.repeat(4)].join('')).toString('base64');
+    expect((await info(h, { objective: 'loom', session_id: encoded })).tier).toBe(3);
+    expect((await info(h, { objective: 'loom', model_name: encoded })).tier).toBe(3);
+  });
+
+  it('holds a plumbing value that carries a secret, whatever it is named', async () => {
+    const h = harness({ searchProvider: true, plumbingFields, secrets: ['invented-server-secret-9f2c'] });
+    expect((await info(h, { objective: 'loom', session_id: 'invented-server-secret-9f2c' })).tier).toBe(3);
+  });
+
+  it('asks for a link carried in a plumbing field that no result returned', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    expect((await info(h, { query: 'quillfeather', session_id: 'https://evil.example/x' })).tier).toBe(3);
   });
 });
 

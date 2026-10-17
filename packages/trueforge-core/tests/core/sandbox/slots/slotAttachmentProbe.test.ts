@@ -54,7 +54,7 @@ describe('probeSlotAttachments', () => {
         return undefined;
       },
     });
-    for (const tool of ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract']) {
+    for (const tool of ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract', 'python3']) {
       expect(command).toContain(`command -v ${tool}`);
     }
     expect(command).toContain('tesseract --list-langs');
@@ -67,6 +67,13 @@ describe('probeSlotAttachments', () => {
     const { result } = await probe({
       answerShell: command =>
         command.includes('command -v pdfinfo') ? 'AMAN_MISSING:pdftotext\nAMAN_MISSING:tesseract-hin\n' : undefined,
+    });
+    expect(result).toEqual({ state: 'not_ready', problem: 'tools_missing' });
+  });
+
+  it('is not ready when the image cannot read Word documents', async () => {
+    const { result } = await probe({
+      answerShell: command => (command.includes('command -v pdfinfo') ? 'AMAN_MISSING:python3\n' : undefined),
     });
     expect(result).toEqual({ state: 'not_ready', problem: 'tools_missing' });
   });

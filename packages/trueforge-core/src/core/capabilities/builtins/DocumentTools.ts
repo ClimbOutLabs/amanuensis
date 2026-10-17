@@ -59,13 +59,18 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('First page to read (1-based), in a PDF or Word file. Defaults to 1.'),
     page_end: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe('Last PDF page to read (inclusive). Defaults to a full window past page_start.'),
+      .describe('Last page to read (inclusive), in a PDF or Word file. Defaults to a full window past page_start.'),
   })
   .strict()
   .refine(data => data.page_end === undefined || data.page_start === undefined || data.page_end >= data.page_start, {
@@ -208,7 +213,7 @@ export function buildDocumentsInstruction(builder: InstructionBuilder): void {
   builder.addSection(
     DOCUMENTS_INSTRUCTION_SECTION,
     dedent`
-      Supported PDF and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals. Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
+      Supported PDF, Word (.docx, .odt) and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images; Word text is read as it is), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals. Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
     `.trim(),
   );
 }
@@ -277,6 +282,10 @@ export async function extractDocumentsFromSandbox(
           throwIfSignalAborted(signal);
           return sandbox.runDocumentOcr({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
         },
+        runWordText: input => {
+          throwIfSignalAborted(signal);
+          return sandbox.runWordDocumentText({ filePath: snapshotFor(input.filePath).filePath, signal });
+        },
         runNativePdfText: input => {
           throwIfSignalAborted(signal);
           return sandbox.runDocumentText({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
@@ -333,7 +342,7 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
-        'Extract page- and line-addressable text from PDF/image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
+        'Extract page- and line-addressable text from PDF, Word (.docx, .odt) and image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs and Word files, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
       handler: input => this.extractText(input),
     }),

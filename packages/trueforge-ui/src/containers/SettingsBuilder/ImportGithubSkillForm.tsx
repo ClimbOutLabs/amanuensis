@@ -63,7 +63,7 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
         if (!nextOpen) close();
       }}
       title="Import from GitHub"
-      description="Import a skill from a SKILL.md file in a GitHub repository."
+      description="Find the repo and the folder holding the SKILL.md file."
       headerIcon={
         <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary-bg text-text-primary">
           <Icon name="github" className="size-5" />

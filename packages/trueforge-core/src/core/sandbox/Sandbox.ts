@@ -8,6 +8,7 @@ import {
   MAX_PAGES_PER_DOCUMENT,
 } from '../../documents/documentExtraction';
 import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
+import { parseWordTextOutput, WORD_TEXT_SCRIPT } from '../../documents/wordText';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -90,6 +91,7 @@ import {
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
+import { plainReaderFailure } from './readerFailure';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
@@ -5863,6 +5865,36 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('PDF text extraction did not return a page count');
     }
     return { total_pages, pages };
+  }
+
+  /**
+   * Reads the text of a staged .docx or .odt inside the selected sandbox. The output is cut at twice the
+   * per-document character cap so the extraction can say plainly that only the head is shown.
+   */
+  async runWordDocumentText(input: { filePath: string; signal: AbortSignal | undefined }): Promise<{ text: string }> {
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
+    const marker = `AMAN_WORD_TEXT_${randomUUID().replace(/-/g, '')}:`;
+    const command = `set -eu; ulimit -v 2097152; timeout 60 python3 -I -c ${shellEscape(WORD_TEXT_SCRIPT)} ${shellEscape(canonicalFilePath)} ${String(MAX_CHARS_PER_DOCUMENT * 2)} ${shellEscape(marker)}`;
+    const result = await this.provider.exec({
+      sandboxId,
+      command,
+      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    if (result.response.exitCode !== 0) {
+      // The reader's output can quote the file; the server log keeps it, the person gets a plain sentence.
+      this.logger.warn('Word document reader failed', {
+        exit_code: result.response.exitCode,
+        output: result.response.result.slice(0, 2000),
+      });
+      throw new Error(plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }));
+    }
+    return { text: parseWordTextOutput({ output: result.response.result, marker }) };
   }
 
   /**

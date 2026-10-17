@@ -27,6 +27,7 @@ import {
   rawSandboxId,
   redisKey,
   SandboxError,
+  SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
@@ -39,6 +40,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import type { ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
@@ -138,6 +140,10 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   return buffer;
 }
 
+/** What a person is told when a file was never copied out of a workspace that has since been cleared. */
+const CLEARED_WORKSPACE_MESSAGE =
+  'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.';
+
 /**
  * Builds the Content-Disposition telling the browser to save the file under its sandbox name.
  *
@@ -190,6 +196,8 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
 }
 
 export interface TurnsRouterDeps {
+  /** Shipped MCP catalog: tells a designated search provider's search tools and plumbing arguments. */
+  mcpCatalog: McpCatalog;
   sessions: Sessions<SessionCustom, TurnCustom>;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
@@ -233,7 +241,13 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
+  | 'activeTurns'
+  | 'turnDrains'
+  | 'eventSubscriptions'
+  | 'logger'
+  | 'globalSettingsStore'
+  | 'mcpCatalog'
+  | 'tokenFactoryBudget'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -269,6 +283,7 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
+  mcpCatalog: McpCatalog;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -314,6 +329,7 @@ function createTurnResolver(deps: {
   tokenFactoryBudget: TokenFactoryBudget;
 }): SpaceTurnResourceResolver {
   const {
+    mcpCatalog,
     mcpServerStore,
     tokenStore,
     skillStore,
@@ -430,7 +446,10 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
-          search_provider: connection.search_provider,
+          search_provider:
+            connection.search_provider === undefined
+              ? undefined
+              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -1056,6 +1075,7 @@ export async function beginTurnExecution(params: {
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
+    mcpCatalog: deps.mcpCatalog,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1464,7 +1484,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
       sandboxId = turn.record.snapshot.sandbox_info?.sandbox_id;
       if (sandboxId === undefined) {
-        return c.json({ error: { message: `Turn has no sandbox: ${turnId}` } }, 412);
+        return c.json({ error: { message: CLEARED_WORKSPACE_MESSAGE } }, 412);
       }
 
       const provider = await (deps.sandboxProviderResolver ?? resolveSandboxProvider)({
@@ -1487,14 +1507,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           'Cache-Control': 'private, no-store',
         });
       } catch (error) {
-        // No persisted copy and the live sandbox is gone: say what happened instead of the raw
-        // provider error, which reads as if the whole session vanished rather than this one file.
-        if (error instanceof SandboxNotAvailableError) {
+        // No persisted copy and the temporary workspace is gone: say what happened to this one file
+        // instead of the raw provider error, which reads as if the whole chat had vanished.
+        if (error instanceof SandboxNotAvailableError || error instanceof SandboxFileNotFoundError) {
           const reason =
             persisted?.status === 'skipped_missing'
-              ? (persisted.skip_reason ?? 'it was not found in the sandbox when this turn finished.')
-              : 'the sandbox was stopped after this turn finished, and no persisted copy was found for this file.';
-          return c.json({ error: { message: `This file was not kept: ${reason}` } }, 410);
+              ? `This file was not kept: ${persisted.skip_reason ?? 'it was not found when this turn finished.'}`
+              : CLEARED_WORKSPACE_MESSAGE;
+          return c.json({ error: { message: reason } }, 410);
         }
         throw error;
       }
@@ -1842,6 +1862,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
+      mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,

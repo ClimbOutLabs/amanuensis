@@ -42,6 +42,14 @@ describe('the slot image and the server agree on what is deployed', () => {
     }
   });
 
+  test('the guest image installs python-docx and lxml only from hashed wheels', () => {
+    const requirements = read('ops/sandbox-slot/guest/requirements.txt');
+    for (const name of ['python-docx', 'lxml']) {
+      expect(requirements).toMatch(new RegExp(`^${name}==\\S+ \\\\\\n\\s+--hash=sha256:`, 'm'));
+    }
+    expect(read('ops/sandbox-slot/Dockerfile')).toContain('--require-hashes --only-binary=:all:');
+  });
+
   test('the agent reports the build and platform the server expects', () => {
     const main = read('ops/sandbox-slot/agent/cmd/aman-slot-agent/main.go');
     expect(captured(main, /agentVersion\s*=\s*"([^"]+)"/)).toBe(SLOT_AGENT_VERSION);
