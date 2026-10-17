@@ -254,6 +254,19 @@ describe('attachment file data on the card', () => {
     expect(decision.card?.outbound_text).not.toContain('fingerprint');
   });
 
+  test('URL-safe unpadded base64, as Gmail sends it, is read like the standard alphabet', async () => {
+    const text = `${'private note '.repeat(300)}END-OF-NOTE`;
+    const textUrl = Buffer.from(text).toString('base64url');
+    expect(textUrl).not.toMatch(/=/);
+    const readable = await sendWith({ attachments: [{ filename: 'n.txt', data: textUrl }] });
+    expect(readable.card?.outbound_text).toContain('END-OF-NOTE');
+    const binary = Buffer.alloc(30_000, 0xfb).toString('base64url');
+    expect(binary).toMatch(/[-_]/);
+    const summarised = await sendWith({ attachments: [{ filename: 'a.bin', raw: binary }] });
+    expect(summarised.auto_deny).toBeNull();
+    expect(summarised.card?.outbound_text).toContain('file data, about 29 KB, fingerprint');
+  });
+
   test('a binary file keeps its type from a data URL, and text after a binary header is not shown as text', async () => {
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('secret '.repeat(500))]);
     const decision = await sendWith({

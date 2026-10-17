@@ -271,7 +271,7 @@ function keyDisplay(key: string): string {
 }
 
 const BASE64_DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
-const BASE64_BLOB = /^[A-Za-z0-9+/]+={0,2}$/;
+const BASE64_BLOB = /^[A-Za-z0-9+/_-]+={0,2}$/;
 const ATTACHMENT_KEY_SET = new Set(
   ['attachment', 'attachments', 'file_attachment', 'file_attachments'].map(normalizeKey),
 );
@@ -308,9 +308,11 @@ function decodeFileData(value: string): string {
     return value;
   }
   const mime = BASE64_DATA_URL.exec(value)?.[1] ?? '';
-  const body = value.replace(BASE64_DATA_URL, '').replace(/[\r\n]/g, '');
+  const raw = value.replace(BASE64_DATA_URL, '').replace(/[\r\n]/g, '');
+  // Standard and URL-safe alphabets both occur (Gmail uses the URL-safe one, often unpadded).
+  const body = raw.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
   const bytes = Buffer.from(body, 'base64');
-  if (!BASE64_BLOB.test(body) || body.length % 4 !== 0 || bytes.toString('base64') !== body) {
+  if (!BASE64_BLOB.test(raw) || body.length % 4 === 1 || bytes.toString('base64').replace(/=+$/, '') !== body) {
     return value;
   }
   try {
