@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Writable } from 'node:stream';
 
 import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
 import { z } from 'zod';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
@@ -173,11 +174,11 @@ describe('runDataExport persona history', () => {
 });
 
 describe('runDataExport audit rows', () => {
-  const decision = (input: { created_by: string; conversation_id: string; description: string }) => ({
+  const decision = (input: { created_by: string; conversation_id: string; description: string }): AuditRecordInput => ({
     tenant_id: TENANT_ID,
     tier: 2,
     tool_name: 'run_code',
-    outcome: 'ran' as const,
+    outcome: 'ran',
     auto_deny_reason: null,
     ...input,
   });
