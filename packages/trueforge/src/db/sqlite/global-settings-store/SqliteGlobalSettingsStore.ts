@@ -1,6 +1,7 @@
 import type { Kysely, Transaction } from 'kysely';
 
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -49,6 +50,41 @@ export class SqliteGlobalSettingsStore implements IGlobalSettingsStore<Transacti
   async deleteSetting(input: GetGlobalSettingInput, transaction?: Transaction<Database>): Promise<void> {
     await this.#write(transaction, async trx => {
       await trx.deleteFrom('global_settings').where('key', '=', input.key).execute();
+    });
+  }
+
+  async compareAndSetSetting(
+    input: CompareAndSetGlobalSettingInput,
+    transaction?: Transaction<Database>,
+  ): Promise<boolean> {
+    const { key, expected, value } = input;
+    return await this.#write(transaction, async trx => {
+      if (expected === null) {
+        if (value === null) {
+          return (await this.getSetting({ key }, trx)) === undefined;
+        }
+        const inserted = await trx
+          .insertInto('global_settings')
+          .values({ key, value, updated_at: nowIso() })
+          .onConflict(oc => oc.column('key').doNothing())
+          .executeTakeFirst();
+        return (inserted.numInsertedOrUpdatedRows ?? 0n) > 0n;
+      }
+      if (value === null) {
+        const deleted = await trx
+          .deleteFrom('global_settings')
+          .where('key', '=', key)
+          .where('value', '=', expected)
+          .executeTakeFirst();
+        return deleted.numDeletedRows > 0n;
+      }
+      const updated = await trx
+        .updateTable('global_settings')
+        .set({ value, updated_at: nowIso() })
+        .where('key', '=', key)
+        .where('value', '=', expected)
+        .executeTakeFirst();
+      return updated.numUpdatedRows > 0n;
     });
   }
 

@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import { modelIdentity, type TurnModelUsage } from '../runtime/modelUsage';
 import { getModelDetails } from '../runtime/sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
@@ -110,6 +111,7 @@ export function createKnowledgeRelevanceJudge(input: {
   modelName: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   logger: Logger;
 }): KnowledgeRelevanceJudge {
   return async (question, candidates) => {
@@ -136,8 +138,10 @@ export function createKnowledgeRelevanceJudge(input: {
         signal: AbortSignal.timeout(RELEVANCE_JUDGE_TIMEOUT_MS),
         streamTimeout,
       }),
-      providerType: providerConfig.provider.type,
+      identity: modelIdentity({ name: input.modelName, providerConfig }),
+      role: 'relevance_judge',
       budget: input.tokenFactoryBudget,
+      usage: input.modelUsage,
       logger: input.logger,
     });
     const result = await llm.createNonStream(request);

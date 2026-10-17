@@ -3,8 +3,9 @@ import { neutralizeDeep } from '../email/gmail/results';
 import { toolResultResponse } from '../mcp/IMCPServer';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
 
+/** Every error is cleaned on the way out too, so no error path can carry raw mail or event text to the model. */
 export function errorResult(error: string) {
-  return toolResultResponse({ text: JSON.stringify({ error }), isError: true });
+  return toolResultResponse({ text: JSON.stringify(neutralizeDeep({ error })), isError: true });
 }
 
 /** Every success result is third-party text, so every string in it is neutralized on the way out. */

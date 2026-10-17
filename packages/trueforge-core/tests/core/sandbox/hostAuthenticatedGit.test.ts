@@ -1,4 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildHostAuthenticatedGit,
   buildHostAuthenticatedGitConfigProbe,
@@ -90,12 +93,40 @@ describe('isGitNetworkCommand', () => {
   });
 });
 
+function configPairs(env: Record<string, string>): Map<string, string> {
+  const pairs = new Map<string, string>();
+  for (let index = 0; index < Number(env['GIT_CONFIG_COUNT']); index += 1) {
+    pairs.set(env[`GIT_CONFIG_KEY_${String(index)}`] ?? '', env[`GIT_CONFIG_VALUE_${String(index)}`] ?? '');
+  }
+  return pairs;
+}
+
+describe('planHostAuthenticatedGit remote target', () => {
+  test.each([
+    ['git push', { kind: 'default' }],
+    ['git pull --ff-only', { kind: 'default' }],
+    ['git fetch --all', { kind: 'all' }],
+    ['git push -u origin feature/x', { kind: 'named', name: 'origin' }],
+    ['git fetch upstream', { kind: 'named', name: 'upstream' }],
+    ['git push https://github.com/o/r main', { kind: 'url', url: 'https://github.com/o/r' }],
+    ['git clone https://github.com/o/r', { kind: 'url', url: 'https://github.com/o/r' }],
+    ['git ls-remote https://github.com/o/r', { kind: 'url', url: 'https://github.com/o/r' }],
+  ])('%s targets %j', (command, remote) => {
+    expect(planHostAuthenticatedGit({ command })?.remote).toEqual(remote);
+  });
+});
+
 describe('buildHostAuthenticatedGit', () => {
   const plan = planHostAuthenticatedGit({ command: 'git push -u origin feature/x' });
   if (plan === undefined) {
     throw new Error('expected a plan');
   }
-  const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: '/work/repo' });
+  const built = buildHostAuthenticatedGit({
+    plan,
+    token: TOKEN,
+    workspaceRoot: '/work/repo',
+    remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }],
+  });
 
   test('uses the pinned git binary and never puts the token in the command', () => {
     expect(built.command.startsWith("'/usr/bin/env' '-u' ")).toBe(true);
@@ -157,25 +188,45 @@ describe('buildHostAuthenticatedGit', () => {
     expect(probe.command).toContain("'config' '--local'");
   });
 
+  test('offers the token to the observed repository alone and adds no remote address', () => {
+    const pairs = configPairs(built.env);
+    expect([...pairs.keys()].filter(key => key.startsWith('remote.'))).toEqual([]);
+    expect(pairs.get('credential.useHttpPath')).toBe('true');
+    expect(pairs.has('credential.https://github.com.helper')).toBe(false);
+    expect([...pairs.keys()].filter(key => key.startsWith('credential.https://'))).toEqual([
+      'credential.https://github.com/o/r.git.helper',
+      'credential.https://github.com/o/r.helper',
+    ]);
+  });
+
   describe('real git credential resolution', () => {
-    function fill(host: string): { status: number | null; stdout: string } {
+    function fill(input: { host: string; path: string }): { status: number | null; stdout: string } {
       const result = spawnSync('git', ['credential', 'fill'], {
-        input: `protocol=https\nhost=${host}\n\n`,
+        input: `protocol=https\nhost=${input.host}\npath=${input.path}\n\n`,
         encoding: 'utf8',
         env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', HOME: '/nonexistent', ...built.env },
       });
       return { status: result.status, stdout: result.stdout };
     }
 
-    test('answers only for github.com over https', () => {
-      const github = fill('github.com');
-      expect(github.status).toBe(0);
-      expect(github.stdout).toContain('username=x-access-token');
-      expect(github.stdout).toContain(`password=${TOKEN}`);
-      for (const host of ['evil.example', 'github.com.evil.example', 'gist.github.com']) {
-        const other = fill(host);
-        expect(other.status).not.toBe(0);
-        expect(other.stdout).not.toContain(TOKEN);
+    test('answers only for the approved repository on github.com over https', () => {
+      for (const path of ['o/r.git', 'o/r']) {
+        const approved = fill({ host: 'github.com', path });
+        expect(approved.status).toBe(0);
+        expect(approved.stdout).toContain('username=x-access-token');
+        expect(approved.stdout).toContain(`password=${TOKEN}`);
+      }
+      for (const other of [
+        { host: 'github.com', path: 'o/other.git' },
+        { host: 'github.com', path: 'attacker/r.git' },
+        { host: 'github.com', path: 'o/r.git.evil' },
+        { host: 'evil.example', path: 'o/r.git' },
+        { host: 'github.com.evil.example', path: 'o/r.git' },
+        { host: 'gist.github.com', path: 'o/r.git' },
+      ]) {
+        const result = fill(other);
+        expect(result.status).not.toBe(0);
+        expect(result.stdout).not.toContain(TOKEN);
       }
     });
   });
@@ -197,6 +248,58 @@ describe('parseGithubRepository', () => {
       expect(parseGithubRepository(url)).toBeUndefined();
     }
   });
+
+  test.each([
+    ['o/r', 'o/r'],
+    ['o/r.git', 'o/r'],
+    ['o/my.repo', 'o/my.repo'],
+    ['o/.github', 'o/.github'],
+    ['my-org/under_score', 'my-org/under_score'],
+    ['jdoe_acme/r', 'jdoe_acme/r'],
+  ])('accepts %s', (path, slug) => {
+    expect(parseGithubRepository(`https://github.com/${path}`)?.slug).toBe(slug);
+  });
+
+  // git normalizes dot segments, so a credential scoped to one would cover a whole owner or all of github.com.
+  test.each(['o/.', 'o/..', 'o/...', 'o/..git', './r', '../r', '-o/r', '_o/r', 'o/.git', 'o/r%2F..', 'o/r/x'])(
+    'rejects %s',
+    path => {
+      expect(parseGithubRepository(`https://github.com/${path}`)).toBeUndefined();
+    },
+  );
+});
+
+const describeWithGit = existsSync('/usr/bin/git') && existsSync('/usr/bin/env') ? describe : describe.skip;
+
+describeWithGit('buildHostAuthenticatedGit in a real checkout', () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'host-auth-git-env-'));
+    execFileSync('/usr/bin/git', ['init', '-q'], { cwd: repo });
+    execFileSync('/usr/bin/git', ['remote', 'add', 'origin', 'https://github.com/o/r'], { cwd: repo });
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('leaves the remote with exactly one address, so a push goes out once', () => {
+    const plan = planHostAuthenticatedGit({ command: 'git push origin main' });
+    if (plan === undefined) {
+      throw new Error('expected a plan');
+    }
+    const built = buildHostAuthenticatedGit({
+      plan,
+      token: TOKEN,
+      workspaceRoot: repo,
+      remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }],
+    });
+    const output = execFileSync('/usr/bin/git', ['config', '--get-all', 'remote.origin.url'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: built.env,
+    });
+    expect(output).toBe('https://github.com/o/r\n');
+  });
 });
 
 describe('host git network environment', () => {
@@ -216,10 +319,27 @@ describe('host git network environment', () => {
     ).toEqual({ HTTPS_PROXY: 'http://proxy:3128', NO_PROXY: 'localhost', SSL_CERT_FILE: '/etc/ca.pem' });
   });
 
+  test('the token is offered to the one repository the host contacts, and to nothing without a token', () => {
+    const scoped = buildHostGitInvocation({
+      gitArguments: ['fetch'],
+      token: TOKEN,
+      credentialRepositories: ['o/r'],
+    });
+    const helpers = [...configPairs(scoped.env).keys()].filter(key => key.startsWith('credential.https://'));
+    expect(helpers).toEqual([
+      'credential.https://github.com/o/r.git.helper',
+      'credential.https://github.com/o/r.helper',
+    ]);
+    const bare = buildHostGitInvocation({ gitArguments: ['fetch'], token: undefined, credentialRepositories: ['o/r'] });
+    expect([...configPairs(bare.env).keys()].some(key => key.startsWith('credential.'))).toBe(false);
+    expect(bare.env['TRUEFORGE_GIT_TOKEN']).toBeUndefined();
+  });
+
   test('the settings sit under the pinned environment, which they cannot override', () => {
     const invocation = buildHostGitInvocation({
       gitArguments: ['status'],
       token: undefined,
+      credentialRepositories: [],
       networkEnv: { HTTPS_PROXY: 'http://proxy:3128', HOME: '/root', PATH: '/tmp' },
       ceilingDirectory: '/scratch',
     });

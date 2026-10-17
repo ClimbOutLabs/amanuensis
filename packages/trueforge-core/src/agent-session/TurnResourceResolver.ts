@@ -64,6 +64,12 @@ function toSelectors(entry: {
  * behavior; subclass and override to customize (tool sources, sandbox,
  * tracing).
  */
+/**
+ * Which job a model call does inside a turn: the root thread's answers, a sub-agent thread's work,
+ * or context compaction on a model the spec set explicitly. Lets a host attribute usage and cost.
+ */
+export type TurnModelRole = 'chat' | 'delegation' | 'compaction';
+
 interface ResolvedModel {
   modelClient: ILLM;
   defaultModelParams: ModelParams;
@@ -105,7 +111,7 @@ export class TurnResourceResolver<
        * which case the definition falls back to the catalog name it was
        * asked to resolve.
        */
-      llm: (model: string) => Promise<ResolvedModel>;
+      llm: (model: string, role: TurnModelRole) => Promise<ResolvedModel>;
       /**
        * MCP server name → connection details. Required to use spec.mcp_servers:
        * the AgentSpec carries names only (no url/headers on the wire) — the
@@ -399,7 +405,7 @@ export class TurnResourceResolver<
       agentInfo === undefined || agentInfo.model !== undefined ? undefined : spec.auxiliary_models?.delegation;
     const selectedModel = delegation ?? spec.model;
     const modelName = agentInfo?.model ?? selectedModel.name;
-    const resolvedModel = await this.getModel(modelName);
+    const resolvedModel = await this.getModel({ modelName, role: agentInfo === undefined ? 'chat' : 'delegation' });
     const modelParams =
       agentInfo?.model !== undefined
         ? { ...resolvedModel.defaultModelParams }
@@ -419,7 +425,7 @@ export class TurnResourceResolver<
       ? spec.auxiliary_models?.compaction
       : undefined;
     const compactionModel = compactionSetting
-      ? await this.getModel(compactionSetting.name).then(resolved => ({
+      ? await this.getModel({ modelName: compactionSetting.name, role: 'compaction' }).then(resolved => ({
           modelClient: resolved.modelClient,
           modelParams: { ...resolved.defaultModelParams, ...compactionSetting.params },
           modelProperties: resolved.modelProperties,
@@ -494,16 +500,17 @@ export class TurnResourceResolver<
   }
 
   /**
-   * Resolves `deps.llm` once per distinct model name for this turn — parent and
-   * sub-agents with the same catalog model share one promise.
+   * Resolves `deps.llm` once per distinct model name and role for this turn. The role is part of
+   * the key so each job gets its own client and a host can attribute every call to it.
    */
-  protected getModel(modelName: string): Promise<ResolvedModel> {
-    const cached = this.#models.get(modelName);
+  protected getModel({ modelName, role }: { modelName: string; role: TurnModelRole }): Promise<ResolvedModel> {
+    const key = `${role}\u0000${modelName}`;
+    const cached = this.#models.get(key);
     if (cached) {
       return cached;
     }
-    const made = this.deps.llm(modelName);
-    this.#models.set(modelName, made);
+    const made = this.deps.llm(modelName, role);
+    this.#models.set(key, made);
     return made;
   }
 }

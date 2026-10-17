@@ -449,7 +449,7 @@ describe('create schedule run', () => {
 });
 
 describe('internal schedule execution', () => {
-  async function seedRun() {
+  async function seedRun({ timezone = 'UTC' }: { timezone?: string } = {}) {
     mockedStartScheduleRun.mockReset();
     mockedStartScheduleRun.mockResolvedValue(undefined);
     const db = createSqliteDb(':memory:');
@@ -470,7 +470,7 @@ describe('internal schedule execution', () => {
       agent_id: agent.id,
       agent_name: agent.name,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone: 'America/Chicago', status: 'active' },
+      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active' },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -531,13 +531,13 @@ describe('internal schedule execution', () => {
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
   });
 
-  it("reads the run's times in the schedule's own zone, since no device is there to name one", async () => {
-    const { agent, run, execute } = await seedRun();
+  it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {
+    const { agent, run, execute } = await seedRun({ timezone: 'Asia/Kolkata' });
     const session = await new Sessions<SessionCustom, TurnCustom>({
       sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
     }).create({
       tenant_id: 'default',
-      session_id: 'run-session-zone',
+      session_id: 'run-session-tz',
       created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
       agent: { type: 'reference', id: agent.id, name: agent.name },
       external_id: run.id,
@@ -552,10 +552,11 @@ describe('internal schedule execution', () => {
     });
     mockedStartTurnInProcess.mockReset();
 
-    await execute(run.id);
+    const response = await execute(run.id);
 
+    expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
-      expect.objectContaining({ deps: expect.objectContaining({ clientTimezone: 'America/Chicago' }) }),
+      expect.objectContaining({ deps: expect.objectContaining({ clientTimezone: 'Asia/Kolkata' }) }),
     );
   });
 

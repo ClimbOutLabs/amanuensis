@@ -223,7 +223,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)
@@ -231,6 +231,42 @@ installer/install.sh upgrade           # back up, rebuild, restart, health-check
 ```
 
 Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
+
+### Exporting one person's data
+
+To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
+
+```bash
+aman export-data --list-users                          # who owns sessions, and how many
+aman export-data --user <id> --out /backup/alice.zip   # one person's archive
+```
+
+An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. The archive is written whole or not at all and is never overwritten; any failure prints one line and exits non-zero. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds the files people uploaded to their chats, `--include-instance-data` adds the shared memories and instance settings, and `--migrate` first updates an older database to this version's schema (back it up first, since it changes the database). Shared memories can hold what other people told the assistant, so they are left out unless you add `--include-instance-data`; add it only when nobody else used the instance. A persona's memory is left out too when another person has a persona with the same name, because the two share that memory. Keys and passwords are removed from the text before anything is written, and the printed result says how many were removed. Names, ids and uploaded files are never changed. Without `--include-instance-data` the archive holds one person's data only, apart from the connector list, which the whole instance shares (without its keys). Treat it as private anyway.
+
+### Importing it into a fresh instance
+
+This is a one-time move run by whoever operates the instance, from a terminal on the machine that runs it. There is no button in the app for it yet, so a person who only uses the app cannot do it alone. An export (made by `aman export-data` on the old Aman) can be restored into a fresh instance. Each person gets a new instance. Everything imported belongs to that instance's owner. Only import a file you exported yourself.
+
+```bash
+installer/install.sh instance import main ~/aman-export.zip
+```
+
+The installer stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.
+
+What moves: chats with their dates and totals, the files uploaded to them when the export included them (the summary counts any that were left behind), folders, agents (with their ids), personas and their knowledge, each chat's chosen persona, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the owner's personalization, the owner's permission history, and the default model and memory summary switch if the new instance has not set them. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer is imported with that request expired and a line saying so, and "Approve for this chat" choices start over. The permission history (what ran, what was approved or denied, and when) is kept and never expires. Dates on personas, spaces, folders, schedules and persona choices show the import time.
+
+What does not move, and what to set up again: model keys, connector sign-ins and Always allow choices; your own skills and registered repositories; and your safety settings. Imported connectors arrive with no agent attached. In Settings, open Permissions to set offline mode, Always allow and web search again, Memory to turn the recall and tool-output checks back on, and Connectors to sign in; attach connectors to agents on the Agents page. An agent the export only names (a chat or schedule refers to it, but its definition is missing) is created as a stand-in with no working model; the import summary names it.
+
+An export made before permission history and persona choices were included still imports; those two parts are simply empty. To bring them across, export again from the old instance with a version that includes them.
+
+Before it writes anything the import checks the whole file, then checks that none of its ids already exist here. A failure undoes what the import wrote, and if the process is killed the next import cleans up first. Knowledge is searched by meaning, so the search model must have finished downloading (open the app once and wait a few minutes). If it has not, the import stops with "the knowledge index is still downloading, retry in a few minutes" and writes nothing.
+
+An import only runs into a fresh instance. If it says the instance already has chats, agents or other data, remove the instance and add it again, then import:
+
+```bash
+installer/install.sh instance remove main --purge-data
+installer/install.sh instance add main --email you@example.com
+```
 
 ## What is off in this version
 

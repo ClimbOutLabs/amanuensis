@@ -246,6 +246,8 @@ export type {
 } from './components/ImplementationPlanGrantContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
+export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
+export type { ModelUsageApi, ModelUsageTurnContext } from './components/ModelUsageContext.js';
 export { EMPTY_PERSONA_DRAFT, PersonaProvider, useOptionalPersonas, usePersonas } from './components/PersonaContext.js';
 export type {
   NewPersonaKnowledgeDocument,

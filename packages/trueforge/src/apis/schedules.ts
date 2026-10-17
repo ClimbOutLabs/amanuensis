@@ -27,6 +27,7 @@ import {
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
@@ -98,7 +99,7 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
    */
   tokenStore: IOAuthTokenStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -160,13 +161,13 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
-      // A scheduled run has no device, so times are read in the schedule's own zone.
-      clientTimezone: item.schedule.manifest.timezone,
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       logger: deps.logger,
+      // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
+      clientTimezone: item.schedule.manifest.timezone,
     },
   });
 }

@@ -78,6 +78,8 @@ type PendingCall = {
   thread?: string;
   /** Approval options the server declared; defaults to allow-once then deny. */
   options?: ApprovalOptions;
+  /** What the server said about chat scope; absent from older servers. */
+  chatAllowOffered?: boolean;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
@@ -104,6 +106,7 @@ function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) 
         card: card(`Do ${call.id}`),
         eventId: call.event ?? 'evt-1',
         threadId: call.thread ?? 'main',
+        ...(call.chatAllowOffered === undefined ? {} : { chatAllowOffered: call.chatAllowOffered }),
       });
     }
   });
@@ -288,5 +291,27 @@ describe('ToolCallContainer Sentinel approvals', () => {
     expect(response).toMatchObject({ approvalId: 'a', approved: true });
     expect(response).not.toHaveProperty('optionId');
     expect(respondToApproval).not.toHaveBeenCalled();
+  });
+  describe('Approve for this chat', () => {
+    const declaredChat: ApprovalOptions = [
+      { id: 'allow-once', kind: 'allow-once' },
+      { id: 'allow-chat', kind: 'allow-always' },
+      { id: 'deny', kind: 'reject-once', confirm: {} },
+    ];
+
+    it('is hidden when the server refuses chat scope, even if the option is declared', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: false }]);
+      expect(screen.queryByRole('button', { name: 'Approve for this chat' })).not.toBeInTheDocument();
+    });
+
+    it('is shown when the server offers it', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true }]);
+      expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    });
+
+    it('follows the declared options when an older server says nothing', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
+      expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
+    });
   });
 });

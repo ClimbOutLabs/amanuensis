@@ -10,6 +10,7 @@ import { buildSummarizationMessages, summarizeTurnContent } from '../../../../sr
 import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
 import { TENANT_ID } from '../../../../src/tenancy';
+import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
 import { startModelEndpointStub } from '../../../fixtures/modelEndpointStub';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
@@ -76,6 +77,7 @@ describe('summarizeTurnContent', () => {
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    modelUsage: discardedModelUsage,
     logger: makeLogger(),
   };
 
@@ -259,6 +261,7 @@ describe('summarizeTurnContent on Token Factory', () => {
         modelProviderStore,
         summarizationModelFqn,
         tokenFactoryBudget,
+        modelUsage: discardedModelUsage,
         logger: makeLogger(),
       });
     return { run, usageStore };
@@ -274,7 +277,12 @@ describe('summarizeTurnContent on Token Factory', () => {
 
   it('falls back to the verbatim transcript, without a call, once the cap is reached', async () => {
     const { run, usageStore } = await setup('tokenfactory');
-    await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+    await usageStore.addUsage({
+      usage_date: TODAY,
+      model_id: 'nvidia/nemotron-3-super-120b-a12b',
+      input_tokens: CAP,
+      output_tokens: 0,
+    });
 
     expect((await run()).status).toBe('failed');
 

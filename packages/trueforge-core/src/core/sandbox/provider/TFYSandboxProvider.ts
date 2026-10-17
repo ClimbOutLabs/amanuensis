@@ -21,6 +21,7 @@ import {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
   type ExecResult,
   type SandboxBuild,
@@ -237,7 +238,7 @@ export class TFYSandboxProvider implements SandboxProvider {
   private async getFileInfo(params: SandboxDownloadFileParams): Promise<SandboxFileInfo> {
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `stat -L --printf='{"size":%s,"type":"%F"}' ${shellEscape(params.path)}`,
+      command: withTrustedPath(`stat -L --printf='{"size":%s,"type":"%F"}' ${shellEscape(params.path)}`),
       signal: params.signal,
     });
 
@@ -263,7 +264,7 @@ export class TFYSandboxProvider implements SandboxProvider {
 
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `base64 -w0 ${shellEscape(params.path)}`,
+      command: withTrustedPath(`base64 -w0 ${shellEscape(params.path)}`),
       signal: params.signal,
     });
 
@@ -283,7 +284,7 @@ export class TFYSandboxProvider implements SandboxProvider {
 
     const result = await this.exec({
       sandboxId: params.sandboxId,
-      command: `echo ${shellEscape(encoded)} | base64 -d > ${escapedPath}`,
+      command: withTrustedPath(`echo ${shellEscape(encoded)} | base64 -d > ${escapedPath}`),
       signal: params.signal,
     });
     ensureExecSuccess(result);

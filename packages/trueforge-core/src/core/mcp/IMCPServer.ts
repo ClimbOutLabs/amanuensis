@@ -11,6 +11,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
+import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
 
 export interface MCPAuthRequired {
   servers: MCPServerAuthInfo[];
@@ -24,6 +25,8 @@ export interface ToolInvocationContext {
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
   approved_params?: Record<string, unknown> | undefined;
+  /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
+  git_remote_precondition?: GitRemotePrecondition | undefined;
   /**
    * the turn's abort signal. Tools with bounded multi-phase work (e.g.
    * run_code's explicit image-provisioning step) observe it so a cancelled
@@ -156,6 +159,12 @@ export interface IToolSet {
    * tool sets whose approvals are not bound to a connector.
    */
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
+
+  /**
+   * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
+   * classification derives them. Absent on tool sets whose wire arguments are already canonical.
+   */
+  mintCanonicalParams?(params: CallToolRequest['params']): Record<string, unknown>;
 
   /**
    * Content digest of a file in this tool set's own sandbox, for approvals that bind to file content when the

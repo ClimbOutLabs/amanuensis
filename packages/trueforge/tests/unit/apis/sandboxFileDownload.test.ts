@@ -273,6 +273,8 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
 
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment;/);
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
   it('returns 413 with a clear reason for a file that was skipped for size, without calling the sandbox', async () => {
@@ -514,6 +516,7 @@ describe('run_code harvest download journey', () => {
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
     expect(response.headers.get('content-disposition')).toContain('plot.png');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });
 
