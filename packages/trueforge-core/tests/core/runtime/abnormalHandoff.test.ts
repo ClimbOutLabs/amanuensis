@@ -21,9 +21,11 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeAgentSpec, mintTestTurnId } from '../../agent-session/testHelpers';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../sandbox/fakeTrackedState';
 import { realCommandExec } from '../sandbox/realCommandExec';
 
 const execFileAsync = promisify(execFile);
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
 
 const GIT_FIXTURE_ENVIRONMENT_KEYS_TO_REMOVE = new Set([
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -413,7 +415,10 @@ describe('abnormal handoffs', () => {
           response: { exitCode: 0, result: boundedEvidenceCaptureOutput() },
         });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox } = makeBoundSandbox({ exec, existingSandboxId: 'v1:test:serialized-handoff' });
     const mutation = sandbox.callTool(
@@ -465,7 +470,10 @@ describe('abnormal handoffs', () => {
           response: { exitCode: 0, result: boundedEvidenceCaptureOutput() },
         });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox } = makeBoundSandbox({ exec, existingSandboxId: 'v1:test:timed-handoff-lock' });
     const mutation = sandbox.callTool(
@@ -552,7 +560,10 @@ describe('abnormal handoffs', () => {
       if (params.command === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo' } });
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: EMPTY_TRACKED_STATE[params.command] ?? 'ok' },
+      });
     });
     const { sandbox, provider, workspaceVerificationCoordinator } = makeBoundSandbox({
       exec,
@@ -617,8 +628,7 @@ describe('abnormal handoffs', () => {
       "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'":
         'HEAD\u00000123456789abcdef\u0000refs/heads/codex/handoff\u0000',
       'git ls-files -v -z': 'H src/verified.ts\u0000',
-      'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-      'git diff --binary --no-ext-diff --no-textconv --no-color --': '',
+      ...fakeTrackedState([]),
       'git ls-files --others --exclude-standard -z': '',
     };
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
