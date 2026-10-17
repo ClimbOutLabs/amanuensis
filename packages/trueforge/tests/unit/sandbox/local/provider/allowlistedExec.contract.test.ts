@@ -173,6 +173,54 @@ describe('allowlisted commands run the program that was classified (real LocalSa
     expect(await exists(marker)).toBe(false);
   });
 
+  /** A startup file that logs every interpreter that loads it, into a folder the sandbox cannot write. */
+  async function plantStartupFile(sitePackagesDir: string, marker: string): Promise<void> {
+    await writeFile(
+      join(sitePackagesDir, 'zz_planted.pth'),
+      `import os; open(${JSON.stringify(marker)}, 'a').write('pid=%d\\n' % os.getpid())\n`,
+    );
+  }
+
+  test('recreating a broken workspace venv never runs a planted startup file on the host', async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), 'tfy-venv-marker-'));
+    try {
+      const marker = join(markerDir, 'startup-ran');
+      const lib = join(sandboxId, '.venv', 'lib');
+      const [pythonDir] = await readdir(lib);
+      await plantStartupFile(join(lib, pythonDir ?? '', 'site-packages'), marker);
+      // Unlink the entry: it links to the host interpreter, which a write would follow.
+      await rm(join(sandboxId, '.venv', 'bin', 'python'));
+      const result = await provider.exec({ sandboxId, command: 'echo repaired' });
+      expect(await exists(marker)).toBe(false);
+      expect(result).toMatchObject({ success: true, response: { exitCode: 0, result: 'repaired\n' } });
+      expect(await exists(join(sandboxId, '.venv', 'bin', 'python'))).toBe(true);
+      expect(await exists(join(lib, pythonDir ?? '', 'site-packages', 'zz_planted.pth'))).toBe(false);
+    } finally {
+      await rm(markerDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a workspace venv that links elsewhere is replaced and the link target is left alone', async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), 'tfy-venv-marker-'));
+    try {
+      const marker = join(markerDir, 'startup-ran');
+      const elsewhere = join(markerDir, 'elsewhere');
+      const sitePackagesDir = join(elsewhere, 'lib', 'python3', 'site-packages');
+      await mkdir(sitePackagesDir, { recursive: true });
+      await plantStartupFile(sitePackagesDir, marker);
+      await rm(join(sandboxId, '.venv'), { recursive: true, force: true });
+      await symlink(elsewhere, join(sandboxId, '.venv'));
+      const result = await provider.exec({ sandboxId, command: 'echo repaired' });
+      expect(await exists(marker)).toBe(false);
+      expect(await readdir(elsewhere)).toEqual(['lib']);
+      expect(await exists(join(sitePackagesDir, 'zz_planted.pth'))).toBe(true);
+      expect(result).toMatchObject({ success: true, response: { exitCode: 0, result: 'repaired\n' } });
+      expect((await lstat(join(sandboxId, '.venv'))).isDirectory()).toBe(true);
+    } finally {
+      await rm(markerDir, { recursive: true, force: true });
+    }
+  });
+
   test('host bookkeeping never runs a planted program from the tool folders', async () => {
     const marker = join(sandboxId, 'planted-ran');
     await writeFile(marker, '');

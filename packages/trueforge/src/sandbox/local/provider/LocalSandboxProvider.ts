@@ -29,12 +29,10 @@ import {
   workspaceTerminationCommand,
 } from '@truefoundry/trueforge-core/core';
 import { throwIfSignalAborted } from '@truefoundry/trueforge-core/core/util/abort';
-import { execFile } from 'node:child_process';
-import { existsSync, realpathSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
 import type { Logger } from 'winston';
 import { newId } from '../../../utils/id';
 import {
@@ -59,31 +57,26 @@ import {
 } from '../core/hostRun.js';
 import { XferFileInfoSchema, type XferFileInfo } from '../schemas/xferFileInfo.js';
 
-const execFileAsync = promisify(execFile);
-
 const DEFAULT_EXEC_TIMEOUT_SECONDS = 60;
 const DEFAULT_FILE_MAX_BYTES = 10 * 1024 * 1024;
 /** Cap for isSupported shell/Python probes (not general exec). */
 const SUPPORT_PROBE_TIMEOUT_MS = 5_000;
 const VENV_CREATE_TIMEOUT_MS = 60_000;
-const VENV_PIP_TIMEOUT_MS = 120_000;
-/** Same pin as the Daytona image / skill_downloader.py PEP 723 header. */
-const VENV_PYDANTIC_PIN = 'pydantic>=2.0.0,<3.0.0';
+/** A venv missing any of these is rebuilt from scratch, never repaired in place. */
+const VENV_REQUIRED_ENTRIES = ['pyvenv.cfg', join('bin', 'python'), join('bin', 'pip')] as const;
 
 /** Command names resolved via `command -v` (PATH from sandbox policy). */
 const SHELL_CANDIDATES = ['bash', 'sh'] as const;
-async function venvHasPydantic(venvDir: string): Promise<boolean> {
-  for (const lib of ['lib', 'lib64']) {
-    const entries = await readdir(join(venvDir, lib)).catch(() => []);
-    if (
-      entries.some(
-        entry => entry.startsWith('python') && existsSync(join(venvDir, lib, entry, 'site-packages', 'pydantic')),
-      )
-    ) {
-      return true;
+
+function venvIsComplete(venvDir: string): boolean {
+  try {
+    if (!lstatSync(venvDir).isDirectory()) {
+      return false;
     }
+  } catch {
+    return false;
   }
-  return false;
+  return VENV_REQUIRED_ENTRIES.every(entry => existsSync(join(venvDir, entry)));
 }
 
 const PYTHON_CANDIDATES = ['python3', 'python'] as const;
@@ -206,20 +199,6 @@ function toSandboxRelativePath(params: { sandboxRootPath: string; absolutePath: 
 function isStrictDescendant(params: { ancestor: string; descendant: string }): boolean {
   const rel = relative(params.ancestor, params.descendant);
   return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-}
-
-function execFileErrorDetail(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-  const parts = [error.message];
-  if ('stderr' in error && typeof error.stderr === 'string' && error.stderr.length > 0) {
-    parts.push(error.stderr);
-  }
-  if ('stdout' in error && typeof error.stdout === 'string' && error.stdout.length > 0) {
-    parts.push(error.stdout);
-  }
-  return parts.join(' ');
 }
 
 function sessionFailDetail(session: SessionResult): string {
@@ -554,46 +533,27 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 
   /**
-   * Host `python -m venv` (stdlib only), then sandboxed pip for pydantic.
-   * Idempotent: skip create when `.venv/bin/python` exists; skip pip when import works.
+   * Rebuilds an incomplete venv entirely inside the sandbox: the workspace may have planted
+   * startup files or links in it, so the host never runs Python against it or writes into it.
    */
   private async ensureVenv(sandboxRootPath: string, signal: AbortSignal | undefined): Promise<void> {
     throwIfSignalAborted(signal);
-    const venvDir = join(sandboxRootPath, SANDBOX_VENV_DIR);
-    const venvPython = join(venvDir, 'bin', 'python');
-    if (!existsSync(venvPython)) {
-      try {
-        await execFileAsync(this.support.python, ['-m', 'venv', venvDir], {
-          timeout: VENV_CREATE_TIMEOUT_MS,
-          ...(signal === undefined ? {} : { signal }),
-        });
-      } catch (error) {
-        throwIfSignalAborted(signal);
-        throw new Error(`Failed to create sandbox ${SANDBOX_VENV_DIR}: ${execFileErrorDetail(error)}`, {
-          cause: error,
-        });
-      }
-    }
-
-    const relPip = join(SANDBOX_VENV_DIR, 'bin', 'pip');
-    // Read the venv's files instead of running its python: a program saved there would otherwise run on every exec.
-    if (await venvHasPydantic(venvDir)) {
+    if (venvIsComplete(join(sandboxRootPath, SANDBOX_VENV_DIR))) {
       return;
     }
-
-    const install = await runSupervisorSession({
+    const venv = shellEscape(SANDBOX_VENV_DIR);
+    // `rm -rf` unlinks a linked `.venv` instead of following it; `-I` keeps the workspace off the import path.
+    const create = await runSupervisorSession({
       sandboxRootPath,
       platform: this.support.platform,
       shell: this.support.shell,
-      command: `${shellEscape(relPip)} install --trusted-host pypi.org --trusted-host files.pythonhosted.org ${shellEscape(VENV_PYDANTIC_PIN)}`,
+      command: withTrustedPath(`rm -rf -- ${venv} && ${shellEscape(this.support.python)} -I -m venv ${venv}`),
       signal,
-      timeoutMs: VENV_PIP_TIMEOUT_MS,
+      timeoutMs: VENV_CREATE_TIMEOUT_MS,
     });
     throwIfSignalAborted(signal);
-    if (install.protocolError !== undefined || install.exitCode !== 0 || install.timedOut) {
-      throw new Error(
-        `Failed to pip install ${VENV_PYDANTIC_PIN} into sandbox ${SANDBOX_VENV_DIR}: ${sessionFailDetail(install)}`,
-      );
+    if (create.protocolError !== undefined || create.exitCode !== 0 || create.timedOut) {
+      throw new Error(`Failed to create sandbox ${SANDBOX_VENV_DIR}: ${sessionFailDetail(create)}`);
     }
   }
 
