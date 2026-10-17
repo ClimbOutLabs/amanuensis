@@ -364,7 +364,7 @@ describe('Sandbox exec result semantics', () => {
       }
       const response = JSON.parse(contentItem.text);
       expect(response.status).toBe('failed');
-      expect(response.error_summary).toContain('sandbox creation rejected by policy');
+      expect(response.error_summary).toBe("Your code couldn't run. Please try again.");
     });
   });
 
@@ -551,5 +551,31 @@ describe('Sandbox exec result semantics', () => {
       // Verify the error is at the top level, not nested in a success:true structure
       expect(response.success).toBeUndefined();
     });
+  });
+});
+
+describe('Sandbox start failure', () => {
+  it('tells the person the code could not run and to try again, without the system error', async () => {
+    const provider = makeProvider({
+      createSandbox: () =>
+        Promise.reject(new Error("ENOENT: no such file or directory, mkdir '/data/sandboxes/abc/x'")),
+      exec: () => readyExec(),
+    });
+
+    const result = await makeSandbox(provider).callTool({
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'run', purpose: 'inspect', command: 'echo hi' },
+    });
+
+    if (!isCallToolResponseResult(result)) {
+      throw new Error('expected tool result');
+    }
+    expect(result.result.isError).toBe(true);
+    const contentItem = result.result.content[0];
+    if (!contentItem || contentItem.type !== 'text') {
+      throw new Error('expected text content');
+    }
+    expect(contentItem.text).toContain("Your code couldn't run. Please try again.");
+    expect(contentItem.text).not.toMatch(/ENOENT|mkdir|\/data\/sandboxes/);
   });
 });

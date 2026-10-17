@@ -33,6 +33,7 @@ import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
+import { ensureLocalSandboxRootParent } from '../sandbox/localLifecycle';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
 import { createSlotSandboxProvider, slotsBackendEnabled, slotSocketPaths } from '../sandbox/slotBackend';
@@ -612,8 +613,11 @@ export async function resolveSandboxProvider({
   if (support?.supported !== true) {
     return undefined;
   }
+  // Sandbox creation makes only the leaf directory, so the per-chat folder must exist first.
+  const sandboxRootPathParent = join(configuration.LOCAL_SANDBOX_ROOT_PARENT, localSandboxSessionSegment(sessionId));
+  await ensureLocalSandboxRootParent(sandboxRootPathParent);
   return new LocalSandboxProvider({
-    sandboxRootPathParent: join(configuration.LOCAL_SANDBOX_ROOT_PARENT, localSandboxSessionSegment(sessionId)),
+    sandboxRootPathParent,
     codeModeSocketParentPath: configuration.CODE_MODE_SOCKET_PARENT,
     support,
     fileMaxBytesForDownload: configuration.SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD,
