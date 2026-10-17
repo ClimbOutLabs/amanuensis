@@ -68,6 +68,35 @@ describe('maps config', () => {
     expect(config.MAPS_ROUTER_URL).toBe('https://routes.example.internal');
   });
 
+  it.each(['MAPS_GEOCODER_URL', 'MAPS_ROUTER_URL', 'MAPS_TILE_URL'])(
+    'refuses plain http for %s off loopback',
+    async key => {
+      const suffix = key === 'MAPS_TILE_URL' ? '/{z}/{x}/{y}.png' : '';
+      process.env[key] = `http://maps.example.internal${suffix}`;
+      await expect(loadConfig()).rejects.toThrow(`${key} must use https`);
+    },
+  );
+
+  it.each([
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://127.1.2.3',
+    'http://[::1]:8080',
+    'http://LOCALHOST:8080',
+    'http://[::ffff:127.0.0.1]:8080',
+  ])('allows plain http on loopback: %s', async url => {
+    process.env['MAPS_GEOCODER_URL'] = url;
+    const config = await loadConfig();
+    expect(config.MAPS_GEOCODER_URL).toBe(url);
+  });
+
+  it('does not treat lookalike hosts as loopback', async () => {
+    process.env['MAPS_GEOCODER_URL'] = 'http://localhost.evil.example';
+    await expect(loadConfig()).rejects.toThrow('must use https');
+    process.env['MAPS_GEOCODER_URL'] = 'http://127.0.0.1.evil.example';
+    await expect(loadConfig()).rejects.toThrow('must use https');
+  });
+
   it('rejects non-http(s) URLs', async () => {
     process.env['MAPS_GEOCODER_URL'] = 'ftp://example.com';
     await expect(loadConfig()).rejects.toThrow('MAPS_GEOCODER_URL must be an http(s) URL');

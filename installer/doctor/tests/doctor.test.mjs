@@ -28,7 +28,7 @@ import {
 } from './world.mjs';
 
 // The document a healthy world prints: same shape and keys as before the text report was restyled.
-const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading email attachments is not available.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
 `;
 
 let world;
@@ -1874,13 +1874,43 @@ describe('sandbox settings that are incomplete', () => {
     assert.ok(slots > refresh, 'the sandboxes were repaired after the settings were rewritten');
   });
 
-  it('an instance installed without the sandbox is left alone', () => {
+  it('tells an instance installed without the sandbox how to turn it on', () => {
     make();
     world.sandbox({ wired: [] });
     mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
     writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
     const result = world.shim(['doctor', 'sandbox']);
-    assert.equal(result.code, 0);
-    assert.match(result.stdout, /No instance has the sandbox/);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stdout.replace(/\s+/g, ' '),
+      /Instance main was installed without the sandbox, so running code and reading PDFs are off\. Next: Run aman doctor sandbox --fix/,
+    );
+    assert.doesNotMatch(result.stdout, /install\.sh --name/);
+    assert.doesNotMatch(result.stdout, /sandbox tools are not installed/);
+  });
+
+  it('says the same when the sandbox tools were never installed, and --fix runs the installer for that instance', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    const plain = world.shim(['doctor', 'sandbox']);
+    assert.match(plain.stdout, /Instance main was installed without the sandbox/);
+    assert.doesNotMatch(plain.stdout, /sandbox tools are not installed/);
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.ok(world.calls().some(line => line.includes(`install.sh --home ${world.home} --yes --name main`)));
+  });
+
+  it('--fix without --yes lets the installer show its own plan and ask', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix'], { input: 'y\n' });
+    const install = world.calls().find(line => line.includes('install.sh --home'));
+    assert.ok(install, fixed.stdout + fixed.stderr);
+    assert.ok(install.includes('--name main'));
+    assert.ok(!install.includes('--yes'), install);
   });
 });

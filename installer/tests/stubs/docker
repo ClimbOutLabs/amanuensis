@@ -52,7 +52,11 @@ case "$cmd" in
     if [ "$1" = inspect ]; then
       for ref in "$@"; do :; done
       if grep -Fxq "$ref" "$S/images"; then
-        case "$*" in *Architecture*) echo amd64 ;; esac
+        case "$*" in
+          *Architecture*) echo amd64 ;;
+          # A rebuild that changed an image changes its id; tests write the new id to $S/image_id.
+          *'{{.Id}}'*) echo "sha256:$(cat "$S/image_id" 2>/dev/null || echo first)" ;;
+        esac
         exit 0
       fi
       exit 1
@@ -89,6 +93,13 @@ case "$cmd" in
     exit 0
     ;;
   inspect)
+    # A slot container: the id of the image it was started from.
+    case "$*" in
+      *'{{.Image}}'*)
+        for a in "$@"; do case "$a" in c[0-9]*) echo "sha256:$(cat "$S/slots_run_image_id" 2>/dev/null || echo first)" ;; esac; done
+        exit 0
+        ;;
+    esac
     echo "stub exit 1 oom false"
     exit 0
     ;;
@@ -273,6 +284,24 @@ case "$cmd" in
         printf '{"hash":"%s"}\n' "$hash"
         exit 0
         ;;
+      *"aman import-data"*)
+        # Models the CLI: records the call, and fails on request the way a refused import does.
+        echo "$*" >>"$S/import_runs"
+        if [ -n "${STUB_IMPORT_SIGNAL:-}" ]; then
+          # Models Ctrl-C or a hangup during the import: the signal reaches the installer, then the run ends.
+          p=$PPID
+          while [ "$p" -gt 1 ]; do
+            case "$(tr '\0' ' ' <"/proc/$p/cmdline")" in
+              *install.sh*) kill -s "$STUB_IMPORT_SIGNAL" "$p"; break ;;
+            esac
+            p=$(awk '{print $4}' "/proc/$p/stat")
+          done
+          exit 130
+        fi
+        [ -n "${STUB_IMPORT_FAIL:-}" ] && { echo "This instance already has chats, so the import was refused and nothing was changed." >&2; exit 1; }
+        printf '{"user_id":"stub","chats":1}\n'
+        exit 0
+        ;;
       *"aman backup"*)
         # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
         echo "$*" >>"$S/backup_runs"
@@ -373,6 +402,12 @@ case "$cmd" in
             printf '{"action":"seed"}\n'
             ;;
         esac
+        exit 0
+        ;;
+      stop)
+        # The instance counts as down once its app is stopped (the stub models a project as up or not).
+        echo "$sub $*" >>"$S/compose_stops"
+        rm -f "$S/up/$proj"
         exit 0
         ;;
       down)

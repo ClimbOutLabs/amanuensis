@@ -12,9 +12,9 @@
 // scopes than the previous one, the host's cached tools/list is stale and
 // affected tools will reject at call-time with the usual re-auth hint.
 
-import { info as logInfo, withRetry } from "@george43g/robustness";
+import { info as logInfo, warn as logWarn, withRetry } from "@george43g/robustness";
 import type { z } from "zod";
-import { hasScope } from "../../scopes.js";
+import { hasScope, wideScopeNotice } from "../../scopes.js";
 import {
   ListAccountsOutputSchema,
   ListAccountsSchema,
@@ -213,6 +213,11 @@ const switchOp: Operation<SwitchAccountInput, SwitchAccountOutput> = {
       `Scopes now granted: ${bundle.scopes.length > 0 ? bundle.scopes.join(", ") : "(none)"}`,
     ];
     if (entry?.emailAddress) lines.push(`Email: ${entry.emailAddress}`);
+    const notice = wideScopeNotice({ scopes: bundle.scopes, accountId });
+    if (notice) {
+      logWarn(notice);
+      lines.push(`Notice: ${notice}`);
+    }
 
     return {
       content: [{ type: "text", text: lines.join("\n") }],

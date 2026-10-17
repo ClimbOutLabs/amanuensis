@@ -101,6 +101,19 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
   return parsed;
 }
 
+/**
+ * The plain line the host wrote for the owner when it refused a call it could not show in full, or
+ * undefined for any other result. Only a policy block that asks to contact the user qualifies.
+ */
+export function parseToolRefusalNotice(content: unknown): string | undefined {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  if (!isUnknownRecord(outcome) || outcome.disposition !== 'policy_blocked' || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  const { suggested_action: action, message } = outcome.remediation;
+  return action === 'contact_user' && typeof message === 'string' ? message : undefined;
+}
+
 export function parseToolResultDisposition(content: unknown): ToolDispositionView | undefined {
   const envelope = parseToolResultEnvelope(content);
   const outcome = envelope?.outcome;

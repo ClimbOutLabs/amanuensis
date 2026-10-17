@@ -81,7 +81,7 @@ describe('TurnResourceResolver delegation model precedence', () => {
 
     const definition = await resolve(resolver, spec);
 
-    expect(llm).toHaveBeenCalledWith(MAIN_MODEL);
+    expect(llm).toHaveBeenCalledWith(MAIN_MODEL, 'chat');
     expect(definition.modelParams).toEqual({
       max_tokens: 8192,
       temperature: 0.2,
@@ -102,7 +102,7 @@ describe('TurnResourceResolver delegation model precedence', () => {
 
     const definition = await resolve(resolver, spec, dynamicAgent());
 
-    expect(llm).toHaveBeenCalledWith(DELEGATION_MODEL);
+    expect(llm).toHaveBeenCalledWith(DELEGATION_MODEL, 'delegation');
     expect(definition.modelParams).toEqual({
       max_tokens: 1024,
       temperature: 0.1,
@@ -118,7 +118,7 @@ describe('TurnResourceResolver delegation model precedence', () => {
 
     const definition = await resolve(resolver, spec, dynamicAgent());
 
-    expect(llm).toHaveBeenCalledWith(MAIN_MODEL);
+    expect(llm).toHaveBeenCalledWith(MAIN_MODEL, 'delegation');
     expect(definition.modelParams).toEqual({
       max_tokens: 8192,
       temperature: 0.2,
@@ -139,7 +139,7 @@ describe('TurnResourceResolver delegation model precedence', () => {
 
     const definition = await resolve(resolver, spec, dynamicAgent(EXPLICIT_MODEL));
 
-    expect(llm).toHaveBeenCalledWith(EXPLICIT_MODEL);
+    expect(llm).toHaveBeenCalledWith(EXPLICIT_MODEL, 'delegation');
     expect(definition.modelParams).toEqual({ max_tokens: 3072, temperature: 0.05 });
   });
 });

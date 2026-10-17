@@ -376,7 +376,7 @@ const CustomModelProviderForm = ({
                 htmlFor="custom-provider-first-chunk-ms"
                 className="mb-1.5 block text-sm font-medium text-text-primary"
               >
-                First token deadline (ms)
+                First reply timeout (ms)
               </label>
               <input
                 id="custom-provider-first-chunk-ms"
@@ -388,11 +388,11 @@ const CustomModelProviderForm = ({
                 placeholder="300000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait for the first token before giving up. Default 300000ms.</FieldHelp>
+              <FieldHelp>How long to wait for a reply to start. Default: 300000 ms.</FieldHelp>
             </div>
             <div>
               <label htmlFor="custom-provider-chunk-ms" className="mb-1.5 block text-sm font-medium text-text-primary">
-                Stall deadline (ms)
+                Stall timeout (ms)
               </label>
               <input
                 id="custom-provider-chunk-ms"
@@ -404,7 +404,7 @@ const CustomModelProviderForm = ({
                 placeholder="60000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait between tokens before giving up. Default 60000ms.</FieldHelp>
+              <FieldHelp>How long to wait if a reply stops partway. Default: 60000 ms.</FieldHelp>
             </div>
           </div>
 
@@ -533,7 +533,7 @@ const CustomModelProviderForm = ({
                             {showContextError ? (
                               <FieldError>{contextError}</FieldError>
                             ) : model.contextLength.trim() === '' ? (
-                              <FieldHelp>Model&apos;s total token window.</FieldHelp>
+                              <FieldHelp>The model&apos;s total context window.</FieldHelp>
                             ) : null}
                           </div>
 
@@ -560,7 +560,7 @@ const CustomModelProviderForm = ({
                             {showMaxError ? (
                               <FieldError>{maxError}</FieldError>
                             ) : model.maxOutputTokens.trim() === '' ? (
-                              <FieldHelp>Longest reply the model allows — use its real limit.</FieldHelp>
+                              <FieldHelp>Longest reply the model allows. Use its real limit.</FieldHelp>
                             ) : null}
                           </div>
 

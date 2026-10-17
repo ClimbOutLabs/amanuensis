@@ -55,6 +55,14 @@ describe('buildActivityItems', () => {
     expect(items.map(item => item.title)).toEqual(['Read web pages', 'Checked your calendar', 'Checked email']);
   });
 
+  it('labels the calendar tools by what they do', () => {
+    const items = buildActivityItems(
+      [toolCall('list_events', 1_000), toolCall('google_calendar__get_event', 2_000)],
+      ORIGIN_MS,
+    );
+    expect(items.map(item => item.title)).toEqual(['Checked your calendar']);
+  });
+
   it('humanizes unknown tools instead of leaking snake_case', () => {
     const items = buildActivityItems([toolCall('list_projects', 1_000)], ORIGIN_MS);
     expect(items).toHaveLength(1);
