@@ -520,7 +520,8 @@ export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {
     ...(toolInfo.open_world_hint !== undefined && { open_world_hint: toolInfo.open_world_hint }),
     ...(toolInfo.effect !== undefined && { effect: toolInfo.effect }),
   };
-  const hostObservedTargetSummary = toolInfo.structured_edit_precondition?.summary;
+  const hostObservedTargetSummary =
+    toolInfo.structured_edit_precondition?.summary ?? toolInfo.git_remote_precondition?.summary;
   if (toolInfo.type === 'mcp') {
     return {
       type: toolInfo.type,
