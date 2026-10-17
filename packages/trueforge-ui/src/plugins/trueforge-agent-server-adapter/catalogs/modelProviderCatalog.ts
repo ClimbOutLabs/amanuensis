@@ -14,6 +14,8 @@ import type {
   ModelProviderCatalogEntry,
   UpdateModelProviderRequest,
 } from '../../../server/types.js';
+import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
+import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** Custom-form rows omit properties; catalog rows round-trip them. */
 export type UiModelEntry = ModelEntry & {
@@ -79,6 +81,7 @@ export function toUiModelProvider(provider: TrueForgeApi.ConfiguredModelProvider
 
 export function toUiCatalogModelProviderEntry(
   provider: TrueForgeApi.CatalogModelProvider,
+  options: { baseUrl?: string } = {},
 ): UiModelProviderCatalogEntry {
   if (provider.type === 'custom') {
     return {
@@ -91,7 +94,9 @@ export function toUiCatalogModelProviderEntry(
   return {
     type: provider.type,
     name: provider.type,
-    ...(provider.logo === undefined ? {} : { logo: provider.logo }),
+    ...(provider.logo === undefined
+      ? {}
+      : { logo: toSameOriginCatalogLogoUrl({ logo: provider.logo, baseUrl: options.baseUrl ?? '/' }) }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     models: provider.models.map(toUiModelEntry),
   };
@@ -143,6 +148,7 @@ export function toHarnessModelProvider(req: {
 /** Settings model-catalog port for `createTrueFoundryServer`. */
 export function createModelProviderCatalog(
   client: TrueForge,
+  clientOptions: CreateTrueForgeClientOptions = {},
 ): ModelCatalogServer<
   UiModelEntry,
   UiModelProvider,
@@ -174,7 +180,7 @@ export function createModelProviderCatalog(
   return {
     getModelProviderCatalog: async () => {
       const body = await client.catalogs.modelProviders.list();
-      return body.data.map(toUiCatalogModelProviderEntry);
+      return body.data.map(provider => toUiCatalogModelProviderEntry(provider, { baseUrl: clientOptions.baseUrl }));
     },
     listModelProviders: async () => {
       const body = await client.settings.modelProviders.list();

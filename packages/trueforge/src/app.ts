@@ -85,6 +85,7 @@ import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
+import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
@@ -392,6 +393,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
+  mountCatalogLogos(app, {
+    logos: [...deps.modelCatalog.list(), ...deps.mcpCatalog.list()].map(entry => entry.logo),
+    authMiddleware: createUiSessionAuthMiddleware(deps.authenticator),
+  });
 
   app.route(
     '/api/v1/auth',

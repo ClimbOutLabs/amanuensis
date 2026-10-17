@@ -1,6 +1,6 @@
 # Try Aman
 
-Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. The only thing that leaves it is what you send to the AI model you choose.
+Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. What leaves it is what you send to the AI model you choose, and the words of any web search, which go to the Parallel search service.
 
 Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer five questions at the start and type your password once near the end.
 
@@ -137,6 +137,6 @@ Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do n
 
 ## Good to know
 
-- Nothing is sent anywhere except to the model company you chose, and to the search service when you use it.
+- Nothing is sent anywhere except to the model company you chose, and to Parallel (the search service Aman uses by default) when Aman searches the web. Parallel sees the search words and your internet address. To stop it, remove the `parallel-web` connector in Settings, or turn on Offline mode.
 - Backups are made every night at 03:30 into `~/.amanuensis/backups` on your computer, keeping the last 7.
 - Each person gets a new instance.

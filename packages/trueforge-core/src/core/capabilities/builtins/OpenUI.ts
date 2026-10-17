@@ -258,7 +258,7 @@ export function buildOpenUIInstruction(builder: InstructionBuilder): void {
     dedent`
       1. Will the response be UI heavy and will contain components which are not supported by markdown? Use openui if the answer is yes.
       2. \`\`\`openui\`\`\` fencing must be closed.
-      3. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML, CSS, or scripts that openui components cannot express.`,
+      3. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML or CSS that openui components cannot express. HTML previews do not run scripts.`,
   );
 }
 
@@ -286,7 +286,7 @@ function buildOpenUIDeferredInstruction(builder: InstructionBuilder): void {
       Before writing any \`\`\`openui fence, the Agent MUST call ${GET_OPENUI_INSTRUCTIONS_TOOL_NAME} with arguments {}.
       Do not invent OpenUI syntax or component APIs without loading those instructions.
 
-      Use OpenUI only when the response is UI-heavy and needs components markdown does not support. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML, CSS, or scripts that openui components cannot express.
+      Use OpenUI only when the response is UI-heavy and needs components markdown does not support. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML or CSS that openui components cannot express. HTML previews do not run scripts.
     `.trim(),
   );
 }
