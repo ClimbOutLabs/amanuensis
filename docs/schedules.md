@@ -1,4 +1,7 @@
-# Schedules
+---
+title: 'Schedules'
+description: 'Things that repeat, and how a scheduled run holds actions for you.'
+---
 
 A schedule asks Aman to do the same job again and again, for example every weekday morning.
 
@@ -22,4 +25,4 @@ Aman has no alerts or notifications. A scheduled run's results wait in its chat 
 
 Aman can think all day. Doing things needs your OK.
 
-A scheduled run can read and search, but it never sends or changes anything by itself. Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there. Held items expire after 24 hours. See [Safety story](safety.md) for the details.
+A scheduled run can read and search, but it never sends or changes anything by itself. Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there. Held items expire after 24 hours. See [Safety story](/safety) for the details.

@@ -13,7 +13,7 @@ source lineage, and upgrade paths stay clear.
 
 ## What we built vs what came from upstream
 
-The fork was cut from upstream TrueForge on 24 August 2026. The public history starts on 26 September 2026 with an import of earlier fork work.
+The fork was cut from upstream TrueForge on 24 August 2026. The public history starts on 26 September 2026 with an import of earlier fork work, flattened into one commit.
 
 From upstream TrueForge:
 
@@ -21,14 +21,19 @@ From upstream TrueForge:
 - the HTTP server, sign-in, SQLite and Postgres storage, model providers and the schedule runner;
 - MCP connector support, the model catalog, the UI toolkit, the generated SDK, the Helm chart and the harness docs.
 
-Built in this fork before 28 September 2026 (imported on 26 and 27 September):
+From other open-source projects, used as they are:
+
+- a Gmail MCP server under `mcp/gmail` (MIT licence, credited in its own license file);
+- small open models for speech-to-text, memory search and prompt-injection screening.
+
+Built in this fork in a private repo, from 24 August to 26 September 2026 (imported on 26 and 27 September):
 
 - long-term memory as local Markdown files, personas, persona knowledge and profile learning;
 - Memory Vault sharing, export and import, Spaces, session metrics and bug reports;
 - the Gmail connector, theme presets, UI polish, model catalog presets and compaction reliability work;
 - the first code-running sandbox, the private-data scanner and the feature specs.
 
-Built in this fork from 28 September 2026:
+Built in this fork in the public repo, from 27 September 2026:
 
 - the Nebius Token Factory provider with Nemotron defaults, helper jobs on a smaller Nemotron model, a daily token cap and a per-answer model and cost line;
 - the guided installer with sign-in, local HTTPS, daily backups, a doctor command and upgrades;

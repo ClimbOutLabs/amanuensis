@@ -1,4 +1,7 @@
-# Backups
+---
+title: 'Backups'
+description: 'How aman backup works and how to copy backups off your computer.'
+---
 
 ## How `aman backup` works
 

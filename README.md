@@ -5,7 +5,7 @@
 <h1 align="center">Amanuensis</h1>
 
 <p align="center">
-  <em>A private, local-first AI workbench. Your models, your tools, your memory — on your machine.</em>
+  <em>Any model. Your memory, as files on your disk. Nothing happens without your OK.</em>
 </p>
 
 <p align="center">
@@ -28,6 +28,12 @@
 </p>
 
 Amanuensis (Aman) is a private, local-first AI workbench built on the TrueForge agent harness. It combines a browser chat interface with configurable models, MCP tools, reusable agents and skills, sandboxed execution, session persistence, and Aman-specific personalization and memory features.
+
+- Your memory is plain files you own, and your chats and personas stay on your machine, where you can back them up or export them any time.
+- Use a hosted model or a local one, and switch any time.
+- Aman can read and think all day, but anything that changes something (sending, running code, writing files) waits for your OK.
+
+If you use a hosted model, the company running it sees your message and the memories Aman recalls for it. For full privacy, use a local model. See [Safety story](docs/safety.md), [Privacy](docs/privacy.md), [Schedules](docs/schedules.md) and [Backups](docs/backup.md).
 
 ## ✨ Features
 
