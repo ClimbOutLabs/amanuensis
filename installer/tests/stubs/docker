@@ -9,6 +9,33 @@ touch "$S/images" "$S/volumes"
 
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$1" | head -n 1; }
 
+# The old compose stack the migrate step reads exists when a test wrote its folder into $S/old_compose_dir. Its
+# containers are "id project service kind" lines in $S/old_containers (kind app, postgres or other), by default the
+# repository's own docker-compose.yml.
+old_rows() {
+  [ -f "$S/old_compose_dir" ] || return 0
+  if [ -f "$S/old_containers" ]; then
+    cat "$S/old_containers"
+  else
+    printf 'old-postgres trueforge postgres postgres\nold-server trueforge server app\n'
+  fi
+}
+old_row() { old_rows | awk -v id="$1" '$1 == id'; }
+
+# Models Ctrl-C or a hangup: the signal reaches the installer itself, past any subshell it runs docker from.
+signal_installer() { # signal
+  local p=$PPID target=''
+  while [ "$p" -gt 1 ]; do
+    if tr '\0' '\n' <"/proc/$p/cmdline" | grep -qx '.*install\.sh'; then
+      target=$p
+    elif [ -n "$target" ]; then
+      break
+    fi
+    p=$(awk '{print $4}' "/proc/$p/stat")
+  done
+  [ -z "$target" ] || kill -s "$1" "$target"
+}
+
 cmd=${1:-}
 shift || true
 case "$cmd" in
@@ -93,13 +120,24 @@ case "$cmd" in
     exit 0
     ;;
   inspect)
-    # The old compose containers the migrate step reads (whether Postgres runs, its image, the app's mounts),
-    # and for a slot container the id of the image it was started from.
+    # The old compose containers the migrate step reads: whether Postgres runs, its image, settings and project, and
+    # the app's mounts.
+    for last in "$@"; do :; done
+    row=$(old_row "$last")
+    if [ -n "$row" ]; then
+      read -r _ project _ kind <<<"$row"
+      case "$*" in
+        *State.Running*) [ -n "${STUB_OLD_PG_STOPPED:-}" ] && echo false || echo true ;;
+        *Config.Image*) [ "$kind" = postgres ] && echo postgres:17 || echo truefoundry-server:latest ;;
+        *Config.Env*) [ "$kind" = postgres ] && echo PGDATA=/var/lib/postgresql/data; echo PATH=/usr/bin ;;
+        *com.docker.compose.project*) echo "$project" ;;
+        *'"/data/memory"'*) [ "$kind" = app ] && echo trueforge_memory-data ;;
+        *'"/data/persona-knowledge"'*) [ "$kind" = app ] && echo trueforge_persona-knowledge-data ;;
+      esac
+      exit 0
+    fi
+    # A slot container: the id of the image it was started from.
     case "$*" in
-      *State.Running*) [ -n "${STUB_OLD_PG_STOPPED:-}" ] && echo false || echo true; exit 0 ;;
-      *Config.Image*) echo postgres:17; exit 0 ;;
-      *'"/data/memory"'*) echo trueforge_memory-data; exit 0 ;;
-      *'"/data/persona-knowledge"'*) echo trueforge_persona-knowledge-data; exit 0 ;;
       *'{{.Image}}'*)
         for a in "$@"; do case "$a" in c[0-9]*) echo "sha256:$(cat "$S/slots_run_image_id" 2>/dev/null || echo first)" ;; esac; done
         exit 0
@@ -200,15 +238,17 @@ case "$cmd" in
   ps)
     case "$*" in
       *com.docker.compose.project.working_dir=*)
-        # The old compose stack exists when a test wrote its folder into $S/old_compose_dir.
-        dir="$*"
-        dir=${dir##*com.docker.compose.project.working_dir=}
-        dir=${dir%% --filter*}
+        # Filters by folder, and by project or service when asked.
+        dir='' want_project='' want_service=''
+        for a in "$@"; do
+          case "$a" in
+            label=com.docker.compose.project.working_dir=*) dir=${a#label=com.docker.compose.project.working_dir=} ;;
+            label=com.docker.compose.project=*) want_project=${a#label=com.docker.compose.project=} ;;
+            label=com.docker.compose.service=*) want_service=${a#label=com.docker.compose.service=} ;;
+          esac
+        done
         [ -f "$S/old_compose_dir" ] && [ "$dir" = "$(cat "$S/old_compose_dir")" ] || exit 0
-        case "$*" in
-          *service=postgres*) echo old-postgres ;;
-          *service=server*) echo old-server ;;
-        esac
+        old_rows | awk -v p="$want_project" -v s="$want_service" '(p == "" || $2 == p) && (s == "" || $3 == s) {print $1}'
         exit 0
         ;;
     esac
@@ -358,21 +398,16 @@ case "$cmd" in
         exit 0
         ;;
       *" cat /out/aman-export.zip"*)
+        umask >"$S/copy_umask"
         printf 'PK-EXPORT-FROM-COPY'
+        [ -n "${STUB_COPY_SIGNAL:-}" ] && { signal_installer "$STUB_COPY_SIGNAL"; exit 130; }
         exit 0
         ;;
       *"aman import-data"*)
         # Models the CLI: records the call, and fails on request the way a refused import does.
         echo "$*" >>"$S/import_runs"
         if [ -n "${STUB_IMPORT_SIGNAL:-}" ]; then
-          # Models Ctrl-C or a hangup during the import: the signal reaches the installer, then the run ends.
-          p=$PPID
-          while [ "$p" -gt 1 ]; do
-            case "$(tr '\0' ' ' <"/proc/$p/cmdline")" in
-              *install.sh*) kill -s "$STUB_IMPORT_SIGNAL" "$p"; break ;;
-            esac
-            p=$(awk '{print $4}' "/proc/$p/stat")
-          done
+          signal_installer "$STUB_IMPORT_SIGNAL"
           exit 130
         fi
         [ -n "${STUB_IMPORT_FAIL:-}" ] && { echo "This instance already has chats, so the import was refused and nothing was changed." >&2; exit 1; }

@@ -8,9 +8,11 @@ OPT_MIGRATE_USER=
 MIGRATE_LABEL=com.amanuensis.scratch=migrate
 MIGRATE_NET=aman_migrate_net
 MIGRATE_PG=aman-migrate-pg
-MIGRATE_VOLUMES="aman_migrate_memory aman_migrate_knowledge aman_migrate_out"
+MIGRATE_VOLUMES="aman_migrate_pg aman_migrate_pg_data aman_migrate_memory aman_migrate_knowledge aman_migrate_out"
 # Set once this run may have created temporary pieces, so the exit handler removes them.
 MIGRATE_ACTIVE=0
+# The half-written archive, removed if the run stops before it is complete.
+MIGRATE_PART=
 # The app user of the image, which owns the copied files and runs the export.
 APP_UID=10001
 
@@ -22,7 +24,7 @@ check_migrate_options() {
 
 migrate_cleanup() {
   local volume
-  D rm -f "$MIGRATE_PG" >/dev/null 2>&1 || true
+  D rm -f -v "$MIGRATE_PG" >/dev/null 2>&1 || true
   D network rm "$MIGRATE_NET" >/dev/null 2>&1 || true
   for volume in $MIGRATE_VOLUMES; do
     D volume rm -f "$volume" >/dev/null 2>&1 || true
@@ -30,14 +32,23 @@ migrate_cleanup() {
 }
 
 migrate_on_exit() {
+  if [ -n "$MIGRATE_PART" ]; then rm -f "$MIGRATE_PART"; fi
   [ "$MIGRATE_ACTIVE" = 1 ] || return 0
   MIGRATE_ACTIVE=0
   migrate_cleanup
 }
 
-# The container of one service of the compose project that runs from FOLDER, running or not.
-old_container() { # folder service
-  D ps -a -q --filter "label=com.docker.compose.project.working_dir=$1" --filter "label=com.docker.compose.service=$2" 2>/dev/null | head -n 1
+# The containers of the compose projects that run from FOLDER, or of one PROJECT there, running or not.
+old_containers() { # folder [project]
+  D ps -a -q --filter "label=com.docker.compose.project.working_dir=$1" ${2:+--filter "label=com.docker.compose.project=$2"} 2>/dev/null
+}
+
+# Postgres images set PGDATA, whatever the image is called.
+is_postgres() { # container
+  case "$(D inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null)" in
+    PGDATA=* | *$'\n'PGDATA=*) return 0 ;;
+  esac
+  return 1
 }
 
 # What the old app has mounted at a path: a volume name, or a host folder for a bind mount.
@@ -57,9 +68,11 @@ migrate_export() {
     "$MIGRATE_IMAGE" sh -c 'cat >/migrate/old.env && exec aman export-data "$@"' export-data "$@" <"$MIGRATE_ENV"
 }
 
-# user_id<TAB>sessions<TAB>display name, one line per owner, from the one JSON line --list-users prints.
+# user_id<TAB>sessions<TAB>display name, one line per owner, from the one JSON line --list-users prints; fails when
+# the line is not such a list.
 migrate_owners() {
-  printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[0-9]*' |
+  case "$1" in *'"users":['*) ;; *) return 1 ;; esac
+  { printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[0-9]*' || true; } |
     sed 's/^"user_id":"\([^"]*\)","display_name":"\([^"]*\)","sessions":\([0-9]*\)$/\1\t\3\t\2/'
 }
 
@@ -69,8 +82,8 @@ migrate_owner_list() {
 }
 
 cmd_migrate() {
-  local folder=$OPT_FROM_COMPOSE old_pg old_app memory knowledge pg_image listing owners with_chats count user display
-  local include=() stamp dest volume tries=0
+  local folder=$OPT_FROM_COMPOSE old_pg='' old_app='' project id memory knowledge pg_image listing owners with_chats count
+  local user display include=() stamp dest volume tries=0
   [ -n "$folder" ] || usage_die "usage: install.sh migrate --from-compose FOLDER"
   [ -d "$folder" ] || die "There is no folder at $folder. Pass --from-compose the folder the old Aman runs from."
   folder=$(cd -- "$folder" && pwd)
@@ -86,10 +99,25 @@ cmd_migrate() {
   load_installed_release
   MIGRATE_IMAGE=$REL_APP_TAG
 
-  old_pg=$(old_container "$folder" postgres)
-  old_app=$(old_container "$folder" server)
-  [ -n "$old_pg" ] && [ -n "$old_app" ] ||
+  # The app is the container with the memory folder, and the database is the Postgres of that same project, so a
+  # second stack started from the folder (such as the dev database) is never mixed in.
+  for id in $(old_containers "$folder"); do
+    [ -n "$(old_mount "$id" /data/memory)" ] || continue
+    [ -z "$old_app" ] ||
+      die "More than one old Aman runs from $folder, so this move cannot tell which one to copy. Follow docs/migrate-from-compose.md to move by hand."
+    old_app=$id
+  done
+  [ -n "$old_app" ] ||
     die "Aman found no old Aman containers made from $folder. Start the old Aman once with docker compose up -d in that folder, then run this again."
+  project=$(D inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$old_app" 2>/dev/null)
+  for id in $(old_containers "$folder" "$project"); do
+    is_postgres "$id" || continue
+    [ -z "$old_pg" ] ||
+      die "The old Aman in $folder has more than one database, so this move cannot tell which one to copy. Follow docs/migrate-from-compose.md to move by hand."
+    old_pg=$id
+  done
+  [ -n "$old_pg" ] ||
+    die "Aman found no database of the old Aman made from $folder. Start the old Aman once with docker compose up -d in that folder, then run this again."
   [ "$(D inspect --format '{{.State.Running}}' "$old_pg" 2>/dev/null)" = true ] ||
     die "The database of the old Aman is not running. Run docker compose up -d postgres in $folder, then run this again."
   memory=$(old_mount "$old_app" /data/memory)
@@ -103,8 +131,14 @@ cmd_migrate() {
   say "Copying the old Aman from $folder; the old Aman keeps running and is not changed."
   D network create --internal --label "$MIGRATE_LABEL" "$MIGRATE_NET" >/dev/null ||
     die "Aman could not make a private network for the copy. Run: aman doctor docker"
+  for volume in $MIGRATE_VOLUMES; do
+    D volume create --label "$MIGRATE_LABEL" "$volume" >/dev/null || die "Aman could not make a temporary volume. Run: aman doctor disk"
+  done
   # Trust needs no password and is safe here: the network is internal and holds only this copy and the export.
+  # The copied database lives in named temporary volumes covering both places Postgres images declare (17 and 18), so
+  # no unnamed volume is left holding it.
   D run -d --name "$MIGRATE_PG" --label "$MIGRATE_LABEL" --network "$MIGRATE_NET" \
+    -v aman_migrate_pg:/var/lib/postgresql -v aman_migrate_pg_data:/var/lib/postgresql/data -e PGDATA=/var/lib/postgresql/data \
     -e POSTGRES_USER=aman -e POSTGRES_DB=aman -e POSTGRES_HOST_AUTH_METHOD=trust "$pg_image" >/dev/null ||
     die "Aman could not start the temporary database. Run: aman doctor docker"
   until D exec "$MIGRATE_PG" pg_isready -h 127.0.0.1 -U aman -d aman -q >/dev/null 2>&1; do
@@ -117,16 +151,14 @@ cmd_migrate() {
     D exec -i "$MIGRATE_PG" pg_restore -U aman -d aman --no-owner --no-acl >/dev/null; then
     die "The old database could not be copied, and the old Aman was not changed. Check that the old Aman is running, then run this again."
   fi
-  for volume in $MIGRATE_VOLUMES; do
-    D volume create --label "$MIGRATE_LABEL" "$volume" >/dev/null || die "Aman could not make a temporary volume. Run: aman doctor disk"
-  done
   D run --rm --network none --user 0:0 -v "$memory:/from/memory:ro" -v "$knowledge:/from/knowledge:ro" \
     -v aman_migrate_memory:/to/memory -v aman_migrate_knowledge:/to/knowledge -v aman_migrate_out:/out "$MIGRATE_IMAGE" \
     sh -c "cp -a /from/memory/. /to/memory/ && cp -a /from/knowledge/. /to/knowledge/ && chown -R $APP_UID:$APP_UID /to /out" ||
     die "The old memory and knowledge folders could not be copied. Run: aman doctor disk"
 
   listing=$(migrate_export --migrate --list-users) || die "The copy of the old database could not be read; the message above says why. Run this again once that is fixed."
-  owners=$(migrate_owners "$listing")
+  owners=$(migrate_owners "$listing") ||
+    die "Aman could not read the list of people from the copy of the old database. Run this again."
   with_chats=$(printf '%s\n' "$owners" | awk -F '\t' '$2 > 0')
   count=$(printf '%s' "$with_chats" | grep -c . || true)
   if [ -n "$OPT_MIGRATE_USER" ]; then
@@ -151,18 +183,20 @@ cmd_migrate() {
   ensure_private_dir "$AMAN_HOME/exports"
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   dest=$AMAN_HOME/exports/aman-export-$stamp.zip
-  if ! D run --rm --network none -v aman_migrate_out:/out:ro "$MIGRATE_IMAGE" cat /out/aman-export.zip >"$dest.part"; then
-    rm -f "$dest.part"
+  MIGRATE_PART=$dest.part
+  if ! D run --rm --network none -v aman_migrate_out:/out:ro "$MIGRATE_IMAGE" cat /out/aman-export.zip >"$MIGRATE_PART"; then
     die "The export could not be copied out of its volume. Run: aman doctor disk"
   fi
-  chmod 600 "$dest.part"
-  mv "$dest.part" "$dest"
+  chmod 600 "$MIGRATE_PART"
+  mv "$MIGRATE_PART" "$dest"
+  MIGRATE_PART=
   MIGRATE_ACTIVE=0
   migrate_cleanup
   log_event "migrate from compose folder $folder into $dest"
   ui_ok "Exported from the old Aman to $dest. The old Aman was not changed, and the temporary copies are removed."
+  # Single quotes keep the old name inert when the line is pasted; display_name_problem refuses a name with a quote.
   if [ -n "$display" ] && [ "$display" != "$user" ] && [ -z "$(display_name_problem "$display")" ]; then
-    ui_hint "Next: aman import $dest --display-name \"$display\""
+    ui_hint "Next: aman import $dest --display-name '$display'"
   else
     ui_hint "Next: aman import $dest"
   fi

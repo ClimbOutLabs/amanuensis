@@ -31,16 +31,28 @@ setup_machine() {
 # Every temporary piece is gone and nothing of the old stack was stopped, removed or written.
 assert_cleaned_and_old_untouched() {
   assert_contains "$(cat "$SB_STATE/containers_removed" 2>/dev/null)" "aman-migrate-pg"
+  assert_log_has "rm -f -v aman-migrate-pg"
   assert_not_contains "$(cat "$SB_STATE/networks" 2>/dev/null)" "aman_migrate_net" "the private network removed"
   local volume
-  for volume in aman_migrate_memory aman_migrate_knowledge aman_migrate_out; do
+  for volume in aman_migrate_pg aman_migrate_pg_data aman_migrate_memory aman_migrate_knowledge aman_migrate_out; do
     assert_not_contains "$(cat "$SB_STATE/volumes")" "$volume" "$volume removed"
   done
   assert_log_lacks "rm -f old-"
   assert_log_lacks "stop old-"
   assert_log_lacks "trueforge_memory-data:/from/memory "
   assert_log_lacks "trueforge_persona-knowledge-data:/from/knowledge "
-  assert_eq "$(grep -c 'old-postgres' "$STUB_LOG" | tr -d ' ')" "$(grep -c 'old-postgres \(pg_dump\|sh -c\)\|State.Running.* old-postgres\|Config.Image.* old-postgres' "$STUB_LOG" | tr -d ' ')" "the old database is only inspected and dumped"
+  assert_eq "$(grep -c 'old-postgres' "$STUB_LOG" | tr -d ' ')" "$(grep -c 'old-postgres \(pg_dump\|sh -c\)\|^docker inspect .* old-postgres$' "$STUB_LOG" | tr -d ' ')" "the old database is only inspected and dumped"
+}
+
+# The temporary database kept its data in the named temporary volumes, made before it started.
+assert_database_in_scratch_volumes() {
+  assert_log_has "volume create --label com.amanuensis.scratch=migrate aman_migrate_pg"
+  assert_log_has "volume create --label com.amanuensis.scratch=migrate aman_migrate_pg_data"
+  assert_log_has "-v aman_migrate_pg:/var/lib/postgresql -v aman_migrate_pg_data:/var/lib/postgresql/data -e PGDATA=/var/lib/postgresql/data"
+  assert_contains "$(cat "$SB_STATE/scratch_removed" 2>/dev/null)" "aman_migrate_pg_data"
+  assert_eq "$(grep -n 'volume create .* aman_migrate_pg_data$' "$STUB_LOG" | head -n 1 | cut -d: -f1)" \
+    "$(grep -n 'volume create .* aman_migrate_pg_data$\|run -d --name aman-migrate-pg' "$STUB_LOG" | head -n 1 | cut -d: -f1)" \
+    "the data volume exists before the database starts"
 }
 
 test_migrate_exports_from_copies_and_cleans_up() {
@@ -53,6 +65,7 @@ test_migrate_exports_from_copies_and_cleans_up() {
   file=$(exports)
   assert_eq "$(cat "$file")" "PK-EXPORT-FROM-COPY"
   assert_mode "$file" 600
+  assert_eq "$(cat "$SB_STATE/copy_umask")" 0077 "the archive is private from its first byte (install.sh runs under umask 077)"
   assert_mode "$AMAN_HOME/exports" 700
   assert_contains "$(cat "$SB_STATE/pg_restored")" "PGDUMP-OF-OLD"
   assert_contains "$(cat "$SB_STATE/volume_copies")" "-v trueforge_memory-data:/from/memory:ro"
@@ -60,6 +73,7 @@ test_migrate_exports_from_copies_and_cleans_up() {
   assert_contains "$(cat "$SB_STATE/volume_copies")" "chown -R 10001:10001 /to /out"
   assert_log_has "network create --internal"
   assert_log_has "POSTGRES_HOST_AUTH_METHOD=trust postgres:17"
+  assert_database_in_scratch_volumes
   runs=$(export_runs)
   assert_eq "$(printf '%s\n' "$runs" | wc -l | tr -d ' ')" 2
   assert_contains "$(printf '%s\n' "$runs" | head -n 1)" "export-data --migrate --list-users"
@@ -68,8 +82,66 @@ test_migrate_exports_from_copies_and_cleans_up() {
   assert_eq "$(cat "$SB_STATE/export_stdin")" "$OLD_ENV_TEXT"
   assert_not_contains "$(cat "$STUB_LOG")" "invented-model-key" "the old keys never reach a command line"
   assert_flat_contains "$OUT" "The old Aman was not changed, and the temporary copies are removed."
-  assert_flat_contains "$OUT" "Next: aman import $file --display-name \"Sam Example\""
+  assert_flat_contains "$OUT" "Next: aman import $file --display-name 'Sam Example'"
   assert_cleaned_and_old_untouched
+  sandbox_drop
+}
+
+test_the_next_line_is_safe_to_paste() {
+  t_begin "the import line migrate prints keeps a name from the old database inert when pasted"
+  setup_machine
+  # shellcheck disable=SC2016 # the name is meant to hold a command substitution
+  export STUB_EXPORT_USERS='{"sign_in":"off","users":[{"user_id":"kai-id","display_name":"Kai $(touch PWNED)","sessions":2}]}'
+  run_install migrate --from-compose "$OLD"
+  unset STUB_EXPORT_USERS
+  assert_rc 0
+  # shellcheck disable=SC2016
+  assert_flat_contains "$OUT" "--display-name 'Kai \$(touch PWNED)'"
+  local line
+  line=$(flat "$OUT" | grep -o "Next: aman import [^']*'[^']*'" || true)
+  # Pasting the line hands the name to the import as written, and runs nothing from it.
+  # shellcheck disable=SC2329 # called by the pasted line
+  (cd "$SB" && aman() { printf '%s\n' "$@" >"$SB/pasted"; } && eval "${line#Next: }")
+  # shellcheck disable=SC2016
+  assert_eq "$(tail -n 1 "$SB/pasted" 2>/dev/null)" 'Kai $(touch PWNED)' "the pasted line passes the name as written"
+  assert_eq "$(find "$SB" -name PWNED | wc -l | tr -d ' ')" 0 "nothing ran from the name"
+  sandbox_drop
+}
+
+test_migrate_finds_the_app_by_its_memory_folder() {
+  t_begin "migrate finds the old app and its database by what they hold, whatever the services are called"
+  setup_machine
+  # The stacks the guide names call the app service aman.
+  printf 'old-postgres aman-prod-sam postgres postgres\nold-app aman-prod-sam aman app\nold-redis aman-prod-sam redis other\n' >"$SB_STATE/old_containers"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/volume_copies")" "-v trueforge_memory-data:/from/memory:ro"
+  assert_contains "$(cat "$SB_STATE/pg_dumps")" "old-postgres"
+  # The dev database started from the same folder belongs to another project and is never read.
+  rm -f "$SB_STATE/pg_dumps"
+  printf 'dev-postgres amanuensis postgres postgres\nold-server trueforge server app\nold-postgres trueforge postgres postgres\n' >"$SB_STATE/old_containers"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/pg_dumps")" "old-postgres"
+  assert_log_lacks "dev-postgres sh -c"
+  assert_log_lacks "exec dev-postgres"
+  assert_cleaned_and_old_untouched
+  sandbox_drop
+}
+
+test_migrate_refuses_two_old_apps() {
+  t_begin "migrate refuses a folder with two old apps or no database, and copies nothing"
+  setup_machine
+  printf 'old-postgres trueforge postgres postgres\nold-server trueforge server app\nold-server-2 trueforge server app\n' >"$SB_STATE/old_containers"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 1
+  assert_flat_contains "$ERR" "More than one old Aman runs from $OLD, so this move cannot tell which one to copy."
+  printf 'old-server trueforge server app\nother-postgres amanuensis postgres postgres\n' >"$SB_STATE/old_containers"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 1
+  assert_flat_contains "$ERR" "Aman found no database of the old Aman made from $OLD."
+  assert_log_lacks "pg_dump"
+  assert_eq "$(exports | wc -l | tr -d ' ')" 0
   sandbox_drop
 }
 
@@ -118,6 +190,11 @@ test_migrate_refuses_what_it_cannot_read() {
   unset STUB_EXPORT_USERS
   assert_rc 1
   assert_flat_contains "$ERR" "The old Aman has no chats, so there is nothing to move."
+  export STUB_EXPORT_USERS='Error: the copy could not be opened'
+  run_install migrate --from-compose "$OLD"
+  unset STUB_EXPORT_USERS
+  assert_rc 1
+  assert_flat_contains "$ERR" "Aman could not read the list of people from the copy of the old database. Run this again."
   printf 'MEMORY_BACKEND=mem0\n' >>"$OLD/packages/trueforge/.env"
   run_install migrate --from-compose "$OLD"
   assert_rc 1
@@ -147,6 +224,18 @@ test_a_failed_copy_or_export_still_cleans_up() {
   sandbox_drop
 }
 
+test_an_interrupted_copy_leaves_nothing_behind() {
+  t_begin "an interrupt while the archive is copied out leaves no half-written file and removes every temporary piece"
+  setup_machine
+  export STUB_COPY_SIGNAL=INT
+  run_install migrate --from-compose "$OLD"
+  unset STUB_COPY_SIGNAL
+  assert_rc 130
+  assert_eq "$(find "$AMAN_HOME/exports" -type f 2>/dev/null | wc -l | tr -d ' ')" 0 "no export or half-written file"
+  assert_cleaned_and_old_untouched
+  sandbox_drop
+}
+
 test_migrate_options_belong_to_migrate() {
   t_begin "--from-compose and --user apply to migrate only, and migrate needs an installed machine"
   sandbox_new
@@ -164,8 +253,12 @@ test_migrate_options_belong_to_migrate() {
 }
 
 test_migrate_exports_from_copies_and_cleans_up
+test_the_next_line_is_safe_to_paste
+test_migrate_finds_the_app_by_its_memory_folder
+test_migrate_refuses_two_old_apps
 test_migrate_asks_which_person_when_several_have_chats
 test_migrate_refuses_what_it_cannot_read
 test_a_failed_copy_or_export_still_cleans_up
+test_an_interrupted_copy_leaves_nothing_behind
 test_migrate_options_belong_to_migrate
 tests_finish
