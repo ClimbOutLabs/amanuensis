@@ -225,10 +225,11 @@ export function createLoginProxy({
       permit?.finish('abandon');
       return c.text('The sign-in service did not answer.', 502);
     }
-    // A redirect means the password was accepted; the form shown again means it was not. Any other answer (a bad
-    // request, an unknown sign-in state) tested no password, so it is not held against the address.
+    // A redirect means the password was accepted; the form shown again (200, or 401 as the real service answers) means
+    // it was not. Any other answer (a bad request, an unknown sign-in state) tested no password, so it is not held
+    // against the address.
     let answerBody: ArrayBuffer | null = null;
-    if (permit !== undefined && response.status === 200) {
+    if (permit !== undefined && (response.status === 200 || response.status === 401)) {
       try {
         answerBody = await response.arrayBuffer();
       } catch {
