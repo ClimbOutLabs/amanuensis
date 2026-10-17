@@ -3,8 +3,14 @@
 # the Docker CLI plus each instance's in-image `aman doctor`, combined into one document.
 # Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
-#   aman doctor [--json] [--only ID] [--instance NAME] [--deep] [--local]
+#   aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
+#   aman doctor instance|network [--fix [--yes]] [--instance NAME]
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+#   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
+#   aman backup [NAME]
+#   aman upgrade [--check] [--force]
+#
+# --json never loads the terminal style and is the same document as before.
 #
 # `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app. The slot
 # setup is the copy of packages/trueforge/scripts/sandbox-slots the installer took out of the app image; it runs on
@@ -22,17 +28,28 @@
 
 set -u
 
-AMAN_HOME="${AMANUENSIS_HOME:-${HOME:-}/.amanuensis}"
+# The state directory: AMANUENSIS_HOME, else the folder this command was installed in (so a schedule or another
+# user of a custom home needs no setting), else ~/.amanuensis.
+if [ -n "${AMANUENSIS_HOME:-}" ]; then
+  AMAN_HOME=$AMANUENSIS_HOME
+elif [ -f "$(dirname "${BASH_SOURCE[0]}")/../state/source" ]; then
+  AMAN_HOME=$(cd -P -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+else
+  AMAN_HOME="${HOME:-}/.amanuensis"
+fi
 APP_SERVICE="${AMAN_DOCTOR_APP_SERVICE:-app}"
 AS_JSON=0
+UI_VERBOSE=0
+SUMMARY=0
+PROBLEMS_ONLY=0
 DEEP=0
 LOCAL=0
 ONLY=""
 ONLY_INSTANCE=""
 
-MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup"
-INSTANCE_IDS="config containers ports service login database disk clock run_code attachments model public_url public_login"
-IN_IMAGE_IDS="service login database disk clock run_code attachments model"
+MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup checkout tls"
+INSTANCE_IDS="config containers ports service login database disk clock run_code attachments demo model public_url public_login network"
+IN_IMAGE_IDS="service login database disk clock run_code attachments demo model"
 
 BACKUP_WARN_DAYS=7
 GIB=$((1024 * 1024 * 1024))
@@ -44,6 +61,7 @@ DOCKER_MEM_WARN_BYTES=$((8 * GIB))
 DOCKER_MIN_COMPOSE_MAJOR=2
 
 RECORDS=""
+CAUSE_IDS=""
 CLEANED=""
 JSON_ESCAPED=""
 DOCKER_OK=0
@@ -57,8 +75,12 @@ APP_CONTAINER=""
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: aman doctor [--json] [--only ID] [--instance NAME] [--deep] [--local]
+Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
+       aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+       aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
+       aman backup [NAME]
+       aman upgrade [--check] [--force]
 USAGE
 }
 
@@ -66,6 +88,92 @@ die_usage() {
   printf '%s\n' "$1" >&2
   usage
   exit 2
+}
+
+# Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
+lib_file() { # file name with its extension: where it is beside this command
+  local src=${BASH_SOURCE[0]} target
+  while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do
+    target=$(readlink "$src")
+    case "$target" in
+      /*) src=$target ;;
+      *) src="$(dirname "$src")/$target" ;;
+    esac
+  done
+  printf '%s/../lib/%s' "$(dirname "$src")" "$1"
+}
+
+load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
+  local file
+  file=$(lib_file "$1.sh")
+  [ -r "$file" ] || return 1
+  # shellcheck source=/dev/null
+  . "$file"
+}
+
+# The folder Aman was installed from, or nothing when none is recorded or it is gone.
+checkout_dir() {
+  local source="${AMAN_HOME}/state/source" repo
+  [ -r "$source" ] || return 1
+  repo=$(head -n 1 "$source")
+  [ -f "${repo}/installer/install.sh" ] || return 1
+  printf '%s' "$repo"
+}
+
+# The installer of the folder Aman was installed from; it is what fixes the machine. A folder other users can change
+# is never run: the installer runs as the person, and often as root.
+checkout_installer() {
+  local repo
+  repo=$(checkout_dir) || return 1
+  if checkout_problem "$repo" >/dev/null; then return 1; fi
+  printf '%s' "${repo}/installer/install.sh"
+}
+
+# The words and the fix when no installer can be used: the folder is gone, or it is not safe to run.
+installer_failure() { # prints "sentence|fix"
+  local repo problem
+  if ! repo=$(checkout_dir); then
+    printf 'Aman cannot find the folder it was installed from.|Run install.sh again from that folder.'
+  elif problem=$(checkout_problem "$repo"); then
+    checkout_problem_words "$problem"
+  fi
+}
+
+fail_no_installer() {
+  local failure
+  failure=$(installer_failure)
+  ui_fail "${failure%%|*}" "${failure#*|}"
+}
+
+# Loads a helper file; one that went missing is put back by the installer once, and if that cannot be done the exact
+# command that does it is printed.
+# The checks that keep the installer's folder safe to run live in shared.sh, so when that file is the one missing nothing
+# is run by itself: the command that puts it back is printed for the person to run.
+require_lib() { # name
+  local repo installer problem words
+  load_lib "$1" && return 0
+  if [ "$1" != shared ] && installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
+    return 0
+  fi
+  if ! repo=$(checkout_dir); then
+    printf 'Aman is missing one of its own files and cannot find the folder it was installed from. Run the installer there: installer/install.sh command\n' >&2
+  elif [ "$1" != shared ] && problem=$(checkout_problem "$repo"); then
+    words=$(checkout_problem_words "$problem")
+    printf 'Aman is missing one of its own files. %s\n' "${words%%|*}" >&2
+  else
+    printf 'Aman is missing one of its own files. Run: bash %s/installer/install.sh --home %s command\n' "$repo" "$AMAN_HOME" >&2
+  fi
+  exit 1
+}
+
+require_lib shared
+require_lib diagnose
+require_lib network
+require_lib schedule
+
+load_ui() {
+  require_lib ui
+  ui_init
 }
 
 # ---------------------------------------------------------------- helpers
@@ -109,13 +217,29 @@ record() { # scope id state detail fix
   RECORDS="${RECORDS}${1}"$'\t'"${2}"$'\t'"${3}"$'\t'"${detail}"$'\t'"${fix}"$'\n'
 }
 
+# One command fixes a stopped, unhealthy or wrongly published instance; it never asks the person to read container logs.
+INSTANCE_FIX="Run aman doctor instance --fix"
+
+# A value from the instance's record in the installer's state directory.
+registry_value() { # instance key
+  sed -n "s/^$2=//p" "${AMAN_HOME}/state/instances/${1}.conf" 2>/dev/null | head -n 1
+}
+
+# The cause of a container failure in one sentence (starting with a space), or nothing when the log does not say.
+# CAUSE_IDS holds the containers that are not running or not healthy.
+container_cause_sentence() {
+  local id log="" cause
+  for id in $CAUSE_IDS; do
+    log="${log}$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$id" 2>&1)"$'\n'
+  done
+  [ -n "$log" ] || return 0
+  cause=$(printf '%s' "$log" | container_failure_cause_stdin)
+  if [ -n "$cause" ]; then printf ' %s' "$cause"; fi
+}
+
 json_escape() {
   local value=${1//\\/\\\\}
   JSON_ESCAPED=${value//\"/\\\"}
-}
-
-lowercase() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 # Days-from-civil arithmetic, so no GNU or BSD date flags are needed.
@@ -188,11 +312,23 @@ json_value() { # file key
 
 # ---------------------------------------------------------------- machine checks
 
+# The one command that fixes a Docker problem where it can be fixed from here (Debian and Ubuntu); elsewhere what to open.
+docker_fix_hint() { # [running|compose]
+  local release=${AMAN_OS_RELEASE:-/etc/os-release}
+  if [ -r "$release" ] && grep -Eq '^ID="?(debian|ubuntu)' "$release"; then
+    printf 'Run aman doctor docker --fix'
+  elif [ "${1:-}" = running ]; then
+    printf 'Open Docker Desktop and wait until it says it is running, then run aman doctor.'
+  else
+    printf 'Install Docker Desktop (macOS, Windows) or Docker Engine with Compose 2 (Linux), then run aman doctor.'
+  fi
+}
+
 check_docker() {
   local out rc version arch security root systime os mem compose compose_major
   if ! command -v docker >/dev/null 2>&1; then
-    record machine docker fail "Docker is not installed, or its command is not on PATH." \
-      "Install Docker: on Linux follow https://docs.docker.com/engine/install/ (or let install.sh do it); on macOS or Windows install Docker Desktop. Then run install.sh again."
+    record machine docker fail "Docker is not installed." \
+      "$(docker_fix_hint)"
     return
   fi
   out=$(bounded "$PROBE_SECONDS" docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.SecurityOptions}}|{{.DockerRootDir}}|{{.SystemTime}}|{{.OperatingSystem}}|{{.MemTotal}}' 2>&1)
@@ -200,16 +336,16 @@ check_docker() {
   if [ "$rc" -ne 0 ]; then
     case "$out" in
       *"permission denied"*)
-        record machine docker fail "Docker is running, but this user is not allowed to use its socket." \
-          "Add yourself to the docker group with: sudo usermod -aG docker \"\$USER\" ; then sign out and back in (the docker group gives full control of this machine). install.sh finishes its own run without that."
+        record machine docker fail "Your user cannot use Docker yet." \
+          "Run aman doctor docker --fix"
         ;;
       *"Cannot connect"* | *"daemon running"* | *"error during connect"* | *"connection refused"*)
-        record machine docker fail "Docker is installed, but its engine is not running." \
-          "Start it: on Linux run \"sudo systemctl start docker\"; on macOS or Windows open Docker Desktop and wait until it says it is running."
+        record machine docker fail "Docker is installed, but it is not running." \
+          "$(docker_fix_hint running)"
         ;;
       *)
         record machine docker fail "Docker did not answer: ${out%%$'\n'*}" \
-          "Check that Docker is running with \"docker info\", fix what it reports, then run doctor again."
+          "$(docker_fix_hint running)"
         ;;
     esac
     return
@@ -230,8 +366,11 @@ check_docker() {
     compose_major=0
   fi
   if [ "$compose_major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
-    record machine docker fail "Docker ${version} is running, but Docker Compose v${DOCKER_MIN_COMPOSE_MAJOR} or newer is missing (found: ${compose:-none})." \
-      "Install the Compose plugin (Linux: sudo apt-get install docker-compose-plugin; Docker Desktop already includes it), then run doctor again."
+    if [ "$compose_major" -eq 0 ]; then
+      record machine docker fail "Docker Compose is missing; version ${DOCKER_MIN_COMPOSE_MAJOR} is needed." "$(docker_fix_hint compose)"
+    else
+      record machine docker fail "Docker Compose ${compose} is too old; version ${DOCKER_MIN_COMPOSE_MAJOR} is needed." "$(docker_fix_hint compose)"
+    fi
     return
   fi
   DOCKER_OK=1
@@ -250,14 +389,14 @@ check_runtime() {
   case "$text" in
     *podman*)
       record machine runtime fail "Podman is not supported." \
-        "Install Docker Engine (https://docs.docker.com/engine/install/) or Docker Desktop, point the docker command at it, then run install.sh again."
+        "Install Docker Engine or Docker Desktop and make it the docker command, then run aman doctor."
       return
       ;;
   esac
   case "$DOCKER_SECURITY" in
     *rootless*)
       record machine runtime fail "Rootless Docker is not supported." \
-        "Install the regular Docker Engine (https://docs.docker.com/engine/install/) or Docker Desktop, switch the docker context to it, then run install.sh again."
+        "Install the regular Docker Engine or Docker Desktop and switch to it, then run aman doctor."
       return
       ;;
   esac
@@ -279,12 +418,12 @@ check_credentials() {
   helper="docker-credential-${store}"
   if ! command -v "$helper" >/dev/null 2>&1; then
     record machine credentials fail "Docker is set to use the credential store \"${store}\", but ${helper} is not on PATH; image downloads will fail with \"error getting credentials\"." \
-      "Start Docker Desktop and make sure its tools folder is on PATH (macOS: /Applications/Docker.app/Contents/Resources/bin), or remove the \"credsStore\" line from ${config} and run doctor again."
+      "Open Docker Desktop and wait until it says it is running, then run aman doctor."
     return
   fi
   if ! bounded "$PROBE_SECONDS" "$helper" list >/dev/null 2>&1; then
     record machine credentials fail "The credential store \"${store}\" is installed but did not answer; image downloads will fail." \
-      "Open Docker Desktop and unlock your keychain, or remove the \"credsStore\" line from ${config}, then run doctor again."
+      "Open Docker Desktop and unlock your keychain, then run aman doctor."
     return
   fi
   record machine credentials ok "The Docker credential store \"${store}\" answers." ""
@@ -299,7 +438,7 @@ check_images() {
   release="${AMAN_HOME}/release/release.json"
   if [ ! -r "$release" ]; then
     record machine images warn "No release record was found, so the expected images are unknown." \
-      "Run install.sh to finish the setup; it writes the release record."
+      "Run install.sh again from the folder Aman was installed from."
     return
   fi
   for key in app_image dex_image stt_image; do
@@ -318,15 +457,15 @@ check_images() {
     fi
   done
   if [ "$checked" -eq 0 ]; then
-    record machine images warn "The release record lists no images." "Run install.sh again to rewrite the release record."
+    record machine images warn "The release record lists no images." "Run install.sh again from the folder Aman was installed from."
   elif [ -n "$missing" ]; then
-    record machine images fail "Images missing on this machine:${missing}." \
-      "Run install.sh again; it builds the app and speech images from this checkout and pulls Dex by its pinned digest."
+    record machine images fail "Some of Aman is not built on this computer:${missing}." \
+      "Run aman upgrade"
   elif [ -n "$wrong_arch" ]; then
     record machine images fail "Images built for another CPU type than Docker uses (${DOCKER_ARCH}):${wrong_arch}." \
-      "Run install.sh again to rebuild them for this machine."
+      "Run aman upgrade"
   else
-    record machine images ok "All ${checked} images are present for ${DOCKER_ARCH:-this CPU}." ""
+    record machine images ok "All ${checked} images are ready." ""
   fi
 }
 
@@ -347,17 +486,17 @@ check_disk() {
   kb=$(df -Pk "$DOCKER_ROOT" 2>/dev/null | awk 'NR == 2 { print $4 }')
   case "$kb" in
     '' | *[!0-9]*)
-      record machine disk warn "The free space for Docker data could not be read." "Run \"df -h\" and check the disk that holds ${DOCKER_ROOT}."
+      record machine disk warn "The free space for Docker data could not be read." "Run aman doctor disk --fix"
       return
       ;;
   esac
   bytes=$((kb * 1024))
   if [ "$bytes" -lt $((2 * GIB)) ]; then
     record machine disk fail "Only $(format_gb "$kb") is free for Docker data; installs and upgrades will fail." \
-      "Free space with \"docker system prune\" (removes stopped containers and unused images) or by removing old backups, then run doctor again."
+      "Run aman doctor disk --fix"
   elif [ "$bytes" -lt $((10 * GIB)) ]; then
     record machine disk warn "$(format_gb "$kb") is free for Docker data; 10 GB is recommended." \
-      "Free space with \"docker system prune\" (removes stopped containers and unused images) or by removing old backups."
+      "Run aman doctor disk --fix"
   else
     record machine disk ok "$(format_gb "$kb") is free for Docker data." ""
   fi
@@ -399,7 +538,7 @@ check_clock() {
   now=$(now_epoch)
   skew=$((now - daemon))
   if [ "$skew" -lt 0 ]; then skew=$((-skew)); fi
-  local fix="Turn on automatic time sync (Linux: sudo timedatectl set-ntp true; Docker Desktop: restart it, since its clock drifts after the computer sleeps)."
+  local fix="Turn on automatic time sync in your system settings (with Docker Desktop, restart it: its clock drifts after the computer sleeps)."
   if [ "$skew" -gt "$CLOCK_FAIL_SECONDS" ]; then
     record machine clock fail "This machine and Docker disagree on the time by ${skew} seconds; sign-in will fail." "$fix"
   elif [ "$skew" -gt "$CLOCK_WARN_SECONDS" ]; then
@@ -409,8 +548,16 @@ check_clock() {
   fi
 }
 
+# A schedule turned on within the last two days has not had its first run yet.
+backup_mode_is_recent() {
+  local mtime
+  mtime=$(file_mtime "$(backups_mode_file)")
+  case "$mtime" in '' | *[!0-9]*) return 1 ;; esac
+  [ $(($(now_epoch) - mtime)) -lt 172800 ]
+}
+
 check_backup() {
-  local dir newest="" newest_time=0 entry mtime age_days now
+  local dir newest="" newest_time=0 entry mtime age_days=-1 now mode scheduled=0 days=""
   dir="${AMAN_HOME}/backups"
   for entry in "$dir"/*/; do
     [ -d "$entry" ] || continue
@@ -421,17 +568,141 @@ check_backup() {
       newest=$entry
     fi
   done
-  if [ -z "$newest" ]; then
-    record machine backup ok "No backup yet; one is made automatically before your first upgrade." ""
-    return
-  fi
   now=$(now_epoch)
-  age_days=$(((now - newest_time) / 86400))
-  if [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
-    record machine backup warn "The last backup is ${age_days} days old." "Run \"install.sh backup\" to make a new one."
-  else
-    record machine backup ok "The last backup is ${age_days} days old." ""
+  if [ -n "$newest" ]; then
+    age_days=$(((now - newest_time) / 86400))
+    days=$([ "$age_days" = 1 ] && echo "1 day" || echo "${age_days} days")
   fi
+  STATE_DIR="${AMAN_HOME}/state"
+  mode=""
+  mode=$(backups_mode)
+  if backup_schedule_present; then scheduled=1; fi
+  case "$mode" in
+    daily)
+      if [ "$scheduled" != 1 ]; then
+        record machine backup warn "Daily backups are on, but the schedule that runs them is missing." "Run aman doctor backup --fix"
+      elif [ "$age_days" -lt 0 ] && backup_mode_is_recent; then
+        record machine backup ok "Daily backups are on; the first one runs within a day." ""
+      elif [ "$age_days" -lt 0 ] || [ "$age_days" -gt 2 ]; then
+        record machine backup warn "Daily backups are scheduled, but ${newest:+the last one is ${days} old}${newest:-none has been made yet}." "Run aman doctor backup --fix"
+      else
+        record machine backup ok "Daily backups are on; the last one is ${days} old." ""
+      fi
+      ;;
+    off)
+      if [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
+        record machine backup warn "Automatic backups are off, and the last backup is ${days} old." "Run aman doctor backup --fix"
+      else
+        record machine backup ok "Automatic backups are off." ""
+      fi
+      ;;
+    *)
+      if [ -z "$newest" ]; then
+        record machine backup ok "No backup yet; one is made automatically before your first upgrade." ""
+      elif [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
+        record machine backup warn "The last backup is ${days} old." "Run aman backup"
+      else
+        record machine backup ok "The last backup is ${days} old." ""
+      fi
+      ;;
+  esac
+}
+
+# Nothing is recorded until Aman has been installed from a folder.
+check_checkout() {
+  local repo problem words
+  repo=$(checkout_dir) || return 0
+  if problem=$(checkout_problem "$repo"); then
+    words=$(checkout_problem_words "$problem")
+    record machine checkout fail "${words%%|*}" "${words#*|}"
+  else
+    record machine checkout ok "The folder Aman was installed from can only be changed by you." ""
+  fi
+}
+
+# Https on the instances opened on the network: the authority and its key, the certificate (how long it lasts, which
+# addresses it lists) and a real answer over https from this computer. One line for the worst thing found.
+check_tls() {
+  local name release image info root_days leaf_days names host origin expected missing='' status any=0 state=ok detail='' fix='' constrained covers
+  local ca_dir="${AMAN_HOME}/tls/ca" mode
+  tls_note() { # state detail fix: keeps the worst
+    case "$1:$state" in
+      fail:*) ;;
+      warn:ok) ;;
+      *) return 0 ;;
+    esac
+    state=$1
+    detail=$2
+    fix=$3
+  }
+  for name in $(list_instances); do
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    any=1
+  done
+  [ "$any" = 1 ] || return 0
+  mode=$(file_mode "$ca_dir/root.key")
+  if [ ! -f "$ca_dir/root.crt" ] || [ -z "$mode" ]; then
+    tls_note fail "The certificate authority of this computer is missing, so devices cannot trust Aman." "Run aman doctor tls --fix"
+  elif [ "$mode" != 600 ]; then
+    tls_note fail "The key of this computer's certificate authority can be read by other users." "Run aman doctor tls --fix"
+  fi
+  release="${AMAN_HOME}/release/release.json"
+  image=$(json_value "$release" app_image)
+  for name in $(list_instances); do
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
+      info=$(bounded 30 docker run --rm --network none --user "$(id -u):$(id -g)" -v "${AMAN_HOME}/tls:/tls:ro" -v "$(lib_file pki.mjs):/pki.mjs:ro" \
+        --entrypoint node "$image" /pki.mjs info /tls/ca "/tls/leaf/$name" 2>/dev/null)
+      root_days=$(printf '%s' "$info" | sed -n 's/.*"root_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      leaf_days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      names=$(printf '%s' "$info" | sed -n 's/.*"leaf_names":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
+      constrained=$(printf '%s' "$info" | sed -n 's/.*"root_constrained":\(true\|false\).*/\1/p')
+      covers=$(printf '%s' "$info" | sed -n 's/.*"root_covers_leaf":\(true\|false\).*/\1/p')
+      if [ -z "$leaf_days" ]; then
+        tls_note fail "The https certificate of instance $name is missing." "Run aman doctor tls --fix"
+      elif [ "$leaf_days" -le 0 ] || [ "${root_days:-1}" -le 0 ]; then
+        tls_note fail "The https certificate of instance $name has run out, so devices refuse it." "Run aman doctor tls --fix"
+      elif [ "$leaf_days" -lt 60 ] || [ "${root_days:-1000}" -lt 60 ]; then
+        tls_note warn "The https certificate of instance $name ends in $([ "$leaf_days" -lt "${root_days:-1000}" ] && echo "$leaf_days" || echo "$root_days") days." "Run aman doctor tls --fix"
+      elif [ "$constrained" = false ]; then
+        tls_note warn "The certificate authority of this computer, from an earlier version, has no limit on the names it can vouch for. A new one is limited to private addresses and names; each device then trusts it again." "Run aman doctor tls --fix"
+      elif [ "$covers" = false ]; then
+        tls_note warn "The certificate authority of this computer does not cover every name of instance $name. A new one does; each device then trusts it again." "Run aman doctor tls --fix"
+      else
+        missing=''
+        while IFS= read -r origin; do
+          host=$(origin_host "$origin")
+          case " $names " in *" $host "*) ;; *) missing="$missing $host" ;; esac
+        done < <(registry_value "$name" origins | tr ',' '\n')
+        if [ -n "$missing" ]; then
+          tls_note warn "The https certificate of instance $name does not list:${missing}." "Run aman doctor tls --fix"
+        elif [ "$state" = ok ]; then
+          detail="Https is on; the certificate of instance $name lasts $leaf_days more days, and Aman renews it in its last 60 days. Authority fingerprint, to compare on a device before trusting it: $(head -n 1 "$ca_dir/root.fingerprint" 2>/dev/null)"
+        fi
+      fi
+    fi
+    if command -v curl >/dev/null 2>&1 && [ -f "$ca_dir/root.crt" ]; then
+      status=$(bounded 10 curl -sS --max-time 8 --cacert "$ca_dir/root.crt" -o /dev/null -w '%{http_code}' \
+        "https://127.0.0.1:$(registry_value "$name" tls_port)/healthz" 2>/dev/null | awk 'NF { last = $0 } END { print last }')
+      if [ "$status" != 200 ]; then
+        tls_note fail "Instance $name does not answer over https on this computer." "$INSTANCE_FIX"
+      fi
+    fi
+  done
+  STATE_DIR="${AMAN_HOME}/state"
+  if [ "$state" = ok ] && [ "$(backups_mode)" != daily ]; then
+    tls_note warn "Daily backups are off, so the https certificate is renewed only when you run an aman command in its last 60 days, or run aman doctor tls --fix." "Run aman doctor backup --fix"
+  fi
+  if [ "$state" = ok ] && [ -z "$detail" ]; then detail="Https is on, with a certificate from this computer's own authority."; fi
+  record machine tls "$state" "$detail" "$fix"
+}
+
+# The one repair that needs no installer: other users lose the right to change the installer's files.
+fix_checkout() {
+  local repo
+  repo=$(checkout_dir) || return 0
+  tighten_checkout "$repo" || true
+  ! checkout_problem "$repo" >/dev/null
 }
 
 # ---------------------------------------------------------------- instance checks
@@ -441,7 +712,7 @@ check_instance_config() {
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
-      "Run install.sh to recreate it, or restore it from a backup."
+      "Restore this instance from a backup in ${AMAN_HOME}/backups."
     return
   fi
   # dex.env holds the login password hash; both files hold secrets.
@@ -450,17 +721,63 @@ check_instance_config() {
     mode=$(file_mode "$file")
     if [ "$mode" != 600 ]; then
       record "$name" config fail "${file##*/} holds secrets but is readable by other users (mode ${mode:-unknown})." \
-        "Run: chmod 600 ${file}"
+        "$INSTANCE_FIX"
       return
     fi
   done
-  record "$name" config ok "The settings files exist and are private to you." ""
+  summarize_users "$dir"
+  if [ "$USERS_SHORT" = 1 ]; then
+    record "$name" config warn "The settings files are private to you.${USERS_SUMMARY} Fewer emails are allowed to sign in than there are users." \
+      "Run install.sh instance list-users, then instance add-user again for each member; it repairs the allowed emails."
+    return
+  fi
+  record "$name" config ok "The settings files exist and are private to you.${USERS_SUMMARY}" ""
+}
+
+# Sets USERS_SUMMARY (" N sign-in user(s): the owner and M member(s).") from the hash variables in dex.env, and
+# USERS_SHORT=1 when fewer emails are allowed than there are users. Hashes are counted, never printed.
+summarize_users() { # instance dir
+  local users members allowed
+  USERS_SUMMARY=""
+  USERS_SHORT=0
+  [ -f "${1}/dex.env" ] || return 0
+  users=$(awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
+  users=${users:-0}
+  members=0
+  if [ "$users" -gt 0 ]; then members=$((users - 1)); fi
+  USERS_SUMMARY=" ${users} sign-in user(s): the owner and ${members} member(s)."
+  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null | awk 'END { print }')
+  case "$allowed" in
+    '' | *'*'*) return 0 ;;
+  esac
+  if [ "$(printf '%s' "$allowed" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')" -lt "$users" ]; then USERS_SHORT=1; fi
+}
+
+# What a container is, in words for a person: "the main app" for the app of instance main.
+container_words() { # instance service
+  case "$2" in
+    app) printf 'the %s app' "$1" ;;
+    dex) printf 'the %s sign-in service' "$1" ;;
+    loopback) printf 'the %s network link' "$1" ;;
+    *) printf 'the %s %s' "$1" "$2" ;;
+  esac
+}
+
+# "the main app", or "the main app and the main sign-in service", from a list of words separated by "|".
+join_words() {
+  local list=${1#|} out="" word count=0 total
+  total=$(printf '%s' "$list" | awk -F'|' '{ print NF }')
+  while IFS= read -r word; do
+    count=$((count + 1))
+    if [ -z "$out" ]; then out=$word; elif [ "$count" -eq "$total" ]; then out="$out and $word"; else out="$out, $word"; fi
+  done < <(printf '%s\n' "$list" | tr '|' '\n')
+  printf '%s' "$out"
 }
 
 check_instance_containers() { # name; sets APP_CONTAINER
-  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0
+  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0 words
   APP_CONTAINER=""
-  local up_command="docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+  CAUSE_IDS=""
   local lines
   lines=$(bounded "$PROBE_SECONDS" docker ps -a --filter "label=com.docker.compose.project=aman-${name}" \
     --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
@@ -472,44 +789,64 @@ check_instance_containers() { # name; sets APP_CONTAINER
       running)
         if [ "$service" = "$APP_SERVICE" ]; then APP_CONTAINER=$id; fi
         case "$status" in
-          *"(unhealthy)"*) unhealthy="${unhealthy} ${cname}" ;;
-          *"(health: starting)"*) starting="${starting} ${cname}" ;;
+          *"(unhealthy)"*)
+            unhealthy="${unhealthy}|$(container_words "$name" "$service")"
+            CAUSE_IDS="${CAUSE_IDS} ${id}"
+            ;;
+          *"(health: starting)"*) starting="${starting}|$(container_words "$name" "$service")" ;;
         esac
         ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
+        # An instance opened on the network publishes the app on each of its own addresses, never on a wildcard.
         case "$ports" in
-          *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed} ${cname}" ;;
+          *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed}|$(container_words "$name" "$service")" ;;
         esac
         ;;
       exited)
         case "$status" in
           "Exited (0)"*) ;;
-          *) bad="${bad} ${cname}" ;;
+          *)
+            bad="${bad}|$(container_words "$name" "$service")"
+            CAUSE_IDS="${CAUSE_IDS} ${id}"
+            ;;
         esac
         ;;
-      *) bad="${bad} ${cname}" ;;
+      *)
+        bad="${bad}|$(container_words "$name" "$service")"
+        CAUSE_IDS="${CAUSE_IDS} ${id}"
+        ;;
     esac
   done <<<"$lines"
   if [ "$found" = 0 ]; then
-    record "$name" containers fail "This instance has no containers; it is stopped or was removed." "Start it with: ${up_command}"
+    record "$name" containers fail "Instance $name is stopped." "$INSTANCE_FIX"
     record "$name" ports off "Skipped: the instance has no containers." ""
     return
   fi
   if [ -n "$bad" ]; then
-    record "$name" containers fail "Not running:${bad}." "Start them with: ${up_command}  (read the log with \"docker logs\" if one keeps stopping)"
+    words=$(join_words "$bad")
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$bad") not running.$(container_cause_sentence)" "$INSTANCE_FIX"
   elif [ -n "$unhealthy" ]; then
-    record "$name" containers fail "Reported unhealthy by Docker:${unhealthy}." "Read the log with \"docker logs\" for that container, then restart it with: docker compose --project-directory ${AMAN_HOME}/instances/${name} restart"
+    words=$(join_words "$unhealthy")
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$unhealthy") not healthy.$(container_cause_sentence)" "$INSTANCE_FIX"
   elif [ -n "$starting" ]; then
-    record "$name" containers warn "Still starting:${starting}." "Wait a minute and run doctor again."
+    words=$(join_words "$starting")
+    record "$name" containers warn "$(capitalize "$words") $(is_are "$starting") still starting." "Wait a minute, then run aman doctor."
   else
-    record "$name" containers ok "All ${count} containers are running." ""
+    record "$name" containers ok "All ${count} parts of instance $name are running." ""
   fi
   if [ -n "$exposed" ]; then
-    record "$name" ports fail "Ports are open to the whole network, not just this machine:${exposed}." \
-      "Change the published ports in ${AMAN_HOME}/instances/${name}/compose.yaml to start with 127.0.0.1:, then run: ${up_command}"
+    words=$(join_words "$exposed")
+    record "$name" ports fail "$(capitalize "$words") $(is_are "$exposed") open to the whole network, not just this computer." "$INSTANCE_FIX"
+  elif [ -n "$(registry_value "$name" origins)" ]; then
+    record "$name" ports ok "The app is open to your network on purpose, so other devices can open Aman; sign-in stays on this computer." ""
   else
-    record "$name" ports ok "Published ports listen on this machine only." ""
+    record "$name" ports ok "Aman listens on this computer only." ""
   fi
 }
+
+capitalize() { printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"; }
+
+# "is" for one item of a "|" list, "are" for several.
+is_are() { case "${1#|}" in *"|"*) printf are ;; *) printf is ;; esac; }
 
 in_list() { # word list
   case " $2 " in *" $1 "*) return 0 ;; esac
@@ -534,7 +871,7 @@ run_in_image_checks() { # name
   rc=$?
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
     record "$name" service fail "The checks could not run inside the app container: ${out%%$'\n'*}" \
-      "Rebuild the app image with install.sh (it must include the aman command), then restart the instance."
+      "$INSTANCE_FIX"
     return
   fi
   while IFS=$'\t' read -r id state detail fix; do
@@ -570,7 +907,7 @@ http_probe() { # url [host:port:address]
 
 public_check() { # name id url what [expected issuer]
   local name=$1 id=$2 url=$3 what=$4 want=${5:-} rest host port=443 first_error="" pinned=0 got
-  local fix_path="Check that the DNS records point at this machine, that Caddy is running (sudo systemctl status caddy; sudo journalctl -u caddy -n 50) and that port 443 is open in the cloud firewall."
+  local fix_path="Run aman doctor instance --fix. If it still fails, the DNS records or the firewall (port 443) are the cause."
   rest=${url#https://}
   host=${rest%%/*}
   case "$host" in *:*)
@@ -590,20 +927,20 @@ public_check() { # name id url what [expected issuer]
   fi
   if [ "$PROBE_CODE" != 200 ]; then
     record "$name" "$id" fail "${what} answered status ${PROBE_CODE}, not 200." \
-      "Status 502 or 503 means Caddy runs but the instance does not answer: run \"aman doctor --instance ${name}\" and fix what it reports. Otherwise check the Caddy log: sudo journalctl -u caddy -n 50."
+      "$INSTANCE_FIX"
     return
   fi
   if [ -n "$want" ]; then
     got=$(printf '%s' "$PROBE_BODY" | tr -d '\n' | sed -n 's/.*"issuer"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
     if [ "$got" != "$want" ]; then
-      record "$name" "$id" fail "${what} answered, but its issuer is \"${got:-missing}\", not the configured \"${want}\"." \
-        "Check that the login address in the instance .env (OIDC_ISSUER_URL) is the one Caddy serves for the sign-in service, then restart the instance."
+      record "$name" "$id" fail "The sign-in service reports the address ${got:-missing}, not ${want}." \
+        "$INSTANCE_FIX"
       return
     fi
   fi
   if [ "$pinned" = 1 ]; then
     record "$name" "$id" warn "${what} answers on this machine with a valid certificate, but not through its public address from here (${first_error:-no answer})." \
-      "Some clouds do not loop a machine back to its own public address. Check from another network: curl -sSI ${url}"
+      "Your cloud may not reach this computer's public address from inside it; this is only a warning."
     return
   fi
   record "$name" "$id" ok "${what} answers over https." ""
@@ -630,6 +967,33 @@ check_instance_public() { # name
 check_instance() {
   check_instance_core "$1"
   if [ "$LOCAL" != 1 ]; then check_instance_public "$1"; fi
+  check_instance_network "$1"
+}
+
+# An instance opened on the network lists the addresses it answers at; a new address of this computer (another
+# network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
+# is refused there. Nothing is recorded for an instance that is open on this computer only.
+check_instance_network() {
+  local name=$1 origins port host missing='' count expected tls_port=''
+  origins=$(registry_value "$name" origins)
+  [ -n "$origins" ] || return 0
+  port=$(registry_value "$name" app_port)
+  case "$origins" in *https://*) tls_port=$(registry_value "$name" tls_port) ;; esac
+  # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
+  expected=$(network_origin_list "$port" "$tls_port" $(registry_value "$name" extra_hosts))
+  while IFS= read -r host; do
+    case ",${origins}," in
+      *",${host},"*) ;;
+      *) missing="${missing} $(origin_host "$host")" ;;
+    esac
+  done < <(printf '%s\n' "$expected" | tr ',' '\n')
+  if [ -n "$missing" ]; then
+    record "$name" network warn "This computer has addresses Aman is not set up for:${missing}. Until they are added, every page opened at them is refused." \
+      "Run aman doctor network --fix"
+    return
+  fi
+  count=$(printf '%s\n' "$origins" | tr ',' '\n' | wc -l | tr -d ' ')
+  record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each." ""
 }
 
 check_instance_core() {
@@ -642,8 +1006,8 @@ check_instance_core() {
   fi
   check_instance_containers "$name"
   if [ -z "$APP_CONTAINER" ]; then
-    record "$name" service fail "The app container is not running." \
-      "Start the instance with: docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+    # The containers check above already says what is down; one line, not two.
+    record "$name" service off "Skipped: the app is not running." ""
     return
   fi
   run_in_image_checks "$name"
@@ -693,19 +1057,87 @@ json_checks() { # scope
   printf ']'
 }
 
+# Skipped checks with the same reason print as one line, so one failure does not look like six.
+SKIP_IDS=""
+SKIP_DETAIL=""
+flush_skipped() {
+  if [ -n "$SKIP_IDS" ]; then ui_skip "$SKIP_DETAIL ($SKIP_IDS)"; fi
+  SKIP_IDS=""
+  SKIP_DETAIL=""
+}
+
 text_checks() { # scope
   local scope id state detail fix label
   while IFS=$'\t' read -r scope id state detail fix; do
     [ -n "$scope" ] || continue
+    if [ "$PROBLEMS_ONLY" = 1 ]; then
+      case "$state" in warn | fail) ;; *) continue ;; esac
+    fi
     case "$state" in
-      ok) label="ok  " ;;
-      warn) label="WARN" ;;
-      fail) label="FAIL" ;;
-      *) label="off " ;;
+      ok | warn | fail) ;;
+      *)
+        if [ -n "$SKIP_IDS" ] && [ "$SKIP_DETAIL" != "$detail" ]; then flush_skipped; fi
+        SKIP_DETAIL=$detail
+        SKIP_IDS="${SKIP_IDS:+$SKIP_IDS, }$id"
+        continue
+        ;;
     esac
-    printf '  [%s] %-12s %s\n' "$label" "$id" "$detail"
-    if [ -n "$fix" ]; then printf '         Fix: %s\n' "$fix"; fi
+    flush_skipped
+    # Two checks that pass without saying anything useful are counted but not shown, unless asked for.
+    if [ "$state" = ok ] && [ "$UI_VERBOSE" != 1 ] && in_list "$id" "runtime credentials checkout"; then continue; fi
+    label=$detail
+    if [ "$UI_VERBOSE" = 1 ]; then label="$detail ($id)"; fi
+    case "$state" in
+      ok) ui_ok "$label" ;;
+      warn) ui_warn "$label" "$fix" ;;
+      fail) ui_fail "$label" "$fix" ;;
+    esac
   done < <(visible_records "$1")
+  flush_skipped
+}
+
+# Counts of the visible checks of a scope: sets N_OK, N_WARN, N_FAIL and N_OFF.
+count_checks() { # scope
+  local scope id state _rest
+  N_OK=0
+  N_WARN=0
+  N_FAIL=0
+  N_OFF=0
+  while IFS=$'\t' read -r scope id state _rest; do
+    [ -n "$scope" ] || continue
+    case "$state" in
+      ok) N_OK=$((N_OK + 1)) ;;
+      warn) N_WARN=$((N_WARN + 1)) ;;
+      fail) N_FAIL=$((N_FAIL + 1)) ;;
+      *) N_OFF=$((N_OFF + 1)) ;;
+    esac
+  done < <(visible_records "$1")
+}
+
+plural() { # count word
+  if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %ss' "$1" "$2"; fi
+}
+
+# The closing block: how many problems and warnings there are, or that all is well.
+print_verdict() {
+  local scope fails=0 warns=0 parts=""
+  for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    count_checks "$scope"
+    fails=$((fails + N_FAIL))
+    warns=$((warns + N_WARN))
+  done
+  if [ "$fails" -gt 0 ]; then parts="$(plural "$fails" problem)"; fi
+  if [ "$warns" -gt 0 ]; then parts="${parts:+$parts, }$(plural "$warns" warning)"; fi
+  if [ "$fails" -gt 0 ]; then
+    ui_summary fail "$parts."
+    ui_line "Run the Next command for each, then run aman doctor again."
+  elif [ "$warns" -gt 0 ]; then
+    ui_summary warn "$parts."
+    ui_line "Run the Next command for each, then run aman doctor again."
+  else
+    ui_summary ok "All checks passed."
+  fi
+  ui_summary_end
 }
 
 print_json() {
@@ -724,12 +1156,42 @@ print_json() {
 
 print_text() {
   local name
-  printf 'Machine\n'
+  load_ui
+  if [ "$SUMMARY" = 1 ]; then
+    print_summary
+    return
+  fi
+  ui_phase "Checking this computer"
   text_checks machine
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    printf '\nInstance %s\n' "$name"
+    ui_phase "Checking instance $name"
     text_checks "$name"
   done
+  print_verdict
+}
+
+# What the installer shows after a run: one line when everything passed, otherwise only the problems.
+print_summary() {
+  local scope label passed=0 problems=0
+  for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    count_checks "$scope"
+    passed=$((passed + N_OK))
+    problems=$((problems + N_WARN + N_FAIL))
+  done
+  if [ "$problems" -eq 0 ]; then
+    ui_ok "All $passed checks passed"
+    return
+  fi
+  PROBLEMS_ONLY=1
+  for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    count_checks "$scope"
+    if [ $((N_WARN + N_FAIL)) -eq 0 ]; then continue; fi
+    if [ "$scope" = machine ]; then label="This computer"; else label="Instance $scope"; fi
+    ui_line "$label"
+    text_checks "$scope"
+  done
+  PROBLEMS_ONLY=0
+  ui_hint "$passed other checks passed. Full report: aman doctor"
 }
 
 select_instances() {
@@ -748,21 +1210,6 @@ select_instances() {
 }
 
 # ---------------------------------------------------------------- sandbox
-
-SANDBOX_NODE_MAJOR=22
-SANDBOX_NODE_MINOR=14
-
-sandbox_node_ok() {
-  local v major minor
-  command -v node >/dev/null 2>&1 || return 1
-  v=$(node --version 2>/dev/null) || return 1
-  v=${v#v}
-  major=${v%%.*}
-  minor=${v#*.}
-  minor=${minor%%.*}
-  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
-  [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
-}
 
 record_state() { # scope id
   local scope id state _rest
@@ -790,22 +1237,35 @@ docker_boot_state() { # prints enabled, or the reason it is not
   systemctl is-enabled --quiet docker 2>/dev/null || printf 'disabled'
 }
 
-sandbox_instances() { # prints the instances whose app is wired to the slots
+# The instances that have the sandbox: their record says so, or their app is already wired to the slots.
+sandbox_instances() {
   local name compose
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
     compose=$(cat "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null)
     case "$compose" in
       *"SANDBOX_BACKEND: slots"*) printf '%s\n' "$name" ;;
+      *) if [ "$(registry_value "$name" sandbox)" = slots ]; then printf '%s\n' "$name"; fi ;;
     esac
   done
 }
 
+# True when the settings that connect the app to its sandboxes are all there.
+sandbox_settings_complete() { # name
+  local compose
+  compose=$(cat "${AMAN_HOME}/instances/${1}/compose.yaml" 2>/dev/null)
+  case "$compose" in
+    *"SANDBOX_BACKEND: slots"*"SANDBOX_SLOTS: "*"SANDBOX_SLOTS_DIR: "*) return 0 ;;
+  esac
+  return 1
+}
+
 doctor_sandbox() {
-  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin answer
+  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin installer
   while [ $# -gt 0 ]; do
     case "$1" in
       --fix) fix=1 ;;
       --yes) yes=1 ;;
+      --verbose) UI_VERBOSE=1 ;;
       --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
       --disk-gb)
         [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
@@ -827,20 +1287,22 @@ doctor_sandbox() {
   done
   if [ "$yes" = 1 ] && [ "$fix" != 1 ]; then die_usage "--yes goes with --fix."; fi
   select_instances
+  load_ui
+  UI_ASSUME_YES=$yes
   bundle="${AMAN_HOME}/bin/aman-sandbox.mjs"
   source="${AMAN_HOME}/state/source"
   if [ ! -f "$bundle" ] || [ ! -r "$source" ]; then
-    printf 'The sandbox tools are not installed under %s. Run install.sh from the checkout; it installs them.\n' "$AMAN_HOME" >&2
+    UI_FD=2 ui_fail "The sandbox tools are not installed under $(ui_path "$AMAN_HOME")." "Run install.sh again from the folder Aman was installed from."
     exit 1
   fi
   repo=$(head -n 1 "$source")
   if [ ! -f "${repo}/docker-compose.slots.yml" ]; then
-    printf 'The checkout the sandbox was installed from is not at %s any more. Run install.sh from the checkout; it records the new place.\n' "$repo" >&2
+    UI_FD=2 ui_fail "The checkout the sandbox was installed from is not at $(ui_path "$repo") any more." "Run install.sh again from that folder."
     exit 1
   fi
   node_bin=$(sandbox_node_path)
   if [ -z "$node_bin" ]; then
-    printf 'No Node.js runtime for the sandbox setup was found (%s/runtime/node, or Node.js %s.%s or newer on this computer). Run install.sh from the checkout; it downloads one.\n' "$AMAN_HOME" "$SANDBOX_NODE_MAJOR" "$SANDBOX_NODE_MINOR" >&2
+    UI_FD=2 ui_fail "No Node.js runtime for the sandbox setup was found (in $(ui_path "$AMAN_HOME")/runtime/node, or Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer on this computer)." "Run install.sh again from the folder Aman was installed from."
     exit 1
   fi
   check_docker
@@ -852,22 +1314,41 @@ doctor_sandbox() {
     [ -n "$name" ] && targets+=("$name")
   done < <(sandbox_instances)
   if [ "${#targets[@]}" -eq 0 ]; then
-    printf 'No instance has the sandbox (it was installed with --no-sandbox, or no instance exists yet).\n'
+    ui_skip "No instance has the sandbox (it was installed with --no-sandbox, or no instance exists yet)."
     exit 0
   fi
   if [ "$(docker_boot_state)" = disabled ]; then
-    printf 'Docker does not start at boot here, so the sandbox stays down after a restart.\n  Fix: sudo systemctl enable docker\n'
-    if [ "$fix" = 1 ]; then
-      answer=n
-      if [ "$yes" = 1 ]; then answer=y; else read -r -p 'Run it now? [y/N] ' answer || true; fi
-      case "$answer" in
-        y | Y | yes) sudo systemctl enable docker || failed=1 ;;
-      esac
+    ui_warn "Docker does not start at boot here, so the sandbox stays down after a restart." "Run aman doctor sandbox --fix"
+    # --yes is the explicit approval for this root step; without it the question defaults to no.
+    if [ "$fix" = 1 ] && { [ "$yes" = 1 ] || ui_confirm "Turn Docker on at boot now? This needs sudo." n; }; then
+      sudo systemctl enable docker || failed=1
     fi
   fi
   for name in "${targets[@]}"; do
-    printf 'Instance %s\n' "$name"
+    if ! sandbox_settings_complete "$name"; then
+      # Settings the installer writes from its template and the record, so the same rewrite as `instance refresh`.
+      if [ "$fix" != 1 ]; then
+        ui_warn "The sandbox settings of instance $name are incomplete." "Run aman doctor sandbox --fix"
+        failed=1
+        continue
+      fi
+      if ! installer=$(checkout_installer); then
+        fail_no_installer
+        failed=1
+        continue
+      fi
+      if ui_confirm "Rewrite the sandbox settings of instance $name and restart it?" y; then
+        bash "$installer" --home "$AMAN_HOME" --yes instance refresh "$name" || {
+          failed=1
+          continue
+        }
+      else
+        failed=1
+        continue
+      fi
+    fi
     args=(--instance "$name" --repo-root "$repo" --log-file "${AMAN_HOME}/state/sandbox.log" --command-name "${AMAN_HOME}/bin/aman doctor sandbox" "${passthru[@]+"${passthru[@]}"}")
+    if [ "$UI_VERBOSE" = 1 ]; then args+=(--verbose); fi
     if [ "$fix" = 1 ]; then
       args+=(--fix --restart)
       if [ "$yes" = 1 ]; then args+=(--yes); fi
@@ -883,8 +1364,7 @@ doctor_sandbox() {
     ONLY=run_code
     check_instance_containers "$name"
     if [ -z "$APP_CONTAINER" ]; then
-      record "$name" run_code fail "The app container is not running, so run_code could not be tried through the app." \
-        "Start the instance with: docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+      record "$name" run_code fail "The $name app is not running, so run code could not be tried." "$INSTANCE_FIX"
     else
       run_in_image_checks "$name"
     fi
@@ -895,10 +1375,213 @@ doctor_sandbox() {
   exit "$failed"
 }
 
+# The installer the sandbox tools were set up from, which knows how to render an instance again.
+# aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
+# render the instance again from its record and restart it.
+doctor_repair() { # kind
+  local kind=$1 fix=0 yes=0 name installer failed=0 question args=()
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fix) fix=1 ;;
+      --yes) yes=1 ;;
+      --verbose) UI_VERBOSE=1 ;;
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        ONLY_INSTANCE=$2
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) die_usage "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+  if [ "$yes" = 1 ] && [ "$fix" != 1 ]; then die_usage "--yes goes with --fix."; fi
+  select_instances
+  load_ui
+  UI_ASSUME_YES=$yes
+  check_docker
+  if [ "$DOCKER_OK" != 1 ]; then
+    text_checks machine
+    exit 1
+  fi
+  if [ "${#INSTANCES[@]}" -eq 0 ]; then
+    ui_skip "There is no instance yet."
+    exit 0
+  fi
+  for name in "${INSTANCES[@]}"; do
+    RECORDS=""
+    ui_phase "Instance $name"
+    if [ "$kind" = network ]; then
+      check_instance_network "$name"
+      if [ -z "$RECORDS" ]; then
+        ui_skip "Open on this computer only; there are no network addresses to keep up to date"
+        continue
+      fi
+    else
+      check_instance_containers "$name"
+    fi
+    text_checks "$name"
+    count_checks "$name"
+    if [ $((N_WARN + N_FAIL)) -eq 0 ] || [ "$fix" != 1 ]; then
+      if [ "$N_FAIL" -gt 0 ]; then failed=1; fi
+      continue
+    fi
+    if ! installer=$(checkout_installer); then
+      fail_no_installer
+      failed=1
+      continue
+    fi
+    args=(--home "$AMAN_HOME" --yes instance refresh "$name")
+    if [ "$kind" = network ]; then
+      question="Add this computer's current addresses to instance $name and restart it?"
+    else
+      question="Restart instance $name now?"
+    fi
+    if ui_confirm "$question" y; then
+      if bash "$installer" "${args[@]}"; then ui_ok "Instance $name is fixed"; else failed=1; fi
+    fi
+  done
+  exit "$failed"
+}
+
+# The Aman images this computer no longer needs: every aman-app and aman-stt image that is not the recorded release and
+# that no container uses.
+unused_aman_images() {
+  local release="${AMAN_HOME}/release/release.json" keep image used
+  keep=" $(json_value "$release" app_image) $(json_value "$release" stt_image) "
+  used=" $(docker ps -a --format '{{.Image}}' 2>/dev/null | tr '\n' ' ') "
+  while IFS= read -r image; do
+    case "$image" in aman-app:* | aman-stt:*) ;; *) continue ;; esac
+    case "$keep$used" in *" $image "*) continue ;; esac
+    printf '%s\n' "$image"
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+}
+
+# aman doctor disk --fix: removes old Aman images and the build cache, after asking.
+fix_disk() {
+  local images count image
+  images=$(unused_aman_images)
+  count=$(printf '%s' "$images" | awk 'NF { n++ } END { print n + 0 }')
+  if ui_confirm "Remove $count unused Aman image(s) and the build cache? Nothing that runs is touched." y; then
+    while IFS= read -r image; do
+      [ -n "$image" ] || continue
+      docker rmi "$image" >/dev/null 2>&1 || ui_warn "Could not remove $image" ""
+    done <<<"$images"
+    docker builder prune -f >/dev/null 2>&1 || true
+    ui_ok "Removed the old Aman images and the build cache"
+  fi
+}
+
+# aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]: the machine checks of one area and, with --fix, the one repair.
+doctor_machine_repair() { # kind
+  local kind=$1 fix=0 yes=0 installer failed=0
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fix) fix=1 ;;
+      --yes) yes=1 ;;
+      --verbose) UI_VERBOSE=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) die_usage "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+  if [ "$yes" = 1 ] && [ "$fix" != 1 ]; then die_usage "--yes goes with --fix."; fi
+  load_ui
+  UI_ASSUME_YES=$yes
+  RECORDS=""
+  case "$kind" in
+    docker)
+      check_docker
+      check_runtime
+      check_credentials
+      ;;
+    disk)
+      check_docker
+      check_disk
+      ;;
+    backup) check_backup ;;
+    checkout) check_checkout ;;
+    tls)
+      check_docker
+      check_tls
+      ;;
+  esac
+  text_checks machine
+  count_checks machine
+  if [ "$N_FAIL" -gt 0 ]; then failed=1; fi
+  if [ $((N_WARN + N_FAIL)) -eq 0 ] || [ "$fix" != 1 ]; then exit "$failed"; fi
+  if [ "$kind" = checkout ]; then
+    if fix_checkout; then ui_ok "Only you can change the folder Aman runs its installer from now"; exit 0; fi
+    exit 1
+  fi
+  if ! installer=$(checkout_installer); then
+    fail_no_installer
+    exit 1
+  fi
+  case "$kind" in
+    docker) bash "$installer" --home "$AMAN_HOME" docker || exit 1 ;;
+    tls)
+      if [ -f "${AMAN_HOME}/tls/ca/root.key" ]; then chmod 600 "${AMAN_HOME}/tls/ca/root.key"; fi
+      bash "$installer" --home "$AMAN_HOME" tls || exit 1
+      ;;
+    disk) fix_disk ;;
+    backup)
+      bash "$installer" --home "$AMAN_HOME" --yes backups daily || exit 1
+      bash "$installer" --home "$AMAN_HOME" --yes backup || exit 1
+      ;;
+  esac
+  exit 0
+}
+
+# aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
+run_installer() { # command args...
+  local installer failure
+  if ! installer=$(checkout_installer); then
+    failure=$(installer_failure)
+    printf '%s %s\n' "${failure%%|*}" "${failure#*|}" >&2
+    exit 1
+  fi
+  exec bash "$installer" --home "$AMAN_HOME" "$@"
+}
+
+# Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
+# the installer's folder to be safe to run, and it never runs from inside the installer's own run.
+renew_tls_if_due() {
+  local conf name ends now installer due=0
+  [ -z "${AMAN_NO_TLS_RENEW:-}" ] || return 0
+  now=$(now_epoch)
+  for conf in "${AMAN_HOME}/state/instances"/*.conf; do
+    [ -f "$conf" ] || continue
+    name=${conf##*/}
+    name=${name%.conf}
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
+    case "$ends" in '' | *[!0-9]*) continue ;; esac
+    if [ $((ends - now)) -le $((60 * 86400)) ]; then due=1; fi
+  done
+  [ "$due" = 1 ] || return 0
+  if installer=$(checkout_installer); then
+    AMAN_NO_TLS_RENEW=1 bounded 300 bash "$installer" --home "$AMAN_HOME" tls >/dev/null 2>&1 || true
+  fi
+}
+
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
+  doctor | backup | upgrade) renew_tls_if_due ;;
+esac
+
+case "${1:-}" in
   doctor) shift ;;
+  backup | upgrade) run_installer "$@" ;;
   -h | --help)
     usage
     exit 0
@@ -906,14 +1589,28 @@ case "${1:-}" in
   *) die_usage "Unknown command: ${1:-(none)}" ;;
 esac
 
-if [ "${1:-}" = sandbox ]; then
-  shift
-  doctor_sandbox "$@"
-fi
+case "${1:-}" in
+  sandbox)
+    shift
+    doctor_sandbox "$@"
+    ;;
+  instance | network)
+    kind=$1
+    shift
+    doctor_repair "$kind" "$@"
+    ;;
+  docker | disk | backup | checkout | tls)
+    kind=$1
+    shift
+    doctor_machine_repair "$kind" "$@"
+    ;;
+esac
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) AS_JSON=1 ;;
+    --verbose) UI_VERBOSE=1 ;;
+    --summary) SUMMARY=1 ;;
     --deep)
       DEEP=1
       PROBE_SECONDS=30
@@ -952,6 +1649,8 @@ check_disk
 check_docker_memory
 check_clock
 check_backup
+check_checkout
+check_tls
 for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
   check_instance "$instance_name"
 done

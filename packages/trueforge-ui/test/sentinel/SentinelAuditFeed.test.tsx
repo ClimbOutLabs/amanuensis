@@ -85,14 +85,14 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText('Logged')).toBeInTheDocument();
   });
 
-  it('renders a Run without asking toggle for each Tier 2 kind, off by default', async () => {
+  it('renders an Always allow toggle for each Tier 2 kind, off by default', async () => {
     const { api, updateUserSettings } = stubApi([makeEntry({ id: 'entry-1' })]);
     render(
       <SentinelApiProvider api={api}>
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeEnabled();
     });
@@ -105,7 +105,7 @@ describe('SentinelAuditFeed', () => {
     });
     // The saved settings come back through the provider, so the switch follows them.
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'Run without asking: file_write' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Always allow: file_write' })).toBeChecked();
     });
   });
 
@@ -121,7 +121,7 @@ describe('SentinelAuditFeed', () => {
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
@@ -143,7 +143,7 @@ describe('SentinelAuditFeed', () => {
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });

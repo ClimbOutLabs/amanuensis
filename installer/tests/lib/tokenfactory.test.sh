@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The optional Token Factory key: prompts, stdin, the instance .env, and every place the key must never appear.
+# The optional Token Factory key: stdin, the instance .env, and every place the key must never appear.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
@@ -37,9 +37,8 @@ test_key_from_stdin_reaches_only_the_env() {
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_key_only_in_env
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
-  assert_contains "$OUT" "Token Factory, $DEFAULT_MODEL, is the default model"
-  assert_contains "$OUT" "doctor --instance main --only model"
-  assert_not_contains "$OUT" "Settings > Models" "the generic model hint is replaced"
+  assert_flat_contains "$OUT" "Model Token Factory, $DEFAULT_MODEL"
+  assert_not_contains "$OUT" "not set: add one in Settings" "a model is set"
   sandbox_drop
 }
 
@@ -55,7 +54,7 @@ test_model_and_cap_flags() {
   managed=${env%%# <<< end of managed block*}
   assert_contains "$managed" "NEBIUS_API_KEY=$TF_KEY" "inside the managed block"
   assert_contains "$managed" "TOKEN_FACTORY_DAILY_TOKEN_CAP=250000"
-  assert_contains "$OUT" "Daily limit: 250000 tokens per day"
+  assert_flat_contains "$OUT" "limit 250000 tokens a day"
   assert_key_only_in_env
   sandbox_drop
 }
@@ -84,7 +83,7 @@ test_key_is_never_taken_from_argv() {
     run_install --yes --password-stdin --email owner@example.invalid "$form" "$TF_KEY"
     clear_input
     assert_rc 2
-    assert_contains "$ERR" "never taken from the command line"
+    assert_flat_contains "$ERR" "never taken from the command line"
     assert_not_contains "$ERR" "$TF_KEY"
     assert_not_contains "$OUT" "$TF_KEY"
   done
@@ -106,81 +105,34 @@ test_key_in_the_callers_environment_is_ignored() {
   assert_rc 0
   assert_eq "$(env_value main NEBIUS_API_KEY)" "" "no key was written"
   assert_tree_lacks "$AMAN_HOME" "$TF_KEY"
-  assert_contains "$(cat "$SB/out")" "not set yet"
+  assert_flat_contains "$(cat "$SB/out")" "not set: add one in Settings"
   sandbox_drop
 }
 
-test_hidden_prompt_on_a_terminal() {
-  t_begin "the key typed at the prompt is not echoed, is written to the .env, and replaces the model server question"
+test_no_model_prompts_on_a_terminal() {
+  t_begin "no question about a key or a model server is asked, and the summary points to Settings"
   sandbox_new
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>$TF_KEY
+Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Token Factory key (optional, hidden"
-  assert_not_contains "$OUT" "$TF_KEY" "the terminal never shows the key"
-  assert_not_contains "$OUT" "Model server address" "a hosted model replaces that question"
-  assert_contains "$OUT" "Use Token Factory (model $DEFAULT_MODEL) as the default model"
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY"
-  assert_tree_lacks "$SB/stub.log" "$TF_KEY"
-  sandbox_drop
-}
-
-test_the_echo_test_can_fail() {
-  t_begin "the same run echoes the key if the prompt stops using read -s"
-  sandbox_new
-  sed -i 's/IFS= read -rs line/IFS= read -r line/' "$SB_INSTALLER/lib/tokenfactory.sh"
-  assert_not_contains "$(cat "$SB_INSTALLER/lib/tokenfactory.sh")" "read -rs"
-  run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>$TF_KEY
-Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
-  assert_contains "$OUT" "$TF_KEY" "echo is visible without -s"
-  sandbox_drop
-}
-
-test_enter_skips_the_key() {
-  t_begin "pressing Enter at the key prompt keeps the model server question and writes no key"
-  sandbox_new
-  run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>
-Model server address=>
-Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
-  assert_eq "$RC" 0
-  assert_contains "$OUT" "Model server address"
+  assert_not_contains "$OUT" "Token Factory key"
+  assert_not_contains "$OUT" "Model server address"
   assert_eq "$(env_value main NEBIUS_API_KEY)" ""
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "TOKEN_FACTORY"
-  assert_contains "$OUT" "not set yet. Next step: open Settings > Models"
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
   sandbox_drop
 }
 
 test_yes_and_pipes_never_wait_for_the_key() {
-  t_begin "--yes, and a piped stdin without the stdin flag, skip the key prompt"
+  t_begin "a plain install never reads a key from the terminal or the environment"
   sandbox_new
   install_machine
   assert_not_contains "$ERR" "Token Factory key"
   assert_eq "$(env_value main NEBIUS_API_KEY)" ""
-  sandbox_drop
-}
-
-test_model_endpoint_still_works_next_to_a_key() {
-  t_begin "an explicit --model-endpoint is kept next to the hosted model"
-  sandbox_new
-  install_with_key_stdin --model-endpoint http://host.docker.internal:11434/v1
-  assert_rc 0
-  assert_eq "$(sed -n 's/^model_endpoint=//p' "$AMAN_HOME/state/instances/main.conf")" "http://host.docker.internal:11434/v1"
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY"
   sandbox_drop
 }
 
@@ -192,8 +144,8 @@ test_flags_without_a_key_are_refused() {
   run_install --yes --password-stdin --email owner@example.invalid --token-factory-model vendor/m
   clear_input
   assert_rc 2
-  assert_contains "$ERR" "need a Token Factory key"
-  assert_contains "$ERR" "--token-factory-key-stdin"
+  assert_flat_contains "$ERR" "need a Token Factory key"
+  assert_flat_contains "$ERR" "--token-factory-key-stdin"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
 }
@@ -207,7 +159,7 @@ short key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 2
-  assert_contains "$ERR" "length or characters a key never has"
+  assert_flat_contains "$ERR" "length or characters a key never has"
   assert_not_contains "$ERR" "short key"
   with_input "$SENTINEL_PASSWORD
 
@@ -215,15 +167,15 @@ short key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 2
-  assert_contains "$ERR" "--token-factory-key-stdin got an empty line"
+  assert_flat_contains "$ERR" "--token-factory-key-stdin got an empty line"
   install_with_key_stdin --token-factory-model 'bad model'
   assert_rc 2
   install_with_key_stdin --token-factory-model '-leading'
   assert_rc 2
-  assert_contains "$ERR" "not a model id"
+  assert_flat_contains "$ERR" "not a model id"
   install_with_key_stdin --token-factory-daily-cap 0
   assert_rc 2
-  assert_contains "$ERR" "whole number of tokens above zero"
+  assert_flat_contains "$ERR" "whole number of tokens above zero"
   install_with_key_stdin --token-factory-daily-cap 12x
   assert_rc 2
   assert_not_contains "$ERR$OUT" "$TF_KEY"
@@ -239,18 +191,18 @@ test_dry_run_plans_without_reading_or_printing_the_key() {
   run_install --dry-run --token-factory-key-stdin --token-factory-model vendor/m --token-factory-daily-cap 1000 --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "Use Token Factory (model vendor/m) as the default model; the key goes only into the instance .env, capped at 1000 tokens per day"
+  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key goes only into the instance .env. Capped at 1000 tokens per day."
   assert_not_contains "$OUT$ERR" "$TF_KEY"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
 }
 
-test_dry_run_with_only_model_flags_plans_for_the_prompt() {
-  t_begin "a dry run with a model flag and no key flag still plans Token Factory (the real run asks at the prompt)"
+test_dry_run_with_only_model_flags_is_refused_like_a_real_run() {
+  t_begin "a dry run with a model flag and no key flag is refused, since nothing could ask for the key"
   sandbox_new
   run_install --dry-run --token-factory-model vendor/m --email owner@example.invalid
-  assert_rc 0
-  assert_contains "$OUT" "Use Token Factory (model vendor/m) as the default model"
+  assert_rc 2
+  assert_flat_contains "$ERR" "need a Token Factory key"
   sandbox_drop
 }
 
@@ -405,7 +357,7 @@ test_a_rerun_key_is_checked_and_planned() {
   run_install --yes --token-factory-key-stdin
   clear_input
   assert_rc 2
-  assert_contains "$ERR" "length or characters a key never has"
+  assert_flat_contains "$ERR" "length or characters a key never has"
   assert_not_contains "$ERR" "short key"
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before"
   with_input "$NEW_KEY
@@ -428,7 +380,7 @@ test_a_rerun_key_is_checked_and_planned() {
   run_install --yes --token-factory-key-stdin
   clear_input
   assert_rc 2
-  assert_contains "$ERR" "needs --name of the instance whose key changes" "two instances, none called main"
+  assert_flat_contains "$ERR" "needs --name of the instance whose key changes" "two instances, none called main"
   sandbox_drop
 }
 
@@ -437,15 +389,12 @@ test_model_and_cap_flags
 test_password_first_then_key_on_stdin
 test_key_is_never_taken_from_argv
 test_key_in_the_callers_environment_is_ignored
-test_hidden_prompt_on_a_terminal
-test_the_echo_test_can_fail
-test_enter_skips_the_key
+test_no_model_prompts_on_a_terminal
 test_yes_and_pipes_never_wait_for_the_key
-test_model_endpoint_still_works_next_to_a_key
 test_flags_without_a_key_are_refused
 test_bad_values_are_refused_without_echoing_the_key
 test_dry_run_plans_without_reading_or_printing_the_key
-test_dry_run_with_only_model_flags_plans_for_the_prompt
+test_dry_run_with_only_model_flags_is_refused_like_a_real_run
 test_a_dry_run_without_tf_flags_has_no_tf_line
 test_network_list_names_token_factory
 test_instance_add_takes_a_key

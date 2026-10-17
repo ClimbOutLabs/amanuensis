@@ -2,29 +2,13 @@ import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
 import { isLoopbackHost } from '../config';
+import { ADDRESS_NOT_LISTED_MESSAGE, findAllowedOrigin, hostMatchesUrl, parseHostHeader } from './allowedOrigins';
 import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACK_ORIGIN_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 /** Reachable without a browser session: probes, the service-key route, and the connector OAuth redirect. */
 const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth'];
-
-/** Default ports are dropped so `example.com` and `example.com:443` compare equal. */
-function canonicalPort(port: string): string {
-  return port === '80' || port === '443' ? '' : port;
-}
-
-function parseHostHeader(raw: string): { hostname: string; port: string } | undefined {
-  try {
-    const url = new URL(`http://${raw}`);
-    if (url.username !== '' || url.password !== '' || url.pathname !== '/' || url.search !== '' || url.hash !== '') {
-      return undefined;
-    }
-    return { hostname: url.hostname, port: canonicalPort(url.port) };
-  } catch {
-    return undefined;
-  }
-}
 
 function isPathExempt(path: string): boolean {
   return ORIGIN_EXEMPT_PATHS.some(exempt => path === exempt || path.startsWith(`${exempt}/`));
@@ -34,18 +18,31 @@ function isPathExempt(path: string): boolean {
  * Standalone request guard for cookie-authenticated sessions. Forwarded-* headers are never read.
  * - Host must be a loopback name on the instance port or the public URL's host, else 421
  *   (defeats DNS rebinding). When the public URL is itself loopback, any loopback name
- *   on its port is accepted too, so `localhost` works for a `127.0.0.1` public URL. A request with no Host header passes: browsers always send one.
+ *   on its port is accepted too, so `localhost` works for a `127.0.0.1` public URL. Every listed allowed origin is accepted as
+ *   Host and as Origin too. A request with no Host header passes: browsers always send one.
  * - State-changing requests need a same-origin signal: an allowed Origin, else
  *   `Sec-Fetch-Site: same-origin|none`, else a Bearer header; otherwise 403.
  */
-export function createRequestGuardMiddleware(options: { port: number; publicBaseUrl: string }): MiddlewareHandler {
+export function createRequestGuardMiddleware(options: {
+  port: number;
+  publicBaseUrl: string;
+  /** The addresses an instance opened on the local network answers at; empty for a single public address. */
+  allowedOrigins?: readonly string[];
+  /**
+   * The sign-in service's public address, when the app passes its pages through: that address is served only under the
+   * service's own path, and writes there are checked by the sign-in service, not by an Origin signal.
+   */
+  loginGatewayUrl?: string;
+}): MiddlewareHandler {
+  const allowedOrigins = options.allowedOrigins ?? [];
   const publicUrl = new URL(options.publicBaseUrl);
-  const publicHost = { hostname: publicUrl.hostname, port: canonicalPort(publicUrl.port) };
-  const instancePort = canonicalPort(String(options.port));
   const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
-  const loopbackPorts = new Set([instancePort, ...(publicIsLoopback ? [publicHost.port] : [])]);
-  const allowedOrigins = new Set([
+  const gatewayUrl = options.loginGatewayUrl === undefined ? undefined : new URL(options.loginGatewayUrl);
+  const gatewayPrefix = gatewayUrl?.pathname.replace(/\/$/, '') ?? '';
+  const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
+  const allowedOriginSet = new Set([
     publicUrl.origin,
+    ...allowedOrigins,
     ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
     ...(publicIsLoopback
       ? LOOPBACK_ORIGIN_HOSTS.map(
@@ -63,11 +60,26 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
     const rawHost = c.req.header('host');
     if (rawHost !== undefined) {
       const host = parseHostHeader(rawHost);
+      if (host !== undefined && gatewayUrl !== undefined && !hostMatchesUrl({ host, url: publicUrl })) {
+        if (hostMatchesUrl({ host, url: gatewayUrl })) {
+          if (path.startsWith(`${gatewayPrefix}/`)) {
+            return next();
+          }
+          throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
+        }
+      }
       const allowed =
         host !== undefined &&
-        ((host.hostname === publicHost.hostname && host.port === publicHost.port) ||
-          (isLoopbackHost(host.hostname) && loopbackPorts.has(host.port)));
+        (hostMatchesUrl({ host, url: publicUrl }) ||
+          (isLoopbackHost(host.hostname) &&
+            (hostMatchesUrl({ host: { ...host, hostname: instanceUrl.hostname }, url: instanceUrl }) ||
+              (publicIsLoopback &&
+                hostMatchesUrl({ host: { ...host, hostname: publicUrl.hostname }, url: publicUrl })))) ||
+          findAllowedOrigin({ hostHeader: rawHost, allowedOrigins }) !== undefined);
       if (!allowed) {
+        if (allowedOrigins.length > 0) {
+          return c.text(ADDRESS_NOT_LISTED_MESSAGE, 421);
+        }
         throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
       }
     }
@@ -78,7 +90,7 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
 
     const origin = c.req.header('origin');
     if (origin !== undefined) {
-      if (!allowedOrigins.has(origin.toLowerCase())) {
+      if (!allowedOriginSet.has(origin.toLowerCase())) {
         throw new HTTPException(403, { message: 'Cross-origin request rejected' });
       }
       return next();

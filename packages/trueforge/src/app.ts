@@ -39,6 +39,8 @@ import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
+import { listedOriginMiddleware } from './auth/listedOriginContext';
+import { createLoginProxy, isProxiableIssuer } from './auth/loginProxy';
 import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
@@ -53,6 +55,7 @@ import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
 import configuration, {
+  getAllowedOrigins,
   getPublicBaseUrl,
   getPublicUiBasePath,
   getTrueForgeAuthMode,
@@ -315,9 +318,50 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   }
   // Standalone sessions are cookies, so reject foreign Hosts and cross-origin writes before any router.
   if (configuration.STANDALONE && authEnabled) {
-    app.use('*', createRequestGuardMiddleware({ port: configuration.PORT, publicBaseUrl: getPublicBaseUrl() }));
+    app.use(
+      '*',
+      createRequestGuardMiddleware({
+        port: configuration.PORT,
+        publicBaseUrl: getPublicBaseUrl(),
+        allowedOrigins: getAllowedOrigins(),
+        ...(configuration.OIDC !== undefined && configuration.LOGIN_UPSTREAM_URL !== ''
+          ? { loginGatewayUrl: configuration.OIDC.OIDC_ISSUER_URL }
+          : {}),
+      }),
+    );
+  }
+  // Connector sign-in returns to the listed address the request came to, however deep in the request it is built.
+  if (configuration.STANDALONE && getAllowedOrigins().length > 0) {
+    app.use('*', listedOriginMiddleware(getAllowedOrigins));
   }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
+
+  // The app serves its sign-in service itself, so password guessing is limited: under every listed address for an
+  // instance opened on the network, or under the issuer's public address when LOGIN_UPSTREAM_URL says where it runs.
+  if (configuration.STANDALONE && configuration.OIDC !== undefined) {
+    const issuerUrl = configuration.OIDC.OIDC_ISSUER_URL;
+    const issuerPath = new URL(issuerUrl).pathname.replace(/\/$/, '');
+    if (getAllowedOrigins().length > 0 && isProxiableIssuer(issuerUrl)) {
+      app.all(
+        `${issuerPath}/*`,
+        createLoginProxy({
+          issuerUrl,
+          allowedOrigins: getAllowedOrigins(),
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
+        }),
+      );
+    } else if (configuration.LOGIN_UPSTREAM_URL !== '') {
+      app.all(
+        `${issuerPath}/*`,
+        createLoginProxy({
+          issuerUrl,
+          upstreamUrl: configuration.LOGIN_UPSTREAM_URL,
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
+          allowedOrigins: [new URL(issuerUrl).origin],
+        }),
+      );
+    }
+  }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
 

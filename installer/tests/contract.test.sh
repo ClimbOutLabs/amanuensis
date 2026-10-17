@@ -17,10 +17,10 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are present' "app_image, dex_image and stt_image read from release.json"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are ready.' "app_image, dex_image and stt_image read from release.json"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
-  assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 containers are running.'
-  assert_contains "$out" '"id":"backup","state":"ok","detail":"No backup yet' "a fresh install is not warned about backups"
+  assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
+  assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"
   assert_log_has "docker ps -a --filter label=com.docker.compose.project=aman-main"
   assert_log_has "aman doctor --text"
   assert_log_has "docker exec -e AMAN_HOST_EPOCH="
@@ -50,7 +50,7 @@ test_doctor_sandbox_reads_what_the_installer_wrote() {
   local out rc=0
   out=$(real_doctor sandbox) || rc=$?
   assert_eq "$rc" 0 "doctor sandbox exit code right after an install"
-  assert_contains "$out" "Instance main"
+  assert_not_contains "$out" "No instance has the sandbox" "the instance the installer wired is found"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
   assert_log_has "--command-name $AMAN_HOME/bin/aman doctor sandbox --check"
   assert_log_has "aman doctor --text --only run_code"
@@ -110,7 +110,7 @@ test_public_base_url_is_the_host_facing_origin() {
   assert_contains "$env" "PORT=8790"
   assert_contains "$env" "PUBLIC_BASE_URL=http://127.0.0.1:18790"
   assert_contains "$env" "OIDC_ISSUER_URL=http://127.0.0.1:15556/dex"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "127.0.0.1:18790:8790"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '127.0.0.1:18790:8790'"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http://127.0.0.1:18790/api/v1/auth/callback"
   sandbox_drop
 }
@@ -125,6 +125,24 @@ test_token_factory_settings_match_the_server() {
     assert_contains "$config" "getEnv('$key'" "the server reads $key"
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
   done
+}
+
+test_sign_in_settings_match_the_server() {
+  t_begin "the installer writes the sign-in settings the server reads, and the doctor counts what add-user wrote"
+  local repo=$INSTALLER_DIR/.. config key out
+  config=$(cat "$repo/packages/trueforge/src/config.ts")
+  for key in OIDC_ALLOWED_EMAILS OIDC_ADMIN_ROLE_VALUE OIDC_USER_ROLE_CLAIM OIDC_USER_REFERENCE_CLAIM; do
+    assert_contains "$config" "getEnv('$key'" "the server reads $key"
+    assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
+  done
+  sandbox_new
+  install_machine
+  run_install instance add-user judge1 --email judge1@demo.invalid
+  assert_rc 0
+  out=$(real_doctor --json --instance main) || true
+  assert_contains "$out" '"id":"config","state":"ok","detail":"The settings files exist and are private to you. 2 sign-in user(s): the owner and 1 member(s)."'
+  assert_not_contains "$out" "\$2a"
+  sandbox_drop
 }
 
 test_image_keeps_app_data_on_the_data_volume() {
@@ -150,6 +168,7 @@ test_in_image_check_ids_match() {
 }
 
 test_token_factory_settings_match_the_server
+test_sign_in_settings_match_the_server
 test_image_keeps_app_data_on_the_data_volume
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote

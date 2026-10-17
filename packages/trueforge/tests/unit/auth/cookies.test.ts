@@ -14,6 +14,7 @@ import { getAuthCookieSuffix, getPublicBaseUrl } from '../../../src/config';
 jest.mock('../../../src/config', () => ({
   getAuthCookieSuffix: jest.fn(() => ''),
   getPublicBaseUrl: jest.fn(() => 'http://localhost:8790'),
+  getAllowedOrigins: jest.fn((): string[] => []),
 }));
 
 function appFor() {

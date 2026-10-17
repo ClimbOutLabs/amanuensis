@@ -432,6 +432,99 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   return `${parsed.origin}${path}`;
 }
 
+/** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
+export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
+  const addresses: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (isIP(text) === 0) {
+      throw new Error(`TRUSTED_PROXY_ADDRESSES has an entry that is not an IP address: ${text}`);
+    }
+    addresses.push(text);
+  }
+  return addresses;
+}
+
+/** The loopback address of the sign-in service, or empty. */
+export function parseLoginUpstreamUrl(raw: string | undefined): string {
+  const text = (raw ?? '').trim();
+  if (text === '') {
+    return '';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch (error) {
+    throw new Error('LOGIN_UPSTREAM_URL must be a valid URL', { cause: error });
+  }
+  if (parsed.protocol !== 'http:' || !isLoopbackHost(parsed.hostname) || parsed.pathname.replace(/\/$/, '') === '') {
+    throw new Error(
+      'LOGIN_UPSTREAM_URL must be an http address on this computer with a path, like http://127.0.0.1:5556/dex',
+    );
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
+}
+
+/** True for a host written like an address but not as four plain decimal parts, which URL parsing would quietly rewrite. */
+function writesAddressInAnotherBase(text: string): boolean {
+  const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]*)/i.exec(text)?.[1] ?? '';
+  const parts = host.split('.');
+  if (!parts.every(part => /^(0x[0-9a-f]*|[0-9]+)$/i.test(part))) {
+    return false;
+  }
+  return !(parts.length === 4 && parts.every(part => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255));
+}
+
+/**
+ * The addresses the app may be opened at, as origins. Sign-in returns to the one the request came to, so the list is
+ * what keeps a request from steering it elsewhere. Plain http is only for this computer and private networks.
+ */
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  const origins: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(text);
+    } catch (error) {
+      throw new Error(`ALLOWED_ORIGINS has an entry that is not a valid origin: ${text}`, { cause: error });
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`ALLOWED_ORIGINS entries must be http or https origins: ${text}`);
+    }
+    if (
+      parsed.pathname !== '/' ||
+      parsed.search !== '' ||
+      parsed.hash !== '' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(text)
+    ) {
+      throw new Error(`ALLOWED_ORIGINS entries must be bare origins with no path, query or login: ${text}`);
+    }
+    if (writesAddressInAnotherBase(text)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has an address written in octal, hex or as one number: ${text}. Write it as four decimal parts.`,
+      );
+    }
+    if (parsed.protocol === 'http:' && !isPrivateNetworkHost(parsed.hostname)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has a public address over plain http (${text}). Sign-in over the internet needs https: set up HTTPS with Caddy (--tls caddy).`,
+      );
+    }
+    if (!origins.includes(parsed.origin)) {
+      origins.push(parsed.origin);
+    }
+  }
+  return origins;
+}
+
 /**
  * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
@@ -910,7 +1003,7 @@ export interface SharedServerConfiguration {
   /**
    * Parent directory for per-run run_code isolation dirs
    * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
-   * Derived: `{app data dir}/sandbox-runs` (both topologies — the Docker
+   * Derived: `{app data dir}/sandbox-runs` (both topologies: the Docker
    * driver is host-local even in distributed mode).
    */
   SANDBOX_RUNS_DIR: string;
@@ -1064,6 +1157,24 @@ export interface SharedServerConfiguration {
    * fail if empty. Env: `PUBLIC_BASE_URL`.
    */
   PUBLIC_BASE_URL: string;
+  /**
+   * Addresses the app may be opened at, as comma-separated origins. Set for an instance opened on the local network:
+   * sign-in then returns to the origin of the request (if listed) and the app serves the sign-in service under
+   * `/dex` itself. Empty keeps the single `PUBLIC_BASE_URL` origin. Env: `ALLOWED_ORIGINS`.
+   */
+  ALLOWED_ORIGINS: string[];
+  /**
+   * Where the sign-in service listens on this computer (loopback http, with the issuer's path), for an instance whose
+   * issuer is a public https address: the app then passes sign-in pages under that address through itself and limits
+   * password guessing. Empty leaves the issuer's address to answer for itself. Env: `LOGIN_UPSTREAM_URL`.
+   */
+  LOGIN_UPSTREAM_URL: string;
+  /**
+   * Addresses of a reverse proxy in front of the app, besides this computer's own, whose X-Forwarded-For says which
+   * visitor a request came from (so password guessing is limited per visitor, not per proxy). Comma separated IP
+   * addresses. Env: `TRUSTED_PROXY_ADDRESSES`.
+   */
+  TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
@@ -1334,6 +1445,12 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_PRICES: ModelPrices;
   /**
+   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
+   * unless it is true, so it can never touch a real instance.
+   * Env: `DEMO_MODE`. Default false.
+   */
+  DEMO_MODE: boolean;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -1544,15 +1661,17 @@ const standalone = parseBoolean({
  * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
  * home directory. Images that run as a user with no home set this to a path on the data volume.
  */
-function resolveAppDataDir(): string {
-  const override = resolveOptionalPathEnv('APP_DATA_DIR');
-  if (override !== undefined) {
-    return override;
+export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
+  if (override !== undefined && override.trim() !== '') {
+    return path.resolve(override);
   }
-  return envPaths(ENV_PATHS_APP_NAME, { suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '' }).data;
+  return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
 }
 
-const appDataDir = resolveAppDataDir();
+const appDataDir = resolveAppDataDir({
+  override: getEnv('APP_DATA_DIR'),
+  suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '',
+});
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
@@ -1933,6 +2052,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
   TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
+  DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -1967,6 +2087,9 @@ const shared: SharedServerConfiguration = {
   }),
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
+  ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
+  LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
+  TRUSTED_PROXY_ADDRESSES: parseTrustedProxyAddresses(getEnv('TRUSTED_PROXY_ADDRESSES', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: resolveTrueForgeApiKey({ standalone }),
@@ -2249,6 +2372,48 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+/** A private IPv4 address: RFC 1918, link-local, or the 100.64.0.0/10 range Tailscale uses. Loopback is not included. */
+function isPrivateIpv4(addr: string): boolean {
+  const octets = addr.split('.').map(part => Number.parseInt(part, 10));
+  const [a, b] = octets;
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+  if (a === 10) {
+    return true;
+  }
+  if (a === 192 && b === 168) {
+    return true;
+  }
+  if (a === 169 && b === 254) {
+    return true;
+  }
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) {
+    return true;
+  }
+  return a === 100 && b !== undefined && b >= 64 && b <= 127;
+}
+
+/**
+ * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` or
+ * `.ts.net` name, or a single-label name. An allowed origin may use plain http only for these; a public one needs https.
+ */
+export function isPrivateNetworkHost(host: string): boolean {
+  if (isLoopbackHost(host)) {
+    return true;
+  }
+  const lowered = host.trim().toLowerCase();
+  const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
+  const ipVersion = isIP(bare);
+  if (ipVersion === 4) {
+    return isPrivateIpv4(bare);
+  }
+  if (ipVersion === 6 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(bare)) {
+    return false;
+  }
+  return !bare.includes('.') || bare.endsWith('.local') || bare.endsWith('.ts.net');
+}
+
 export interface NetworkAuthRequirement {
   authMode: TrueForgeAuthMode;
   /** True for `STANDALONE=true`, which never starts without login. */
@@ -2412,6 +2577,11 @@ export function getPublicBaseUrl(config: PublicUrlConfig = configuration): strin
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
   }
   return publicBaseUrl;
+}
+
+/** The origins the app may be opened at; empty unless `ALLOWED_ORIGINS` is set. */
+export function getAllowedOrigins(config: Pick<ServerConfiguration, 'ALLOWED_ORIGINS'> = configuration): string[] {
+  return config.ALLOWED_ORIGINS;
 }
 
 /** Suffix appended to every auth cookie name; empty unless `AUTH_COOKIE_SUFFIX` is set. */

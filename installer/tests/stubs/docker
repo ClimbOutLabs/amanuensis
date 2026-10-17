@@ -69,15 +69,27 @@ case "$cmd" in
       exit 1
     fi
     if [ -n "${STUB_BUILD_FAIL:-}" ]; then
+      echo '#0 building with "default" instance using docker driver'
       echo "build failed" >&2
       exit 1
     fi
+    echo '#0 building with "default" instance using docker driver'
+    echo '#1 [internal] load build definition from Dockerfile.dev'
     echo "$tag" >>"$S/images"
     echo "$tag" >>"$S/builds"
     exit 0
     ;;
   pull)
+    echo "sha256:4c1d: Pulling from dexidp/dex"
     echo "$1" >>"$S/images"
+    exit 0
+    ;;
+  logs)
+    printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
+    exit 0
+    ;;
+  inspect)
+    echo "stub exit 1 oom false"
     exit 0
     ;;
   network)
@@ -85,7 +97,14 @@ case "$cmd" in
     shift
     touch "$S/networks" "$S/network_links"
     case "$sub" in
-      inspect) grep -Fxq "$1" "$S/networks"; exit $? ;;
+      inspect)
+        # With a format: the gateway of an instance's own network.
+        case "$*" in
+          *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
+        esac
+        grep -Fxq "$1" "$S/networks"
+        exit $?
+        ;;
       connect)
         # connect [--alias NAME] NETWORK CONTAINER
         [ "$1" = --alias ] && shift 2
@@ -154,12 +173,18 @@ case "$cmd" in
   ps)
     proj=
     formatted=
+    all=
     for a in "$@"; do
       case "$a" in
+        -a) all=1 ;;
         label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;;
         '{{'*) formatted=1 ;;
       esac
     done
+    if [ -n "$all" ] && [ -f "$S/failed/$proj" ]; then
+      echo c-app
+      exit 0
+    fi
     if [ -f "$S/up/$proj" ]; then
       case "$proj" in
         aman-machine) echo c1 ;;
@@ -203,10 +228,48 @@ case "$cmd" in
         echo "// stub sandbox setup"
         exit 0
         ;;
+      *"/pki.mjs"*)
+        # The authority script, run for real with the host's Node.js on the folder mounted as /tls.
+        echo "$*" >>"$S/pki_runs"
+        [ -n "${STUB_PKI_FAIL:-}" ] && { echo "certificate failed" >&2; exit 1; }
+        [ -n "${STUB_REAL_NODE:-}" ] || { echo "the test host has no Node.js" >&2; exit 1; }
+        tls_dir=
+        pki=
+        last=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in
+              *:/tls) tls_dir=${a%:/tls} ;;
+              *:/pki.mjs:ro) pki=${a%:/pki.mjs:ro} ;;
+            esac
+          fi
+          prev=$a
+          last=$a
+        done
+        script=$(printf '%s' "$last" | sed "s#/tls#$tls_dir#g; s#/pki.mjs#$pki#g")
+        PATH="$(dirname "$STUB_REAL_NODE"):/usr/bin:/bin" exec sh -c "$script"
+        ;;
+      *"/qr.mjs"*)
+        echo "$*" >>"$S/qr_runs"
+        [ -n "${STUB_REAL_NODE:-}" ] || exit 1
+        qr=
+        last=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in *:/qr.mjs:ro) qr=${a%:/qr.mjs:ro} ;; esac
+          fi
+          prev=$a
+          last=$a
+        done
+        exec "$STUB_REAL_NODE" "$qr" "$last"
+        ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"
-        hash="\$2a\$10\$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01"
+        # Derived from the password, so two different passwords never share a hash.
+        hash="\$2a\$10\$$(sha256sum <"$S/hash_stdin" | cut -c1-53)"
         printf '{"hash":"%s"}\n' "$hash"
         exit 0
         ;;
@@ -221,6 +284,16 @@ case "$cmd" in
         printf 'SQLITE-OF-%s\n' "$data_vol" >"$out/db.sqlite"
         printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
+        exit 0
+        ;;
+      *" test -f "*)
+        # The probe for a database file; a data volume listed in $S/no_db has none.
+        [ -f "$S/no_db/$vol" ] && exit 1
+        exit 0
+        ;;
+      *" test ! -e "*)
+        # Whether the folder is missing or searchable; a data volume listed in $S/unreadable is neither.
+        [ -f "$S/unreadable/$vol" ] && exit 1
         exit 0
         ;;
       *" tar "*)
@@ -246,10 +319,12 @@ case "$cmd" in
     fi
     proj=
     file=
+    envfile=
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --project-name) proj=$2; shift 2 ;;
-        --project-directory | --env-file) shift 2 ;;
+        --env-file) envfile=$2; shift 2 ;;
+        --project-directory) shift 2 ;;
         -f) file=$2; shift 2 ;;
         *) break ;;
       esac
@@ -265,6 +340,12 @@ case "$cmd" in
           echo "external volume \"$missing\" not found" >&2
           exit 1
         fi
+        if [ -n "${STUB_UP_FAIL_LOG:-}" ] && [ "$proj" != aman-machine ]; then
+          mkdir -p "$S/failed"
+          : >"$S/failed/$proj"
+          echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
+          exit 1
+        fi
         if [ -n "${STUB_UP_FAIL_UNLESS_TAG:-}" ] && [ "$img" != "$STUB_UP_FAIL_UNLESS_TAG" ] && [ "$proj" != aman-machine ]; then
           echo "container is unhealthy" >&2
           exit 1
@@ -277,6 +358,21 @@ case "$cmd" in
             *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes" ;;
           esac
         done
+        exit 0
+        ;;
+      exec)
+        # `exec -T app aman demo-seed ...`: refuses unless the instance .env turns demo mode on, as the real command does.
+        case "$*" in
+          *"aman demo-seed"*)
+            echo "$*" >>"$S/demo_runs"
+            [ -n "${STUB_DEMO_FAIL:-}" ] && { echo "No model is configured yet." >&2; exit 1; }
+            if ! grep -q '^DEMO_MODE=true$' "$envfile"; then
+              echo "Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance." >&2
+              exit 1
+            fi
+            printf '{"action":"seed"}\n'
+            ;;
+        esac
         exit 0
         ;;
       down)

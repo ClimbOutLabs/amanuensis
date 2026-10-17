@@ -13,29 +13,53 @@ PLAN_BLOCKERS=
 DL_TOTAL_MB=0
 DL_LINES=
 DL_HOSTS=
+# 1 when this checkout differs from the recorded release: the run then updates the installed version first.
+INSTALL_UPGRADE=0
+PLAN_UPGRADE_NOTE=
+PLAN_FS=$'\037'
+PLAN_RS=$'\036'
+INSTALL_T0=0
+DOCTOR_PROBLEMS=0
+# daily or off: the choice for the automatic backup.
+B_MODE=
 
-plan_add() {
-  # plan_add STATE TEXT where STATE is have, todo, root or blocked.
-  local tag
+# Results of the checks on this computer print as they are made; a blocker also stops the run before any question.
+check_ok() { ui_ok "$1"; }
+check_warn() { ui_warn "$1" "${2:-}" "${3:-}"; }
+check_block() { # what is wrong, what to do next, technical details
+  PLAN_BLOCKERS="$PLAN_BLOCKERS$1"$'\n'
+  ui_fail "$1" "${2:-}" "${3:-}"
+}
+
+# First sentence and the rest of a message, for text that says the problem and then the way out.
+split_problem() {
   case "$1" in
-    have) tag='[done]    ' ;;
-    todo)
-      tag='[will do] '
-      PLAN_TODO=$((PLAN_TODO + 1))
+    *". "*)
+      SPLIT_HEAD=${1%%. *}
+      SPLIT_NEXT=${1#*. }
       ;;
+    *)
+      SPLIT_HEAD=${1%.}
+      SPLIT_NEXT="Fix this, then run install.sh again."
+      ;;
+  esac
+}
+
+# plan_add STATE TEXT [DETAIL...]: STATE is have, todo, root or blocked. Details print dim under the row; for a
+# blocked row the first one is what to do next.
+plan_add() {
+  local state=$1 text=$2 details='' d
+  shift 2
+  for d in "$@"; do details="$details$PLAN_RS$d"; done
+  case "$state" in
+    todo) PLAN_TODO=$((PLAN_TODO + 1)) ;;
     root)
-      tag='[root]    '
       PLAN_TODO=$((PLAN_TODO + 1))
       PLAN_ROOT=$((PLAN_ROOT + 1))
       ;;
-    blocked)
-      tag='[blocked]'
-      PLAN_BLOCKERS="$PLAN_BLOCKERS
-  $2"
-      ;;
+    blocked) PLAN_BLOCKERS="$PLAN_BLOCKERS$text"$'\n' ;;
   esac
-  PLAN_LINES="$PLAN_LINES
-  $tag $2"
+  PLAN_LINES="$PLAN_LINES$state$PLAN_FS$text$PLAN_FS$details"$'\n'
 }
 
 # Free space of the filesystem holding a path (nearest existing ancestor), in KB.
@@ -71,7 +95,9 @@ preflight_docker_space() {
     '' | *[!0-9]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
-        plan_add blocked "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free. Free space with: docker system prune"
+        check_block "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free" "Free space with: docker system prune"
+      else
+        check_ok "$((free / 1024 / 1024)) GB free for Docker data"
       fi
       ;;
   esac
@@ -85,33 +111,47 @@ preflight_docker_memory() {
   case "${bytes:-}" in '' | *[!0-9]*) return 0 ;; esac
   gb=$(awk -v b="$bytes" 'BEGIN {printf "%.1f", b / 1073741824}')
   if [ "$bytes" -lt "$DOCKER_MEM_BLOCK_BYTES" ]; then
-    plan_add blocked "Docker has only $gb GB of memory and needs at least 6 GB to build the app. Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap."
+    check_block "Docker has only $gb GB of memory and needs at least 6 GB to build the app" "Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap, then run install.sh again."
   elif [ "$bytes" -lt "$DOCKER_MEM_WARN_BYTES" ]; then
-    warn "Docker has $gb GB of memory. The first build needs at least 6 GB and may be slow or run out of memory; 8 GB or more is recommended. Raise it in Docker Desktop under Settings, Resources, Memory."
+    check_warn "Docker has $gb GB of memory. The first build needs at least 6 GB and may be slow; 8 GB or more is recommended" "Raise it in Docker Desktop under Settings, Resources, Memory."
+  else
+    check_ok "Docker has $((bytes / 1073741824)) GB of memory"
   fi
 }
 
 preflight_system() {
-  local os arch free
+  local os arch free pretty='' unsupported=0
   os=$(uname -s)
   arch=$(uname -m)
   case "$os" in
-    Linux | Darwin) ;;
-    *) plan_add blocked "Operating system $os is not supported. On Windows, run this inside the WSL2 distribution that Docker Desktop integrates with." ;;
+    Linux) pretty=Linux ;;
+    Darwin) pretty=macOS ;;
+    *)
+      unsupported=1
+      check_block "Operating system $os is not supported" "On Windows, run this inside the WSL2 distribution that Docker Desktop integrates with."
+      ;;
   esac
   case "$arch" in
     x86_64 | amd64 | aarch64 | arm64) ;;
-    *) plan_add blocked "CPU architecture $arch is not supported (x86_64 and arm64 only)." ;;
+    *)
+      unsupported=1
+      check_block "CPU architecture $arch is not supported" "Use an x86_64 or arm64 computer."
+      ;;
   esac
-  if ! command -v git >/dev/null 2>&1; then
-    plan_add blocked "git is required to read the checkout the images are built from."
+  if [ "$unsupported" = 0 ]; then check_ok "$pretty on $arch"; fi
+  if command -v git >/dev/null 2>&1; then
+    check_ok "git is installed"
+  else
+    check_block "git is not installed, and the images are built from the checkout it reads" "Install git, then run install.sh again."
   fi
   free=$(free_kb "$AMAN_HOME")
   case "${free:-}" in
     '' | *[!0-9]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
-        plan_add blocked "Less than 10 GB free on the disk holding $AMAN_HOME ($((free / 1024 / 1024)) GB free)."
+        check_block "Less than 10 GB free on the disk holding $(ui_path "$AMAN_HOME") ($((free / 1024 / 1024)) GB free)" "Free some space there, then run install.sh again."
+      else
+        check_ok "$((free / 1024 / 1024)) GB free for the install"
       fi
       ;;
   esac
@@ -137,74 +177,128 @@ dl_add() {
 }
 
 print_network_destinations() {
-  local line fid hosts all=
+  local line fid hosts all='' skipped iface addr
   while IFS='|' read -r fid _ _ hosts; do
     case "$fid" in '' | '#'*) continue ;; esac
     all="$all $hosts"
   done <"$DOWNLOADS_FILE"
-  say "The installer may contact only these hosts, and the model endpoint you type:"
+  say "The installer may contact only these hosts:"
   for line in $(printf '%s' "$all" | tr ' ' '\n' | sort -u); do
     say "  $line"
   done
   say "Nothing is scanned and nothing is reported to the project."
+  skipped=$(network_skipped_addresses)
+  if [ -n "$skipped" ]; then
+    say ""
+    say "Addresses of this computer that Aman does not open at, because other devices cannot reach them (virtual or VPN networks):"
+    while read -r iface addr; do
+      say "  $addr ($iface)"
+    done <<<"$skipped"
+  fi
+}
+
+# One plan row per entry: a status word and a sentence, the detail dim underneath.
+print_plan_rows() {
+  local state text details rest piece
+  while IFS=$PLAN_FS read -r state text details; do
+    [ -n "$state" ] || continue
+    case "$state" in
+      have) ui_done "$text" ;;
+      todo) ui_todo "$text" ;;
+      root) ui_admin "$text" ;;
+      blocked) ui_fail "$text" "${details#"$PLAN_RS"}" ;;
+    esac
+    if [ "$state" != blocked ]; then
+      rest=$details
+      while [ -n "$rest" ]; do
+        rest=${rest#"$PLAN_RS"}
+        piece=${rest%%"$PLAN_RS"*}
+        ui_detail "$piece"
+        case "$rest" in *"$PLAN_RS"*) rest=$PLAN_RS${rest#*"$PLAN_RS"} ;; *) rest= ;; esac
+      done
+    fi
+  done <<<"$PLAN_LINES"
 }
 
 print_plan() {
-  local total_gb
-  say "Amanuensis install plan"
-  say "  state directory: $AMAN_HOME"
-  say "  source checkout: $REPO_ROOT (${REL_REF:-unknown})"
-  if [ -n "${DOCKER_ENGINE_VERSION:-}" ]; then
-    say "  docker:          Engine $DOCKER_ENGINE_VERSION, Compose ${DOCKER_COMPOSE_VERSION:-?} (access: ${DOCKER_ACCESS:-direct})"
+  local total_gb hosts count=0 host
+  ui_phase "The plan" 3 6
+  if [ "$UI_VERBOSE" = 1 ]; then
+    ui_hint "State directory $(ui_path "$AMAN_HOME"); source checkout $(ui_path "$REPO_ROOT") (${REL_REF:-unknown})."
+    if [ -n "${DOCKER_ENGINE_VERSION:-}" ]; then
+      ui_hint "Docker Engine $DOCKER_ENGINE_VERSION, Compose ${DOCKER_COMPOSE_VERSION:-?} (access: ${DOCKER_ACCESS:-direct})."
+    fi
   fi
-  say ""
-  say "Steps:$PLAN_LINES"
-  say ""
-  say "Images are built on this machine from the checkout. Nothing is pushed to any registry."
+  if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
+  print_plan_rows
+  ui_hint "Everything is built on this computer; nothing is pushed anywhere."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group / --sandbox-root / --tls-root; --yes alone does not allow them). The docker group is root-equivalent."
+    ui_hint "Steps marked needs admin use sudo and only run after you say yes (or pass --install-docker, --add-docker-group, --sandbox-root or --tls-root; --yes alone does not allow them). The docker group gives full control of this computer."
   fi
   if [ "$EDGE_IN_PLAN" = 1 ]; then
     edge_print_firewall_hint
   fi
   if [ -n "$DL_LINES" ]; then
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
-    say ""
-    say "First-run downloads (approximate):$DL_LINES"
-    say "  total: about $DL_TOTAL_MB MB ($total_gb GB)"
-    say "  sources:$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
+    hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    for host in $hosts; do count=$((count + 1)); done
+    ui_hint "Downloads: about $total_gb GB from $count sources. The first run takes several minutes, mostly for the image builds."
+    if [ "$UI_VERBOSE" = 1 ]; then
+      say "  First-run downloads (approximate):$DL_LINES"
+      say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
+      say "    sources: $hosts"
+    else
+      ui_hint "Full list of downloads and sources: --verbose"
+    fi
   fi
-  say ""
   if sandbox_needed; then
-    say "Run code (Python, shell, files) runs in the gVisor sandbox; attachment extraction stays off in this version."
+    ui_hint "Run code (Python, shell, files) runs in a sandbox."
   else
-    say "Run code and attachment extraction stay off in this version."
+    ui_hint "Run code stays off (installed with --no-sandbox)."
   fi
 }
 
 # Machine checks that need no answers from the user, so a blocker can stop the run before any prompt.
 plan_preflight() {
+  local ver
   PLAN_LINES=
   PLAN_TODO=0
   PLAN_ROOT=0
   PLAN_BLOCKERS=
+  ui_phase "Checking this computer" 1 6
   preflight_system
   docker_plan_access
   case "$DOCKER_ACCESS" in
-    direct) plan_add have "Docker is reachable" ;;
-    sg) plan_add have "Docker is reachable through the docker group (no re-login needed for this run)" ;;
+    direct | sg) ;;
     install)
-      plan_add root "Install Docker Engine from the vendor repository (see: install.sh --print-root-steps)"
+      plan_add root "Install Docker Engine from the vendor repository" "See: install.sh --print-root-steps"
+      ui_skip "Docker is not installed yet; the plan below installs it"
       dl_add docker-engine
       ;;
-    add-group) plan_add root "Add $(current_user) to the docker group, then use it for this run without a re-login" ;;
+    add-group)
+      plan_add root "Add $(current_user) to the docker group, then use it for this run without a re-login"
+      ui_skip "You cannot use Docker yet; the plan below adds you to the docker group"
+      ;;
     *)
-      plan_add blocked "$(docker_blocked_text)"
+      docker_blocked_parts
+      check_block "$DB_HEAD" "$DB_NEXT" "${DOCKER_DETAIL:-}"
       ;;
   esac
   docker_plan_runtime
   if [ -n "$PLAN_BLOCKER" ]; then
-    plan_add blocked "$PLAN_BLOCKER"
+    split_problem "$PLAN_BLOCKER"
+    check_block "$SPLIT_HEAD" "$SPLIT_NEXT"
+  else
+    case "$DOCKER_ACCESS" in
+      direct)
+        ver=${DOCKER_ENGINE_VERSION%.*}
+        check_ok "Docker $ver is running and you can use it"
+        ;;
+      sg)
+        ver=${DOCKER_ENGINE_VERSION%.*}
+        check_ok "Docker $ver works through the docker group, no sign-out needed for this run"
+        ;;
+    esac
   fi
   case "$DOCKER_ACCESS" in direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;; esac
   if [ -z "$PLAN_BLOCKERS" ]; then
@@ -212,11 +306,17 @@ plan_preflight() {
     preflight_docker_memory
   fi
   preflight_sandbox
+  if sandbox_needed && [ -z "$PLAN_BLOCKERS" ]; then
+    check_ok "This computer can run the sandbox"
+  fi
 }
 
+# The closing block of a run that cannot start; nothing has been changed.
 report_blockers_and_exit() {
-  say ""
-  say "This machine cannot be set up yet:$PLAN_BLOCKERS" >&2
+  local UI_FD=2
+  ui_summary fail "Stopped before changing anything."
+  ui_line "Fix the item above, then run install.sh again. It picks up where it left off."
+  ui_summary_end
   exit 1
 }
 
@@ -227,39 +327,38 @@ plan_build() {
     have_release=1
   fi
   if [ -d "$AMAN_HOME" ] && [ -f "$STATE_DIR/installed" ]; then
-    plan_add have "State directory $AMAN_HOME"
+    plan_add have "The folder $(ui_path "$AMAN_HOME") exists"
   else
-    plan_add todo "Create the state directory $AMAN_HOME"
+    plan_add todo "Create the folder $(ui_path "$AMAN_HOME")"
   fi
+  INSTALL_UPGRADE=0
+  PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    expected_app=$CUR_APP_TAG
-    expected_stt=$CUR_STT_TAG
-    REL_DEX_IMAGE=$CUR_DEX_IMAGE
-    if [ "$expected_app" != "$REL_APP_TAG" ]; then
-      plan_add have "Installed release $expected_app (the checkout is at $REL_APP_TAG; install.sh upgrade applies it)"
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ]; then
+      # A re-run never quietly reuses older images: this checkout is what gets installed.
+      INSTALL_UPGRADE=1
+      PLAN_UPGRADE_NOTE="This checkout is newer than the installed version, so it will be updated."
+      plan_add todo "Update the installed version to this checkout" \
+        "App $CUR_APP_TAG to $REL_APP_TAG." \
+        "Instances that have data are backed up first. If the restart fails, the old version comes back and each database is restored."
     fi
-    REL_APP_TAG=$expected_app
-    REL_STT_TAG=$expected_stt
   fi
 
-  plan_image "$REL_APP_TAG" "Build the app image $REL_APP_TAG from Dockerfile.dev" app-base app-deps dockerfile-frontend
-  plan_image "$REL_STT_TAG" "Build the speech-to-text image $REL_STT_TAG from ops/aman-stt" stt-base stt-deps
-  plan_image "$REL_DEX_IMAGE" "Pull the login image by digest" dex
+  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+  plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
+  plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
+  plan_tls
 
   plan_sandbox
 
-  if [ -x "$(doctor_shim)" ]; then
-    plan_add have "Doctor command $(doctor_shim)"
-  elif [ -f "$INSTALLER_DIR/doctor/aman" ]; then
-    plan_add todo "Install the doctor command at $(doctor_shim)"
-  fi
+  plan_aman_command
 
   if ! docker_available_for_probes; then
-    plan_add todo "Start the shared speech-to-text service (one container, no CPU pinning)"
+    plan_add todo "Start the speech-to-text service"
   elif machine_running; then
-    plan_add have "Shared speech-to-text service is running"
+    plan_add have "The speech-to-text service is running"
   else
-    plan_add todo "Start the shared speech-to-text service (one container, no CPU pinning)"
+    plan_add todo "Start the speech-to-text service"
   fi
   if ! docker_available_for_probes || ! docker_volume_exists aman_stt_cache; then
     dl_add stt-weights
@@ -267,7 +366,11 @@ plan_build() {
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
-      if docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
+      if [ "$INSTALL_UPGRADE" = 1 ]; then
+        plan_add todo "Restart instance $name on the new version"
+      elif [ -n "$(instance_address_change "$name")" ]; then
+        plan_existing_addresses "$name"
+      elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
       else
         plan_add todo "Start instance $name"
@@ -275,16 +378,114 @@ plan_build() {
     done
   fi
   if need_new_instance; then
-    plan_add todo "Create instance $I_NAME for $I_EMAIL: app at $I_PUBLIC_URL (port $I_PORT on this computer), sign-in service on port $I_LOGIN_PORT"
+    if [ -n "$I_ORIGINS" ]; then
+      plan_instance_with_addresses
+    else
+      plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
+    fi
     if [ "$I_TF" = 1 ]; then
-      plan_add todo "$(tf_plan_text)"
+      plan_add todo "Use Token Factory (model $I_TF_MODEL) as the default model" "$(tf_plan_detail)"
     fi
     dl_add embed
   fi
-  if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
-    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) (it goes only into the instance .env) and restart its app"
+  if [ "$OPT_DEMO" = 1 ]; then
+    name=$(demo_target)
+    if need_new_instance; then
+      plan_add todo "$(demo_plan_text "$name" "${OPT_DEMO_USER:-$I_EMAIL}")"
+    elif demo_env_on "$name"; then
+      plan_add have "Demo mode is on for instance $name"
+    else
+      plan_add todo "$(demo_plan_text "$name" "$(demo_user "$name")")"
+    fi
   fi
+  if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
+    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key goes only into the instance .env."
+  fi
+  plan_backups
   plan_edge
+}
+
+# The plan row of the aman command: the command itself and the line that puts it on the path of new terminals.
+plan_aman_command() {
+  local profiles
+  [ -f "$INSTALLER_DIR/doctor/aman" ] || return 0
+  if aman_command_current && path_ready; then
+    plan_add have "The aman command is installed"
+    return 0
+  fi
+  profiles=$(shell_profiles | while IFS= read -r f; do ui_path "$f"; done | tr '\n' ' ')
+  plan_add todo "Install the aman command" "At $(ui_path "$(doctor_shim)"), with a line in ${profiles% } so new terminals find it."
+}
+
+# An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
+# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
+plan_existing_addresses() { # name
+  local name=$1 hosts port
+  port=$(reg_get "$name" app_port)
+  if [ "$(instance_address_change "$name")" = close ]; then
+    plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
+    return 0
+  fi
+  # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
+  hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
+  if [ "$(tls_target "$name")" = local ]; then
+    plan_add todo "Serve instance $name over https on your network" \
+      "It will answer at: $hosts, with a certificate from an authority Aman makes on this computer. The old plain address sends devices to https." \
+      "Each device trusts that authority once. Its data and sign-in stay as they are."
+    return 0
+  fi
+  plan_add todo "Open instance $name on your network" \
+    "It will answer at: $hosts. Sign-in works from each, and the port is open to your network on private addresses only." \
+    "Its data and sign-in stay as they are."
+}
+
+# The https front end and the local authority, when an instance is about to be served over https.
+plan_tls() {
+  local name change need=0
+  if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
+  for name in $(reg_names); do
+    change=$(instance_address_change "$name")
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+  done
+  if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
+    plan_add todo "Make this computer's certificate authority again" \
+      "The one from an earlier version has no limit on what it can vouch for. The new one is limited to private addresses and names. Each device trusts it again."
+  fi
+  [ "$need" = 1 ] || return 0
+  plan_image "$(tls_image)" "The https front end is downloaded" "Download the https front end" https-front
+  if [ -f "$(tls_ca_dir)/root.crt" ]; then
+    plan_add have "This computer's certificate authority exists"
+  else
+    plan_add todo "Make this computer's certificate authority" "Your devices trust it once, so https works. Its key stays private on this computer."
+  fi
+}
+
+# The daily backup: asked once (or given with --backups), default yes.
+backups_collect() {
+  B_MODE=${OPT_BACKUPS:-$(backups_mode)}
+  [ -z "$B_MODE" ] || return 0
+  B_MODE=daily
+  if [ -z "$(backup_scheduler)" ]; then
+    B_MODE=off
+    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "This computer has no scheduler that works without admin rights."; fi
+    return 0
+  fi
+  if [ "$DRY_RUN" != 1 ] && ! ui_confirm "Back up automatically every day?" y; then B_MODE=off; fi
+}
+
+plan_backups() {
+  case "$B_MODE" in
+    daily)
+      if [ "$(backups_mode)" = daily ] && backup_schedule_present; then
+        plan_add have "Daily backups are on"
+      else
+        plan_add todo "Back up every day, keeping the last $BACKUP_KEEP" "Runs at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE") with $(backup_scheduler_label)."
+      fi
+      ;;
+    off)
+      if backup_schedule_present; then plan_add todo "Turn off the daily backups"; fi
+      ;;
+  esac
 }
 
 docker_available_for_probes() {
@@ -292,11 +493,11 @@ docker_available_for_probes() {
 }
 
 # plan_image TAG TEXT download-ids...
-plan_image() {
-  local tag=$1 text=$2 dl
-  shift 2
+plan_image() { # tag, have text, todo text, download ids...
+  local tag=$1 have=$2 text=$3 dl
+  shift 3
   if docker_available_for_probes && docker_image_exists "$tag"; then
-    plan_add have "Image $tag is present"
+    plan_add have "$have"
   else
     plan_add todo "$text"
     for dl in "$@"; do dl_add "$dl"; done
@@ -309,42 +510,58 @@ need_new_instance() {
 
 cmd_install() {
   local name
+  INSTALL_T0=$SECONDS
   DL_TOTAL_MB=0
   DL_LINES=
   DL_HOSTS=
   release_resolve
   AMAN_PASSWORD=
+  ui_title "Setting up a private assistant on this computer"
   plan_preflight
   if [ "$DRY_RUN" != 1 ] && [ -n "$PLAN_BLOCKERS" ]; then
     report_blockers_and_exit
   fi
   if need_new_instance; then
+    ui_phase "Your first instance" 2 6
     read_password_first
     instance_collect main
     instance_derive
   else
+    ui_phase "Your instance" 2 6
+    ui_skip "Instance $(reg_names | tr '\n' ' ')is already set up; nothing to ask"
     tf_rotation_collect
   fi
+  backups_collect
   plan_build
   print_plan
   if [ -n "$PLAN_BLOCKERS" ]; then
     report_blockers_and_exit
   fi
   if [ "$DRY_RUN" = 1 ]; then
-    say ""
-    say "Dry run: nothing was changed."
+    ui_summary ok "Dry run: nothing was changed."
+    ui_summary_end
     exit 0
   fi
   if [ "$PLAN_TODO" = 0 ]; then
-    say ""
-    say "Nothing to do."
+    # Nothing is claimed that was not looked at: the checks run again before the table says what is on.
+    docker_attach
+    ui_phase "Checking the result" 6 6
+    check_result
+    if [ "$DOCTOR_PROBLEMS" = 1 ] || [ "$SANDBOX_VERIFY_FAILED" = 1 ]; then
+      ui_summary warn "Nothing to change, but the checks found a problem (listed above)."
+    else
+      ui_summary ok "Nothing to do."
+    fi
     print_signout_note
     for name in $(reg_names); do
       print_instance_summary "$name"
     done
+    print_closing_lines
+    ui_summary_end
+    sandbox_finish
     exit 0
   fi
-  if ! confirm "Go ahead?"; then
+  if ! ui_confirm "Go ahead?" y; then
     say "Nothing was changed."
     exit 0
   fi
@@ -352,52 +569,128 @@ cmd_install() {
 }
 
 install_execute() {
-  local name
+  local name demo_name='' change recreate ADDRESS_CHANGED=''
   ensure_private_dir "$AMAN_HOME"
   lock_acquire
+  ensure_private_dir "$STATE_DIR/logs"
   docker_prepare
   ensure_private_dir "$RELEASE_DIR"
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
+    ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
   fi
-  images_ensure
-  release_write
-  machine_up "$REL_STT_TAG"
+  ui_phase "Building images" 4 6
+  if [ "$INSTALL_UPGRADE" = 1 ]; then
+    upgrade_prepare
+  else
+    images_ensure
+    release_write
+  fi
+  ui_phase "Starting services" 5 6
   for name in $(reg_names); do
-    if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
-      if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
-      instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-      instance_up "$name" || exit 1
+    change=$(instance_address_change "$name")
+    if [ -n "$change" ]; then
+      instance_apply_addresses "$name" "$change"
+      ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done
+  if [ "$INSTALL_UPGRADE" = 1 ]; then
+    upgrade_switch
+  else
+    machine_up "$REL_STT_TAG"
+    for name in $(reg_names); do
+      recreate=
+      case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
+      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+        if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
+        instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+        instance_up "$name" ${recreate:+"$recreate"} || exit 1
+      fi
+    done
+  fi
+  if [ "$OPT_DEMO" = 1 ]; then demo_name=$(demo_target); fi
   if need_new_instance; then
     instance_create
     AMAN_PASSWORD=
   fi
   tf_rotation_apply
+  if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
+    tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"
+  fi
   for name in $(reg_names); do
     edge_ensure "$name"
   done
+  if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$demo_name"; fi
+  if [ -n "$B_MODE" ]; then
+    backups_apply "$B_MODE" || warn "The daily backup could not be set up. Run: aman doctor backup --fix"
+  fi
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REL_APP_TAG" >"$STATE_DIR/installed"
   log_event "install complete $REL_APP_TAG"
-  for name in $(reg_names); do
-    print_instance_summary "$name"
-  done
-  if [ -x "$(doctor_shim)" ]; then
-    say ""
-    say "Doctor:"
-    # Includes the model and the public https checks, which wait on the network.
-    DOCTOR_TIMEOUT=180 run_doctor || warn "doctor reported problems; each one lists its fix"
-    for name in $(reg_names); do
-      if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
-    done
-  fi
-  say ""
-  say "Backups: install.sh backup  (kept in $BACKUPS_DIR). Upgrade after pulling new source: install.sh upgrade"
-  print_signout_note
+  ui_phase "Checking the result" 6 6
+  check_result
+  print_install_summary
   sandbox_finish
   edge_finish
+  [ "$DEMO_FAILED" = 0 ] || exit 1
+}
+
+# The doctor's one line (or only its problems), and a quiet look at the sandbox of each instance that has one.
+check_result() {
+  local name
+  [ -x "$(doctor_shim)" ] || return 0
+  # Includes the model and the public https checks, which wait on the network.
+  DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
+  for name in $(reg_names); do
+    if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
+  done
+}
+
+# The plan row of an instance that answers at every address of this computer.
+plan_instance_with_addresses() {
+  local hosts
+  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
+  if [ -n "$I_TLS_PORT" ]; then
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate from an authority Aman makes on this computer. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
+      "Port $I_PORT only sends devices to https. $(plan_public_address_note)"
+    return 0
+  fi
+  if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
+      "This computer's public address (${I_PUBLIC_ADDRESSES% }) is not used: signing in over plain http across the internet is not safe. For the internet use --tls caddy."
+  else
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)."
+  fi
+}
+
+# The line about this computer's public address, when it has one; nothing otherwise.
+plan_public_address_note() {
+  if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
+    printf "This computer's public address (%s) is not used. For the internet use --tls caddy." "${I_PUBLIC_ADDRESSES% }"
+  fi
+}
+
+# The closing block of a finished install: one verdict, then each instance and what to do next.
+print_install_summary() {
+  local names count
+  names=$(reg_names)
+  count=$(printf '%s\n' "$names" | wc -l | tr -d ' ')
+  if [ "$DOCTOR_PROBLEMS" = 1 ] || [ "$SANDBOX_VERIFY_FAILED" = 1 ]; then
+    ui_summary warn "Running, but the checks found a problem (listed above)."
+  elif [ "$count" = 1 ]; then
+    ui_summary ok "Ready. Instance $names is running."
+  else
+    ui_summary ok "Ready. Your instances are running."
+  fi
+  print_signout_note
+  for name in $names; do
+    print_instance_summary "$name"
+  done
+  print_closing_lines
+  ui_summary_end "$(_ui_elapsed_since "$INSTALL_T0")"
 }

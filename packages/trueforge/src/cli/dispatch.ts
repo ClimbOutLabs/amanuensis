@@ -1,5 +1,6 @@
 import { backup } from './backup';
 import type { Command } from './command';
+import { demoSeed } from './demoSeed';
 import { doctor } from './doctor';
 import { hashPassword } from './hashPassword';
 import { UsageError, type CliIo } from './io';
@@ -8,6 +9,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   'hash-password': hashPassword,
   backup,
   doctor,
+  'demo-seed': demoSeed,
 };
 
 const USAGE = `Usage: aman <command> [options]
@@ -16,6 +18,7 @@ Commands:
   hash-password   Read a password on stdin, print {"hash": "<bcrypt>"}
   backup          Copy the database, memory and persona knowledge to --target
   doctor          Check this instance and print the results
+  demo-seed       Seed one synthetic demo world (needs DEMO_MODE=true); --reset removes it
 
 JSON goes to stdout, messages to stderr. Exit codes: 0 ok, 1 failure, 2 usage.
 `;

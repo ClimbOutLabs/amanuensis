@@ -21,14 +21,6 @@ edge_installed_file() { printf '%s/aman.d/%s.caddyfile' "$CADDY_ETC" "$1"; }
 # The main Caddyfile is the installer's minimal one, not the package's default site.
 edge_main_managed() { grep -q 'Managed by the Amanuensis installer' "$CADDY_ETC/Caddyfile" 2>/dev/null; }
 
-valid_ipv4() {
-  local ip=$1 part
-  matches_whole "$ip" '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
-  for part in ${ip//./ }; do
-    [ "$((10#$part))" -le 255 ] || return 1
-  done
-}
-
 # A DNS name Let's Encrypt can issue for: dotted labels, no port, not an address.
 valid_edge_host() {
   matches_whole "$1" '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' && ! matches_whole "$1" '^[0-9.]+$'
@@ -39,7 +31,7 @@ edge_render() {
   local name=$1
   render_template "$TEMPLATES_DIR/edge/Caddyfile.tpl" \
     "NAME=$name" "APP_HOST=$(edge_host "$(reg_get "$name" public_url)")" "LOGIN_HOST=$(edge_host "$(reg_get "$name" login_url)")" \
-    "APP_PORT=$(reg_get "$name" app_port)" "LOGIN_PORT=$(reg_get "$name" login_port)" | write_if_changed "$(edge_file "$name")" 644 || true
+    "APP_PORT=$(reg_get "$name" app_port)" | write_if_changed "$(edge_file "$name")" 644 || true
 }
 
 # Caddy runs as its own user and cannot read the private install directory, so the file is copied, not linked.
@@ -108,8 +100,7 @@ STEPS
 }
 
 edge_print_firewall_hint() {
-  say "  Firewall: the installer changes none. Open only TCP 443 to the internet, plus SSH (22) from your own address;"
-  say "            port 80 can stay closed. In a cloud this is the security group of the machine."
+  ui_line "Firewall: the installer changes none. Open only TCP 443 to the internet, plus SSH (22) from your own address; port 80 can stay closed. In a cloud this is the security group of the machine."
 }
 
 edge_print_root_steps() {
@@ -186,10 +177,10 @@ plan_edge_instance() {
   if command -v caddy >/dev/null 2>&1; then
     plan_add have "Caddy is installed"
   else
-    plan_add root "Install Caddy from the Ubuntu package archive (apt-get install caddy; see: install.sh --print-root-steps --tls caddy)"
+    plan_add root "Install Caddy from the Ubuntu package archive" "apt-get install caddy; see: install.sh --print-root-steps --tls caddy"
     dl_add caddy
   fi
-  plan_add root "Apply the Caddyfile for $app_host and $login_host under $CADDY_ETC/aman.d, check it and reload Caddy (Caddy then asks Let's Encrypt for certificates for exactly those two names)"
+  plan_add root "Apply the Caddyfile for $app_host and $login_host" "It goes under $CADDY_ETC/aman.d. Caddy is checked and reloaded, then asks Let's Encrypt for certificates for exactly those two names."
 }
 
 plan_edge() {
@@ -216,7 +207,7 @@ edge_wait_ready() {
     i=$((i + 1))
     [ "$i" -lt "$EDGE_WAIT_TRIES" ] && sleep 5
   done
-  warn "$url did not answer over https yet. Caddy keeps trying; read why with: sudo journalctl -u caddy --no-pager -n 50"
+  warn "$url did not answer over https yet. Caddy keeps trying. Run aman doctor to see why."
   return 0
 }
 

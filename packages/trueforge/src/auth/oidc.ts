@@ -12,10 +12,12 @@ import {
   randomState,
 } from 'openid-client';
 import type { Logger } from 'winston';
-import { getPublicBaseUrl, type OIDCConfig } from '../config';
+import { getAllowedOrigins, getPublicBaseUrl, type OIDCConfig } from '../config';
+import { ADDRESS_NOT_LISTED_MESSAGE, OriginNotAllowedError, requestAllowedOrigin } from './allowedOrigins';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
 import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
 import { assertEmailAllowed } from './emailAllowlist';
+import { isProxiableIssuer } from './loginProxy';
 import { safeReturnTo } from './safeReturnTo';
 
 const CALLBACK_PATH = '/api/v1/auth/callback';
@@ -134,9 +136,45 @@ export function startOidcDiscovery(params: { oidc: OIDCConfig; logger: Logger })
   };
 }
 
-function authCallbackUrl(): string {
-  const publicBaseUrl = getPublicBaseUrl();
-  return `${publicBaseUrl}${CALLBACK_PATH}`;
+/**
+ * The address the browser uses for this request. An instance opened on the local network lists the addresses it may
+ * be opened at; sign-in then starts and ends at the one the request came to, so the sign-in cookies (set per host) are
+ * sent back. An address that is not listed is refused, never redirected to. Without a list it is the public address.
+ */
+function browserOrigin(context: Context): string {
+  const allowedOrigins = getAllowedOrigins();
+  if (allowedOrigins.length === 0) {
+    return new URL(getPublicBaseUrl()).origin;
+  }
+  const origin = requestAllowedOrigin({ context, allowedOrigins });
+  if (origin === undefined) {
+    throw new OriginNotAllowedError(ADDRESS_NOT_LISTED_MESSAGE);
+  }
+  return origin;
+}
+
+function authCallbackUrl(context: Context): string {
+  if (getAllowedOrigins().length === 0) {
+    return `${getPublicBaseUrl()}${CALLBACK_PATH}`;
+  }
+  return `${browserOrigin(context)}${CALLBACK_PATH}`;
+}
+
+/**
+ * The sign-in page the browser is sent to. The service sits beside the app and its address means nothing to another
+ * device, so with a list of addresses the page is opened on the app's own origin, where `/dex` is passed through.
+ */
+function browserAuthorizationUrl({ context, url, issuer }: { context: Context; url: URL; issuer: string }): URL {
+  if (getAllowedOrigins().length === 0 || !isProxiableIssuer(issuer) || url.origin !== new URL(issuer).origin) {
+    return url;
+  }
+  const origin = new URL(browserOrigin(context));
+  const moved = new URL(url);
+  moved.protocol = origin.protocol;
+  moved.hostname = origin.hostname;
+  // An address with the default port has none, and the service's own port must not stay behind.
+  moved.port = origin.port;
+  return moved;
 }
 
 export async function buildLoginAuthorization(params: {
@@ -156,7 +194,7 @@ export async function buildLoginAuthorization(params: {
   const codeVerifier = randomPKCECodeVerifier();
   const state = randomState();
   const authorizationUrl = buildAuthorizationUrl(params.client, {
-    redirect_uri: authCallbackUrl(),
+    redirect_uri: authCallbackUrl(params.context),
     scope: scopes.join(' '),
     claims: JSON.stringify(claims),
     code_challenge: await calculatePKCECodeChallenge(codeVerifier),
@@ -173,7 +211,8 @@ export async function buildLoginAuthorization(params: {
     }),
     maxAgeSeconds: OAUTH_STATE_MAX_AGE_SECONDS,
   });
-  return authorizationUrl.href;
+  return browserAuthorizationUrl({ context: params.context, url: authorizationUrl, issuer: oidcConfig.OIDC_ISSUER_URL })
+    .href;
 }
 
 export async function exchangeAuthorizationCode(params: {
@@ -185,7 +224,7 @@ export async function exchangeAuthorizationCode(params: {
   state: string;
 }): Promise<void> {
   // Origin and path come from config so redirect_uri matches the one registered with the IdP.
-  const callbackUrl = new URL(authCallbackUrl());
+  const callbackUrl = new URL(authCallbackUrl(params.context));
   callbackUrl.search = params.callbackParams.toString();
   const oidcConfig = getOidcVerify()?.oidcConfig;
   if (!oidcConfig) {

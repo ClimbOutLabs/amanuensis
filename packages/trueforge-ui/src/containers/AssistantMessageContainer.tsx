@@ -11,6 +11,7 @@ import {
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import type { ReactNode } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
@@ -27,6 +28,7 @@ import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvide
 import { useMemoryTurnContext, useMemoryTurnContextStatus } from './MemoryTurnContextProvider.js';
 import { MessageImageContainer } from './MessageImageContainer.js';
 import { useModelUsageSummary } from './ModelUsageTurnProvider.js';
+import { NeedsYourOkContainer } from './NeedsYourOkContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
 import { ToolCallContainer } from './ToolCallContainer.js';
@@ -141,7 +143,7 @@ export function AssistantMessageContainer() {
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
   const { visibility: agentDetailsVisibility } = useAgentDetailsVisibility(sessionId);
   const { copy, isCopied } = useActionBarCopy({
-    copyToClipboard: text => navigator.clipboard.writeText(text),
+    copyToClipboard: text => copyText(text),
   });
 
   // `metadata.custom.turnId` is set by the runtime for both live and replayed messages (see
@@ -324,6 +326,7 @@ export function AssistantMessageContainer() {
           }}
         </MessagePrimitive.GroupedParts>
         {modelUsage !== undefined && <ModelUsageLine summary={modelUsage} />}
+        <NeedsYourOkContainer parts={parts} />
       </AssistantMessageBubble>
     </MessagePrimitive.Root>
   );

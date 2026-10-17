@@ -3,6 +3,7 @@ import { statfs } from 'node:fs/promises';
 import { SlotDriver, type DriverReadiness } from '@truefoundry/trueforge-core/core';
 import Database from 'better-sqlite3';
 import winston from 'winston';
+import { z } from 'zod';
 
 import { runTokenFactorySmoke, type SmokeCheck } from '../../runtime/tokenFactorySmoke';
 import { processEnv, type CliEnv } from '../env';
@@ -21,6 +22,8 @@ export interface DoctorDeps {
   freeBytes(dir: string): Promise<number>;
   /** Throws unless a write transaction can be opened on an existing database. */
   probeDatabaseWritable(options: { path: string; timeoutMs: number }): void;
+  /** How many model providers are set up in the database, read without changing it. */
+  countModelProviders(options: { path: string }): number;
   /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
   slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
   /** The live Token Factory checks for one model; the key never appears in the results. */
@@ -53,6 +56,17 @@ function probeDatabaseWritable({ path, timeoutMs }: { path: string; timeoutMs: n
   const db = new Database(path, { fileMustExist: true, timeout: timeoutMs });
   try {
     db.exec('BEGIN IMMEDIATE; ROLLBACK;');
+  } finally {
+    db.close();
+  }
+}
+
+const ProviderCountSchema = z.object({ n: z.number() });
+
+function countModelProviders({ path }: { path: string }): number {
+  const db = new Database(path, { fileMustExist: true, readonly: true });
+  try {
+    return ProviderCountSchema.parse(db.prepare('SELECT COUNT(*) AS n FROM model_provider').get()).n;
   } finally {
     db.close();
   }
@@ -99,6 +113,7 @@ export function processDeps(): DoctorDeps {
     get,
     freeBytes,
     probeDatabaseWritable,
+    countModelProviders,
     slotsReadiness,
     tokenFactoryChecks,
   };

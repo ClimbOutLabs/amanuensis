@@ -12,7 +12,7 @@ test_docker_data_disk_is_checked() {
   STUB_DOCKER_ROOT_KB=1000000
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Less than 10 GB free on the disk holding Docker's data ($SB/dockerroot)"
+  assert_flat_contains "$OUT$ERR" "Less than 10 GB free on the disk holding Docker's data ($SB/dockerroot)"
   STUB_DOCKER_ROOT_KB=50000000
   run_install --dry-run
   assert_rc 0
@@ -29,18 +29,19 @@ test_docker_memory_is_checked() {
   STUB_DOCKER_MEM_BYTES=4294967296
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Docker has only 4.0 GB of memory and needs at least 6 GB to build the app"
-  assert_contains "$OUT$ERR" "Settings, Resources, Memory"
-  assert_contains "$OUT$ERR" "add swap"
+  assert_flat_contains "$OUT$ERR" "Docker has only 4.0 GB of memory and needs at least 6 GB to build the app"
+  assert_flat_contains "$OUT$ERR" "Settings, Resources, Memory"
+  assert_flat_contains "$OUT$ERR" "add swap"
   STUB_DOCKER_MEM_BYTES=7516192768
   run_install --dry-run
   assert_rc 0
-  assert_contains "$ERR" "Docker has 7.0 GB of memory"
-  assert_not_contains "$OUT$ERR" "[blocked]"
+  assert_flat_contains "$OUT$ERR" "Docker has 7.0 GB of memory"
+  assert_flat_contains "$OUT$ERR" "8 GB or more is recommended"
   STUB_DOCKER_MEM_BYTES=17179869184
   run_install --dry-run
   assert_rc 0
-  assert_not_contains "$OUT$ERR" "of memory"
+  assert_flat_contains "$OUT$ERR" "Docker has 16 GB of memory"
+  assert_not_contains "$OUT$ERR" "recommended" "plenty of memory is quiet"
   sandbox_drop
 }
 
@@ -52,8 +53,8 @@ test_out_of_memory_build_points_at_docker_memory() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "ran out of memory"
-  assert_contains "$ERR" "Settings, Resources, Memory"
+  assert_flat_contains "$ERR" "ran out of memory"
+  assert_flat_contains "$ERR" "Settings, Resources, Memory"
   clear_input
   sandbox_drop
 }
@@ -69,14 +70,14 @@ test_password_length_is_checked_up_front() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 2
-  assert_contains "$ERR" "at most 72 bytes"
+  assert_flat_contains "$ERR" "at most 72 characters"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME/state/instances"
   with_input "$wide
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 2
-  assert_contains "$ERR" "at most 72 bytes"
+  assert_flat_contains "$ERR" "at most 72 characters"
   with_input "$long72
 "
   run_install --yes --password-stdin --email owner@example.invalid
@@ -123,14 +124,12 @@ test_end_of_input_at_the_password_prompt_aborts() {
   t_begin "Ctrl-D at the password prompt stops the run cleanly"
   sandbox_new
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=><EOF>"
+Password for owner@example.invalid=><EOF>"
   assert_eq "$RC" 1
-  assert_contains "$OUT" "no password was entered"
+  assert_contains "$OUT" "No password was entered"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
   assert_no_path "$AMAN_HOME/state/lock"
   assert_eq "$(log_count "docker build")" 0 "nothing was built"
@@ -138,45 +137,39 @@ Password for the owner account=><EOF>"
 }
 
 test_prompts_and_summary_use_plain_words() {
-  t_begin "prompts and the summary avoid jargon and do not present the sign-in service as a page to open"
+  t_begin "prompts and the summary avoid jargon and say nothing about the sign-in service as a page"
   sandbox_new
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Address you will use from other devices (press Enter to use this computer only)"
+  assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter)"
+  assert_contains "$OUT" "Your email, used to sign in"
+  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters"
+  assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
-  assert_contains "$OUT" "Sign-in service (used by the app automatically, not a page to open)"
+  assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"
   assert_not_contains "$OUT" "  Login:"
-  assert_contains "$OUT" "port 8791 on this computer"
+  assert_flat_contains "$OUT" "on port 8791 at: 127.0.0.1, localhost"
   sandbox_drop
 }
 
 test_model_hint() {
-  t_begin "a skipped model address prints a next step and how to make a local server reachable"
+  t_begin "a fresh install shows the model as not set, says where to add one, and names no model product"
   sandbox_new
   install_machine
-  assert_contains "$OUT" "not set yet. Next step: open Settings > Models"
-  assert_contains "$OUT" "must listen on more than 127.0.0.1"
-  assert_contains "$OUT" "host.docker.internal"
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
+  assert_not_contains "$OUT" "must listen on more than 127.0.0.1" "models are set up in the app, not here"
   local product
   for product in ollama llama lmstudio vllm openai; do
     case "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" in *"$product"*) t_fail "names a product: $product" ;; *) t_pass ;; esac
   done
-  sandbox_drop
-  sandbox_new
-  with_input "$SENTINEL_PASSWORD
-"
   run_install --yes --password-stdin --email owner@example.invalid --model-endpoint http://localhost:11434/v1
-  clear_input
-  assert_rc 0
-  assert_contains "$ERR" "Use host.docker.internal instead of localhost"
-  assert_contains "$OUT" "open Settings > Models and enter http://localhost:11434/v1"
+  assert_rc 2
+  assert_flat_contains "$ERR" "unknown option --model-endpoint"
   sandbox_drop
 }
 

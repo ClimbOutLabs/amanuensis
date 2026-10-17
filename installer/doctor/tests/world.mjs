@@ -20,7 +20,26 @@ export const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
 export const GIB_KB = 1024 * 1024;
 export const GIB = 1024 * 1024 * 1024;
 
-const SYSTEM_TOOLS = ['bash', 'sed', 'awk', 'tr', 'cut', 'head', 'date', 'stat', 'timeout', 'cat', 'env', 'dirname'];
+const SYSTEM_TOOLS = [
+  'bash',
+  'sed',
+  'awk',
+  'tr',
+  'cut',
+  'head',
+  'date',
+  'stat',
+  'timeout',
+  'cat',
+  'env',
+  'dirname',
+  'grep',
+  'uname',
+  'wc',
+  'find',
+  'id',
+  'chmod',
+];
 
 const FAKE_DOCKER = `#!/usr/bin/env bash
 dir="$FAKE_DOCKER_DIR"
@@ -32,9 +51,14 @@ case "$1" in
   version) key=version ;;
   compose) key="compose_$2" ;;
   ps) key=ps ;;
+  logs) eval "last=\\\${$#}"; key="logs_$last" ;;
   port) key="port_$2" ;;
   exec) shift; while [ "$1" = -e ]; do shift 2; done; key="exec_$1" ;;
+  run) key=pki_info ;;
   image) eval "last=\\\${$#}"; key="image_$(sanitize "$last")" ;;
+  images) key=images ;;
+  rmi) key=rmi ;;
+  builder) key=builder ;;
   *) key=unknown ;;
 esac
 if [ ! -e "$dir/$key.out" ] && [ ! -e "$dir/$key.rc" ] && [ ! -e "$dir/$key.err" ]; then
@@ -120,6 +144,8 @@ export function createWorld({ instances = ['main'] } = {}) {
       symlinkSync(found, path.join(tools, tool));
     }
   }
+
+  writeFileSync(path.join(root, 'os-release'), 'ID=ubuntu\n');
 
   const world = {
     root,
@@ -208,7 +234,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       for (const name of wired) {
         writeFileSync(
           path.join(world.instanceDir(name), 'compose.yaml'),
-          'services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n',
+          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '4'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
         );
       }
       return repo;
@@ -230,6 +256,98 @@ export function createWorld({ instances = ['main'] } = {}) {
       writeFileSync(path.join(fake, `curl_${key}.err`), error);
       writeFileSync(path.join(fake, `curl_${key}.status`), String(status));
       writeFileSync(path.join(fake, `curl_${key}.body`), body);
+    },
+    /** An instance opened on the local network: its record lists the origins it answers at and `ip` reports this computer's addresses. */
+    network(
+      name,
+      {
+        origins = 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791',
+        addresses = ['127.0.0.1', '192.168.1.20'],
+        extraHosts = '',
+      } = {},
+    ) {
+      const dir = path.join(home, 'state', 'instances');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, `${name}.conf`),
+        `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=${extraHosts}\n`,
+      );
+      const lines = addresses
+        .map((entry, index) => {
+          const [iface, address] = entry.includes(':') ? entry.split(':') : ['eth0', entry];
+          return `${index + 1}: ${iface}    inet ${address}/24 scope global ${iface}`;
+        })
+        .join('\\n');
+      world.install('ip', `#!/usr/bin/env bash\nprintf '${lines}\\n'\n`);
+    },
+    /**
+     * An instance served over https: its record, the authority's files and what the certificate script reports about
+     * the root and the certificate. A request to https://127.0.0.1:<port>/healthz is answered with `healthz`.
+     */
+    tls(
+      name,
+      {
+        leafDays = 300,
+        rootDays = 3000,
+        leafNames = ['127.0.0.1', '192.168.1.20', 'localhost'],
+        origins = 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443',
+        keyMode = 0o600,
+        healthz = 200,
+        constrained = true,
+        covers = true,
+        endsInSeconds = undefined,
+        info = undefined,
+      } = {},
+    ) {
+      const dir = path.join(home, 'state', 'instances');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, `${name}.conf`),
+        `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=\ntls=local\ntls_port=8443\n`,
+      );
+      writeFileSync(path.join(home, 'state', 'backups'), 'daily\n');
+      mkdirSync(path.join(home, 'tls', 'ca'), { recursive: true });
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.crt'), 'certificate\n');
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.key'), 'key\n', { mode: keyMode });
+      chmodSync(path.join(home, 'tls', 'ca', 'root.key'), keyMode);
+      const report =
+        info ??
+        JSON.stringify({
+          root_not_after: 'x',
+          root_days_left: rootDays,
+          root_fingerprint: 'AA:BB',
+          root_constrained: constrained,
+          root_covers_leaf: covers,
+          leaf_not_after: 'x',
+          leaf_days_left: leafDays,
+          leaf_names: leafNames,
+        });
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.fingerprint'), 'AA:BB:CC\n');
+      if (endsInSeconds !== undefined) {
+        mkdirSync(path.join(home, 'tls', 'leaf', name), { recursive: true });
+        writeFileSync(path.join(home, 'tls', 'leaf', name, 'leaf.notafter'), `${String(NOW + endsInSeconds)}\n`);
+      }
+      world.set('pki_info', { out: `${report}\n`, rc: 0 });
+      world.install('curl', FAKE_CURL);
+      world.curlRoute('https://127.0.0.1:8443/healthz', {
+        status: healthz,
+        rc: healthz === 0 ? 7 : 0,
+        error: 'refused',
+      });
+    },
+    /** `crontab -l` prints this table; without a call to this, there is no crontab command at all. */
+    crontab(text) {
+      world.install('crontab', '#!/usr/bin/env bash\ncase "$1" in -l) cat "$FAKE_DOCKER_DIR/crontab" ;; esac\n');
+      writeFileSync(path.join(fake, 'crontab'), text);
+    },
+    /** A stand-in for the installer in the recorded checkout, so a fix can be seen to call it. */
+    installerStub(repo, { rc = 0 } = {}) {
+      const dir = path.join(repo, 'installer');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, 'install.sh'),
+        `#!/usr/bin/env bash\necho "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"\nexit ${rc}\n`,
+      );
     },
     psLine({ id, name, state = 'running', status = 'Up 2 minutes', service }) {
       return `${id}|${name}|${state}|${status}|${service}`;
@@ -256,6 +374,7 @@ export function createWorld({ instances = ['main'] } = {}) {
           DOCKER_CONFIG: dockerConfig,
           FAKE_DOCKER_DIR: fake,
           AMAN_DOCTOR_NOW: String(world.now),
+          AMAN_OS_RELEASE: path.join(root, 'os-release'),
           ...env,
         },
       });
@@ -319,6 +438,7 @@ export const HEALTHY_INSTANCE_CHECKS =
     'clock\tok\tThe clock is within 60 seconds of the login provider.\t',
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
     'attachments\toff\tReading email attachments is not available.\t',
+    'demo\toff\tDemo mode is off.\t',
     'model\toff\tNo Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.\t',
   ].join('\n') + '\n';
 

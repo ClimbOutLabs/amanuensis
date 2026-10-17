@@ -31,6 +31,9 @@ import {
 /** The one repair command shown to users for every slot problem. */
 export const SLOT_FIX_COMMAND = 'aman doctor sandbox --fix';
 
+/** What the model and the chat say when code cannot run because the sandbox is not ready: one fix, no jargon. */
+export const SLOT_NOT_READY_MESSAGE = `Code can't run on this computer yet. To turn it on, run \`${SLOT_FIX_COMMAND}\` on the computer where Aman is installed, then try again.`;
+
 /** A slot that refused a connection is not tried again for this long. */
 const DOWN_FOR_MS = 5_000;
 /** Extra wait allowed for a free slot beyond the call's own time limit. */
@@ -127,22 +130,19 @@ export class SlotDriver implements IsolationDriver {
       return { ready: true };
     }
     const refused = health.filter(slot => slot.state === 'refused');
+    for (const slot of health) {
+      this.logger.warn('sandbox slot is not usable', { slot: slot.index + 1, detail: slot.detail });
+    }
     if (refused.length > 0) {
-      const causes = refused
-        .map(slot => `Slot ${String(slot.index + 1)} failed its checks (${slot.detail})`)
-        .join('. ');
       return {
         ready: false,
         error_code: 'daemon_unavailable',
         reason: 'isolation_refused',
-        error: `The sandbox could not prove its safety limits, so no code was run. ${causes}. Run \`${SLOT_FIX_COMMAND}\`, then check again.`,
+        error: SLOT_NOT_READY_MESSAGE,
+        verbatim: true,
       };
     }
-    return {
-      ready: false,
-      error_code: 'slots_unavailable',
-      error: `The sandbox slots are not running. Run \`${SLOT_FIX_COMMAND}\`, then check again.`,
-    };
+    return { ready: false, error_code: 'slots_unavailable', error: SLOT_NOT_READY_MESSAGE, verbatim: true };
   }
 
   provision(): Promise<void> {

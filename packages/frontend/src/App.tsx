@@ -18,11 +18,15 @@ import {
   TrueForgeUI,
   useTheme,
   VoiceInputProvider,
+  type AgentConfig,
   type AmanAvatarActivity,
   type AmanAvatarMotionSources,
+  type CurrentUser,
   type MemoryBankStatus,
+  type RoutesConfig,
   type SlotOverrides,
   type ThemeConfig,
+  type TrueForgeServerConfig,
 } from '@truefoundry/trueforge-ui';
 import {
   createTrueForgeClient,
@@ -32,7 +36,7 @@ import {
   type BuildIdentity,
   type HarnessAgentSpec,
 } from '@truefoundry/trueforge-ui/plugins/trueforge-agent-server-adapter';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { AuthErrorScreen } from './AuthErrorScreen';
 import { createAuthAwareFetch } from './authFetch';
@@ -61,6 +65,8 @@ const bootClient = createTrueForgeClient({ baseUrl: API_BASE_URL, fetch: authAwa
 const routerBasename = uiRouterBasename();
 const chatFolders = createChatFolderStore(authAwareFetch);
 const spaces = createSpaceStore(authAwareFetch);
+const SERVER_CONFIG: TrueForgeServerConfig = { type: 'trueforge', baseUrl: API_BASE_URL, fetch: authAwareFetch };
+const ROUTES: RoutesConfig | undefined = routerBasename ? { basename: routerBasename } : undefined;
 
 /**
  * Living-avatar clip sources, resolved through the public base path so subpath deploys
@@ -123,6 +129,52 @@ type BootState =
     };
 
 /**
+ * The chat itself. Memoized with props that stay stable across avatar activity flips, so the
+ * activity it reports up to `AmanShell` re-renders only the runtime rail, not the chat tree.
+ */
+const AmanChatSurface = memo(function AmanChatSurface({
+  defaultAgentSpec,
+  openSettings,
+  displayName,
+  overrides,
+  onAgentActivity,
+  onActiveSessionChange,
+}: {
+  defaultAgentSpec: HarnessAgentSpec;
+  openSettings: boolean;
+  displayName: string;
+  overrides: SlotOverrides;
+  onAgentActivity: (activity: AmanAvatarActivity) => void;
+  onActiveSessionChange: (sessionId: string | undefined) => void;
+}) {
+  const agentConfig = useMemo(
+    (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
+    [defaultAgentSpec],
+  );
+  const currentUser = useMemo((): CurrentUser => ({ displayName }), [displayName]);
+  return (
+    <main className="aman-chat-surface">
+      <TrueForgeUI
+        server={SERVER_CONFIG}
+        chatFolders={chatFolders}
+        spaces={spaces}
+        theme={AMAN_THEME}
+        layout="sidebar"
+        withRouter
+        {...(ROUTES ? { routes: ROUTES } : {})}
+        agentConfig={agentConfig}
+        initialSettingsOpen={openSettings}
+        currentUser={currentUser}
+        onAgentActivity={onAgentActivity}
+        onActiveSessionChange={onActiveSessionChange}
+        overrides={overrides}
+        className="app-assistant"
+      />
+    </main>
+  );
+});
+
+/**
  * The authenticated chat surface + runtime rail. Owns the raw agent-activity state that
  * drives the living avatar — scoped here, not at the App root, so every activity
  * transition re-renders only this subtree instead of the whole app.
@@ -155,27 +207,14 @@ function AmanShell({
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   return (
     <div className="aman-shell">
-      <main className="aman-chat-surface">
-        <TrueForgeUI
-          server={{ type: 'trueforge', baseUrl: API_BASE_URL, fetch: authAwareFetch }}
-          chatFolders={chatFolders}
-          spaces={spaces}
-          theme={AMAN_THEME}
-          layout="sidebar"
-          withRouter
-          {...(routerBasename ? { routes: { basename: routerBasename } } : {})}
-          agentConfig={{
-            mode: 'AgentLibraryWithComposer',
-            defaultAgentSpec,
-          }}
-          initialSettingsOpen={openSettings}
-          currentUser={{ displayName }}
-          onAgentActivity={setAvatarActivity}
-          onActiveSessionChange={setActiveSessionId}
-          overrides={overrides}
-          className="app-assistant"
-        />
-      </main>
+      <AmanChatSurface
+        defaultAgentSpec={defaultAgentSpec}
+        openSettings={openSettings}
+        displayName={displayName}
+        overrides={overrides}
+        onAgentActivity={setAvatarActivity}
+        onActiveSessionChange={setActiveSessionId}
+      />
       <AmanRuntimeRail
         modelName={modelName}
         userName={displayName}

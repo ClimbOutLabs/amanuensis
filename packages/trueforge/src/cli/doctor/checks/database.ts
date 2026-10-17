@@ -2,7 +2,7 @@ import { errorCode } from '../../errorCode';
 import type { DoctorDeps } from '../deps';
 import { failCheck, offCheck, okCheck, type Check } from '../schemas';
 
-const START_FIX = 'Restart the instance with "docker compose up -d" in its folder and run doctor again.';
+const START_FIX = 'Run aman doctor instance --fix';
 
 export function isStandalone(deps: DoctorDeps): boolean {
   return deps.env['STANDALONE']?.trim().toLowerCase() !== 'false';

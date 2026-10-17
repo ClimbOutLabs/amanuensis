@@ -61,6 +61,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600). See [Feeding the Token Factory key safely](#feeding-the-token-factory-key-safely). On an instance that already exists it replaces the key and restarts the app.
 - `--token-factory-model ID`: the Token Factory model to use (default `nvidia/nemotron-3-super-120b-a12b`).
 - `--token-factory-daily-cap N`: stop answering after N Token Factory tokens per day (default: no cap).
+- `--tls local|off`: https on your network with a certificate from an authority made on this computer (the default), or plain http. See [First login](#first-login).
 - `--tls caddy`: serve `--public-url` and `--login-url` over https with Caddy on this computer. See [Https with Caddy](#https-with-caddy).
 - `--tls-root`: let the installer run the printed root steps for `--tls caddy` (and for the Caddy removal of `instance remove`) without asking. `--yes` alone never uses sudo.
 - `--public-ip ADDRESS`: this computer's public IPv4 address for the DNS check of `--tls caddy`, instead of asking a lookup service.
@@ -93,7 +94,9 @@ If the installer just installed Docker for you, it finishes the same run without
 
 ## First login
 
-When the installer finishes, it prints an address like `http://127.0.0.1:<port>` (`localhost` works too). Open it in your browser and sign in with the owner email and the password you set. The first run is local only: the app and its login server are reached over plain HTTP on loopback.
+When the installer finishes, it prints a short table with the addresses to open. By default Aman answers at every address this computer has on a private network (`127.0.0.1`, `localhost`, its LAN address, its Tailscale address, its host name, `<name>.local` and its MagicDNS name), and signing in works from each of them: open any one in a browser, from this computer or another device, and sign in with the owner email and the password you set. The sign-in service itself stays on this computer; the app passes its pages through under its own address.
+
+On a home network the app is served over https at port 8443 (the next free port), with a certificate from an authority the installer makes on this computer: nothing needs administrator rights or a package on the host, and a pinned web front end in the instance's own project serves it. The plain port (8791) only sends devices to https and serves one short page, `/trust`, with the certificate for each kind of device (an iPhone profile and a certificate file for Android, Mac and Windows). Each device trusts the authority once, with the steps on that page; the ending of the install prints the link and a code a phone can scan. The authority lasts ten years, the certificate renews with the daily backup (`aman doctor tls` checks it, `aman doctor tls --fix` renews it), and the authority's key is part of every backup so a restored computer keeps the one your devices trust. `--tls off` keeps plain http, where the password is not encrypted on the way and only Tailscale protects it. A public address is never used over plain HTTP: for access from the internet use `--public-url`, `--login-url` and `--tls caddy`. `--address <name or private address>` (repeatable) adds a name this computer cannot work out itself, and `--local-only` keeps the app on `127.0.0.1` alone. If this computer gets a new address later, `aman doctor network` says so and `aman doctor network --fix` adds it.
 
 Your password is never stored anywhere. The installer hashes it once and keeps only the hash.
 
@@ -118,6 +121,20 @@ installer/install.sh instance remove <name> --purge-data
 This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise.
 
 An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
+
+## Adding sign-in users to an instance
+
+To let other people (for example hackathon judges) sign in to one instance without giving them their own, add members:
+
+```bash
+installer/install.sh instance add-user <name> --email <address> [--role member] [--instance <instance>]
+installer/install.sh instance list-users
+installer/install.sh instance remove-user <name>
+```
+
+`add-user` generates a password, prints it once, and stores only its hash in the instance's `dex.env`. To choose the password yourself, pass `--password-stdin` and give it on the first line of stdin; it is never a command-line value. The command adds the user to the sign-in service and to the app's `OIDC_ALLOWED_EMAILS`, then restarts both. Running it again for the same user changes nothing and keeps the password; to reset a password, run `remove-user` and `add-user`.
+
+Members can chat and see their own history. Only the owner is an admin: members cannot open server settings (model providers, connectors, sandbox, skills) and see only their own sessions. `--role member` is the only role. Users are kept in the installer's registry, so a re-run, an upgrade or an instance restart keeps them. `list-users` shows names, emails and roles, never hashes, and `aman doctor` reports the user count. With several instances, pass `--instance`.
 
 ## Using it from other devices
 
@@ -165,6 +182,8 @@ aman doctor --deep          # raises the probe timeout to 30 seconds
 aman doctor --json          # machine-readable output
 aman doctor sandbox         # sandbox: every slot's safety checks, then a real call through the app
 aman doctor sandbox --fix   # repair the sandbox: rebuild the image, reload AppArmor, recreate disks, restart the slots
+aman doctor network         # are all this computer's addresses listed for sign-in?
+aman doctor network --fix   # add the new ones and restart the instance
 ```
 
 Each check reports one of four states:

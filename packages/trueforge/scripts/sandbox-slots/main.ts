@@ -10,18 +10,22 @@
  * the image, profile, disks and every slot's attestation), `--build-only` (build the image and stop), `--restart`
  * (recreate running slots), `--repo-root <dir>` (where the compose files and `ops/sandbox-slot` are; default this
  * checkout), `--log-file <path>` (send the image build output there), `--command-name <text>` (the command quoted in
- * fix lines).
+ * fix lines), `--verbose` (show the tool output a failure ends with), `--embedded` (print only the lines of the parts,
+ * for a caller that prints its own title, phases and closing block).
  * Exit code 0 when every check passes, 1 when a check fails, 2 on a usage error.
  */
-import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdtempSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { createUi, type Ui, type UiStream } from '../lib/ui.js';
 import { createPacksPort, parsePackList, type Download } from './packs.js';
+import { SlotsReporter } from './report.js';
 import {
   CommandNotFoundError,
   DEFAULT_DISK_GB,
@@ -33,7 +37,6 @@ import {
   stopSandboxSlots,
   type CommandResult,
   type CommandRunner,
-  type SlotsCheck,
   type SlotsResult,
 } from './slots.js';
 
@@ -76,21 +79,33 @@ const download: Download = async ({ url, destination }) => {
   throw new Error('too many redirects');
 };
 
-/** Asks on the terminal; without a terminal the answer is no unless `--yes` was given. */
-async function askYesNo({ question, assumeYes }: { question: string; assumeYes: boolean }): Promise<boolean> {
-  if (assumeYes) {
-    return true;
-  }
+function streamOf(stream: NodeJS.WriteStream): UiStream {
+  return { write: text => void stream.write(text), isTTY: stream.isTTY, columns: stream.columns };
+}
+
+/** One line from the terminal; without a terminal nothing can be asked, so the input counts as ended. */
+async function readTerminalLine(): Promise<string | undefined> {
   if (!process.stdin.isTTY) {
-    return false;
+    return undefined;
   }
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
-    const answer = await rl.question(`${question}\nContinue? [y/N] `);
-    return /^y(es)?$/i.test(answer.trim());
+    return await rl.question('');
   } finally {
     rl.close();
   }
+}
+
+/** Asks sudo for the password once, with our own prompt, and says whether later sudo calls will not ask again. */
+function prepareSudo(ui: Ui): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    return Promise.resolve(false);
+  }
+  ui.hint('The next steps need your password once.');
+  const asked = spawnSync('sudo', ['-v', '-p', ui.promptText({ label: 'Your password, for sudo (not shown):' })], {
+    stdio: 'inherit',
+  });
+  return Promise.resolve(asked.status === 0 && spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0);
 }
 
 /** Where a command's streamed output goes: the terminal, or a log file when the caller wants only progress lines. */
@@ -132,12 +147,12 @@ function createRunCommand({ logFile }: { logFile: string | undefined }): Command
     });
 }
 
-function formatCheck(check: SlotsCheck): string {
-  return `${check.status === 'ok' ? '[ok]  ' : '[note]'} ${check.message}\n`;
-}
-
-function formatFailure(result: Extract<SlotsResult, { ok: false }>): string {
-  return `[fail] ${result.step}: ${result.error}\n       Fix: ${result.fix}\n`;
+/** The document `--json` prints; it carries exactly the fields it always has, not the ones only the text report uses. */
+function wireResult(result: SlotsResult): unknown {
+  if (result.ok) {
+    return result;
+  }
+  return { ok: false, checks: result.checks, step: result.step, error: result.error, fix: result.fix };
 }
 
 async function main(): Promise<number> {
@@ -158,6 +173,8 @@ async function main(): Promise<number> {
     'repo-root'?: string | undefined;
     'log-file'?: string | undefined;
     'command-name'?: string | undefined;
+    verbose?: boolean | undefined;
+    embedded?: boolean | undefined;
   };
   try {
     ({ values } = parseArgs({
@@ -178,12 +195,14 @@ async function main(): Promise<number> {
         'repo-root': { type: 'string' },
         'log-file': { type: 'string' },
         'command-name': { type: 'string' },
+        verbose: { type: 'boolean' },
+        embedded: { type: 'boolean' },
       },
       strict: true,
     }));
   } catch (error: unknown) {
     process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix [--yes]] [--disk-gb <n>] [--no-hard-disk-limit] [--add go,rust,java] [--remove go,rust,java] [--json] [--instance <name>] [--check | --build-only | --restart] [--repo-root <dir>] [--log-file <path>] | --down [--purge] [--instance <name>]\n`,
+      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix [--yes]] [--disk-gb <n>] [--no-hard-disk-limit] [--add go,rust,java] [--remove go,rust,java] [--json] [--instance <name>] [--check | --build-only | --restart] [--repo-root <dir>] [--log-file <path>] [--verbose] [--embedded] | --down [--purge] [--instance <name>]\n`,
     );
     return 2;
   }
@@ -202,8 +221,12 @@ async function main(): Promise<number> {
     process.stderr.write('--check, --build-only and --restart are separate; --check also does not take --fix.\n');
     return 2;
   }
-  const run = createRunCommand({ logFile: values['log-file'] });
+  const json = values.json === true;
   const commandName = values['command-name'] ?? 'pnpm sandbox:slots';
+  // Tool output goes to a private log file; with --json and no file it stays on stderr as it always did.
+  const logFile =
+    values['log-file'] ?? (json ? undefined : join(mkdtempSync(join(tmpdir(), 'aman-slots-')), 'slots.log'));
+  const run = createRunCommand({ logFile });
   const diskGb = values['disk-gb'] === undefined ? DEFAULT_DISK_GB : Number(values['disk-gb']);
   if (!Number.isInteger(diskGb) || diskGb < MIN_DISK_GB || diskGb > MAX_DISK_GB) {
     process.stderr.write(`--disk-gb must be a whole number from ${String(MIN_DISK_GB)} to ${String(MAX_DISK_GB)}.\n`);
@@ -231,13 +254,34 @@ async function main(): Promise<number> {
     });
     return stopped.exitCode === 0 ? 0 : 1;
   }
-  const json = values.json === true;
+  const mode = values.check === true ? 'check' : values['build-only'] === true ? 'build' : 'up';
+  const ui = createUi({
+    env: process.env,
+    out: streamOf(process.stdout),
+    err: streamOf(process.stderr),
+    readLine: readTerminalLine,
+    verbose: values.verbose === true,
+    assumeYes: values.yes === true,
+  });
+  const reporter = new SlotsReporter({
+    ui,
+    mode,
+    embedded: values.embedded === true,
+    logFile,
+    instance,
+    commandName,
+    home: process.env['HOME'],
+    now: () => Date.now(),
+  });
+  if (!json) {
+    reporter.start();
+  }
   const result = await runSandboxSlots({
     repoRoot,
     run,
     fix: values.fix === true,
     instance,
-    mode: values.check === true ? 'check' : values['build-only'] === true ? 'build' : 'up',
+    mode,
     command: commandName,
     restart: values.restart === true,
     platform: process.platform,
@@ -247,24 +291,33 @@ async function main(): Promise<number> {
     addPacks: added.packs,
     removePacks: removed.packs,
     hardDiskLimit: values['no-hard-disk-limit'] !== true,
-    confirm: question => askYesNo({ question, assumeYes: values.yes === true }),
+    confirm: async question => {
+      reporter.explain(question);
+      const label = 'Create the slot disks?';
+      if (values.yes === true) {
+        // --yes is this command's own approval of the one question it asks.
+        ui.promptHead({ label: `${label} [y/N]` });
+        ui.writeProgress('yes (--yes)\n');
+        return true;
+      }
+      return ui.confirm({ question: label, fallback: 'n' });
+    },
     onCheck: json
       ? undefined
       : check => {
-          process.stdout.write(formatCheck(check));
+          reporter.onCheck(check);
         },
+    onStage: json
+      ? undefined
+      : stage => {
+          reporter.onStage(stage);
+        },
+    prepareRoot: json ? undefined : () => prepareSudo(ui),
   });
   if (json) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  } else if (result.ok) {
-    for (const warning of result.warnings) {
-      process.stdout.write(`[warn] ${warning}\n`);
-    }
-    const size = result.image_size_mb === undefined ? '' : ` Image size: ${String(result.image_size_mb)} MB.`;
-    const done = values.check === true ? 'healthy' : values['build-only'] === true ? 'built' : 'running';
-    process.stdout.write(`\nThe sandbox slots are ${done}.${size}\n`);
+    process.stdout.write(`${JSON.stringify(wireResult(result))}\n`);
   } else {
-    process.stdout.write(`\n${formatFailure(result)}`);
+    reporter.finish({ result, imageSizeMb: result.ok ? result.image_size_mb : undefined });
   }
   return result.ok ? 0 : 1;
 }

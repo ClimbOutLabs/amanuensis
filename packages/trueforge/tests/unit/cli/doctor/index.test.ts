@@ -21,7 +21,7 @@ async function run(args: string[], deps = fakeDeps({ env: healthyEnv, get: healt
 }
 
 describe('aman doctor', () => {
-  it('prints a JSON array of checks and exits 0 when nothing fails', async () => {
+  it('prints a JSON array of checks and exits 0 when nothing fails (a missing model is only a warning)', async () => {
     const { code, io } = await run([]);
     expect(code).toBe(0);
     const checks = z.array(CheckSchema).parse(JSON.parse(io.out.join('')));
@@ -33,7 +33,8 @@ describe('aman doctor', () => {
       ['clock', 'ok'],
       ['run_code', 'off'],
       ['attachments', 'off'],
-      ['model', 'off'],
+      ['demo', 'off'],
+      ['model', 'warn'],
     ]);
   });
 
@@ -104,7 +105,7 @@ describe('aman doctor', () => {
     const deps = fakeDeps({ env: healthyEnv, get: () => Promise.reject(networkError('ECONNREFUSED')) });
     const { io } = await run(['--text'], deps);
     const lines = io.out.join('').trimEnd().split('\n');
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     const [id, state, detail, fix] = lines[0]?.split('\t') ?? [];
     expect([id, state]).toEqual(['service', 'fail']);
     expect(detail).not.toBe('');

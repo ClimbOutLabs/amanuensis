@@ -20,17 +20,17 @@ describe('ToolApprovalBar', () => {
     render(
       <ToolApprovalBar
         toolName="apply_patch"
-        guidance="Allow once still works outside an active plan."
+        guidance="Approve still works outside an active plan."
         approveOptions={[
-          { id: 'allow-once', label: 'Allow once' },
-          { id: 'allow-chat', label: 'Allow in this chat' },
+          { id: 'allow-once', label: 'Approve' },
+          { id: 'allow-chat', label: 'Approve for this chat' },
         ]}
         denyOptions={[{ id: 'deny', label: 'Deny' }]}
         onSelect={() => {}}
       />,
     );
 
-    expect(screen.getByText('Allow once still works outside an active plan.')).toBeInTheDocument();
+    expect(screen.getByText('Approve still works outside an active plan.')).toBeInTheDocument();
     expect(screen.getAllByRole('radio').map(option => option.getAttribute('value'))).toEqual([
       'allow-once',
       'allow-chat',
@@ -63,14 +63,14 @@ describe('ToolApprovalBar', () => {
     render(
       <ToolApprovalBar
         toolName="shell"
-        approveOptions={[{ id: 'allow-once', label: 'Allow once', variant: 'primary' }]}
+        approveOptions={[{ id: 'allow-once', label: 'Approve', variant: 'primary' }]}
         denyOptions={[{ id: 'reject', label: 'Reject', variant: 'destructive' }]}
         onSelect={onSelect}
       />,
     );
 
     expect(screen.getByRole('radiogroup', { name: 'Approval options for shell' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow once' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Reject' }));
     expect(onSelect).toHaveBeenNthCalledWith(1, 'allow-once');
     expect(onSelect).toHaveBeenNthCalledWith(2, 'reject');

@@ -3,6 +3,7 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../icons/Icon.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -22,7 +23,7 @@ export function Toast({ title, description, open, onOpenChange, variant = 'error
   const handleCopy = useCallback(async () => {
     const text = `${title}\n${description}`;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {

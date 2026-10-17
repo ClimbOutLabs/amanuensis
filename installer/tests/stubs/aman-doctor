@@ -2,9 +2,23 @@
 # Stand-in for the doctor shim: prints a fixed document and exits as STUB_DOCTOR_EXIT says.
 printf 'doctor %s\n' "$*" >>"$STUB_LOG"
 # The sandbox check has its own exit code so a failing sandbox is told apart from a failing machine.
+# shellcheck source=../../lib/ui.sh
+. "$(dirname "$0")/../lib/ui.sh"
+ui_init
 if [ "${2:-}" = sandbox ]; then
-  echo "sandbox check stub"
+  ui_ok "run_code is ready: the sandbox slots answer through the app."
   exit "${STUB_SANDBOX_DOCTOR_EXIT:-0}"
+fi
+if [ "${2:-}" = --summary ]; then
+  # Like the real summary: one line when all is well, otherwise only the problems.
+  if [ "${STUB_DOCTOR_EXIT:-0}" = 0 ]; then
+    ui_ok "All 16 checks passed"
+  else
+    ui_line "Instance main"
+    ui_fail "Port 5556 is already in use by another program." "Run aman doctor instance --fix"
+    ui_hint "15 other checks passed. Full report: aman doctor"
+  fi
+  exit "${STUB_DOCTOR_EXIT:-0}"
 fi
 echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
 exit "${STUB_DOCTOR_EXIT:-0}"

@@ -1,18 +1,18 @@
 # shellcheck shell=bash
-# Free loopback port selection. Only this machine's own loopback is looked at; nothing is scanned.
+# Free port selection. Only this machine is looked at, never the network; nothing is scanned.
 
 # Container-side ports that share the instance network namespace and so can never be a host pick.
 APP_CONTAINER_PORT=8790
 DEX_TELEMETRY_PORT=5558
 
-# True when something already holds the loopback port. A bind attempt is the real test; the
+# True when something already holds the port on any address, since an instance may publish it on every interface. A bind attempt is the real test; the
 # listener table and a loopback connect are fallbacks when python3 is absent.
 port_in_use() {
   local port=$1
   if command -v python3 >/dev/null 2>&1; then
     if python3 -c 'import socket, sys
 s = socket.socket()
-s.bind(("127.0.0.1", int(sys.argv[1])))' "$port" 2>/dev/null; then
+s.bind(("0.0.0.0", int(sys.argv[1])))' "$port" 2>/dev/null; then
       return 1
     fi
     return 0

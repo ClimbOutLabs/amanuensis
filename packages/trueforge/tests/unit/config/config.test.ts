@@ -1,11 +1,17 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   assertNetworkAuthRequirement,
   assertOidcIssuerTransportAllowed,
   getPublicBaseUrl,
   getPublicUiBasePath,
   isLoopbackHost,
+  isPrivateNetworkHost,
+  parseAllowedOrigins,
+  parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
+  parseTrustedProxyAddresses,
   TrueForgeAuthMode,
   type PublicUrlConfig,
   type ServerConfiguration,
@@ -354,4 +360,144 @@ describe('parseTokenFactoryMode', () => {
   it('throws on anything else', () => {
     expect(() => parse('sometimes')).toThrow('TOKEN_FACTORY_MODE must be one of off, fallback, force');
   });
+});
+
+/** The hosts and classes the installer's tests read as well, so the app and the installer agree on what is private. */
+function readSharedHosts(): { kind: string; host: string }[] {
+  const file = path.resolve(__dirname, '../../../../../installer/tests/private-hosts.txt');
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(line => line.trim() !== '' && !line.startsWith('#'))
+    .map(line => {
+      const [kind = '', host = ''] = line.trim().split(/\s+/);
+      return { kind, host };
+    });
+}
+
+describe('isPrivateNetworkHost', () => {
+  const hosts = readSharedHosts();
+
+  it('reads a list with every class', () => {
+    expect(new Set(hosts.map(entry => entry.kind))).toEqual(
+      new Set(['private', 'cgnat', 'public', 'app-private', 'app-public']),
+    );
+  });
+
+  it.each(hosts.filter(entry => ['private', 'app-private', 'cgnat'].includes(entry.kind)))(
+    'accepts $host ($kind), since a listed address is the operator choice',
+    ({ host }) => {
+      expect(isPrivateNetworkHost(host)).toBe(true);
+    },
+  );
+
+  it.each(hosts.filter(entry => ['public', 'app-public'].includes(entry.kind)))('rejects $host', ({ host }) => {
+    expect(isPrivateNetworkHost(host)).toBe(false);
+  });
+
+  it('rejects an empty host and a doubled dot', () => {
+    expect(isPrivateNetworkHost('a..b')).toBe(false);
+    expect(isPrivateNetworkHost('')).toBe(false);
+  });
+});
+
+describe('parseAllowedOrigins', () => {
+  it('is empty when unset or blank', () => {
+    expect(parseAllowedOrigins(undefined)).toEqual([]);
+    expect(parseAllowedOrigins(' , ')).toEqual([]);
+  });
+
+  it('keeps plain http for this computer and private networks, and https for anything', () => {
+    expect(
+      parseAllowedOrigins(
+        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark.local:8791,https://aman.example.com',
+      ),
+    ).toEqual([
+      'http://127.0.0.1:8791',
+      'http://localhost:8791',
+      'http://192.168.1.20:8791',
+      'http://100.101.102.103:8791',
+      'http://spark.local:8791',
+      'https://aman.example.com',
+    ]);
+  });
+
+  it('normalises and removes duplicates', () => {
+    expect(parseAllowedOrigins('HTTP://Spark.Local:8791,http://spark.local:8791,https://a.example.com:443')).toEqual([
+      'http://spark.local:8791',
+      'https://a.example.com',
+    ]);
+  });
+
+  it.each(['http://203.0.113.9:8791', 'http://aman.example.com', 'http://8.8.8.8'])(
+    'refuses a public address over plain http (%s) and points to HTTPS',
+    entry => {
+      expect(() => parseAllowedOrigins(entry)).toThrow(/public address over plain http.*--tls caddy/);
+    },
+  );
+
+  it.each([
+    'ftp://spark:8791',
+    'http://spark:8791/app',
+    'http://user@spark:8791',
+    'http://spark:8791?x=1',
+    'spark',
+    'http://',
+  ])('refuses %s', entry => {
+    expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);
+  });
+
+  it.each(['http://:pw@192.168.1.20:8791', 'http://:@192.168.1.20:8791', 'http://user:pw@192.168.1.20:8791'])(
+    'refuses a login of any kind (%s)',
+    entry => {
+      expect(() => parseAllowedOrigins(entry)).toThrow(/no path, query or login/);
+    },
+  );
+
+  it.each([
+    'http://0x7f.1:8791',
+    'http://0xc0a80114:8791',
+    'http://0300.0250.01.020:8791',
+    'http://3232235796:8791',
+    'http://192.168.01.20:8791',
+    'http://010.1.1.1:8791',
+    'http://192.168.1:8791',
+  ])('refuses an address written in octal, hex or as one number (%s) instead of rewriting it', entry => {
+    expect(() => parseAllowedOrigins(entry)).toThrow(/octal, hex or as one number|public address/);
+  });
+
+  it('keeps an address written as four plain decimal parts', () => {
+    expect(parseAllowedOrigins('http://192.168.1.20:8791,http://10.0.0.1')).toEqual([
+      'http://192.168.1.20:8791',
+      'http://10.0.0.1',
+    ]);
+  });
+});
+
+describe('parseLoginUpstreamUrl', () => {
+  it('is empty when unset and keeps a loopback address with a path', () => {
+    expect(parseLoginUpstreamUrl(undefined)).toBe('');
+    expect(parseLoginUpstreamUrl(' ')).toBe('');
+    expect(parseLoginUpstreamUrl('http://127.0.0.1:5556/dex/')).toBe('http://127.0.0.1:5556/dex');
+  });
+
+  it.each(['http://192.168.1.20:5556/dex', 'https://127.0.0.1:5556/dex', 'http://127.0.0.1:5556', 'nonsense'])(
+    'refuses %s',
+    value => {
+      expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
+});
+
+describe('parseTrustedProxyAddresses', () => {
+  it('is empty when unset and keeps IP addresses', () => {
+    expect(parseTrustedProxyAddresses(undefined)).toEqual([]);
+    expect(parseTrustedProxyAddresses(' 172.17.0.1, fd00::1 ')).toEqual(['172.17.0.1', 'fd00::1']);
+  });
+
+  it.each(['proxy.example.com', '172.17.0.0/16', '*'])(
+    'refuses %s, so a name or range cannot widen the trust',
+    value => {
+      expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
+    },
+  );
 });

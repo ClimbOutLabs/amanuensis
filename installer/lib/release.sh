@@ -17,6 +17,7 @@ pins_validate() {
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
+  valid_digest_ref "$(json_get "$PINS_FILE" caddy_image)" || die "caddy_image in $PINS_FILE must be pinned by sha256 digest"
   node_pins_validate
 }
 
@@ -104,47 +105,44 @@ release_load() {
 
 build_app_image() {
   [ -f "$REPO_ROOT/Dockerfile.dev" ] || die "Dockerfile.dev not found in $REPO_ROOT; run the installer from a checkout of the repository"
-  local log rc=0
-  log=$(umask 077 && mktemp "${TMPDIR:-/tmp}/aman-build.XXXXXX")
-  say "Building the app image $REL_APP_TAG (this is the long step)"
-  # The log is read back to tell an out-of-memory kill (exit 137) from other failures.
-  if ! D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" 2>&1 | tee "$log"; then
-    rc=${PIPESTATUS[0]}
-  fi
+  local rc=0
+  step_begin build-app "Building the Aman app (the long step)"
+  D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
-    if [ "$rc" = 137 ] || grep -Eq 'exit code: 137|signal: killed' "$log"; then
-      rm -f "$log"
-      die "the app image build ran out of memory. Docker needs at least 6 GB: raise it in Docker Desktop under Settings, Resources, Memory (on Linux, free up memory or add swap), then run the installer again. Nothing was changed on the running stack."
+    # The log tells an out-of-memory kill (exit 137) from other failures.
+    if [ "$rc" = 137 ] || grep -Eq 'exit code: 137|signal: killed' "$STEP_LOG"; then
+      step_fail "Building the Aman app ran out of memory" "Docker needs at least 6 GB: raise it in Docker Desktop under Settings, Resources, Memory (on Linux, free up memory or add swap), then run install.sh again. Nothing was changed on the running stack."
     fi
-    rm -f "$log"
-    die "the app image build failed; nothing was changed on the running stack"
+    step_fail "Building the Aman app failed" "Run install.sh again once the cause in the log is fixed. Nothing was changed on the running stack."
   fi
-  rm -f "$log"
+  step_ok "Built the Aman app"
 }
 
 build_stt_image() {
   [ -f "$REPO_ROOT/ops/aman-stt/Dockerfile" ] || die "ops/aman-stt/Dockerfile not found in $REPO_ROOT"
-  say "Building the speech-to-text image $REL_STT_TAG"
-  D build -t "$REL_STT_TAG" "$REPO_ROOT/ops/aman-stt" || die "the speech-to-text image build failed"
+  step_begin build-stt "Building the speech-to-text service"
+  D build -t "$REL_STT_TAG" "$REPO_ROOT/ops/aman-stt" >"$STEP_LOG" 2>&1 || step_fail "Building the speech-to-text service failed" "Run install.sh again once the cause in the log is fixed."
+  step_ok "Built the speech-to-text service"
 }
 
 # Builds whatever is missing. Pulls the login image by digest. Nothing is pushed anywhere.
 images_ensure() {
   if docker_image_exists "$REL_APP_TAG"; then
-    say "App image $REL_APP_TAG already built"
+    ui_skip "The Aman app is already built"
   else
     build_app_image
   fi
   if docker_image_exists "$REL_STT_TAG"; then
-    say "Speech-to-text image $REL_STT_TAG already built"
+    ui_skip "The speech-to-text service is already built"
   else
     build_stt_image
   fi
   if docker_image_exists "$REL_DEX_IMAGE"; then
-    say "Login image already present"
+    ui_skip "The sign-in service is already downloaded"
   else
-    say "Pulling the login image by digest"
-    D pull "$REL_DEX_IMAGE" || die "could not pull $REL_DEX_IMAGE"
+    step_begin pull-login "Downloading the sign-in service"
+    D pull "$REL_DEX_IMAGE" >"$STEP_LOG" 2>&1 || step_fail "The sign-in service could not be downloaded" "Check this computer's network access to ghcr.io (install.sh --print-network lists every host), then run install.sh again."
+    step_ok "Downloaded the sign-in service"
   fi
   sandbox_images_ensure
 }

@@ -9,7 +9,7 @@ storage:
     file: /var/dex/dex.db
 
 # Plain http inside the instance network namespace; the owner's reverse proxy terminates TLS for a
-# public URL. The port equals the published loopback port so the issuer name works from the browser
+# public URL. The port equals the published port so the issuer name works from the browser
 # and from the app container.
 web:
   http: 0.0.0.0:@@LOGIN_PORT@@
@@ -20,6 +20,8 @@ telemetry:
 
 oauth2:
   responseTypes: ['code']
+  # The app only signs people in with the code flow. Naming it alone leaves the device, refresh and password grants off.
+  grantTypes: ['authorization_code']
   skipApprovalScreen: true
 
 enablePasswordDB: true
@@ -29,10 +31,11 @@ staticPasswords:
     hashFromEnv: DEX_USER_PASSWORD_HASH
     username: 'owner'
     userID: 'owner'
+@@IF_MEMBERS@@@@MEMBER_USERS@@
 
 staticClients:
   - id: @@CLIENT_ID@@
     name: Amanuensis
     secretEnv: OIDC_CLIENT_SECRET
     redirectURIs:
-      - @@PUBLIC_URL@@/api/v1/auth/callback
+@@REDIRECT_URIS@@

@@ -16,6 +16,7 @@ interface Call {
   command: string;
   args: string[];
   env: Record<string, string>;
+  interactive: boolean;
 }
 
 /** A scripted docker: `respond` returns the result for a call, or undefined to answer success. */
@@ -25,7 +26,7 @@ function fakeRunner(respond: (call: Call) => Partial<CommandResult> | Error | un
 } {
   const calls: Call[] = [];
   const run: CommandRunner = input => {
-    const call = { command: input.command, args: input.args, env: input.env };
+    const call = { command: input.command, args: input.args, env: input.env, interactive: input.interactive };
     calls.push(call);
     const answer = respond(call);
     if (answer instanceof Error) {
@@ -76,6 +77,8 @@ const BASE_OPTIONS: Omit<SlotsOptions, 'run' | 'fix'> = {
   removePacks: [],
   confirm: () => Promise.resolve(true),
   onCheck: undefined,
+  onStage: undefined,
+  prepareRoot: undefined,
 };
 
 async function run(
@@ -124,7 +127,7 @@ describe('runSandboxSlots', () => {
       seen.push({ args: input.args, env: input.env });
       return Promise.resolve({
         ...OK,
-        ...defaultAnswers({ command: input.command, args: input.args, env: input.env }),
+        ...defaultAnswers({ command: input.command, args: input.args, env: input.env, interactive: input.interactive }),
       });
     };
     const result = await runSandboxSlots({ ...BASE_OPTIONS, run: runner, fix: false, instance: 'lab' });
@@ -162,6 +165,33 @@ describe('runSandboxSlots', () => {
   test('without AppArmor on the host the profile is never probed or loaded', async () => {
     const { calls } = await run(() => undefined);
     expect(calls.some(call => joined(call).includes('apparmor='))).toBe(false);
+  });
+
+  test('announces each part of a full run in order, even a part with nothing to do', async () => {
+    const stages: string[] = [];
+    await run(() => undefined, false, { onStage: stage => void stages.push(stage) });
+    expect(stages).toEqual(['docker', 'image', 'profile', 'disks', 'start', 'attest']);
+  });
+
+  test('a read-only check announces its parts without a start, and a build stops after the image', async () => {
+    const checked: string[] = [];
+    await run(() => undefined, false, { mode: 'check', onStage: stage => void checked.push(stage) });
+    expect(checked).toEqual(['docker', 'image', 'profile', 'disks', 'attest']);
+    const built: string[] = [];
+    await run(() => undefined, false, { mode: 'build', onStage: stage => void built.push(stage) });
+    expect(built).toEqual(['docker', 'image']);
+  });
+
+  test('a failure keeps the tool output apart from its sentence and leaves the message as it was', async () => {
+    const { result } = await run(call =>
+      joined(call).includes('build sandbox-1') ? { exitCode: 1, stderr: 'no route to mirror' } : undefined,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      step: 'build',
+      error: 'Building the sandbox image failed: no route to mirror',
+      detail: 'no route to mirror',
+    });
   });
 
   describe('where the host runs AppArmor', () => {
@@ -203,6 +233,53 @@ describe('runSandboxSlots', () => {
         ],
         ['apparmor_parser', '-r', '-W', '/etc/apparmor.d/aman-sandbox-slot'],
       ]);
+    });
+
+    test('asks for the sudo password once, before the first root step, and lets the steps run with their output captured', async () => {
+      let loaded = false;
+      const order: string[] = [];
+      const { result, calls } = await run(
+        call => {
+          if (call.command === 'sudo') {
+            order.push(`sudo ${call.args[0] ?? ''}`);
+            loaded = true;
+            return undefined;
+          }
+          if (joined(call).includes('apparmor=aman-sandbox-slot')) {
+            return loaded ? undefined : { exitCode: 125 };
+          }
+          return appArmorHost(call);
+        },
+        true,
+        {
+          prepareRoot: () => {
+            order.push('password');
+            return Promise.resolve(true);
+          },
+        },
+      );
+      expect(result.ok).toBe(true);
+      expect(order).toEqual(['password', 'sudo install', 'sudo apparmor_parser']);
+      expect(calls.filter(call => call.command === 'sudo').every(call => call.interactive === false)).toBe(true);
+    });
+
+    test('without a cached password the root steps keep the terminal, as before', async () => {
+      let loaded = false;
+      const { calls } = await run(
+        call => {
+          if (call.command === 'sudo') {
+            loaded = true;
+            return undefined;
+          }
+          if (joined(call).includes('apparmor=aman-sandbox-slot')) {
+            return loaded ? undefined : { exitCode: 125 };
+          }
+          return appArmorHost(call);
+        },
+        true,
+        { prepareRoot: () => Promise.resolve(false) },
+      );
+      expect(calls.filter(call => call.command === 'sudo').every(call => call.interactive === true)).toBe(true);
     });
 
     test('as root the profile is installed and loaded without sudo', async () => {
@@ -268,7 +345,7 @@ describe('runSandboxSlots', () => {
         : undefined,
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
-    expect(!result.ok && result.error).toContain('Slot 3');
+    expect(!result.ok && result.error).toContain('Sandbox 3');
   });
 });
 

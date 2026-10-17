@@ -19,6 +19,47 @@ describe('model check', () => {
     expect(tokenFactoryChecks).not.toHaveBeenCalled();
   });
 
+  describe('without a hosted model key, the model comes from a provider added in the app', () => {
+    const env = { SQLITE_PATH: '/data/db/db.sqlite' };
+
+    it('warns, pointing at Settings and nothing else, when no provider is set up', async () => {
+      const countModelProviders = jest.fn().mockReturnValue(0);
+      const check = await checkModel({ deps: fakeDeps({ env, countModelProviders }), timeoutMs: 1 });
+      expect(countModelProviders).toHaveBeenCalledWith({ path: '/data/db/db.sqlite' });
+      expect(check).toMatchObject({ id: 'model', state: 'warn' });
+      expect(check.fix).toBe('Open Aman and add a model in Settings › Models.');
+      expect(`${check.detail} ${check.fix}`).not.toMatch(/\.env|docker|aman doctor|NEBIUS|command/);
+    });
+
+    it('is ok once a provider is set up', async () => {
+      const one = await checkModel({ deps: fakeDeps({ env, countModelProviders: () => 1 }), timeoutMs: 1 });
+      expect(one).toMatchObject({ state: 'ok', detail: 'A model provider is set up.' });
+      const two = await checkModel({ deps: fakeDeps({ env, countModelProviders: () => 2 }), timeoutMs: 1 });
+      expect(two).toMatchObject({ state: 'ok', detail: '2 model providers are set up.' });
+    });
+
+    it('is off, never a failure, when the providers cannot be read or the database is not the built-in one', async () => {
+      const unreadable = await checkModel({
+        deps: fakeDeps({
+          env,
+          countModelProviders: () => {
+            throw new Error('SQLITE_CANTOPEN');
+          },
+        }),
+        timeoutMs: 1,
+      });
+      expect(unreadable.state).toBe('off');
+      const shared = await checkModel({ deps: fakeDeps({ env: { ...env, STANDALONE: 'false' } }), timeoutMs: 1 });
+      expect(shared.state).toBe('off');
+    });
+
+    it('makes no Token Factory request', async () => {
+      const tokenFactoryChecks = jest.fn();
+      await checkModel({ deps: fakeDeps({ env, tokenFactoryChecks }), timeoutMs: 1 });
+      expect(tokenFactoryChecks).not.toHaveBeenCalled();
+    });
+  });
+
   it('asks the shared Token Factory checks for the configured model and passes on success', async () => {
     const tokenFactoryChecks = jest.fn().mockResolvedValue(PASSING);
     const env = {

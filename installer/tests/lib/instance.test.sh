@@ -67,7 +67,7 @@ test_explicit_busy_port_is_refused() {
   install_machine
   add_instance other --port 8791
   assert_rc 1
-  assert_contains "$ERR" "already used by another instance"
+  assert_flat_contains "$ERR" "already used by another instance"
   assert_no_path "$AMAN_HOME/state/instances/other.conf"
   sandbox_drop
 }
@@ -165,7 +165,7 @@ test_purge_failure_is_not_reported_as_success() {
   STUB_VOLUME_RM_FAIL=aman_second_data
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 1
-  assert_contains "$ERR" "could not delete the volumes: aman_second_data"
+  assert_flat_contains "$ERR" "could not delete the volumes: aman_second_data"
   assert_not_contains "$OUT" "deleted its data volumes"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
   unset STUB_VOLUME_RM_FAIL
@@ -230,6 +230,9 @@ test_public_url_rules() {
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "issuer: https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "https://aman.example.invalid/api/v1/auth/callback"
   assert_contains "$OUT" "Requirements for your reverse proxy"
+  assert_eq "$(env_value pub TRUSTED_PROXY_ADDRESSES)" "172.30.0.1" "the app believes the proxy that reaches it through the network's gateway"
+  assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
+  assert_eq "$(env_value pub LOGIN_UPSTREAM_URL)" "http://127.0.0.1:$(sed -n 's/^login_port=//p' "$AMAN_HOME/state/instances/pub.conf")/dex"
   assert_contains "$OUT" "Never a path prefix"
   assert_contains "$OUT" "Forward the original Host header"
   assert_contains "$OUT" "Do not buffer responses"
@@ -262,15 +265,14 @@ test_url_validation() {
   sandbox_drop
 }
 
-test_model_endpoint_is_recorded_not_a_secret() {
-  t_begin "the model endpoint is remembered for the summary and never goes to .env"
+test_a_new_instance_points_to_settings_for_a_model() {
+  t_begin "an instance added without a hosted model says to add one in Settings and keeps no model address"
   sandbox_new
   install_machine
-  add_instance m --model-endpoint http://host.docker.internal:11434/v1
+  add_instance m
   assert_rc 0
-  assert_contains "$OUT" "Settings > Models"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/m/.env")" "11434"
-  assert_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint=http://host.docker.internal:11434/v1"
+  assert_flat_contains "$OUT" "not set: add one in Settings > Models"
+  assert_not_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint"
   sandbox_drop
 }
 
@@ -279,7 +281,7 @@ test_add_before_install_is_refused() {
   sandbox_new
   add_instance x
   assert_rc 1
-  assert_contains "$ERR" "run install.sh first"
+  assert_flat_contains "$ERR" "run install.sh first"
   sandbox_drop
 }
 
@@ -336,6 +338,49 @@ test_dry_run_instance_add() {
   sandbox_drop
 }
 
+test_refresh_puts_back_lost_settings() {
+  t_begin "instance refresh puts back each lost setting, changes no setting that is there, and keeps the file private"
+  sandbox_new
+  install_machine
+  local env="$AMAN_HOME/instances/main/.env" keys key before after other
+  keys=$(sed -n 's/^\([A-Z_]*\)=.*/\1/p' "$env")
+  assert_contains "$keys" OIDC_CLIENT_SECRET
+  for key in $keys; do
+    before=$(cat "$env")
+    grep -v "^$key=" "$env" >"$SB/env.cut"
+    cat "$SB/env.cut" >"$env"
+    run_install instance refresh main
+    assert_rc 0
+    assert_contains "$(cat "$env")" "$key=" "$key is back"
+    assert_eq "$(grep -c "^$key=" "$env")" 1 "$key is there once"
+    assert_mode "$env" 600
+    after=$(cat "$env")
+    for other in $keys; do
+      [ "$other" = "$key" ] && continue
+      assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
+    done
+    case "$key" in
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY) ;;
+      *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
+    esac
+  done
+  sandbox_drop
+}
+
+test_refresh_leaves_a_complete_file_alone() {
+  t_begin "instance refresh of an instance whose settings are all there rewrites none of them"
+  sandbox_new
+  install_machine
+  local before
+  before=$(cat "$AMAN_HOME/instances/main/.env")
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before"
+  assert_not_contains "$OUT$ERR" "Put back"
+  assert_eq "$(env_value main LOGIN_UPSTREAM_URL)" "" "an instance opened on this computer has no public sign-in address to limit"
+  sandbox_drop
+}
+
 test_list_without_docker() {
   t_begin "list still shows registered instances when Docker is down"
   sandbox_new
@@ -361,6 +406,8 @@ test_dry_run_only_where_it_means_something() {
 }
 
 test_three_instances_never_share_values
+test_refresh_puts_back_lost_settings
+test_refresh_leaves_a_complete_file_alone
 test_list_without_docker
 test_dry_run_only_where_it_means_something
 test_skips_ports_in_use
@@ -377,7 +424,7 @@ test_yes_does_not_bypass_purge_confirmation
 test_name_validation
 test_public_url_rules
 test_url_validation
-test_model_endpoint_is_recorded_not_a_secret
+test_a_new_instance_points_to_settings_for_a_model
 test_add_before_install_is_refused
 test_dry_run_instance_add
 tests_finish

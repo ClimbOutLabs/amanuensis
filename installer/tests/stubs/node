@@ -3,6 +3,13 @@
 # and answers like the real setup: --check reports the state in $STUB_STATE/slots_state, a full run brings the slots up.
 set -u
 printf 'node %s\n' "$*" >>"$STUB_LOG"
+# Prints its progress lines in the installer's own style, as the real setup does.
+if [ -n "${STUB_UI_SH:-}" ]; then
+  # shellcheck source=../../lib/ui.sh
+  . "$STUB_UI_SH"
+  ui_init
+fi
+say_ok() { if [ -n "${STUB_UI_SH:-}" ]; then ui_ok "$1"; else echo "+ $1"; fi; }
 if [ "${1:-}" = --version ]; then
   echo "${STUB_NODE_VERSION:-v22.22.0}"
   exit 0
@@ -29,7 +36,7 @@ state=$(cat "$S/slots_state" 2>/dev/null || echo ready)
 case "$mode" in
   build)
     echo "amanuensis-sandbox-slot:local" >>"$S/images"
-    echo "[ok]   Built amanuensis-sandbox-slot:local"
+    say_ok "Built the slot image"
     exit "${STUB_SLOT_BUILD_RC:-0}"
     ;;
   down)
@@ -48,10 +55,10 @@ case "$mode" in
     ;;
   up)
     if [ "$state" != ready ] && [ "$fix" != 1 ]; then
-      echo "[fail] $state: needs --fix"
+      echo "x $state: needs --fix" >&2
       exit 1
     fi
-    echo "[ok]   Started 4 slots"
+    say_ok "Started 4 slots"
     mkdir -p "$S/up"
     echo slots >"$S/up/$instance-slots"
     for n in 1 2 3 4; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done

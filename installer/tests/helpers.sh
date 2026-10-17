@@ -6,6 +6,9 @@ TESTS_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 INSTALLER_DIR=$(cd -P -- "$TESTS_DIR/.." && pwd)
 SENTINEL_PASSWORD="sentinel-pw-7f3a91c2"
 
+# The host's Node.js, which the docker stub uses to run the certificate and code scripts for real.
+STUB_REAL_NODE=$(command -v node 2>/dev/null || true)
+
 PASSED=0
 FAILED=0
 CURRENT_TEST=
@@ -26,7 +29,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      aman-doctor | caddy | systemctl) ;;
+      aman-doctor | caddy | systemctl | ip | hostname | tailscale | launchctl) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -43,9 +46,10 @@ sandbox_new() {
   fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_NODE_VERSION STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC || true
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_NODE_VERSION STUB_PKI_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
   STUB_DF_KB=50000000
   INSTALL_EXTRA=()
+  RUN_ENV_EXTRA=()
 }
 
 # A copy of the installer with the stub doctor in place of the real shim, so install and upgrade runs
@@ -99,6 +103,25 @@ UNAME
 # Caddy is on the machine; a second call is the same.
 fixture_caddy() {
   cp "$TESTS_DIR/stubs/caddy" "$SB_BIN/caddy"
+}
+
+# This computer has these network addresses (space separated), so an instance opens on each of them.
+fixture_network() {
+  cp "$TESTS_DIR/stubs/ip" "$SB_BIN/ip"
+  STUB_ADDRS=$*
+}
+
+# This computer is called NAME on its network.
+fixture_hostname() {
+  cp "$TESTS_DIR/stubs/hostname" "$SB_BIN/hostname"
+  STUB_HOSTNAME=$1
+}
+
+# Tailscale is running here with this address and MagicDNS name.
+fixture_tailscale() {
+  cp "$TESTS_DIR/stubs/tailscale" "$SB_BIN/tailscale"
+  STUB_TS_IP=$1
+  STUB_TS_NAME=$2
 }
 
 # systemctl only logs; "cat" fails so the installer treats the Caddy unit as absent unless a test needs it.
@@ -173,9 +196,10 @@ build_run_env() {
     STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" ${STUB_COMPOSE_VERSION+STUB_COMPOSE_VERSION="$STUB_COMPOSE_VERSION"}
     STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}" STUB_SUDO_SH_FAIL="${STUB_SUDO_SH_FAIL:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
-    STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}"
+    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
-    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_EDGE_WAIT_TRIES=1
+    STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}"
+    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
 }
 
@@ -220,6 +244,8 @@ os_release_ubuntu() {
 # Install with defaults for tests that need an installed machine. Docker stub reachable, one instance "main".
 # INSTALL_EXTRA holds extra install.sh arguments for the call, for example (--add-docker-group).
 INSTALL_EXTRA=()
+# Extra VAR=value settings for the next runs, such as LANG or CLICOLOR_FORCE for the terminal style.
+RUN_ENV_EXTRA=()
 install_machine() {
   with_input "$SENTINEL_PASSWORD
 "
@@ -248,6 +274,13 @@ assert_eq() {
 
 assert_contains() {
   case "$1" in *"$2"*) t_pass ;; *) t_fail "${3:-missing text}: expected to find [$2] in [$(printf '%s' "$1" | head -c 600)]" ;; esac
+}
+
+# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches.
+flat() { printf '%s' "$1" | tr '\n' ' ' | tr -s ' '; }
+
+assert_flat_contains() {
+  assert_contains "$(flat "$1")" "$2" "${3:-}"
 }
 
 assert_not_contains() {

@@ -54,6 +54,22 @@ export const SessionEventWithPassthroughSchema = z
   ])
   .openapi('SessionEvent');
 
+/** A built-in member's `type`; `tool.response.v2` is itself a union whose variants share one type. */
+function builtInEventType(option: (typeof SessionEventSchema.options)[number]) {
+  return 'shape' in option ? option.shape.type.value : option.options[0].shape.type.value;
+}
+
+/** Every `type` the persisted union above can carry, derived from its members so filters cannot drift. */
+export const SessionEventTypeSchema = z
+  .enum([
+    ...SessionEventSchema.options.map(builtInEventType),
+    MemoryRecallPersistedEventSchema.shape.type.value,
+    ProfileLearnedPersistedEventSchema.shape.type.value,
+    SkillUsedPersistedEventSchema.shape.type.value,
+    ProvisioningPersistedEventSchema.shape.type.value,
+  ])
+  .openapi('SessionEventType');
+
 const SessionEventItemWithPassthroughSchema = z
   .object({
     turn_id: z.string().describe('Turn that emitted this event.'),
@@ -101,6 +117,9 @@ export const TurnStreamingEventSchema = z
   ])
   .openapi('TurnStreamingEvent');
 
+/** Event ids are 26-character ULIDs; the bound only keeps an oversized cursor out of the query. */
+export const MAX_EVENT_ID_LENGTH = 128;
+
 export const ListSessionEventsRequestQuerySchema = z
   .object({
     page_token: z
@@ -123,6 +142,24 @@ export const ListSessionEventsRequestQuerySchema = z
       .optional()
       .default(EVENTS_PAGE_LIMIT)
       .describe(`Page size. Defaults to ${String(EVENTS_PAGE_LIMIT)}, max ${String(EVENTS_PAGE_LIMIT)}.`),
+    // A single repeated query key arrives as a string, several as an array.
+    types: z.preprocess(
+      value => (typeof value === 'string' ? [value] : value),
+      z
+        .array(SessionEventTypeSchema)
+        .min(1)
+        .max(SessionEventTypeSchema.options.length)
+        .optional()
+        .describe('Event types to include; at most 19 entries.'),
+    ),
+    after_event_id: z
+      .string()
+      .min(1)
+      .max(MAX_EVENT_ID_LENGTH)
+      .optional()
+      .describe(
+        'Only list events whose id sorts after this event id. Pass the newest event id already seen to fetch just the newer events.',
+      ),
   })
   .openapi('ListSessionEventsRequestQuery');
 

@@ -2,9 +2,11 @@
 name: aman-@@NAME@@
 
 services:
-  # Idle holder of the network namespace that app and login share and that publishes their loopback
-  # ports. Either one can restart without stranding the other, and the login issuer name is the same
-  # URL for the browser and for the app.
+  # Idle holder of the network namespace that app, login and the https front end share and that publishes their ports.
+  # They are on 127.0.0.1 and on each private address of this computer an instance opened on the local network lists,
+  # never on a wildcard; the login port is always on 127.0.0.1 (other devices reach sign-in through the app). Either
+  # container can restart without stranding the other, and the login issuer name is the same URL for the browser and
+  # for the app.
   loopback:
     image: @@APP_IMAGE@@
     # Built on this machine and never pulled.
@@ -12,7 +14,7 @@ services:
     init: true
     entrypoint: ['sleep', 'infinity']
     ports:
-      - '127.0.0.1:@@APP_PORT@@:8790'
+@@APP_PORTS@@
       - '127.0.0.1:@@LOGIN_PORT@@:@@LOGIN_PORT@@'
     # Lets a model server on the host answer at host.docker.internal.
     extra_hosts:
@@ -64,6 +66,39 @@ services:
     # Above the app's graceful shutdown window so a kill does not cut off turn drain.
     stop_grace_period: 35s
     restart: unless-stopped
+
+@@IF_TLS@@  # Serves the app over https on the addresses of this computer, with a certificate from its own authority, and sends the
+@@IF_TLS@@  # plain port to https. It shares the network of the app, so the app is never reachable except through it.
+@@IF_TLS@@  tls:
+@@IF_TLS@@    image: @@CADDY_IMAGE@@
+@@IF_TLS@@    network_mode: 'service:loopback'
+@@IF_TLS@@    user: '@@TLS_USER@@'
+@@IF_TLS@@    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile']
+@@IF_TLS@@    volumes:
+@@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
+@@IF_TLS@@      - @@TLS_LEAF_DIR@@:/certs:ro
+@@IF_TLS@@      - @@TLS_TRUST_DIR@@:/srv/trust:ro
+@@IF_TLS@@    # It needs no privileges beyond the one its binary is marked with, and writes only to memory.
+@@IF_TLS@@    cap_drop:
+@@IF_TLS@@      - ALL
+@@IF_TLS@@    cap_add:
+@@IF_TLS@@      - NET_BIND_SERVICE
+@@IF_TLS@@    security_opt:
+@@IF_TLS@@      - no-new-privileges:true
+@@IF_TLS@@    read_only: true
+@@IF_TLS@@    tmpfs:
+@@IF_TLS@@      - /data
+@@IF_TLS@@      - /config
+@@IF_TLS@@      - /tmp
+@@IF_TLS@@    depends_on:
+@@IF_TLS@@      app:
+@@IF_TLS@@        condition: service_healthy
+@@IF_TLS@@    healthcheck:
+@@IF_TLS@@      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:@@TLS_HTTP_IN@@/trust']
+@@IF_TLS@@      interval: 5s
+@@IF_TLS@@      timeout: 3s
+@@IF_TLS@@      retries: 10
+@@IF_TLS@@    restart: unless-stopped
 
   dex:
     image: @@DEX_IMAGE@@
