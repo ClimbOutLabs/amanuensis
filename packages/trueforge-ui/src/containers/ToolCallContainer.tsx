@@ -24,6 +24,7 @@ import {
   MCP_META_TOOLS,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
+  allowChatOptionId,
   allowOnceOptionId,
   buildApprovalOptions,
   buildOutcomeText,
@@ -175,6 +176,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
     // and taking the first allow option would silently approve every later equivalent call.
     const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
+    const allowChatId = allowChatOptionId(part.approval?.options);
     const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
@@ -214,6 +216,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         card={approvalInfo.card}
         tier={approvalInfo.tier}
         onApprove={() => onSelectOption(allowOnceId)}
+        onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
