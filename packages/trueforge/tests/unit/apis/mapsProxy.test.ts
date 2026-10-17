@@ -3,9 +3,9 @@ import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
 import {
   createMapsRouter,
-  isServableTileType,
   MAX_UPSTREAM_TILES_PER_USER_PER_MINUTE,
   parseTileIndex,
+  servableTileType,
   TILE_MAX_BODY_BYTES,
   TileCache,
   UpstreamBudget,
@@ -54,13 +54,29 @@ describe('parseTileIndex', () => {
   });
 });
 
-describe('isServableTileType', () => {
-  it('passes raster images and drops active or non-image types', () => {
-    expect(isServableTileType('image/png')).toBe(true);
-    expect(isServableTileType('image/jpeg')).toBe(true);
-    expect(isServableTileType('image/svg+xml')).toBe(false);
-    expect(isServableTileType('text/html')).toBe(false);
-    expect(isServableTileType('')).toBe(false);
+describe('servableTileType', () => {
+  it('returns the normalized type for allowed raster images only', () => {
+    for (const type of ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']) {
+      expect(servableTileType(type)).toBe(type);
+    }
+    expect(servableTileType('  IMAGE/PNG ')).toBe('image/png');
+  });
+
+  it.each([
+    'image/svg+xml',
+    'image/SVG+xml',
+    'IMAGE/SVG+XML',
+    'image/png, text/html',
+    'text/html, image/png',
+    'image/png; charset=utf-8',
+    'image/png;x=1',
+    'image/x-icon',
+    'image/',
+    'text/html',
+    'application/xhtml+xml',
+    '',
+  ])('refuses %j', value => {
+    expect(servableTileType(value)).toBeUndefined();
   });
 });
 
@@ -137,6 +153,9 @@ describe('tile proxy route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toContain('private');
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get('Content-Disposition')).toBe('inline; filename="tile"');
+    expect(response.headers.get('Content-Type')).toBe('image/png');
     const [url, init] = fetchSpy.mock.calls[0] ?? [];
     expect(String(url)).toBe(configuration.MAPS_TILE_URL.replace('{z}', '3').replace('{x}', '1').replace('{y}', '1'));
     const sent = new Headers(init?.headers);
@@ -188,6 +207,31 @@ describe('tile proxy route', () => {
       new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', { headers: { 'Content-Type': 'image/svg+xml' } }),
     );
     expect((await get('4/2/2.png')).status).toBe(503);
+  });
+
+  it('refuses case, list and parameter variants of active types and never caches them', async () => {
+    const hostile = ['image/SVG+xml', 'image/png, text/html', 'image/png; charset=utf-8', 'text/html'];
+    for (const [index, contentType] of hostile.entries()) {
+      fetchSpy.mockResolvedValueOnce(new Response('<script>1</script>', { headers: { 'Content-Type': contentType } }));
+      const response = await get(`5/${String(index)}/0.png`);
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Content-Type')).not.toContain('image');
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
+    }
+    fetchSpy.mockResolvedValueOnce(pngResponse());
+    expect((await get('5/0/0.png')).status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(hostile.length + 1);
+  });
+
+  it('serves the normalized type, not the upstream string, and caches it', async () => {
+    fetchSpy.mockResolvedValueOnce(pngResponse({ headers: { 'Content-Type': ' IMAGE/PNG ' } }));
+    const first = await get('6/1/1.png');
+    expect(first.headers.get('Content-Type')).toBe('image/png');
+    const second = await get('6/1/1.png');
+    expect(second.headers.get('Content-Type')).toBe('image/png');
+    expect(second.headers.get('Content-Disposition')).toBe('inline; filename="tile"');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('drops an oversize upstream body, declared or streamed, and does not cache it', async () => {
@@ -246,6 +290,17 @@ describe('UpstreamBudget', () => {
     expect([budget.take('u'), budget.take('u'), budget.take('u')]).toEqual([true, true, false]);
     now = 60_000;
     expect(budget.take('u')).toBe(true);
+  });
+});
+
+describe('TileCache type policy', () => {
+  it('purges an entry whose stored type would now be refused', () => {
+    const cache = new TileCache({ now: () => 0 });
+    cache.set('1/1/1', { body: PNG, content_type: 'image/svg+xml', expires_at: 1000 });
+    cache.set('1/1/2', { body: PNG, content_type: 'image/png', expires_at: 1000 });
+    expect(cache.get('1/1/1')).toBeUndefined();
+    expect(cache.size).toBe(1);
+    expect(cache.get('1/1/2')?.content_type).toBe('image/png');
   });
 });
 

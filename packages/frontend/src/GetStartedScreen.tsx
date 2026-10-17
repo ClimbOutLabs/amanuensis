@@ -19,7 +19,7 @@ export function GetStartedScreen() {
             window.location.assign(buildLoginHref());
           }}
         >
-          Let&apos;s Get Started
+          Sign in
         </button>
       </div>
     </main>

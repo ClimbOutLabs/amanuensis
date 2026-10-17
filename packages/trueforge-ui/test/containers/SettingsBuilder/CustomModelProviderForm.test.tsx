@@ -110,6 +110,54 @@ describe('CustomModelProviderForm', () => {
     expect(onAdd).not.toHaveBeenCalled();
   });
 
+  it('rejects max output tokens at or above the context length', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '8000'); // max output covers the whole context window
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('rejects max output tokens above the context length', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '16000');
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('rejects max output tokens that leave less than the safety reserve', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '7600'); // 7600 + 512 reaches 8000
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('focuses the max output field that carries the error', async () => {
+    renderForm();
+    fillVisible();
+    fillLimits('8000', '8000');
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    await waitFor(() => expect(document.activeElement?.id).toBe('custom-provider-model-0-max-output-tokens'));
+  });
+
+  it('accepts max output tokens below the context length', async () => {
+    const onAdd = renderForm();
+    fillValid(); // 128000 context, 4096 max output
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalled());
+  });
+
   it('keeps a newly added model clean after a failed submit attempt', () => {
     renderForm();
     fillVisible(); // model 1 visible-valid, limits still empty
@@ -320,8 +368,8 @@ describe('CustomModelProviderForm', () => {
   it('sends streamTimeout when a deadline field is set', async () => {
     const onAdd = renderForm();
     fillValid();
-    fireEvent.change(screen.getByLabelText('First token deadline (ms)'), { target: { value: '120000' } });
-    fireEvent.change(screen.getByLabelText('Stall deadline (ms)'), { target: { value: '90000' } });
+    fireEvent.change(screen.getByLabelText('First reply timeout (ms)'), { target: { value: '120000' } });
+    fireEvent.change(screen.getByLabelText('Stall timeout (ms)'), { target: { value: '90000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
 
     await waitFor(() => expect(onAdd).toHaveBeenCalled());
@@ -346,7 +394,7 @@ describe('CustomModelProviderForm', () => {
       />,
     );
 
-    expect(screen.getByLabelText('First token deadline (ms)')).toHaveValue(120000);
-    expect(screen.getByLabelText('Stall deadline (ms)')).toHaveValue(90000);
+    expect(screen.getByLabelText('First reply timeout (ms)')).toHaveValue(120000);
+    expect(screen.getByLabelText('Stall timeout (ms)')).toHaveValue(90000);
   });
 });

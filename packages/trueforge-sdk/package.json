@@ -88,6 +88,17 @@
             },
             "default": "./dist/cjs/api/resources/server/exports.js"
         },
+        "./data": {
+            "import": {
+                "types": "./dist/esm/api/resources/data/exports.d.mts",
+                "default": "./dist/esm/api/resources/data/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/data/exports.d.ts",
+                "default": "./dist/cjs/api/resources/data/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/data/exports.js"
+        },
         "./mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/mcpServers/exports.d.mts",
@@ -462,6 +473,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
         },
+        "./settings/tokenFactoryUsage": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+        },
         "./settings/toolOutputScreens": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/toolOutputScreens/exports.d.mts",
@@ -504,7 +526,8 @@
         "build:esm": "tsc --project ./tsconfig.esm.json && node scripts/rename-to-esm-files.js dist/esm",
         "test": "vitest",
         "test:unit": "vitest --project unit",
-        "test:wire": "vitest --project wire"
+        "test:wire": "vitest --project wire",
+        "prepack": "node ../../scripts/copy-license-files.mjs"
     },
     "dependencies": {},
     "devDependencies": {
@@ -528,7 +551,7 @@
         "node": ">=22"
     },
     "sideEffects": false,
-    "license": "MIT",
+    "license": "MPL-2.0",
     "author": "TrueForge",
     "repository": {
         "type": "git",

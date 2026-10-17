@@ -14,13 +14,16 @@ import type {
   GoogleConsentStart,
   GoogleFeature,
   GoogleSetupPort,
+  GoogleTestResult,
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
 const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
 const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
+const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
+const GOOGLE_AUDIENCE_URL = 'https://console.cloud.google.com/auth/audience';
 
 const STATUS_POLL_MS = 2000;
 /** 300 polls, two seconds apart: the ten minutes a consent in flight is good for. */
@@ -41,7 +44,8 @@ type ClientEntry = GoogleClientDraft & { registeredRedirectUris: string[] };
 
 const EMPTY_CLIENT: ClientEntry = { clientId: '', clientSecret: '', clientType: null, registeredRedirectUris: [] };
 
-function CopyField({ label, value }: { label: string; value: string }) {
+/** A value to copy; with `href` it is also a link that opens in a new tab. */
+function CopyField({ label, value, href }: { label: string; value: string; href?: string | undefined }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(
@@ -52,12 +56,24 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
   return (
     <div className="mt-1 flex items-center gap-2">
-      <code
-        aria-label={label}
-        className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs"
-      >
-        {value}
-      </code>
+      {href === undefined ? (
+        <code
+          aria-label={label}
+          className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs"
+        >
+          {value}
+        </code>
+      ) : (
+        <a
+          aria-label={label}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs text-link underline"
+        >
+          {value}
+        </a>
+      )}
       <Button
         variant="secondary"
         size="small"
@@ -84,20 +100,24 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
+const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
+
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
 }
 
-function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unreachable', account: string | null) {
+function describeTest(result: GoogleTestResult['result'], account: string | null) {
   switch (result) {
     case 'ok':
       return `Working. Connected as ${account ?? 'your Google account'}.`;
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Reconnect needed. Google sign-in expired and mail is paused. Select Reconnect to sign in again.';
+      return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
     case 'unreachable':
       return "Aman couldn't reach Google just now. Try again in a minute.";
+    case 'calendar_unavailable':
+      return 'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.';
   }
 }
 
@@ -303,9 +323,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google sign-in expired. Mail is paused, and other parts of Aman keep working. Select Reconnect to sign
-                in again. If this keeps happening about once a week, your Google project is in Testing: either reconnect
-                each week, or in Google Cloud open Audience and choose Publish app, then reconnect once.
+                Google sign-in expired. Mail and calendar are paused, and other parts of Aman keep working. Select
+                Reconnect to sign in again. If this keeps happening about once a week, your Google project is in
+                Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish app, then
+                reconnect once.
               </p>
             ) : (
               <>
@@ -323,12 +344,74 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
               </>
             )}
             <ul className="space-y-1 text-text-secondary">
-              {status.features.map(item => (
-                <li key={item.feature}>
-                  {item.label}: {item.granted ? 'allowed' : 'not allowed'}
-                </li>
-              ))}
+              {status.features
+                .filter(item => item.feature !== CALENDAR_FEATURE)
+                .map(item => (
+                  <li key={item.feature}>
+                    {item.label}: {item.granted ? 'allowed' : 'not allowed'}
+                  </li>
+                ))}
             </ul>
+            {status.state === 'connected' ? (
+              <div aria-label="Calendar" className="space-y-2 rounded-md border border-border bg-primary-bg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <span className="font-medium">Calendar</span>:{' '}
+                    {grantedFeatures(status).includes(CALENDAR_FEATURE) ? 'connected' : 'not connected'}
+                  </p>
+                  {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={busy || offline}
+                      onClick={() => void beginConsent({ useSavedClient: true, features: [CALENDAR_FEATURE] })}
+                    >
+                      Connect Calendar
+                    </Button>
+                  )}
+                </div>
+                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? (
+                  <>
+                    <p className="text-text-secondary">
+                      Aman can read events on your calendar. It cannot add, change or delete them.
+                    </p>
+                    <p className="text-text-secondary">
+                      If Calendar stops answering, check that its API is still on: open this page and click Enable.
+                    </p>
+                    <CopyField
+                      label="Calendar API link"
+                      value={GOOGLE_CALENDAR_API_URL}
+                      href={GOOGLE_CALENDAR_API_URL}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-text-secondary">
+                      Lets Aman read events on your calendar, such as a birthday coming up. It cannot add, change or
+                      delete them.
+                    </p>
+                    <ol className="list-decimal space-y-3 pl-5">
+                      <li>
+                        <p className="font-medium">Turn on the Google Calendar API</p>
+                        <p className="text-text-secondary">On the page, click Enable.</p>
+                        <CopyField
+                          label="Calendar API link"
+                          value={GOOGLE_CALENDAR_API_URL}
+                          href={GOOGLE_CALENDAR_API_URL}
+                        />
+                      </li>
+                      <li>
+                        <p className="font-medium">Select Connect Calendar</p>
+                        <p className="text-text-secondary">
+                          On Google&apos;s screen, leave the calendar box ticked and continue.
+                        </p>
+                      </li>
+                    </ol>
+                  </>
+                )}
+              </div>
+            ) : null}
             {testMessage ? (
               <p role="status" className="text-text-secondary">
                 {testMessage}
@@ -383,8 +466,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 className="rounded-md border border-border bg-primary-bg p-3"
               >
                 <p>
-                  This removes Aman&apos;s access to your Google account everywhere it is used and deletes the saved
-                  login. Emails already sent stay in Gmail. You can connect again later.
+                  Disconnecting turns off both mail and calendar. It removes Aman&apos;s access to your Google account
+                  everywhere it is used and deletes the saved login. Emails already sent stay in Gmail. You can connect
+                  again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button
@@ -418,17 +502,21 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 <p className="text-text-secondary">
                   Use an existing project if you have one. It is free and takes a minute.
                 </p>
-                <CopyField label="Project link" value={GOOGLE_PROJECT_URL} />
+                <CopyField label="Project link" value={GOOGLE_PROJECT_URL} href={GOOGLE_PROJECT_URL} />
               </li>
               <li>
                 <p className="font-medium">Turn on the Gmail API</p>
                 <p className="text-text-secondary">On the page, click Enable.</p>
-                <CopyField label="Gmail API link" value={GOOGLE_GMAIL_API_URL} />
+                <CopyField label="Gmail API link" value={GOOGLE_GMAIL_API_URL} href={GOOGLE_GMAIL_API_URL} />
               </li>
               <li>
                 <p className="font-medium">Set up the consent screen</p>
                 <p className="text-text-secondary">Choose External, then fill in an app name and your email address.</p>
-                <CopyField label="Consent screen link" value={GOOGLE_CONSENT_SCREEN_URL} />
+                <CopyField
+                  label="Consent screen link"
+                  value={GOOGLE_CONSENT_SCREEN_URL}
+                  href={GOOGLE_CONSENT_SCREEN_URL}
+                />
               </li>
               <li>
                 <p className="font-medium">Add yourself as a test user</p>
@@ -436,6 +524,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   On the Audience page, under Test users, click Add users and add the Gmail address you will connect as.
                   Without it, Google shows an &quot;Access blocked&quot; page when you try to sign in.
                 </p>
+                <CopyField label="Audience page link" value={GOOGLE_AUDIENCE_URL} href={GOOGLE_AUDIENCE_URL} />
               </li>
               <li>
                 <p className="font-medium">Choose Testing or Production</p>
@@ -447,6 +536,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   screen once; click Advanced, then continue. After you publish, reconnect once, so the saved sign-in is
                   issued in production mode.
                 </p>
+                <CopyField label="Audience page link" value={GOOGLE_AUDIENCE_URL} href={GOOGLE_AUDIENCE_URL} />
               </li>
               <li>
                 <p className="font-medium">Create the client</p>
@@ -458,7 +548,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 </p>
                 {setup.clientType === 'web' ? <CopyField label="Redirect URI" value={setup.redirectUri} /> : null}
                 <p className="mt-1 text-text-secondary">Click Create, then Download JSON.</p>
-                <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} />
+                <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} href={GOOGLE_CREDENTIALS_URL} />
               </li>
               <li>
                 <p className="font-medium">Drop the downloaded JSON, or paste the client ID and secret</p>

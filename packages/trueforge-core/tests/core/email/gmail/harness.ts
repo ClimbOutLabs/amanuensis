@@ -1,15 +1,17 @@
+import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { DraftReviewLedger } from '../../../../src/core/email/gmail/draftReview';
 import { GmailApi } from '../../../../src/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/gmail/GmailToolSet';
 import type { GmailThread } from '../../../../src/core/email/gmail/gmailWire';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { GOOGLE_TOKEN_URL } from '../../../../src/core/google/oauth';
+import type { ToolInvocationContext } from '../../../../src/core/mcp/IMCPServer';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
   forUnattendedRun,
 } from '../../../../src/core/permissions/context';
+import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 
@@ -54,7 +56,6 @@ export async function build(input: {
   stager?: AttachmentStager | undefined;
   unattended?: boolean;
   demoSendAllowlist?: string[] | null;
-  reviews?: DraftReviewLedger;
   listDeadlineMs?: number;
 }) {
   const connections = new FakeConnections();
@@ -78,7 +79,6 @@ export async function build(input: {
     conversation_id: 'c1',
     services: input.unattended === true ? forUnattendedRun(services) : services,
   });
-  const reviews = input.reviews ?? new DraftReviewLedger();
   const tools = new GmailToolSet({
     tracing: NOOP_AGENT_TRACING,
     api,
@@ -86,10 +86,9 @@ export async function build(input: {
     features: input.features ?? ['gmail_read'],
     attachmentStager: input.stager,
     sentinel,
-    reviews,
     listDeadlineMs: input.listDeadlineMs ?? 60_000,
   });
-  return { tools, google, sentinel, connections, reviews, sleeps };
+  return { tools, google, sentinel, connections, sleeps };
 }
 
 export function text(response: Awaited<ReturnType<GmailToolSet['callTool']>>): string {
@@ -166,4 +165,42 @@ const DraftRequestSchema = z.object({ message: z.object({ raw: z.string(), threa
 export function sentDraft(body: unknown): { mime: string; threadId: string | undefined } {
   const request = DraftRequestSchema.parse(body);
   return { mime: Buffer.from(request.message.raw, 'base64url').toString(), threadId: request.message.threadId };
+}
+
+/**
+ * What the host does before it runs an approved call: re-checks the approval minted for the card against the
+ * call as the tool set sees it now. Returns why the approval no longer holds, or undefined when it still does.
+ */
+export async function approvalProblem(input: {
+  tools: GmailToolSet;
+  sentinel: ReturnType<typeof createSentinelHostContext>;
+  info: Awaited<ReturnType<GmailToolSet['toolCallInfo']>>;
+  call: CallToolRequest['params'];
+}): Promise<string | undefined> {
+  let live: Record<string, unknown> | undefined;
+  try {
+    live = await input.tools.liveMintParams(input.call);
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
+  return await verifyPreDispatch({
+    call: {
+      tool_name: input.call.name,
+      tool_type: input.info.type,
+      canonical_params: live ?? input.call.arguments ?? {},
+      tier: 3,
+      approval_token_id: input.info.approval_token_id ?? null,
+      approval_binding: null,
+      shell_binding: null,
+    },
+    ctx: { ...input.sentinel, repository_id: null, agent_intent: null, offline: false },
+  });
+}
+
+/** What the host hands a tool with an approved call: the params the approval was minted over. */
+export function approvedContext(info: Awaited<ReturnType<GmailToolSet['toolCallInfo']>>): ToolInvocationContext {
+  return {
+    admission_provenance: { source: 'user_approval', decision: 'allow' },
+    approved_params: info.mint_canonical_params,
+  };
 }

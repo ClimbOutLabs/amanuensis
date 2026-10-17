@@ -635,6 +635,70 @@ await client.server.getCapabilities();
 </dl>
 </details>
 
+## Data
+<details><summary><code>client.data.<a href="/src/api/resources/data/client/Client.ts">exportData</a>({ ...params }) -> core.BinaryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.data.exportData();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ExportDataRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `DataClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## MCP Servers
 <details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">list</a>() -> TrueForge.ListAvailableMcpServersResponse</code></summary>
 <dl>
@@ -8177,6 +8241,62 @@ await client.settings.skills.delete("name");
 <dd>
 
 **requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings TokenFactoryUsage
+<details><summary><code>client.settings.tokenFactoryUsage.<a href="/src/api/resources/settings/resources/tokenFactoryUsage/client/Client.ts">get</a>() -> TrueForge.GetTokenFactoryUsageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.tokenFactoryUsage.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TokenFactoryUsageClient.RequestOptions`
 
 </dd>
 </dl>

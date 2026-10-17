@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 
+import { getModelOutputExceedsContextError } from '@truefoundry/trueforge-core/schemas/modelTokenLimits';
 import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { CenteredModal } from '../../atoms/primitives/CenteredModal.js';
@@ -206,6 +207,14 @@ const CustomModelProviderForm = ({
   const modelMaxOutputError = (model: ModelRow): string | null =>
     parsePositiveInt(model.maxOutputTokens) == null ? 'Set the max output tokens.' : null;
 
+  // Reserving the whole context window for output leaves no room for input, so
+  // every turn fails. The rule and message live in core; reuse them here.
+  const modelOutputExceedsContextError = (model: ModelRow): string | null =>
+    getModelOutputExceedsContextError({
+      context_length: parsePositiveInt(model.contextLength),
+      max_output_tokens: parsePositiveInt(model.maxOutputTokens),
+    });
+
   // The Add-provider button gates on the always-visible fields. The collapsed per-model
   // limits are enforced on submit — auto-expanding and focusing the first offender.
   const visibleValid =
@@ -218,12 +227,16 @@ const CustomModelProviderForm = ({
     markAllTouched();
     if (!visibleValid || busy) return;
 
-    // A required per-model limit is missing: reveal it rather than silently blocking.
-    // Expand that model's Advanced section, then scroll to and focus the first empty field.
-    const incompleteIndex = models.findIndex(model => modelContextError(model) || modelMaxOutputError(model));
+    // A required per-model limit is missing, or the output reservation covers the
+    // whole context window: reveal it rather than silently blocking.
+    // Expand that model's Advanced section, then scroll to and focus the first offending field.
+    const incompleteIndex = models.findIndex(
+      model => modelContextError(model) || modelMaxOutputError(model) || modelOutputExceedsContextError(model),
+    );
     if (incompleteIndex !== -1) {
       updateModel(incompleteIndex, { advancedExpanded: true });
       const target = models[incompleteIndex];
+      // The output-vs-context error is shown on the max output field, so focus that one.
       const field = target && modelContextError(target) ? 'context-length' : 'max-output-tokens';
       setTimeout(() => {
         const el = document.getElementById(`custom-provider-model-${incompleteIndex}-${field}`);
@@ -363,7 +376,7 @@ const CustomModelProviderForm = ({
                 htmlFor="custom-provider-first-chunk-ms"
                 className="mb-1.5 block text-sm font-medium text-text-primary"
               >
-                First token deadline (ms)
+                First reply timeout (ms)
               </label>
               <input
                 id="custom-provider-first-chunk-ms"
@@ -375,11 +388,11 @@ const CustomModelProviderForm = ({
                 placeholder="300000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait for the first token before giving up. Default 300000ms.</FieldHelp>
+              <FieldHelp>How long to wait for a reply to start. Default: 300000 ms.</FieldHelp>
             </div>
             <div>
               <label htmlFor="custom-provider-chunk-ms" className="mb-1.5 block text-sm font-medium text-text-primary">
-                Stall deadline (ms)
+                Stall timeout (ms)
               </label>
               <input
                 id="custom-provider-chunk-ms"
@@ -391,7 +404,7 @@ const CustomModelProviderForm = ({
                 placeholder="60000"
                 className={inputClassName}
               />
-              <FieldHelp>How long to wait between tokens before giving up. Default 60000ms.</FieldHelp>
+              <FieldHelp>How long to wait if a reply stops partway. Default: 60000 ms.</FieldHelp>
             </div>
           </div>
 
@@ -411,7 +424,7 @@ const CustomModelProviderForm = ({
                 // type one. Only surface an error once they have hand-edited the name themselves.
                 const showNameFieldError = !!nameFieldError && model.nameDirty;
                 const contextError = modelContextError(model);
-                const maxError = modelMaxOutputError(model);
+                const maxError = modelMaxOutputError(model) ?? modelOutputExceedsContextError(model);
                 const showContextError = model.contextTouched && contextError;
                 const showMaxError = model.maxTouched && maxError;
                 return (
@@ -520,7 +533,7 @@ const CustomModelProviderForm = ({
                             {showContextError ? (
                               <FieldError>{contextError}</FieldError>
                             ) : model.contextLength.trim() === '' ? (
-                              <FieldHelp>Model&apos;s total token window.</FieldHelp>
+                              <FieldHelp>The model&apos;s total context window.</FieldHelp>
                             ) : null}
                           </div>
 
@@ -547,7 +560,7 @@ const CustomModelProviderForm = ({
                             {showMaxError ? (
                               <FieldError>{maxError}</FieldError>
                             ) : model.maxOutputTokens.trim() === '' ? (
-                              <FieldHelp>Longest reply the model allows — use its real limit.</FieldHelp>
+                              <FieldHelp>Longest reply the model allows. Use its real limit.</FieldHelp>
                             ) : null}
                           </div>
 

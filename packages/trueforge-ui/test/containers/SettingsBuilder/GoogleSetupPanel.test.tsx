@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GoogleSetupPanel from '@/containers/SettingsBuilder/GoogleSetupPanel.js';
@@ -63,6 +63,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: false },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
     ],
     hasSavedClient: false,
     locked: false,
@@ -79,9 +80,17 @@ function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): Googl
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: true },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
     ],
     ...overrides,
   });
+}
+
+function withCalendar(status: GoogleConnectionStatus): GoogleConnectionStatus {
+  return {
+    ...status,
+    features: status.features.map(item => (item.feature === 'calendar_read' ? { ...item, granted: true } : item)),
+  };
 }
 
 function makePort(overrides: Partial<GoogleSetupPort> = {}) {
@@ -113,6 +122,21 @@ function fillClient() {
 }
 
 describe('GoogleSetupPanel', () => {
+  it('makes each Google Cloud page a link that opens in a new tab, including the Audience page for test users and publishing', async () => {
+    renderPanel(makePort().port);
+
+    await screen.findByLabelText('Gmail API link');
+    for (const name of ['Project link', 'Gmail API link', 'Consent screen link', 'Credentials link']) {
+      const link = screen.getByLabelText(name);
+      expect(link).toHaveAttribute('href', link.textContent);
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+    const audience = screen.getAllByLabelText('Audience page link');
+    expect(audience).toHaveLength(2);
+    expect(audience[0]).toHaveAttribute('href', 'https://console.cloud.google.com/auth/audience');
+  });
+
   it('guides a Desktop client with a copy control for each string typed into the Google console', async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -331,13 +355,73 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Google sign-in expired\. Mail is paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
+        /Google sign-in expired\. Mail and calendar are paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/open Audience and choose Publish app, then reconnect once\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read'] }));
+  });
+
+  it('shows Calendar as not connected, and connects it with a second consent on the saved client', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus() });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('Calendar: not connected');
+    expect(row).toHaveTextContent('cannot add, change or delete');
+    expect(row).toHaveTextContent('Turn on the Google Calendar API');
+    expect(row).toHaveTextContent('click Enable');
+    expect(row).not.toHaveTextContent(/scope|consent screen/i);
+    const link = within(row).getByRole('link', { name: /Calendar API link/ });
+    expect(link).toHaveAttribute('href', 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText(/Read events on your calendar: /)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Calendar' }));
+    await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read'] }));
+  });
+
+  it('shows Calendar as connected, with nothing left to connect', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    expect(await screen.findByLabelText('Calendar')).toHaveTextContent('Calendar: connected');
+    expect(screen.queryByRole('button', { name: 'Connect Calendar' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Calendar API link once Calendar is connected, so the message that names it has somewhere to point', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('click Enable');
+    expect(within(row).getByRole('link', { name: /Calendar API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com',
+    );
+  });
+
+  it('says in plain words when mail works but Calendar did not answer', async () => {
+    renderPanel(
+      makePort({
+        getGoogleStatus: async () => withCalendar(connectedStatus()),
+        testGoogleConnection: async () => ({ result: 'calendar_unavailable', accountEmail: 'ada@example.com' }),
+      }).port,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }));
+    expect(
+      await screen.findByText(
+        'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Working/)).not.toBeInTheDocument();
+  });
+
+  it('keeps Calendar when reconnecting', async () => {
+    const { port, begin } = makePort({
+      getGoogleStatus: async () => withCalendar(connectedStatus({ state: 'needs_reconnect' })),
+    });
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read', 'calendar_read'] }),
+    );
   });
 
   it('reports a test result in plain words', async () => {
@@ -358,6 +442,7 @@ describe('GoogleSetupPanel', () => {
     });
     const { onChanged } = renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('turns off both mail and calendar');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
@@ -582,6 +667,7 @@ describe('GoogleSetupPanel', () => {
       expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Allow drafts and sending' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Connect Calendar' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
     });
 

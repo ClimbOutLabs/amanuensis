@@ -25,12 +25,19 @@ sandbox_log() { printf '%s/sandbox.log' "$STATE_DIR"; }
 # An instance keeps the sandbox unless it was installed with --no-sandbox.
 instance_sandbox_wanted() { [ "$(reg_get "$1" sandbox)" != off ]; }
 
+# True when this run turns the sandbox on for an existing instance that was installed without it. Asking for the
+# sandbox again is the default, so only --no-sandbox leaves such an instance as it is.
+sandbox_enable_wanted() {
+  [ "$OPT_NO_SANDBOX" != 1 ] && [ -n "${OPT_NAME:-}" ] && reg_exists "$OPT_NAME" && ! instance_sandbox_wanted "$OPT_NAME"
+}
+
 # True when any instance, existing or about to be created, gets the sandbox.
 sandbox_needed() {
   local name
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then return 0; fi
   done
+  if sandbox_enable_wanted; then return 0; fi
   need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]
 }
 
@@ -204,11 +211,19 @@ plan_sandbox() {
     if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name" &&
       sandbox_slots_use_current_image "$name"; then
       plan_add have "The $SLOT_COUNT sandboxes of instance $name are running"
+      if [ "$OPT_NO_SANDBOX" = 1 ] && [ "$name" = "${OPT_NAME:-}" ]; then
+        plan_add have "Instance $name keeps its sandbox" "--no-sandbox only applies to a new instance."
+      fi
     else
       pending=1
       plan_add todo "Start $SLOT_COUNT sandboxes for $name" "Run code (Python, shell and files) uses them."
     fi
   done
+  if sandbox_enable_wanted; then
+    pending=1
+    plan_add todo "Turn on the sandbox for instance $OPT_NAME (run code, PDF and image reading)" \
+      "Its chats, memory and files are kept. The app restarts once."
+  fi
   if need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]; then
     pending=1
     plan_add todo "Start $SLOT_COUNT sandboxes for $I_NAME" "Run code (Python, shell and files) uses them."
@@ -247,6 +262,15 @@ sandbox_run() {
     --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "aman doctor sandbox" --embedded
 }
 
+# Brings the sandbox up for an existing instance installed without it and records that it has it. The compose file is
+# rendered and the app recreated by the caller; named volumes are never touched.
+sandbox_enable() {
+  local name=$1
+  sandbox_ensure "$name"
+  reg_set "$name" sandbox slots
+  log_event "instance $name sandbox turned on"
+}
+
 # Execute phase of the images step: the bundle, then the slot image (cached when nothing changed).
 sandbox_images_ensure() {
   sandbox_needed || return 0
@@ -259,8 +283,8 @@ sandbox_images_ensure() {
 
 sandbox_first_instance() {
   local name
-  if [ -n "${I_NAME:-}" ]; then
-    printf '%s' "$I_NAME"
+  if [ -n "${I_NAME:-}" ] || [ -n "${OPT_NAME:-}" ]; then
+    printf '%s' "${I_NAME:-$OPT_NAME}"
     return 0
   fi
   name=$(reg_names | head -n 1)

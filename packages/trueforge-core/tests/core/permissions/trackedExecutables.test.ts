@@ -5,6 +5,7 @@ import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
   isGitControlPath,
+  isSandboxToolPath,
   observeShellCreatedFiles,
   skipWrapperPrefix,
   writeTargetTouchesGitControl,
@@ -109,6 +110,21 @@ describe('isGitControlPath', () => {
 
   test.each(['src/index.ts', '.gitignore', 'git/notes.md', 'a.git/x', '.github/workflows/ci.yml'])('allows %s', p => {
     expect(isGitControlPath(p)).toBe(false);
+  });
+});
+
+describe('isSandboxToolPath', () => {
+  test.each([
+    '.venv/bin/flock',
+    'mcp-client/x',
+    'a/.VENV/lib/site-packages/zz.pth',
+    '/ws/.venv/pyvenv.cfg',
+    'mcp-client/',
+  ])('flags %s', p => {
+    expect(isSandboxToolPath(p)).toBe(true);
+  });
+  test.each(['bin/ls', 'src/venv/bin/x', 'mcp-client.md', 'docs/mcp-clients/a.md'])('allows %s', p => {
+    expect(isSandboxToolPath(p)).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { CalendarApi } from '../calendar/CalendarApi';
 import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
 import { clientProblems, type ClientProblem, type ClientType } from './clientJson';
@@ -9,7 +10,7 @@ import type {
   GoogleOwner,
   PendingGoogleAuthorizationStore,
 } from './connection';
-import { GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
+import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
 import { GoogleAccessTokens } from './GoogleAccessTokens';
 import {
   buildAuthorizationUrl,
@@ -59,10 +60,12 @@ export class GoogleConsentError extends Error {
   }
 }
 
-const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
+const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable', 'calendar_unavailable'] as const;
 
 export const GoogleTestResultSchema = z.object({
-  result: z.enum(GOOGLE_TEST_OUTCOMES),
+  result: z
+    .enum(GOOGLE_TEST_OUTCOMES)
+    .describe('calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.'),
   account_email: z.string().nullable().describe('The connected address when the test passed.'),
 });
 export type GoogleTestResult = z.infer<typeof GoogleTestResultSchema>;
@@ -167,7 +170,9 @@ export class GoogleConnectService {
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
     if (!features.includes('gmail_read')) {
       throw new GoogleFeatureError(
-        'Sending needs permission to read mail too. Tick the read box as well, then connect.',
+        features.includes('gmail_compose')
+          ? 'Sending needs permission to read mail too. Tick the read box as well, then connect.'
+          : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
       );
     }
     const scopes = scopesForFeatures(features);
@@ -205,11 +210,11 @@ export class GoogleConnectService {
       throw new GoogleConsentError(
         (await this.#pending.hasPending(input.owner))
           ? 'That response does not belong to the connection in progress. Use the address from the page Google just opened.'
-          : 'There is no connection in progress.',
+          : 'There is no connection in progress. Select Connect Google to start again.',
       );
     }
     if (this.#now().getTime() - Date.parse(pending.created_at) > PENDING_TTL_MS) {
-      throw new GoogleConsentError('That connection attempt took too long.');
+      throw new GoogleConsentError('That connection attempt took too long. Select Connect Google to start again.');
     }
     let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
     try {
@@ -221,7 +226,10 @@ export class GoogleConnectService {
         fetchImpl: this.#fetchImpl,
       });
     } catch (error) {
-      throw new GoogleConsentError('Google did not accept the code.', { cause: error });
+      throw new GoogleConsentError(
+        'Google did not accept the code. Select Cancel, then Connect Google to start again.',
+        { cause: error },
+      );
     }
     let accountEmail: string;
     try {
@@ -281,6 +289,18 @@ export class GoogleConnectService {
           account_email: accountEmail,
           updated_at: this.#now().toISOString(),
         });
+      }
+      if (grantedFeatures(record.granted_scopes).includes('calendar_read')) {
+        const calendar = new CalendarApi({ tokens, fetchImpl: this.#fetchImpl, sleep: undefined });
+        try {
+          await calendar.calendarTimeZone();
+        } catch (error) {
+          if (!(error instanceof GoogleApiError)) {
+            throw error;
+          }
+          this.#logger.warn('Google Calendar did not answer the connection test', safeFailureFields(error));
+          return { result: 'calendar_unavailable', account_email: accountEmail };
+        }
       }
       return { result: 'ok', account_email: accountEmail };
     } catch (error) {

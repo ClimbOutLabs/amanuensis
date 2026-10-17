@@ -40,7 +40,7 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
   return undefined;
 }
 
-export const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
+const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 
@@ -106,6 +106,8 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** False when the server refuses chat scope for this call; absent from servers that do not say. */
+  chatAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -307,11 +309,13 @@ function parseApprovalInfo(
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
+  const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };

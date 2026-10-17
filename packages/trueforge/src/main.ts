@@ -656,6 +656,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => getConfiguredSecretValues(configuration),
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpOAuthStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
     demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
@@ -663,14 +671,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => getConfiguredSecretValues(configuration),
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpOAuthStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -769,6 +770,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     oidcDiscovery,
     authenticator,
     authorizer,
+    outboundSecrets,
   });
 
   return {

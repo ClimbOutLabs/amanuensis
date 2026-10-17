@@ -12,6 +12,20 @@ export type Tier = 1 | 2 | 3;
 
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
 
+/**
+ * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
+ * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
+ * hosting server declares about the tool.
+ */
+export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
+  'external_service',
+  'destructive_action',
+  'install_action',
+  'mcp_destructive_hint',
+  'mcp_open_world_hint',
+  'connector_send',
+]);
+
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
@@ -19,6 +33,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
 export const AUTO_DENY_REASONS = [
   'destination_unverifiable',
+  'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
   'unattended_run',
@@ -45,8 +60,6 @@ export const Tier3EmailSchema = z
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
-
-export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
 
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
@@ -94,6 +107,8 @@ export interface TierDecision {
   escalated: boolean;
   /** Set when the action is auto-denied without a card. */
   auto_deny: AutoDenyReason | null;
+  /** One plain line for the owner when an auto-denied call needs more than the generic message, or null. */
+  owner_message: string | null;
   /** Populated for Tier 3 carded actions and for every Tier 2 action. */
   card: Tier3Card | null;
   /** Tier 2 member kind, for the per-kind relaxation lookup. */
@@ -139,6 +154,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
@@ -153,6 +169,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
@@ -234,12 +251,14 @@ export function tier3Decision(input: {
 export function autoDenyDecision(input: {
   reason: AutoDenyReason;
   reason_detail: string | null;
+  owner_message?: string | null | undefined;
   sensitive_read: boolean;
 }): TierDecision {
   return {
     ...baseDecision(),
     tier: 3,
     reason: 'auto_denied',
+    owner_message: input.owner_message ?? null,
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
     auto_deny: input.reason,

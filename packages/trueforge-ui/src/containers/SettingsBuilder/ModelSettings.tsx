@@ -21,6 +21,7 @@ import {
 import { useCatalogServer } from '@/server/ServerContext.js';
 import type { ModelEntry, ModelProviderBase, ModelProviderCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { TokenFactoryUsagePanel } from './TokenFactoryUsagePanel.js';
 
 function catalogBaseUrl(provider: ModelProviderCatalogEntry): string {
   if ('baseUrl' in provider && typeof provider.baseUrl === 'string') {
@@ -285,6 +286,8 @@ const ModelSettings = () => {
         Connect providers and choose which models are available. Assign models to roles under Roles and Personas.
       </p>
 
+      <TokenFactoryUsagePanel providerConfigured={configuredTypes.has('tokenfactory')} />
+
       {error ? (
         <p className="mt-3 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg">
           {error}
@@ -306,7 +309,7 @@ const ModelSettings = () => {
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
-              Add Custom Provider
+              Add custom provider
             </Button.Secondary>
           </div>
 
@@ -532,7 +535,7 @@ const ModelSettings = () => {
               if (editingProvider) return handleReplaceKey(editingProvider, draft);
               if (editingCatalogEntry) return handleCreateFromCatalog(editingCatalogEntry, draft);
             }}
-            title={editingProvider ? 'Edit Provider Details' : 'Configure Provider Details'}
+            title={editingProvider ? 'Edit provider' : 'Add provider'}
             initialBaseUrl={
               editingProvider
                 ? (editingProvider.baseUrl ?? '')
@@ -576,8 +579,8 @@ const ModelSettings = () => {
             <div className="px-5 py-5">
               <p className="text-sm text-text-secondary">
                 {modelCatalog.deleteModelProvider
-                  ? `It is the only model on ${lastModelPendingDelete?.provider.name ?? 'this provider'}. A provider needs at least one model, so removing it removes the provider too.`
-                  : `It is the only model on ${lastModelPendingDelete?.provider.name ?? 'this provider'}. A provider needs at least one model. Add another model first, or remove the provider.`}
+                  ? `This is ${lastModelPendingDelete?.provider.name ?? 'this provider'}'s only model. Removing it removes the provider too.`
+                  : `This is ${lastModelPendingDelete?.provider.name ?? 'this provider'}'s only model. Add another model first, or remove the provider.`}
               </p>
             </div>
             <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">

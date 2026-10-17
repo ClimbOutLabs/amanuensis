@@ -5,7 +5,8 @@ import { existsSync } from 'node:fs';
 const DEJAVU = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'];
 const UNIFONT = ['/usr/share/fonts/opentype/unifont/unifont_jp.otf', '/usr/share/fonts/truetype/unifont/unifont.ttf'];
 
-export type ScriptFamily = 'latin' | 'arabic' | 'cyrillic' | 'devanagari' | 'chinese' | 'japanese' | 'korean';
+export const SCRIPT_FAMILIES = ['latin', 'arabic', 'cyrillic', 'devanagari', 'chinese', 'japanese', 'korean'] as const;
+export type ScriptFamily = (typeof SCRIPT_FAMILIES)[number];
 
 interface FamilyFixture {
   fonts: readonly string[];
