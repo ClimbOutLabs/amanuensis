@@ -55,6 +55,8 @@ const RECIPIENT_KEYS = [
   'webhook_url',
   'forward',
   'forward_to',
+  'to_recipients',
+  'participants',
 ];
 
 /** Field names that hold the address inside an object recipient such as `{ email, name }`. */
@@ -264,13 +266,38 @@ function keyDisplay(key: string): string {
   return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
 }
 
+const ATTACHMENT_KEYS = new Set(['attachment', 'attachments']);
+const ATTACHMENT_BODY_KEYS = new Set(['content', 'data', 'body', 'base64']);
+
+/**
+ * Attachment bodies are bound into the approval but not printed: the card names each file and its size,
+ * so a large attachment never counts against the length a send may have.
+ */
+function withAttachmentSizes(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(withAttachmentSizes);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      key,
+      ATTACHMENT_BODY_KEYS.has(key.toLowerCase()) && typeof field === 'string'
+        ? `(${String(Array.from(field).length)} characters, not shown)`
+        : field,
+    ]),
+  );
+}
+
 function renderOutboundLines(
   params: Record<string, unknown>,
   valueMaxChars: number,
 ): { lines: string[]; truncated: boolean } {
   let truncated = false;
   const lines = Object.entries(params).map(([key, value]) => {
-    const raw = typeof value === 'string' ? value : argumentJson(value);
+    const shownValue = ATTACHMENT_KEYS.has(key.toLowerCase()) ? withAttachmentSizes(value) : value;
+    const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
     const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
     truncated ||= rest > 0;
     const shown = escapeDisplayText(head, { keepNewlines: true });
@@ -449,11 +476,6 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     destination: repositoryLabel,
   },
   {
-    match: words => hasPhrase(words, 'send_draft'),
-    sends: 'recipient',
-    describe: ({ tool_name, where, fields }) => `Send a saved draft${toRecipient(fields)} with ${tool_name}${where}.`,
-  },
-  {
     match: (words, params) => hasPhrase(words, 'create_filter') && hasForwardAction(params),
     sends: 'recipient',
     describe: ({ tool_name, where, fields }) =>
@@ -525,6 +547,8 @@ export interface ExtractionResult {
   external_service: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
+  /** The call sends data out (a send family, an external service, or a named recipient); it is never trusted by a hint or grant. */
+  sends: boolean;
   /** Why a send cannot be shown to the user in full, or null. Such a send is refused, never carded. */
   incomplete_send: string | null;
 }
@@ -540,13 +564,13 @@ function incompleteSend(input: {
   truncated: boolean;
 }): string | null {
   if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES)) {
-    return 'This tool sends to recipients or content that are filled in after approval, so the card cannot show them.';
+    return 'This tool sends to recipients or content that are filled in after approval, so the card cannot show them. Send a new message that names every recipient and includes its full text.';
   }
   if (input.sends && input.truncated) {
-    return 'The message is too long to show in full, so it cannot be approved.';
+    return 'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller parts, or tell the user it is too long to approve.';
   }
   if (input.needs_recipient && input.fields.recipient === null) {
-    return 'The card cannot name who receives this.';
+    return 'The card cannot name who receives this. Name each recipient in `to` and try again.';
   }
   return null;
 }
@@ -576,6 +600,7 @@ export function extractCardFields(input: {
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
       connector_what: null,
+      sends: externalService,
       incomplete_send: null,
     };
   }
@@ -586,11 +611,11 @@ export function extractCardFields(input: {
     : CONNECTOR_FAMILIES.find(f => f.match(words, input.canonical_params));
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
-  const sends = externalService || family?.sends !== undefined;
+  const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
+  const sends = externalService || family?.sends !== undefined || recipients.length > 0;
   const outbound = renderOutboundArguments(input.canonical_params, {
     valueMaxChars: sends ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
   });
-  const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
   const fields: ExtractedCardFields = {
     ...base,
     destination: family?.destination?.(input.canonical_params) ?? base.destination,
@@ -605,6 +630,7 @@ export function extractCardFields(input: {
     fields,
     destination_unverifiable: destinationUnverifiable,
     external_service: externalService,
+    sends,
     incomplete_send: incompleteSend({
       sends,
       words,

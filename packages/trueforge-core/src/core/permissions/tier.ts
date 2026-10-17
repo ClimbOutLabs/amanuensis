@@ -23,7 +23,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'install_action',
   'mcp_destructive_hint',
   'mcp_open_world_hint',
-  'connector_outbound',
+  'connector_send',
 ]);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */

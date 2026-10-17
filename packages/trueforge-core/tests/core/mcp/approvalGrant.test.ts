@@ -213,7 +213,7 @@ describe('chat approval grants', () => {
 describe('chat grant key', () => {
   it('differs by destination and recipient so one grant never covers a different target', () => {
     const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
-    const card = (destination: string | null, recipient: string | null) => ({
+    const card = ({ destination, recipient }: { destination: string | null; recipient: string | null }) => ({
       plain_what: 'x',
       plain_why: null,
       cannot_be_undone: null,
@@ -226,10 +226,35 @@ describe('chat grant key', () => {
       destination_host: null,
       outbound_truncated: false,
     });
-    const keyA = approvalGrantKey({ ...base, tier3_card: card('https://a.example', null) });
-    const keyB = approvalGrantKey({ ...base, tier3_card: card('https://b.example', null) });
-    const keyC = approvalGrantKey({ ...base, tier3_card: card(null, 'a@example.com') });
+    const keyA = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://a.example', recipient: null }) });
+    const keyB = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://b.example', recipient: null }) });
+    const keyC = approvalGrantKey({ ...base, tier3_card: card({ destination: null, recipient: 'a@example.com' }) });
     expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
+
+  it('bars durable scope when the card names a recipient or the tier has no reason', () => {
+    const info: InternalToolCallInfo = { ...toolInfo('notes', 'invite_user'), effect: 'inspect', tier: 3 };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+    const named = {
+      ...info,
+      tier_reason: 'unrecognized_tool',
+      tier3_card: {
+        plain_what: 'x',
+        plain_why: null,
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: 'guest@example.com',
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+    };
+    expect(allowsChatApproval(named)).toBe(false);
+    expect(allowsToolGrant(named)).toBe(false);
   });
 
   it('never admits a Tier 3 send-class call from a chat grant, even a forged one', () => {

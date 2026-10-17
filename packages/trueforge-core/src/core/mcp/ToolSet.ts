@@ -126,7 +126,7 @@ function autoDenyMessage(decision: TierDecision): string {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
     case 'incomplete_send_card':
-      return `Auto-denied: ${decision.reason_detail ?? 'the card cannot show everything that would be sent.'} Use a different way to send it.`;
+      return `Auto-denied: ${decision.reason_detail ?? 'the card cannot show everything that would be sent.'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     default:

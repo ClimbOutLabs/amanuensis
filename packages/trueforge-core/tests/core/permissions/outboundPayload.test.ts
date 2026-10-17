@@ -374,6 +374,7 @@ describe('connector card: fetch, repository writes and mail', () => {
 
   test.each([
     ['forward_email', 'Forward an email to carol@example.com.'],
+    ['reply_to_thread', 'Send a reply to carol@example.com with reply_to_thread on gmail.'],
     ['draft_email', 'Save an email draft for carol@example.com.'],
   ])('%s is named in plain words with the recipient', async (toolName, expected) => {
     const decision = await classifyTier(

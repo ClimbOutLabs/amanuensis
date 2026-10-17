@@ -1450,6 +1450,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     readOnlyHint &&
     action.mcp_hints.open_world_hint === false &&
+    !extraction.sends &&
     !sensitiveReadHit(action.canonical_params)
   ) {
     if (action.mcp_first_party === true) {
@@ -1492,7 +1493,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const recognized = extraction.connector_what !== null;
   return tier3Decision({
     card,
-    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason: extraction.sends ? 'connector_send' : recognized ? 'connector_outbound' : 'unrecognized_tool',
     reason_detail: recognized
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
