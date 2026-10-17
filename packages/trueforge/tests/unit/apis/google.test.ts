@@ -1,3 +1,4 @@
+import { GOOGLE_FEATURES, scopesForFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
@@ -14,6 +15,7 @@ const ID = '123456789-abcdefghij.apps.googleusercontent.com';
 const SECRET = 'GOCSPX-abcdefghijklmnop';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+const EVERY_SCOPE = scopesForFeatures(GOOGLE_FEATURES).join(' ');
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const LAN = 'http://192.168.1.20:8791';
 const BASE = '/api/v1/user/settings/google';
@@ -48,6 +50,7 @@ describe('Google connection API', () => {
   let granted = `${READ}`;
   let revoked = false;
   let revokeStatus = 200;
+  let profileEmail = 'ada@example.com';
   const calls: string[] = [];
   const originalBase = configuration.PUBLIC_BASE_URL;
 
@@ -66,7 +69,7 @@ describe('Google connection API', () => {
       );
     }
     if (url.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/profile')) {
-      return Promise.resolve(jsonResponse({ emailAddress: 'ada@example.com' }));
+      return Promise.resolve(jsonResponse({ emailAddress: profileEmail }));
     }
     if (url.startsWith('https://oauth2.googleapis.com/revoke')) {
       return Promise.resolve(new Response('', { status: revokeStatus }));
@@ -104,6 +107,7 @@ describe('Google connection API', () => {
     granted = READ;
     revoked = false;
     revokeStatus = 200;
+    profileEmail = 'ada@example.com';
     calls.length = 0;
     configuration.PUBLIC_BASE_URL = '';
     const router = createGoogleRouter({
@@ -177,37 +181,145 @@ describe('Google connection API', () => {
     expect(JSON.parse(text).data.setup.mode).toBe('paste');
   });
 
-  it('is unavailable on a demo instance', async () => {
-    const original = configuration.DEMO_MODE;
-    configuration.DEMO_MODE = true;
-    try {
-      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(false);
-    } finally {
-      configuration.DEMO_MODE = original;
-    }
-    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(true);
-  });
+  describe('on a demo instance', () => {
+    let originalMode: boolean;
+    let originalAccount: string;
+    const statusOf = async (as?: string) =>
+      JSON.parse((await call({ method: 'GET', path: '/status', ...(as === undefined ? {} : { as }) })).text).data;
+    beforeEach(() => {
+      originalMode = configuration.DEMO_MODE;
+      originalAccount = configuration.DEMO_GOOGLE_ACCOUNT;
+      configuration.DEMO_MODE = true;
+      configuration.DEMO_GOOGLE_ACCOUNT = 'ada@example.com';
+      granted = EVERY_SCOPE;
+    });
+    afterEach(() => {
+      configuration.DEMO_MODE = originalMode;
+      configuration.DEMO_GOOGLE_ACCOUNT = originalAccount;
+    });
 
-  it('refuses every route but the status on a demo instance', async () => {
-    const original = configuration.DEMO_MODE;
-    configuration.DEMO_MODE = true;
-    try {
-      const routes: { method: string; path: string }[] = [
+    it('lets the owner connect the named account before the demo opens', async () => {
+      expect(await statusOf()).toMatchObject({ locked: false });
+      const { status, text } = await connect();
+      expect(status).toBe(200);
+      expect(JSON.parse(text).data).toMatchObject({
+        state: 'connected',
+        account_email: 'ada@example.com',
+        locked: true,
+      });
+    });
+
+    it('locks the connection once made: no reconnecting and no disconnecting', async () => {
+      await connect();
+      const locked: { method: string; path: string }[] = [
         { method: 'POST', path: '/oauth/check-client' },
         { method: 'POST', path: '/oauth/begin' },
-        { method: 'GET', path: '/oauth/callback?code=a&state=b' },
         { method: 'POST', path: '/oauth/complete' },
-        { method: 'POST', path: '/test' },
         { method: 'POST', path: '/disconnect' },
       ];
-      for (const { method, path } of routes) {
-        const response = await call({ method, path, body: method === 'POST' ? {} : undefined });
+      for (const { method, path } of locked) {
+        const response = await call({ method, path, body: {} });
         expect({ path, status: response.status }).toEqual({ path, status: 403 });
+        expect(response.text).toContain("This demo's Google account is already set up and cannot be changed.");
       }
-      expect((await call({ method: 'GET', path: '/status' })).status).toBe(200);
-    } finally {
-      configuration.DEMO_MODE = original;
-    }
+      expect(await statusOf()).toMatchObject({ state: 'connected', locked: true });
+    });
+
+    it('never lets a demo visitor disconnect, even when the account is not yet connected', async () => {
+      expect((await call({ method: 'POST', path: '/disconnect' })).status).toBe(403);
+    });
+
+    it('still lets the connection be tested', async () => {
+      await connect();
+      expect((await call({ method: 'POST', path: '/test' })).status).toBe(200);
+    });
+
+    it('refuses to connect any other Google account, and saves nothing', async () => {
+      profileEmail = 'judge@gmail.example';
+      const { status, text } = await connect('judge');
+      expect(status).toBe(400);
+      expect(text).toContain("Only this demo's own Google account can be connected here.");
+      expect(await statusOf('judge')).toMatchObject({ state: 'not_connected', account_email: null, locked: false });
+    });
+
+    it('lets a different user than the owner connect only the named account', async () => {
+      profileEmail = 'Ada@Example.com';
+      expect((await connect('judge')).status).toBe(200);
+      expect((await statusOf('judge')).account_email).toBe('Ada@Example.com');
+    });
+
+    it('refuses every connect step, and says why, until the owner names the demo account', async () => {
+      configuration.DEMO_GOOGLE_ACCOUNT = '';
+      for (const path of ['/oauth/check-client', '/oauth/begin', '/oauth/complete']) {
+        const response = await call({ method: 'POST', path, body: {} });
+        expect({ path, status: response.status }).toEqual({ path, status: 403 });
+        expect(response.text).toContain("until its owner names the demo's Google account");
+      }
+      expect(await statusOf()).toMatchObject({ state: 'not_connected', locked: true });
+    });
+
+    it('lets the named account repair a login Google stopped accepting, and no one else', async () => {
+      await connect();
+      revoked = true;
+      expect(JSON.parse((await call({ method: 'POST', path: '/test' })).text).data.result).toBe('needs_reconnect');
+      expect(await statusOf()).toMatchObject({ state: 'needs_reconnect', locked: false });
+
+      profileEmail = 'judge@gmail.example';
+      expect((await connect()).status).toBe(400);
+      expect((await statusOf()).state).toBe('needs_reconnect');
+
+      profileEmail = 'ada@example.com';
+      revoked = false;
+      expect((await connect()).status).toBe(200);
+      expect(await statusOf()).toMatchObject({ state: 'connected', locked: true });
+    });
+
+    it('asks Google for every feature, whatever the request named', async () => {
+      const begin = await call({
+        method: 'POST',
+        path: '/oauth/begin',
+        body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
+      });
+      expect(begin.status).toBe(201);
+      const url = new URL(BeginResponse.parse(JSON.parse(begin.text)).data.authorization_url);
+      expect(url.searchParams.get('scope')).toBe(EVERY_SCOPE);
+    });
+
+    it('lets the named account come back for a feature it was not given, then locks', async () => {
+      granted = READ;
+      await connect();
+      expect(await statusOf()).toMatchObject({ state: 'connected', account_email: 'ada@example.com', locked: false });
+      granted = EVERY_SCOPE;
+      expect((await connect()).status).toBe(200);
+      const status = await statusOf();
+      expect(status).toMatchObject({ state: 'connected', account_email: 'ada@example.com', locked: true });
+      expect(status.features.every((feature: { granted: boolean }) => feature.granted)).toBe(true);
+    });
+
+    it('still refuses any other account while a feature is missing, and saves nothing', async () => {
+      granted = READ;
+      await connect();
+      const before = await statusOf();
+      profileEmail = 'judge@gmail.example';
+      granted = EVERY_SCOPE;
+      const { status, text } = await connect();
+      expect(status).toBe(400);
+      expect(text).toContain("Only this demo's own Google account can be connected here.");
+      expect(await statusOf()).toEqual(before);
+    });
+
+    it('lets the named account replace a saved login that belongs to another account', async () => {
+      configuration.DEMO_GOOGLE_ACCOUNT = '';
+      configuration.DEMO_MODE = false;
+      profileEmail = 'someone@else.example';
+      await connect();
+      configuration.DEMO_MODE = true;
+      configuration.DEMO_GOOGLE_ACCOUNT = 'ada@example.com';
+      expect(await statusOf()).toMatchObject({ account_email: 'someone@else.example', locked: false });
+      profileEmail = 'ada@example.com';
+      expect((await connect()).status).toBe(200);
+      expect(await statusOf()).toMatchObject({ account_email: 'ada@example.com', locked: true });
+    });
   });
 
   describe('a request that did not come from the Aman page', () => {
