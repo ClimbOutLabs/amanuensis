@@ -38,7 +38,7 @@ import {
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
-import { isMapsToolName, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
+import { isMapsToolName, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   checkOutboundStrings,
@@ -182,6 +182,37 @@ export function mapsDestinationHosts(hosts: MapsHosts): string {
   return [...new Set(parts)].join(', ');
 }
 
+/** Most addresses one pin call may send; the tool schema caps the list at the same number. */
+const PLACES_CARD_MAX = 3;
+
+/** The addresses a render_places call would send to the geocoder, as the model wrote them. */
+function placeAddresses(params: Record<string, unknown>): unknown[] {
+  const places = params['places'];
+  if (!Array.isArray(places)) {
+    return [];
+  }
+  return places
+    .slice(0, PLACES_CARD_MAX)
+    .map((place: unknown) => (typeof place === 'object' && place !== null ? Reflect.get(place, 'address') : undefined));
+}
+
+/** Only the addresses leave the machine, so only they are the outbound text of a pin call. */
+function placesOutboundArguments(params: Record<string, unknown>): Record<string, unknown> {
+  const addresses = placeAddresses(params);
+  return Object.fromEntries(
+    addresses.map((address, index) => [
+      addresses.length === 1 ? 'address' : `address_${String(index + 1)}`,
+      address === undefined ? '(not text)' : address,
+    ]),
+  );
+}
+
+function joinedLabels(values: readonly unknown[]): string {
+  const labels = values.map(mapsCardLabel);
+  const last = labels.pop();
+  return labels.length === 0 ? (last ?? '') : `${labels.join(', ')} and ${last ?? ''}`;
+}
+
 /** Card plain_what naming the quoted place strings and the configured hosts. */
 function mapsPlainWhat(action: SentinelAction): string {
   const params = action.canonical_params;
@@ -193,6 +224,12 @@ function mapsPlainWhat(action: SentinelAction): string {
     return (
       `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
       `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
+    );
+  }
+  if (action.tool_name === RENDER_PLACES_TOOL_NAME) {
+    return (
+      `Send the addresses ${joinedLabels(placeAddresses(params))} to ${geocoder} to find where they are, ` +
+      `then load map tiles for that area from ${tile}. The details on each pin come from pages Aman already read.`
     );
   }
   const placeName = mapsCardLabel(params['place_name']);
@@ -1618,7 +1655,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           sensitive_read: false,
         });
       }
-      const outbound = renderOutboundArguments(action.canonical_params);
+      const outbound = renderOutboundArguments(
+        action.tool_name === RENDER_PLACES_TOOL_NAME
+          ? placesOutboundArguments(action.canonical_params)
+          : action.canonical_params,
+      );
       return tier3Decision({
         card: {
           plain_what: mapsPlainWhat(action),

@@ -1,5 +1,5 @@
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
-import { groundPlace, type PlaceClaim } from '../../../src/core/search/groundPlace';
+import { groundPlace, isInCalendar, type PlaceClaim } from '../../../src/core/search/groundPlace';
 import { GARDEN_TEXT, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL } from './tavilyFixtures';
 
 function storeWithPages(): FetchedPageStore {
@@ -81,5 +81,25 @@ describe('groundPlace', () => {
       ok: false,
       reason: 'name_not_found',
     });
+  });
+});
+
+describe('isInCalendar', () => {
+  const place = { name: 'Harbour Family Clinic', address: '12 Example Street, Lisbon 1100-000' };
+
+  it('matches an appointment location that names the place or its address', () => {
+    expect(isInCalendar({ place, locations: ['Harbour Family Clinic, Lisbon'] })).toBe(true);
+    expect(isInCalendar({ place, locations: ['12 Example Street Lisbon 1100-000'] })).toBe(true);
+    expect(isInCalendar({ place, locations: ['harbour family clinic'] })).toBe(true);
+  });
+
+  it('matches a longer address line that contains the appointment location', () => {
+    expect(isInCalendar({ place, locations: ['12 Example Street'] })).toBe(true);
+  });
+
+  it('does not match a different place or a one-word area', () => {
+    expect(isInCalendar({ place, locations: ['Garden Health Centre, 4 Sample Avenue'] })).toBe(false);
+    expect(isInCalendar({ place, locations: ['Lisbon'] })).toBe(false);
+    expect(isInCalendar({ place, locations: [] })).toBe(false);
   });
 });

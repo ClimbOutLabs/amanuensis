@@ -92,3 +92,29 @@ export function groundPlace({ claim, pages }: { claim: PlaceClaim; pages: Fetche
     },
   };
 }
+
+/** An appointment location needs this many words before it can match by being part of an address. */
+const MIN_WORDS_TO_MATCH_INSIDE_ADDRESS = 3;
+
+/**
+ * Whether the user's calendar already holds this place: an appointment location that contains the
+ * place's name or address, or a fuller address line that contains a specific location. A bare area
+ * such as a city never matches.
+ */
+export function isInCalendar({
+  place,
+  locations,
+}: {
+  place: { name: string; address: string };
+  locations: readonly string[];
+}): boolean {
+  const candidates = [words(place.name), words(place.address)];
+  return locations.some(location => {
+    const where = words(location);
+    if (where.trim() === '') {
+      return false;
+    }
+    const specific = where.trim().split(' ').length >= MIN_WORDS_TO_MATCH_INSIDE_ADDRESS;
+    return candidates.some(candidate => where.includes(candidate) || (specific && candidate.includes(where)));
+  });
+}

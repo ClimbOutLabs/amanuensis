@@ -40,6 +40,19 @@ describe('TavilySource', () => {
     expect(source.serverHost).toBe('api.tavily.com');
   });
 
+  it('keeps every schema bound at or under 128 and uses no pattern, like the other model-facing schemas', async () => {
+    const { source } = harness({});
+    const listed = await source.listTools();
+    const tools = 'result' in listed ? listed.result.tools : [];
+    for (const tool of tools) {
+      const schema = JSON.stringify(tool.inputSchema);
+      expect(schema).not.toMatch(/"pattern"/);
+      for (const [, value] of schema.matchAll(/"(?:maxLength|maxItems|minLength|minItems)"\s*:\s*(\d+)/g)) {
+        expect(Number(value)).toBeLessThanOrEqual(128);
+      }
+    }
+  });
+
   it('runs one search and marks the result as untrusted web text', async () => {
     const { source, calls } = harness({ body: searchResponse });
     const out = textOf(
