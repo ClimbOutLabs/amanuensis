@@ -62,6 +62,7 @@ export function AgentConfigEditors({
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [toolsRequestEpoch, setToolsRequestEpoch] = useState(0);
+  const selectedModel = useMemo(() => models.find(model => model.name === spec.model.name), [models, spec.model.name]);
   const mounts = useMemo(() => editableMountsFromSpec(spec.mcpServers), [spec.mcpServers]);
   const catalogConnectors = useMemo(
     () => connectorsWithSelectedStubs({ connectors, selected: mounts }),
@@ -187,6 +188,9 @@ export function AgentConfigEditors({
           open
           spec={spec}
           sandboxAvailable={sandboxAvailable}
+          modelContextLengthKnown={
+            selectedModel === undefined ? undefined : selectedModel.properties.contextLength !== undefined
+          }
           onChange={onChange}
           onClose={close}
         />

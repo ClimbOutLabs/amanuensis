@@ -6,10 +6,16 @@ import { useSlot } from '../../theme/SlotsProvider.js';
 export type AgentRuntimeEditorContentProps = {
   spec: AgentSpec;
   sandboxAvailable: boolean;
+  modelContextLengthKnown?: boolean;
   onChange: (spec: AgentSpec) => void;
 };
 
-export function AgentRuntimeEditorContent({ spec, sandboxAvailable, onChange }: AgentRuntimeEditorContentProps) {
+export function AgentRuntimeEditorContent({
+  spec,
+  sandboxAvailable,
+  modelContextLengthKnown,
+  onChange,
+}: AgentRuntimeEditorContentProps) {
   const AgentRuntimeConfigFields = useSlot('AgentRuntimeConfigFields');
 
   return (
@@ -19,6 +25,7 @@ export function AgentRuntimeEditorContent({ spec, sandboxAvailable, onChange }: 
         sandboxAvailable={sandboxAvailable}
         hasSkills={(spec.skills?.length ?? 0) > 0}
         layout="detailed"
+        modelContextLengthKnown={modelContextLengthKnown}
         onChange={config => onChange({ ...spec, config })}
       />
     </div>

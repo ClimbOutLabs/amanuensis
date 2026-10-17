@@ -145,7 +145,7 @@ This avoids two failure modes at once:
 
 ### Context compaction
 
-When the conversation grows longer than offloading alone can manage, the harness triggers **compaction**. Compaction is enabled by default and runs at 80% of the model's context length. If that length is unavailable, the harness falls back to 50,000 input tokens. An agent can also set an explicit input-token threshold.
+When the conversation grows longer than offloading alone can manage, the harness triggers **compaction**. Compaction is enabled by default and runs at 80% of the model's context length. If that length is unavailable, the harness falls back to 50,000 input tokens. In the agent's runtime settings this is the **Automatic (recommended)** choice for "When to summarize long chats"; **At a set size** lets an agent set an explicit input-token threshold instead.
 
 An LLM fills a host-owned handoff template covering the goal, completed work, in-flight work, remaining work, the current blocker, and bound repository state. The host validates the template, replaces repository identity with the active binding, and adds a bounded touched-path ledger derived only from successful structured-edit evidence. If more than 200 paths are observed, the handoff explicitly marks the ledger as truncated.
 

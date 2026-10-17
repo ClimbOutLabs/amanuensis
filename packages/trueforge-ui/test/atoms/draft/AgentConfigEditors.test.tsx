@@ -7,7 +7,7 @@ import { AgentConfigEditors } from '@/atoms/draft/AgentConfigEditors.js';
 import { AgentModelSettingsContent } from '@/atoms/draft/AgentModelSettingsContent.js';
 import { withInitialUserMessages } from '@/atoms/draft/agentConfigMessages.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import type { AgentSkill, AgentSpec, ConnectorState } from '@/server/types.js';
+import type { AgentSkill, AgentSpec, ConnectorState, ModelSelection } from '@/server/types.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
@@ -482,8 +482,10 @@ describe('AgentConfigEditors', () => {
 
     expect(screen.getByRole('switch', { name: 'File downloads' })).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'File downloads' })).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('spinbutton', { name: /Compaction threshold tokens/ })).toBeDisabled();
-    expect(screen.getByRole('spinbutton', { name: /Compaction threshold tokens/ })).toHaveValue(42_000);
+    expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toHaveValue('set_size');
+    expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toHaveValue(42_000);
 
     fireEvent.click(screen.getByRole('switch', { name: 'Context compaction' }));
     expect(onChange).toHaveBeenCalledWith({
@@ -498,6 +500,123 @@ describe('AgentConfigEditors', () => {
           largeToolResponse: { enabled: false },
         },
       },
+    });
+  });
+
+  describe('when to summarize long chats', () => {
+    const KNOWN_MODEL: ModelSelection = {
+      id: 'openai/gpt',
+      name: 'openai/gpt',
+      provider: { name: 'OpenAI' },
+      properties: { contextLength: 128_000 },
+    };
+    const UNKNOWN_MODEL: ModelSelection = { ...KNOWN_MODEL, properties: {} };
+
+    function renderRuntime({
+      spec,
+      models = [KNOWN_MODEL],
+      onChange = vi.fn(),
+    }: {
+      spec: AgentSpec;
+      models?: ModelSelection[];
+      onChange?: (spec: AgentSpec) => void;
+    }) {
+      render(
+        <SlotsProvider>
+          <AgentConfigEditors
+            editor="runtime"
+            spec={spec}
+            models={models}
+            connectors={[]}
+            skills={[]}
+            loading={false}
+            error={null}
+            sandboxAvailable
+            onChange={onChange}
+            onClose={vi.fn()}
+          />
+        </SlotsProvider>,
+      );
+    }
+
+    it('reads saved settings with no value as Automatic and shows no number field', () => {
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } } });
+
+      const select = screen.getByRole('combobox', { name: 'When to summarize long chats:' });
+      expect(select).toHaveValue('automatic');
+      expect(screen.getByRole('option', { name: 'Automatic (recommended)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'At a set size' })).toBeInTheDocument();
+      expect(
+        screen.getByText('Aman summarizes the oldest part of a long chat so the model can keep reading it.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('spinbutton', { name: /Chat size to summarize at/ })).not.toBeInTheDocument();
+    });
+
+    it('keeps an existing saved number as a set size', () => {
+      renderRuntime({
+        spec: {
+          model: { name: 'openai/gpt' },
+          config: {
+            contextManagement: { compaction: { enabled: true, trigger: { type: 'input_tokens', value: 42_000 } } },
+          },
+        },
+      });
+
+      expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toHaveValue('set_size');
+      expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toHaveValue(42_000);
+    });
+
+    it('saves no trigger for Automatic and a number for a set size', () => {
+      const onChange = vi.fn();
+      const spec: AgentSpec = {
+        model: { name: 'openai/gpt' },
+        config: {
+          contextManagement: {
+            compaction: { enabled: true, trigger: { type: 'input_tokens', value: 42_000 } },
+            largeToolResponse: { enabled: true },
+          },
+        },
+      };
+      renderRuntime({ spec, onChange });
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats:' }), {
+        target: { value: 'automatic' },
+      });
+      expect(onChange).toHaveBeenLastCalledWith({
+        ...spec,
+        config: {
+          contextManagement: { compaction: { enabled: true }, largeToolResponse: { enabled: true } },
+        },
+      });
+    });
+
+    it('starts a set size from the safe default when leaving Automatic', () => {
+      const onChange = vi.fn();
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } }, onChange });
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats:' }), {
+        target: { value: 'set_size' },
+      });
+      expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
+        enabled: true,
+        trigger: { type: 'input_tokens', value: 50_000 },
+      });
+    });
+
+    it('says in plain words when the model limit is unknown, and only then', () => {
+      const unknownLine = /size limit isn't known.*safe default/;
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } }, models: [UNKNOWN_MODEL] });
+      expect(screen.getByText(unknownLine)).toBeInTheDocument();
+    });
+
+    it('stays quiet about the limit when the model limit is known', () => {
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } }, models: [KNOWN_MODEL] });
+      expect(screen.queryByText(/safe default/)).not.toBeInTheDocument();
+    });
+
+    it('stays quiet about the limit when the model is not in the catalog yet', () => {
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } }, models: [] });
+      expect(screen.queryByText(/safe default/)).not.toBeInTheDocument();
     });
   });
 
