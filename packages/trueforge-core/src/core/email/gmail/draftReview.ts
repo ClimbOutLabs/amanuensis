@@ -1,0 +1,26 @@
+/**
+ * What the user was shown before a send. The send card is built from the draft as Gmail holds it, and its hash
+ * is part of the approved call, so an edit made after review, by anyone, voids the approval instead of mailing
+ * different text.
+ */
+import { createHash } from 'node:crypto';
+import { stableStringify } from '../../permissions/approvalTokens';
+
+export interface ReviewableDraft {
+  to: readonly string[];
+  cc: readonly string[];
+  bcc: readonly string[];
+  subject: string;
+  body: string;
+  threadId: string;
+  /** The `In-Reply-To` and `References` headers, so a change in threading counts as a change. */
+  inReplyTo: string;
+  references: string;
+  /** The display name the message is sent under, which recipients see; empty when there is none. */
+  fromName: string;
+}
+
+/** Hash of everything a send delivers. */
+export function hashDraft(draft: ReviewableDraft): string {
+  return createHash('sha256').update(stableStringify(draft)).digest('hex');
+}

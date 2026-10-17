@@ -30,9 +30,11 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { heldCallAuditText } from '../permissions/audit';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
-import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
+import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -520,16 +522,48 @@ async function verifySentinelPreDispatch(input: {
   // minted) against the underlying tool's name and inner input, not the wrapper
   // (see DeferredTool.toolCallInfo). When mint unwrapped, the verifier must hash
   // the same inner input, or every approved deferred call fails as "action
-  // identity changed". Wrapper-classified fallbacks keep
-  // original_tool_name === 'call_tool' and are verified against the wrapper.
+  // identity changed". The token covers neither the tool name nor the server, so
+  // the wire wrapper must still name exactly what was classified. Wrapper-classified
+  // fallbacks keep original_tool_name === 'call_tool' and are verified against the wrapper.
   if (info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME) {
-    canonicalParams = tryUnwrapCallToolInput(canonicalParams) ?? canonicalParams;
+    const wrapper = tryParseCallToolWrapper(canonicalParams);
+    if (wrapper !== undefined) {
+      if (wrapper.tool_name !== info.original_tool_name || wrapper.mcp_server !== info.mcp_server_name) {
+        return 'The deferred tool call no longer names the tool that was approved; request approval again.';
+      }
+      canonicalParams = wrapper.input;
+    }
   }
-  // When the mint site recorded its exact identity (sandbox: invoked name and
-  // normalized args, while original_tool_name is remapped for display), verify
-  // against the recorded values instead of reconstructing.
-  if (info.mint_canonical_params !== undefined) {
-    canonicalParams = info.mint_canonical_params;
+  // Host-observed state an approval also binds (a Gmail draft as shown on the card) cannot be re-derived
+  // from the wire alone, so the tool set re-reads it here from the wire arguments; the token check below
+  // then compares that whole re-derivation with what was approved.
+  let live: Record<string, unknown> | undefined;
+  try {
+    live = await input.toolInfo.toolSet.liveMintParams?.({
+      name: input.toolInfo.originalToolName,
+      arguments: wireArguments,
+    });
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
+  if (live !== undefined) {
+    canonicalParams = live;
+  } else if (info.mint_canonical_params !== undefined) {
+    // Where mint recorded its exact identity (sandbox: invoked name and
+    // normalized args, while original_tool_name is remapped for display), the
+    // wire arguments are re-derived the way mint derived them and must equal what
+    // was approved. Verifying the recorded values alone would let arguments edited
+    // after classification run under the earlier decision.
+    const rederived = toJsonSafeParams(
+      input.toolInfo.toolSet.mintCanonicalParams?.({
+        name: input.toolInfo.originalToolName,
+        arguments: canonicalParams,
+      }) ?? canonicalParams,
+    );
+    if (JSON.stringify(canonicalValue(rederived)) !== JSON.stringify(canonicalValue(info.mint_canonical_params))) {
+      return 'Tool arguments changed since approval; request approval again.';
+    }
+    canonicalParams = rederived;
   }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
@@ -1491,6 +1525,9 @@ export async function executeToolCalls({
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
+            ...(toolCall.tool_info.mint_canonical_params === undefined
+              ? {}
+              : { approved_params: toolCall.tool_info.mint_canonical_params }),
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
@@ -1818,7 +1855,7 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        description: heldCallAuditText(info),
         outcome,
         auto_deny_reason: null,
       });

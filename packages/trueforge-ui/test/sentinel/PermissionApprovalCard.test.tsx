@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
-import type { SentinelApprovalCard } from '@/sentinel/types.js';
+import type { SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
   return {
@@ -18,6 +18,7 @@ function baseCard(): SentinelApprovalCard {
     outbound_text: null,
     destination_host: null,
     outbound_truncated: false,
+    email: null,
   };
 }
 
@@ -142,7 +143,7 @@ describe('PermissionApprovalCard', () => {
     const recipients = Array.from({ length: 60 }, (_, index) => `person${String(index)}@example.com`).join(', ');
     renderCard({ recipient: recipients });
     const folded = screen.getByText(/^person0@example\.com.*\.\.\.$/);
-    expect(folded.className).toContain('break-all');
+    expect(folded.className).toContain('break-words');
     expect(folded.parentElement?.className).toContain('min-w-0');
     expect(folded.textContent).not.toContain('person59@example.com');
     fireEvent.click(screen.getByRole('button', { name: /show all/i }));
@@ -198,5 +199,104 @@ describe('PermissionApprovalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
     expect(onApproveAll).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
+  });
+});
+
+describe('PermissionApprovalCard for mail', () => {
+  const email: SentinelApprovalEmail = {
+    action: 'send',
+    to: ['grace@example.com', 'lin@example.com'],
+    cc: ['sam@example.com'],
+    bcc: ['audit@example.com'],
+    subject: 'Lease',
+    body: 'Thursday works.\n\nBest,\nAda',
+    replaces: null,
+  };
+
+  function renderMail(overrides: Partial<SentinelApprovalEmail> = {}) {
+    return renderCard(
+      {
+        plain_what:
+          'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Copy: sam@example.com. Hidden copy: audit@example.com.',
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        email: { ...email, ...overrides },
+      },
+      { toolName: 'send_draft' },
+    );
+  }
+
+  it('lists the recipients once, in the box, besides the sentence the server wrote', () => {
+    renderMail();
+    expect(screen.getByText(/^Send "Lease" from your Gmail to grace@example.com/)).toBeInTheDocument();
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Hidden copy: audit@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('To')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copy')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('(Bcc)');
+    expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
+  });
+
+  it('names the action in the badge instead of the tool id', () => {
+    renderMail();
+    expect(screen.getByText('Send email')).toBeInTheDocument();
+    expect(screen.queryByText('send_draft')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['save', 'Save draft'],
+    ['change', 'Change draft'],
+  ] as const)('labels a %s as "%s"', (action, badge) => {
+    renderMail({ action });
+    expect(screen.getByText(badge)).toBeInTheDocument();
+  });
+
+  it('shows the whole message in its own labelled box, with its line breaks, and no gutters or brackets', () => {
+    renderMail();
+    expect(screen.getByText('Exactly what will be sent')).toBeInTheDocument();
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Subject: Lease')).toBeInTheDocument();
+    const box = screen.getByRole('region', { name: 'Message, exactly as sent' });
+    expect(box.textContent).toBe('Thursday works.\n\nBest,\nAda');
+    expect(box.querySelector('p')).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(document.body.textContent).not.toMatch(/\(array\)|\[|\]|"audit|\|/);
+  });
+
+  it('never folds a long body: all of it is in the scrollable box', () => {
+    const body = `${'Line of the lease. '.repeat(400)}THE-END`;
+    renderMail({ body });
+    const box = screen.getByRole('region', { name: 'Message, exactly as sent' });
+    expect(box.textContent).toBe(body);
+    expect(box).toHaveClass('overflow-auto');
+    expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
+  });
+
+  it('shows what a change replaces', () => {
+    renderMail({ action: 'change', replaces: { subject: 'Old lease', to: ['sam@example.com'] } });
+    expect(screen.getByText('Replaces')).toBeInTheDocument();
+    expect(screen.getByText('Old lease (to sam@example.com)')).toBeInTheDocument();
+  });
+
+  it('uses surface tokens that flip with the theme, not a tint of the button colour', () => {
+    const { container } = render(
+      <PermissionApprovalCard
+        toolName="send_draft"
+        card={{ ...baseCard(), email }}
+        tier={3}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    const root = container.firstElementChild;
+    expect(root).toHaveClass('bg-card-bg');
+    expect(root?.className).not.toContain('primary-button-bg');
+  });
+
+  it('keeps Approve and Deny', () => {
+    const { onApprove, onDeny } = renderMail();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onDeny).toHaveBeenCalledTimes(1);
   });
 });

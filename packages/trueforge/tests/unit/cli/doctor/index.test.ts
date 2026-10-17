@@ -128,4 +128,39 @@ describe('aman doctor', () => {
     const { io } = await run([], fakeDeps({ env, get: () => Promise.reject(networkError('ENOTFOUND')) }));
     expect(io.out.join('')).not.toContain('SENTINEL');
   });
+
+  describe('the live attachments test', () => {
+    const slotEnv = {
+      ...healthyEnv,
+      SANDBOX_BACKEND: 'slots',
+      SANDBOX_SLOTS: '2',
+      SANDBOX_SLOTS_DIR: '/run/aman-slots',
+    };
+    const slotsReadiness = () => Promise.resolve({ ready: true } as const);
+
+    it('is skipped with --local, which gates upgrades and lists status, so a busy sandbox cannot block them', async () => {
+      const slotsAttachments = jest.fn();
+      const { code, io } = await run(
+        ['--local'],
+        fakeDeps({ env: slotEnv, get: healthyGet, slotsReadiness, slotsAttachments }),
+      );
+      expect(slotsAttachments).not.toHaveBeenCalled();
+      expect(code).toBe(0);
+      const checks = z.array(CheckSchema).parse(JSON.parse(io.out.join('')));
+      expect(checks.find(c => c.id === 'attachments')).toMatchObject({ state: 'off' });
+    });
+
+    it('runs in a full check and only warns, with exit code 0, when the sandbox is busy', async () => {
+      const slotsAttachments = jest.fn().mockResolvedValue({ state: 'busy' });
+      const { code, io } = await run(
+        ['--only', 'attachments'],
+        fakeDeps({ env: slotEnv, get: healthyGet, slotsReadiness, slotsAttachments }),
+      );
+      expect(slotsAttachments).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
+      expect(code).toBe(0);
+      expect(z.array(CheckSchema).parse(JSON.parse(io.out.join('')))).toMatchObject([
+        { id: 'attachments', state: 'warn' },
+      ]);
+    });
+  });
 });

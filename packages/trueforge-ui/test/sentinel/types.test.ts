@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+import {
+  heldBecause,
+  searchHoldCardText,
+  SERVER_SECRET_REASON,
+} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -73,6 +78,48 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.parsed_command).toBeNull();
     expect(first?.card.outbound_text).toBeNull();
     expect(first?.card.destination_host).toBeNull();
+  });
+
+  describe('held search cards saved before the hold reason had its own place', () => {
+    const legacy = (card: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ tool_call_id: 'call-7', tier: 3, tier3_card: { plain_what: 'x', ...card } }],
+      })[0]?.card;
+
+    it('does not show a saved key, and says what was caught', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: debug synthetic-key-000111',
+        outbound_text: 'query: debug synthetic-key-000111',
+        why_asked_again: 'Held for approval: it contains a secret this server holds.',
+      });
+      expect(card?.plain_what).toBe(`Search the web through finder${heldBecause(SERVER_SECRET_REASON)}`);
+      expect(card?.outbound_text).toBeNull();
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('moves another hold reason out of "seen before" and keeps the query', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: oslo weather',
+        outbound_text: 'query: oslo weather',
+        why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
+      });
+      expect(card?.plain_what).toBe(
+        searchHoldCardText({
+          server: 'finder',
+          query: 'oslo weather',
+          why: 'this turn already ran 8 searches without asking',
+        }),
+      );
+      expect(card?.outbound_text).toBe('query: oslo weather');
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('leaves a real "seen before" reason alone', () => {
+      expect(legacy({ why_asked_again: 'the earlier approval expired' })?.why_asked_again).toBe(
+        'the earlier approval expired',
+      );
+    });
   });
 
   it('parses outbound_text and destination_host from the card', () => {
@@ -157,6 +204,68 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
     expect(approvals[0]?.card.outbound_truncated).toBe(true);
+  });
+
+  it('reads the whole message of a mail card after the SDK deserializes it', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-2',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-12',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Change a saved draft in your Gmail.',
+              plain_why: null,
+              cannot_be_undone: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+              email: {
+                action: 'change',
+                to: ['grace@example.com'],
+                cc: [],
+                bcc: ['audit@example.com'],
+                subject: 'Lease',
+                body: 'Thursday works.\n\nAda',
+                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+              },
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
+      action: 'change',
+      to: ['grace@example.com'],
+      cc: [],
+      bcc: ['audit@example.com'],
+      subject: 'Lease',
+      body: 'Thursday works.\n\nAda',
+      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+    });
+  });
+
+  it('has no email on a card that carries none, or one it cannot read', () => {
+    const card = (email: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-13', tier: 3, tier3_card: { plain_what: 'Do it', email } }],
+      })[0]?.card.email;
+    expect(card(undefined)).toBeNull();
+    expect(card(null)).toBeNull();
+    expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
+    expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {

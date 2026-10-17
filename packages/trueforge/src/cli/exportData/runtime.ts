@@ -22,6 +22,7 @@ async function buildSession<TTransaction>({
     { TENANT_ID },
     exportService,
     secrets,
+    envFile,
     memory,
     outbound,
   ] = await Promise.all([
@@ -29,6 +30,7 @@ async function buildSession<TTransaction>({
     import('../../tenancy'),
     import('../../dataExport/exportService'),
     import('../../dataExport/secretScrub'),
+    import('../../dataExport/envFileSecrets'),
     import('../../dataExport/memorySource'),
     import('../../runtime/outboundSecrets'),
   ]);
@@ -39,6 +41,7 @@ async function buildSession<TTransaction>({
     sandboxProviders: stores.sandboxProviderStore,
     mcpServers: stores.mcpServerStore,
     tokens: stores.tokenStore,
+    googleConnections: stores.googleConnectionStore,
   });
   // Memory provider lookups log through this; the command reports failures itself.
   const logger = createLogger({ silent: true });
@@ -102,10 +105,11 @@ async function buildSession<TTransaction>({
   return {
     signInOffUserId,
     listOwners,
-    exportUser: async ({ userId, includeUploads, includeInstanceData, out }) => {
-      const secretValues = secrets.normalizeSecrets(
-        await outboundSecrets({ tenant_id: TENANT_ID, created_by: userId }),
-      );
+    exportUser: async ({ userId, includeUploads, includeInstanceData, secretsEnvText, out }) => {
+      const secretValues = secrets.normalizeSecrets([
+        ...(await outboundSecrets({ tenant_id: TENANT_ID, created_by: userId })),
+        ...(secretsEnvText === undefined ? [] : envFile.envFileSecretValues(secretsEnvText)),
+      ]);
       const memorySource = await memory.resolveMemoryExportSource({
         mcpServerStore: stores.mcpServerStore,
         tokenStore: stores.tokenStore,

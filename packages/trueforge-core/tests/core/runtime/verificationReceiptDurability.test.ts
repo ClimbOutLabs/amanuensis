@@ -13,6 +13,7 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../sr
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../sandbox/fakeTrackedState';
 import { realCommandExec } from '../sandbox/realCommandExec';
 
 const VERIFICATION_COMMAND = './scripts/validate.sh';
@@ -24,8 +25,7 @@ const GIT_STATE_RESULTS: Readonly<Record<string, string>> = {
   'git rev-parse --abbrev-ref HEAD': 'feature/verification',
   'git rev-parse HEAD': '0123456789abcdef',
   "ls -di -- .git '/repo/.git'": '101 .git\n101 /repo/.git',
-  'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-  'git diff --binary --no-ext-diff --no-textconv --no-color --': '',
+  ...fakeTrackedState([]),
   'git ls-files --others --exclude-standard -z': '',
 };
 

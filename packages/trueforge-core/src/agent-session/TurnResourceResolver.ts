@@ -1,4 +1,5 @@
 import type { Logger } from 'winston';
+import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ILLM } from '../core/llm/ILLM';
 import type { ToolSource } from '../core/mcp/IMCPServer';
@@ -93,8 +94,8 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
-  /** The turn's silent-search state, shared by the root thread and every sub-agent thread. */
-  readonly #webSearch = createWebSearchTurnState();
+  /** The turn's search state, shared by every thread's host context so one thread's reads bind the others. */
+  protected readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -351,7 +352,7 @@ export class TurnResourceResolver<
       created_by,
       conversation_id: session_id,
       workspace_cwd: workspace_cwd ?? null,
-      web_search: this.#webSearch,
+      web_search: this.webSearchTurn,
     });
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
@@ -475,6 +476,8 @@ export class TurnResourceResolver<
         toolSets,
       },
       compactionModel,
+      // The root thread carries the session's "read private data" flag across turns.
+      ...(agentInfo ? {} : { extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn })] }),
     };
   }
 

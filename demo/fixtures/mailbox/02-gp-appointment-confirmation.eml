@@ -1,0 +1,25 @@
+From: Brightwater Family Clinic <appointments@brightwater-clinic.example.org>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Wed, 14 Oct 2026 10:00:05 +0100
+Subject: Appointment confirmed: Thursday, October 22 at 09:30
+Message-ID: <appt-20261022@brightwater-clinic.example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Maya,
+
+Your first appointment is confirmed:
+
+  What:     New patient check-up
+  When:     Thursday, October 22, 2026 at 09:30
+  Where:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa
+  Doctor:   Dra. Helena Rocha
+
+Please bring a photo ID, your insurance card and a list of
+your medications and allergies. Arrive 10 minutes early.
+
+Need to reschedule? Use this link:
+https://www.example.com/reschedule/bw4k9q
+
+- Brightwater Family Clinic
