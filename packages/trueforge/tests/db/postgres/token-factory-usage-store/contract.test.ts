@@ -22,7 +22,7 @@ describePg('PostgresTokenFactoryUsageStore (ITokenFactoryUsageStore contract)', 
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE token_factory_usage`.execute(env.db);
+      await sql`TRUNCATE TABLE token_factory_usage, token_factory_model_usage`.execute(env.db);
     }
   });
 

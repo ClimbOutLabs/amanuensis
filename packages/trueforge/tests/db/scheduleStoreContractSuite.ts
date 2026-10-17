@@ -89,6 +89,24 @@ export function runScheduleStoreContractSuite(deps: {
     expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
   });
 
+  it('create with a caller-supplied id keeps that id', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const { schedule } = await store.createScheduleAndRun({
+      id: 'schedule-imported-1',
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'imported',
+      manifest: manifest({ status: 'paused' }),
+      created_by_subject: USER_SUBJECT,
+      runFrom: new Date(),
+    });
+
+    expect(schedule.id).toBe('schedule-imported-1');
+    expect(await store.getSchedule({ tenant_id: TENANT, id: 'schedule-imported-1' })).toEqual(schedule);
+  });
+
   it('pause drops the pending run; resume re adds a pending run from the new now', async () => {
     const store = deps.getScheduleStore();
     const agent = await seedAgent();

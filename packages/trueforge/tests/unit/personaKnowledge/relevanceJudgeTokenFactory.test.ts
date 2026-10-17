@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import { createLogger } from 'winston';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -70,6 +71,7 @@ describe('the knowledge relevance judge on Token Factory', () => {
       modelName,
       modelProviderStore,
       tokenFactoryBudget: budget,
+      modelUsage: discardedModelUsage,
       logger,
     });
     return { judge, usageStore };
@@ -85,7 +87,12 @@ describe('the knowledge relevance judge on Token Factory', () => {
 
   it('is refused once the cap is reached, which the caller treats as a judge outage', async () => {
     const { judge, usageStore } = await setup({ providerType: 'tokenfactory' });
-    await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+    await usageStore.addUsage({
+      usage_date: TODAY,
+      model_id: 'nvidia/nemotron-3-super-120b-a12b',
+      input_tokens: CAP,
+      output_tokens: 0,
+    });
 
     await expect(judge('When did the solo project sell?', candidates)).rejects.toBeInstanceOf(
       TokenFactoryDailyCapError,
@@ -95,7 +102,12 @@ describe('the knowledge relevance judge on Token Factory', () => {
 
   it('counts nothing for a persona on another provider', async () => {
     const { judge, usageStore } = await setup({ providerType: 'custom' });
-    await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+    await usageStore.addUsage({
+      usage_date: TODAY,
+      model_id: 'nvidia/nemotron-3-super-120b-a12b',
+      input_tokens: CAP,
+      output_tokens: 0,
+    });
 
     await expect(judge('When did the solo project sell?', candidates)).resolves.toEqual([0]);
 

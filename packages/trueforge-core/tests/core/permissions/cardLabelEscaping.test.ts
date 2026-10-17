@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hasAnyHiddenCharacter } from '../../../src/core/email/gmail/mimeText';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
-import { isHiddenCodePoint } from '../../../src/core/permissions/hiddenCharacters';
 import { seedShellAllowlist } from '../../../src/core/permissions/shellAllowlist';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -72,7 +72,7 @@ function mapsAction(tool_name: string, canonical_params: Record<string, unknown>
 }
 
 function hiddenCodePointsIn(text: string): string[] {
-  return Array.from(text).filter(char => isHiddenCodePoint(char.codePointAt(0) ?? 0));
+  return Array.from(text).filter(char => hasAnyHiddenCharacter(char));
 }
 
 interface LabelCase {

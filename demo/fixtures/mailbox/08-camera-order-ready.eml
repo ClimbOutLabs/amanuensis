@@ -1,0 +1,33 @@
+From: Objectiva Foto <encomendas@objectiva-foto.example.com>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Thu, 15 Oct 2026 12:15:44 +0100
+Subject: Your order OF-2026-10482 is ready for pickup
+Message-ID: <order-of-2026-10482@objectiva-foto.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
+
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Maya,
+
+Your order is ready for pickup at our shop.
+
+  Order:    OF-2026-10482
+  Pickup:   Tuesday to Saturday, 10:00 to 19:00
+  Held for: 7 days
+
+Please bring the order number and a photo ID. The items are
+listed in the attached CSV file.
+
+- Objectiva Foto
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/csv; name="order.csv"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="order.csv"
+
+aXRlbSxxdWFudGl0eSxzdGF0dXMKRnVqaWZpbG0gWEYgMjNtbSBmLzIgbGVucywxLHJlYWR5IGZv
+ciBwaWNrdXAKTGVucyBjYXAgNDNtbSwxLHJlYWR5IGZvciBwaWNrdXAKTWljcm9maWJlciBjbG90
+aCwxLHJlYWR5IGZvciBwaWNrdXAK
+------=_fixture-boundary-7d3a9f2c--

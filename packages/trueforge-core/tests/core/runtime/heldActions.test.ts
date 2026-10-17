@@ -114,7 +114,7 @@ interface Harness {
 
 function makeHarness(
   script: (() => ReturnType<typeof textReplyStream>)[],
-  options: { searchProviderAsks?: boolean } = {},
+  options: { searchProviderAsks?: boolean; searchProvider?: boolean; secrets?: readonly string[] } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
   const base: SentinelServices = {
@@ -126,6 +126,7 @@ function makeHarness(
       },
     },
     searchWithoutAsking: () => Promise.resolve(options.searchProviderAsks !== true),
+    outboundSecrets: () => Promise.resolve(options.secrets ?? []),
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -148,7 +149,10 @@ function makeHarness(
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
-        searchProvider: options.searchProviderAsks === true ? { tools: ['web_search'] } : undefined,
+        searchProvider:
+          options.searchProviderAsks === true || options.searchProvider === true
+            ? { tools: ['web_search'], plumbing_fields: [] }
+            : undefined,
       });
       const threadInput: AgentThreadConstructorInput = {
         definition: {
@@ -517,5 +521,182 @@ describe('approving a held action later', () => {
     await expect(
       runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send', 'chat')] }),
     ).rejects.toThrow('chat-scoped approval is not available');
+  });
+});
+
+describe('audit rows for a held web search', () => {
+  const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.');
+  const caught = [
+    ['a signed token', jwt],
+    ['a card number', 'refund to 4111 1111 1111 1111'],
+    ['a password label', 'password: hunter2hunter2'],
+  ] as const;
+
+  function searchCall(query: string): CallSpec {
+    return { id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) };
+  }
+
+  function answer(status: 'allow' | 'deny') {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: 'call-search',
+      approval: { status },
+    };
+  }
+
+  function descriptions(h: Harness): string[] {
+    return h.audit.map(record => record.description);
+  }
+
+  it.each(caught)('names the rule, not the text, for %s held in a scheduled run', async (_label, query) => {
+    for (const status of ['allow', 'deny'] as const) {
+      const h = makeHarness([() => toolCallsStream([searchCall(query)])], { searchProvider: true });
+      const { thread } = await runBrief(h);
+      const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+      await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+      expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
+      expect(JSON.stringify(descriptions(h))).not.toContain(query);
+      expect(descriptions(h)[0]).toContain('Held because');
+    }
+  });
+
+  it.each(caught)('names the rule, not the text, for %s held in an attended chat', async (_label, query) => {
+    for (const status of ['allow', 'deny'] as const) {
+      const h = makeHarness([() => toolCallsStream([searchCall(query)])], { searchProvider: true });
+      const { orchestrator, thread } = h.build({ unattended: false });
+      await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }] });
+      const replay = h.build({
+        unattended: false,
+        context: heldContext(thread),
+        stopAfterToolResponse: true,
+      });
+      await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+      expect(descriptions(h).length).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(descriptions(h))).not.toContain(query);
+    }
+  });
+
+  it.each([false, true])('keeps a held key out of the row and the card when searches ask: %s', async asks => {
+    const key = 'synthetic-provider-key-000111';
+    const h = makeHarness([() => toolCallsStream([searchCall(`debug ${key}`)])], {
+      searchProvider: true,
+      searchProviderAsks: asks,
+      secrets: [key],
+    });
+    const { thread, brief } = await runBrief(h);
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('allow')] });
+    const listed = brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
+    expect(JSON.stringify([descriptions(h), listed])).not.toContain(key);
+  });
+
+  it('keeps the query out of the row when searches are set to ask', async () => {
+    const h = makeHarness([() => toolCallsStream([searchCall('oslo weather in march')])], { searchProviderAsks: true });
+    const { thread } = await runBrief(h);
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('deny')] });
+    expect(JSON.stringify(descriptions(h))).not.toContain('oslo weather');
+    expect(descriptions(h).at(-1)).toContain('searches are set to ask');
+  });
+});
+
+describe('audit rows for a web search held before its audit text was stored', () => {
+  const key = 'wsk-live-synthetic000111222333';
+  const cardNumber = '4111 1111 1111 1111';
+  const query = `how do I rotate ${key} safely, refund to ${cardNumber}`;
+  const savedReasons = ['Held for approval: it contains a secret this server holds.', null] as const;
+
+  // A hold stored by the earlier release: the query in plain_what, the reason in why_asked_again,
+  // and no audit_description.
+  function savedByEarlierRelease(
+    context: ReturnType<typeof heldContext>,
+    whyAskedAgain: string | null,
+  ): ReturnType<typeof heldContext> {
+    return context.map(message => {
+      if (!('role' in message) || message.role !== 'assistant' || message.tool_calls === undefined) {
+        return message;
+      }
+      return {
+        ...message,
+        tool_calls: message.tool_calls.map(call => {
+          const card = call.tool_info.tier3_card;
+          if (call.id !== 'call-search' || card === null || card === undefined) {
+            return call;
+          }
+          const info = {
+            ...call.tool_info,
+            tier3_card: {
+              ...card,
+              plain_what: `Search the web through mail for: ${query}`,
+              why_asked_again: whyAskedAgain,
+            },
+          };
+          delete info.audit_description;
+          return { ...call, tool_info: info };
+        }),
+      };
+    });
+  }
+
+  function answer(status: 'allow' | 'deny') {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: 'call-search',
+      approval: { status },
+    };
+  }
+
+  function expectNoCaughtText(h: Harness): void {
+    const rows = JSON.stringify(h.audit.map(record => record.description));
+    expect(rows).not.toContain(key);
+    expect(rows).not.toContain(cardNumber);
+    expect(rows).not.toContain('rotate');
+  }
+
+  const cases = savedReasons.flatMap(why => (['allow', 'deny'] as const).map(status => [status, why] as const));
+
+  it.each(cases)('answered %s in an attended chat (saved reason %s)', async (status, why) => {
+    const h = makeHarness(
+      [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
+      {
+        searchProvider: true,
+        secrets: [key],
+      },
+    );
+    const { orchestrator, thread } = h.build({ unattended: false });
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }] });
+    const replay = h.build({
+      unattended: false,
+      context: savedByEarlierRelease(heldContext(thread), why),
+      stopAfterToolResponse: true,
+    });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+
+    expect(h.audit.length).toBeGreaterThanOrEqual(1);
+    expectNoCaughtText(h);
+    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. Held because');
+  });
+
+  it.each(cases)('answered %s after a scheduled run held it (saved reason %s)', async (status, why) => {
+    const h = makeHarness(
+      [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
+      {
+        searchProvider: true,
+        secrets: [key],
+      },
+    );
+    const { thread } = await runBrief(h);
+    const replay = h.build({
+      unattended: false,
+      context: savedByEarlierRelease(heldContext(thread), why),
+      stopAfterToolResponse: true,
+    });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+
+    expect(h.audit.length).toBeGreaterThanOrEqual(2);
+    expectNoCaughtText(h);
+    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. Held because');
   });
 });

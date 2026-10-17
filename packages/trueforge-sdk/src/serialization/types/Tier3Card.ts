@@ -3,12 +3,14 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
+import { Tier3Email } from "./Tier3Email.js";
 
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> = core.serialization.object({
         "amount": core.serialization.string().nullable(),
         "cannotBeUndone": core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
         "destination": core.serialization.string().nullable(),
         "destinationHost": core.serialization.property("destination_host", core.serialization.string().nullable()),
+        "email": Tier3Email.optionalNullable(),
         "outboundText": core.serialization.property("outbound_text", core.serialization.string().nullable()),
         "outboundTruncated": core.serialization.property("outbound_truncated", core.serialization.boolean()),
         "parsedCommand": core.serialization.property("parsed_command", core.serialization.string().nullable()),
@@ -24,6 +26,7 @@ export declare namespace Tier3Card {
         cannot_be_undone?: string | null;
         destination?: string | null;
         destination_host?: string | null;
+        email?: (Tier3Email.Raw | null | undefined) | null;
         outbound_text?: string | null;
         outbound_truncated: boolean;
         parsed_command?: string | null;

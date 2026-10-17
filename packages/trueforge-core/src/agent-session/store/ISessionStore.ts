@@ -22,7 +22,7 @@ import type { SessionRecord } from '../models/SessionRecord';
 import type { TurnRecord } from '../models/TurnRecord';
 import type { PersistedTurnEvent, SessionEventItem, TurnDoneEvent } from '../schemas/events';
 import type { TokenPagination } from '../schemas/pagination';
-import type { SessionMetadata } from '../schemas/session';
+import type { SessionMetadata, SessionMetrics } from '../schemas/session';
 import type { TaskChecklist, TaskChecklistItem } from '../schemas/taskChecklist';
 import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
@@ -50,6 +50,18 @@ export type UpdateSessionInput<TSessionCustom extends object = Record<string, ne
   title: SessionRecord<TSessionCustom>['title'] | undefined;
   metadata: SessionRecord<TSessionCustom>['metadata'] | undefined;
 };
+
+/** Archived timestamps and metrics for a session that data import has just replayed. */
+export interface StampImportedSessionInput {
+  tenant_id: string;
+  session_id: string;
+  created_at: Date;
+  updated_at: Date;
+  last_activity_timestamp_ms: number;
+  metrics: SessionMetrics;
+  /** One entry per replayed turn; each turn must already exist in the session. */
+  turns: { turn_id: string; created_at: Date; updated_at: Date }[];
+}
 
 export interface GetSessionInput {
   tenant_id: string;
@@ -433,6 +445,17 @@ export interface ISessionStore<
    * Sets `last_activity_timestamp_ms` (= now) on create.
    */
   createSession(input: CreateSessionInput<TSessionCustom>): Promise<void>;
+
+  /**
+   * Import-only. Overwrites the clock-stamped fields that createSession,
+   * createTurn and the turn-state writes set to "now" (session and turn
+   * `created_at` / `updated_at`, `last_activity_timestamp_ms`, `metrics`) with
+   * the archived values, so a restored chat keeps its original dates and
+   * totals. Bypasses the terminal-turn fence; nothing else calls it.
+   * Missing session or turn rejects with the matching not-found error and
+   * writes nothing.
+   */
+  stampImportedSession(input: StampImportedSessionInput): Promise<void>;
 
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;

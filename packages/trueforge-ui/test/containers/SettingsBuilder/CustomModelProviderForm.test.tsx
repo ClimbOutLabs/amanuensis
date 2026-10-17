@@ -368,8 +368,8 @@ describe('CustomModelProviderForm', () => {
   it('sends streamTimeout when a deadline field is set', async () => {
     const onAdd = renderForm();
     fillValid();
-    fireEvent.change(screen.getByLabelText('First token deadline (ms)'), { target: { value: '120000' } });
-    fireEvent.change(screen.getByLabelText('Stall deadline (ms)'), { target: { value: '90000' } });
+    fireEvent.change(screen.getByLabelText('First reply timeout (ms)'), { target: { value: '120000' } });
+    fireEvent.change(screen.getByLabelText('Stall timeout (ms)'), { target: { value: '90000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
 
     await waitFor(() => expect(onAdd).toHaveBeenCalled());
@@ -394,7 +394,7 @@ describe('CustomModelProviderForm', () => {
       />,
     );
 
-    expect(screen.getByLabelText('First token deadline (ms)')).toHaveValue(120000);
-    expect(screen.getByLabelText('Stall deadline (ms)')).toHaveValue(90000);
+    expect(screen.getByLabelText('First reply timeout (ms)')).toHaveValue(120000);
+    expect(screen.getByLabelText('Stall timeout (ms)')).toHaveValue(90000);
   });
 });

@@ -17,6 +17,7 @@ import {
   recordResultUrls,
   runOneAtATime,
   SEARCH_SILENT_REASON,
+  type SearchProviderGrant,
 } from '../permissions/webSearch';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
@@ -62,6 +63,7 @@ export function stampSentinelDecision(input: {
 }): Pick<
   InternalToolCallInfo,
   | 'tier'
+  | 'tier_reason'
   | 'tier3_card'
   | 'tier2_kind'
   | 'approval_token_id'
@@ -70,16 +72,19 @@ export function stampSentinelDecision(input: {
   | 'is_approval_required'
   | 'pre_dispatch_failure'
   | 'silent_search_query'
+  | 'audit_description'
 > {
   const decision = input.decision;
   return {
     tier: decision.tier,
+    tier_reason: decision.reason,
     tier3_card: decision.card,
     tier2_kind: decision.tier2_kind,
     approval_token_id: decision.approval_token_id,
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
+    ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
       decision.auto_deny === null &&
       (decision.tier === 3 || (decision.tier === 2 && decision.approval_token_id !== null)),
@@ -89,6 +94,7 @@ export function stampSentinelDecision(input: {
           pre_dispatch_failure: {
             kind: 'policy_blocked' as const,
             message: autoDenyMessage(decision),
+            ...(decision.owner_message === null ? {} : { owner_message: decision.owner_message }),
           },
         }),
   };
@@ -123,6 +129,10 @@ function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
+    case 'incomplete_send_card':
+      return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
+    case 'unattended_run':
+      return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     default:
@@ -145,6 +155,7 @@ export class ToolSet implements IToolSet {
   private readonly firstParty: boolean;
   private readonly searchProvider: boolean;
   private readonly searchTools: ReadonlySet<string>;
+  private readonly searchPlumbingFields: readonly string[];
 
   constructor(params: {
     source: ToolSource;
@@ -170,7 +181,7 @@ export class ToolSet implements IToolSet {
      * connector URL, client input, or tool metadata. A tool runs silently only when the server
      * declares it read-only or this list names it. Has no effect without `sentinel`.
      */
-    searchProvider?: { tools: readonly string[] } | undefined;
+    searchProvider?: SearchProviderGrant | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -184,6 +195,7 @@ export class ToolSet implements IToolSet {
     this.firstParty = params.firstParty === true;
     this.searchProvider = params.searchProvider !== undefined;
     this.searchTools = new Set(params.searchProvider?.tools);
+    this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -280,8 +292,8 @@ export class ToolSet implements IToolSet {
     if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
       // What a search returned is what a later fetch in this turn may name. A call that itself
       // names a URL is a fetch: its page's links are not search results, so they stay unreturned.
-      const sent = collectOutboundStrings(params.arguments ?? {});
-      if (sent !== undefined && !namesUrl(sent.values)) {
+      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
+      if (sent !== undefined && !namesUrl([...sent.values, ...sent.plumbing])) {
         recordResultUrls({ state: this.sentinel.web_search, texts: resultTexts(response.result) });
       }
     }
@@ -355,7 +367,7 @@ export class ToolSet implements IToolSet {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
-      const sent = collectOutboundStrings(params.arguments ?? {});
+      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
       }
@@ -448,6 +460,7 @@ export class ToolSet implements IToolSet {
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),
+        mcp_search_plumbing_fields: this.searchPlumbingFields,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,

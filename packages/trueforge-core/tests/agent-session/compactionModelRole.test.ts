@@ -46,6 +46,43 @@ describe('auxiliary_models.compaction wiring', () => {
     ).rejects.toThrow(`Unknown model "${COMPACTION_MODEL}" — not configured on provider`);
   });
 
+  it('tells the host which role each model is resolved for, so usage can be attributed to it', async () => {
+    const llm = jest.fn((_name: string, _role: string) =>
+      Promise.resolve({
+        modelClient: makeMockILLM(),
+        defaultModelParams: {},
+        modelId: undefined,
+        modelSupportsVision: false,
+      }),
+    );
+    const resolver = new TurnResourceResolver({
+      llm,
+      mcp: () => Promise.reject(new Error('unused')),
+      mcpRequestTimeoutMs: 1_000,
+      mcpConnectTimeoutMs: 1_000,
+      logger: makeSilentLogger(),
+    });
+    const spec = makeAgentSpec({
+      model: { name: MAIN_MODEL },
+      auxiliary_models: { compaction: { name: COMPACTION_MODEL } },
+      config: { context_management: { compaction: { enabled: true } } },
+    });
+
+    await resolver.resolveAgentDefinition({
+      spec,
+      signal: new AbortController().signal,
+      tracing: resolver.createTracing(),
+      tenant_id: 'test-tenant',
+      created_by: 'test-user',
+      session_id: 'test-session',
+    });
+
+    expect(llm.mock.calls).toEqual([
+      [MAIN_MODEL, 'chat'],
+      [COMPACTION_MODEL, 'compaction'],
+    ]);
+  });
+
   it('does not resolve (or fail on) an unavailable compaction override when compaction is disabled — an unused role must never block the turn', async () => {
     const resolver = new TurnResourceResolver({
       llm: name => {

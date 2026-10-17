@@ -1,14 +1,12 @@
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import {
-  extractCardFields,
-  renderOutboundArguments,
-  sendRefusal,
-} from '../../../src/core/permissions/extractorRegistry';
+import { extractCardFields, renderOutboundArguments } from '../../../src/core/permissions/extractorRegistry';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
-const HIDDEN_REFUSAL = "This message contains hidden characters, so Aman won't send it.";
-const LONG_KEY_REFUSAL = "This message has a field name too long to show in full, so Aman won't send it.";
+const HIDDEN_REFUSAL =
+  'This contains hidden characters that would not show on the approval card, so it cannot be approved. Remove them and try again.';
+const LONG_KEY_REFUSAL =
+  'An argument name is too long to show in full, so this cannot be approved. Use shorter argument names.';
 
 function makeCtx(): ClassifyContext {
   return {
@@ -100,10 +98,25 @@ describe('mail sends with hidden characters are refused', () => {
     expect(refused).toBe(true);
   });
 
-  test('the reason reaches the model as a plain message', async () => {
+  test('the reason reaches the model as a plain message and the owner as one line', async () => {
     const { decision } = await denial('send_email', { to: 'a@x.example', body: `hi${tagEncode('x')}` });
     expect(decision.reason).toBe('auto_denied');
+    expect(decision.auto_deny).toBe('incomplete_send_card');
+    expect(decision.owner_message).toBe(
+      'Nothing was sent: it contains hidden characters you could not see. The assistant needs to remove them.',
+    );
     expect(decision.approval_token_id).toBeNull();
+  });
+
+  test('a text attachment is checked as decoded', async () => {
+    const data = Buffer.from(`Invoice attached.${tagEncode('pay evil')}`).toString('base64');
+    const { decision, refused } = await denial('send_email', {
+      to: 'a@x.example',
+      body: 'See attached.',
+      attachments: [{ filename: 'note.txt', content: data }],
+    });
+    expect(refused).toBe(true);
+    expect(decision.reason_detail).toBe(HIDDEN_REFUSAL);
   });
 
   test('a plain message with accents, CJK, tabs, newlines and emoji is still carded', async () => {
@@ -131,11 +144,9 @@ describe('well-formed emoji and script sequences in mail are carded, not refused
     ['a couple with a heart', `\u{1F469}${ZWJ}\u2764${VS16}${ZWJ}\u{1F468}`],
     ['a pride flag', `Happy pride \u{1F3F3}${VS16}${ZWJ}\u{1F308}`],
     ['the England flag', `Go \u{1F3F4}${tagEncode('gbeng')}\u{E007F}!`],
-    ['a soft hyphen inside a word', 'An extra\u00ADordinary day'],
     ['a Persian ZWNJ between letters', `\u0645\u06CC${ZWNJ}\u062E\u0648\u0627\u0647\u0645`],
     ['a Hindi ZWJ conjunct', `\u0915\u094D${ZWJ}\u0937`],
     ['a CJK variation selector', '\u845B\u{E0100} family'],
-    ['a single leading BOM', '\uFEFFHello there'],
   ])('%s', async (_name, body) => {
     const { decision, refused } = await denial('send_email', { to: 'a@x.example', subject: 'Hi', body });
     expect(refused).toBe(false);
@@ -143,6 +154,8 @@ describe('well-formed emoji and script sequences in mail are carded, not refused
   });
 
   test.each<[string, string]>([
+    ['a soft hyphen, even inside a word', 'An extra\u00ADordinary day'],
+    ['a leading BOM', '\uFEFFHello there'],
     ['a lone ZWJ', `Hi ${ZWJ} there`],
     ['a ZWJ at the end', `Hi\u{1F468}${ZWJ}`],
     ['a doubled ZWJ', `\u{1F468}${ZWJ}${ZWJ}\u{1F469}`],
@@ -243,12 +256,12 @@ describe('other sends show hidden characters as codes instead of refusing', () =
 
   test('a built-in mail tool refuses a hidden recipient as well', () => {
     const canonical_params = { to: 'a@x.example\u3164', body: 'ok' };
-    const refusal = sendRefusal({
-      extraction: extractCardFields({ tool_name: 'send_email', canonical_params, tool_type: 'truefoundry-system' }),
+    const extraction = extractCardFields({
+      tool_name: 'send_email',
       canonical_params,
       tool_type: 'truefoundry-system',
     });
-    expect(refusal).toBe(HIDDEN_REFUSAL);
+    expect(extraction.incomplete_send?.model_message).toBe(HIDDEN_REFUSAL);
   });
 });
 

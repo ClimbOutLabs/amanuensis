@@ -56,6 +56,26 @@ export const GIT_HARDENING_ENV: Readonly<Record<string, string>> = {
   GIT_ATTR_NOSYSTEM: '1',
 };
 
+/** Config entries as env pairs, so no argv carries them; system, global and inherited config are dropped. */
+export function gitConfigEntriesEnv(entries: readonly GitConfigEntry[]): Record<string, string> {
+  const env: Record<string, string> = { ...GIT_HARDENING_ENV, GIT_CONFIG_COUNT: String(entries.length) };
+  entries.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
+    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
+  });
+  return env;
+}
+
+/** Env for host git that reads the workspace: program-running keys neutralised, only the repository's own config in play. */
+export function gitHardeningEnv(input: { workspaceRoot: string | undefined }): Record<string, string> {
+  return {
+    ...gitConfigEntriesEnv(gitHardeningConfigEntries(input)),
+    GIT_PAGER: 'cat',
+    GIT_OPTIONAL_LOCKS: '0',
+    LC_ALL: 'C',
+  };
+}
+
 /**
  * Config for git that only touches local objects on the server (a scratch repository and a bundle file):
  * no remote protocol except `file`, which bundles use, and objects are checked as they arrive.
