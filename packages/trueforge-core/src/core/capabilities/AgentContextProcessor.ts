@@ -4,6 +4,7 @@ import type {
   AgentThreadAppendContext,
   ContextMessage,
   InternalCapabilityStateEvent,
+  InternalModelUsageEvent,
   InternalPassthroughEvent,
 } from '../runtime/AgentThread.types';
 import type { CurrentContextUsage } from '../runtime/contextUsage';
@@ -35,11 +36,15 @@ export type AgentContextProcessorAppendContext = Omit<AgentThreadAppendContext, 
 /** Processors omit thread_id — AgentThread stamps it (same as append/overwrite). */
 export type AgentContextProcessorCapabilityState = Omit<InternalCapabilityStateEvent, 'thread_id'>;
 
+/** Processors omit thread_id — AgentThread stamps it (same as append/overwrite). */
+export type AgentContextProcessorModelUsage = Omit<InternalModelUsageEvent, 'thread_id'>;
+
 export type AgentContextProcessorOutput =
   | AgentContextProcessorOverwriteContext
   | AgentContextProcessorAppendContext
   | InternalPassthroughEvent
   | AgentContextProcessorCapabilityState
+  | AgentContextProcessorModelUsage
   | AgentContextProcessorCompactionEvent;
 
 export interface PreSendContextProcessor {

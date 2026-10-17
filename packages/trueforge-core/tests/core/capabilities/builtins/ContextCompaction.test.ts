@@ -5,7 +5,6 @@ import {
   contextCompaction,
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_SUMMARY_PREFACE,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
@@ -14,6 +13,7 @@ import {
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
 import type { TaskChecklistAccess } from '../../../../src/core/capabilities/builtins/TaskChecklist';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '../../../../src/core/capabilities/builtins/tokenBudgetConstants';
 import { createToolResponseV2, newEventId, type ToolResultDisposition } from '../../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../../src/core/llm/LLMTypes';
 import {

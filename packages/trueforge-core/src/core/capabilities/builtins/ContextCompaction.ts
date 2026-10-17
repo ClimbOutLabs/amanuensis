@@ -36,9 +36,8 @@ import type {
 } from '../AgentContextProcessor';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
-import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS, TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
 
-export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
 export const MAX_COMPACTION_TOUCHED_PATHS = 200;
 export const COMPACTION_TOUCHED_PATHS_STATE_KEY = 'tfy.context_compaction.touched_paths';
 /** Fraction of the threshold to keep verbatim as a recent tail after compaction. */

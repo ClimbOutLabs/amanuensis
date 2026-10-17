@@ -2508,6 +2508,13 @@ export class AgentThread {
             };
             this.capabilityState[response.key] = response.state;
             break;
+          case InternalEventType.MODEL_USAGE:
+            // A model request completed and consumed billable tokens but produced
+            // no context change worth persisting (e.g. a discarded malformed
+            // compaction summary). Fold the usage into thread metrics without a
+            // context mutation, a wire event, or any success counter.
+            updateMetricsFromUsage(this.metrics, response.usage);
+            break;
           default: {
             const _exhaustive: never = response;
             return _exhaustive;
