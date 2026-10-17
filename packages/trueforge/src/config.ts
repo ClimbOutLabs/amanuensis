@@ -526,7 +526,7 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
 }
 
 /**
- * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * Parse a maps upstream URL: must be https (http only for loopback), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
 function parseMapsUrl({
@@ -549,6 +549,9 @@ function parseMapsUrl({
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+    throw new Error(`${envKey} must use https: plain http is only allowed for localhost, 127.0.0.0/8 or [::1]`);
   }
   if (parsed.search !== '' || parsed.hash !== '') {
     throw new Error(`${envKey} must not include a query or hash`);
