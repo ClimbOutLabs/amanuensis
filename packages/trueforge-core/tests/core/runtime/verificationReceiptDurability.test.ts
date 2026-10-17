@@ -13,6 +13,7 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../sr
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../sandbox/durableWorkspaceCoordinator';
+import { realCommandExec } from '../sandbox/realCommandExec';
 import { withUnpinnedCommands } from '../sandbox/unpinnedExec';
 
 const VERIFICATION_COMMAND = './scripts/validate.sh';
@@ -115,7 +116,7 @@ function makeProvider(exec: jest.MockedFunction<(params: SandboxExecParams) => P
     buildImage: jest.fn(),
     getImageBuildStatus: jest.fn(),
     createSandbox: jest.fn(() => Promise.resolve({ sandboxId: 'sandbox-verification' })),
-    exec: withUnpinnedCommands(exec),
+    exec: realCommandExec(withUnpinnedCommands(exec)),
     acknowledgeWorkspaceTermination: jest.fn(() => Promise.resolve()),
     executeVerifiedWorkspaceCommit: () =>
       Promise.resolve({ status: 'indeterminate', result: { success: false, error: 'not used by this fixture' } }),

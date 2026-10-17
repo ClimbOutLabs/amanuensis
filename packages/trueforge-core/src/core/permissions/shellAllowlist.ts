@@ -509,6 +509,8 @@ export interface PinnedExecInvocation {
   env: Record<string, string>;
   /** PATH the program runs under, so anything it launches by name resolves on the same pinned path. */
   pinned_path: string;
+  /** Git cannot be hardened without a workspace root, so it must not run at all. */
+  git_needs_workspace_root: boolean;
 }
 
 /**
@@ -521,7 +523,7 @@ export interface PinnedExecInvocation {
 export function pinAllowlistedExec(input: {
   command: string;
   config: ShellAllowlistConfig;
-  workspace_root: string;
+  workspace_root: string | undefined;
 }): PinnedExecInvocation | undefined {
   const parsed = parseSimpleCommand(input.command);
   const matched = parsed === undefined ? undefined : matchAllowlist(parsed, input.config);
@@ -538,6 +540,16 @@ export function pinAllowlistedExec(input: {
       probe_argv: null,
       env: {},
       pinned_path: input.config.pinned_path,
+      git_needs_workspace_root: false,
+    };
+  }
+  if (input.workspace_root === undefined) {
+    return {
+      argv: [],
+      probe_argv: null,
+      env: {},
+      pinned_path: input.config.pinned_path,
+      git_needs_workspace_root: true,
     };
   }
   const globalArgs = gitHardeningGlobalArgs(input.workspace_root);
@@ -546,6 +558,7 @@ export function pinAllowlistedExec(input: {
     probe_argv: [matched.argv0_resolved, ...globalArgs, 'config', '--local', '--no-includes', '--list', '--name-only'],
     env: { ...GIT_HARDENING_ENV },
     pinned_path: input.config.pinned_path,
+    git_needs_workspace_root: false,
   };
 }
 

@@ -24,9 +24,15 @@ import {
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
-import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
+import {
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from '../../../src/core/sandbox/provider/Provider';
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
+  buildWriteAndRunScriptCommand,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -49,6 +55,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { realCommandExec } from './realCommandExec';
 import { CLEAN_REPOSITORY_CONFIG, isRepositoryConfigProbe, unpinHostCommand } from './unpinnedExec';
 
 function readyExec(): Promise<ExecResult> {
@@ -155,7 +162,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
         },
       };
     }
-    if (params.command.startsWith('python3 -c ') && result.success && result.response.result === 'ok') {
+    if (params.command.startsWith('python3 -I -S -c ') && result.success && result.response.result === 'ok') {
       const path = params.command.includes('src/runtime.ts')
         ? 'src/runtime.ts'
         : params.command.includes('src/app.ts')
@@ -192,7 +199,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
+    exec: realCommandExec(exec),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -1363,7 +1370,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -1432,7 +1439,7 @@ describe('Sandbox provider-owned paths', () => {
     });
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -2487,7 +2494,7 @@ describe('Sandbox provider-owned paths', () => {
     // file's current content, rather than reject it and fall back to unstructured shell edits.
     const originalContent = 'export function add(a, b) {\n  return a + b;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2554,7 +2561,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo' } });
       }
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         const content = params.command.includes('"sub/a.txt"') ? nestedContent : rootContent;
         return Promise.resolve({
           success: true,
@@ -2689,9 +2696,9 @@ describe('Sandbox provider-owned paths', () => {
     expect(uploadedScript?.content.toString('utf-8')).toContain('replacement would not change the file');
     const executed = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c '));
+      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c '));
     expect(executed?.cwd).toBe('/repo');
-    expect(executed?.command).toMatch(/^python3 '.*\.py' '.*\.json'$/);
+    expect(executed?.command).toMatch(/^python3 -I -S '.*\.py' '.*\.json'$/);
     expect(executed?.command).not.toContain('yield update');
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
   });
@@ -2699,7 +2706,7 @@ describe('Sandbox provider-owned paths', () => {
   it('proceeds unchanged when old_text matches the current file content exactly once', async () => {
     const fileContent = 'function reconnect() {\n  break;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2742,7 +2749,7 @@ describe('Sandbox provider-owned paths', () => {
     // it never guesses — and point at the real (tab-indented) passage instead of substituting it.
     const fileContent = 'function connect() {\n  if (down) {\n\t\tbreak;\n  }\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2782,7 +2789,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text matches more than one location', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2820,7 +2827,7 @@ describe('Sandbox provider-owned paths', () => {
   it('dispatches replace_text when old_text matches more than one location and replace_all is true', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2861,7 +2868,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text has no acceptable match', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2900,7 +2907,7 @@ describe('Sandbox provider-owned paths', () => {
   it("surfaces the replace script's own {error: string} JSON output at the top level", async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2909,7 +2916,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         return Promise.resolve({
           success: true,
           response: { exitCode: 1, result: JSON.stringify({ error: 'replacement would not change the file' }) },
@@ -2942,7 +2949,7 @@ describe('Sandbox provider-owned paths', () => {
   it('falls back to a generic rejection when the failed script output is not a {error: string} shape', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2951,7 +2958,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         // Neither a string `error`, nor JSON at all in the second call — both must be handled
         // without throwing out of the `hasStringErrorProperty` narrowing.
         return Promise.resolve({ success: true, response: { exitCode: 1, result: JSON.stringify({ error: 42 }) } });
@@ -3008,7 +3015,7 @@ describe('Sandbox provider-owned paths', () => {
 
   it('does not apply a patch that fails validation', async () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> =>
-      params.command.startsWith('python3 -c ')
+      params.command.startsWith('python3 -I -S -c ')
         ? Promise.resolve({
             success: true,
             response: {
@@ -4061,5 +4068,43 @@ describe('Sandbox provider-owned paths', () => {
     expect(portableCommand).toContain("mv -f 'mcp-client/mcp_client.py.new' 'mcp-client/mcp_client.py'");
     expect(portableCommand).toContain("ln -sf '../mcp_client.py'");
     expect(portableCommand).toContain('mcp-client/bin/mcp-client');
+  });
+});
+
+describe('Sandbox host bookkeeping', () => {
+  it('runs every host-authored command on the trusted PATH and only the model command on the sandbox PATH', async () => {
+    const commands: string[] = [];
+    const transport: CodeModeTransport = {
+      getClientInstall: () => ({ content: 'print("mock")\n', remotePath: 'mcp-client/mcp_client.py' }),
+      start: () =>
+        Promise.resolve({
+          env: { TFY_NATS_URL: 'ws://localhost:4223', TFY_NATS_SUBJECT_PREFIX: 'sandbox.bridge.test' },
+        }),
+      stop: () => Promise.resolve(),
+    };
+    const provider: SandboxProvider = {
+      ...makeProvider({ createCodeModeTransport: () => transport }),
+      exec: (params): Promise<ExecResult> => {
+        commands.push(params.command);
+        return readyExec();
+      },
+    };
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter([]) });
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+    await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Run command', purpose: 'execute', command: 'true' } },
+      { status: 'allow', scope: 'once' },
+    );
+    const trustedPrefix = withTrustedPath('');
+    expect(commands).toContain('true');
+    expect(commands.some(command => command.includes('skill_downloader.py'))).toBe(true);
+    expect(commands.some(command => command.includes('mcp_client.py'))).toBe(true);
+    expect(commands.filter(command => command !== 'true' && !command.startsWith(trustedPrefix))).toEqual([]);
+  });
+
+  it('runs setup scripts in isolated mode so the workspace stays off the import path', () => {
+    expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
+      / && python3 -I -S 'skill_downloader\.py'$/u,
+    );
   });
 });

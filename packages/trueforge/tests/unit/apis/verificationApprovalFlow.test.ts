@@ -7,6 +7,7 @@ import type {
   VerifiedWorkspaceCommitParams,
   VerifiedWorkspaceCommitResult,
 } from '@truefoundry/trueforge-core/core';
+import { realCommand } from '../../../../trueforge-core/tests/core/sandbox/realCommandExec';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -68,13 +69,13 @@ class VerificationSandboxProvider implements SandboxProvider {
     return Promise.resolve({ sandboxId: 'approval-continuation-checkout' });
   }
 
-  exec(pinnedParams: SandboxExecParams): Promise<ExecResult> {
+  exec(params: SandboxExecParams): Promise<ExecResult> {
     // Host bookkeeping runs by resolved path, hardened when it is git; match it by its bare-name spelling.
-    const params = { ...pinnedParams, command: bareHostCommand(pinnedParams.command) };
-    if (params.command === 'git config --local --no-includes --list --name-only') {
+    const command = bareHostCommand(realCommand(params.command));
+    if (command === 'git config --local --no-includes --list --name-only') {
       return successfulResult('core.bare');
     }
-    if (params.command === VERIFY_COMMAND) {
+    if (command === VERIFY_COMMAND) {
       this.verifyInvocations += 1;
       return successfulResult('verification passed');
     }
@@ -92,7 +93,7 @@ class VerificationSandboxProvider implements SandboxProvider {
       'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/verified.ts b/src/verified.ts',
       'git ls-files --others --exclude-standard -z': '',
     };
-    return successfulResult(gitResults[params.command] ?? 'ok');
+    return successfulResult(gitResults[command] ?? 'ok');
   }
 
   executeVerifiedWorkspaceCommit(params: VerifiedWorkspaceCommitParams): Promise<VerifiedWorkspaceCommitResult> {

@@ -73,7 +73,16 @@ export function buildStructuredEditObservationCommand(input: {
   const paths = [...new Set(input.paths)].sort(comparePaths);
   return pinnedProgramCommand({
     pinnedPath: input.pinnedPath,
-    argv: ['python3', '-c', STRUCTURED_EDIT_OBSERVATION_SCRIPT, kind, input.workspaceRoot, JSON.stringify(paths)],
+    argv: [
+      'python3',
+      '-I',
+      '-S',
+      '-c',
+      STRUCTURED_EDIT_OBSERVATION_SCRIPT,
+      kind,
+      input.workspaceRoot,
+      JSON.stringify(paths),
+    ],
   });
 }
 

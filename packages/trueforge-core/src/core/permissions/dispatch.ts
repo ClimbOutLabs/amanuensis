@@ -34,6 +34,7 @@ import {
   lexicalPath,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  writeTargetTouchesSandboxTools,
   type FileDigest,
   type PathResolution,
 } from './trackedExecutables';
@@ -164,6 +165,9 @@ function verifyTier2Containment(input: {
       }
       if (writeTargetTouchesGitControl({ p: target, cwd: callDirectory, resolution })) {
         return 'Tier 2 write target is Git control state at dispatch; request approval again.';
+      }
+      if (writeTargetTouchesSandboxTools({ p: target, cwd: callDirectory, roots: [workspace_root], resolution })) {
+        return 'Tier 2 write target is a sandbox tool folder at dispatch; request approval again.';
       }
     }
     return undefined;

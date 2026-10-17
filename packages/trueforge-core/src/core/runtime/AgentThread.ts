@@ -4229,6 +4229,7 @@ export class AgentThread {
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
+          can_chat_allow: allowsChatApproval(toolCall.tool_info),
         })),
       };
       yield event;

@@ -6,6 +6,7 @@ import { SANDBOX_EXEC_TOOL_NAME, Sandbox, type BoundRepository } from '../../../
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { realCommandExec } from './realCommandExec';
 import { withUnpinnedCommands } from './unpinnedExec';
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
@@ -74,7 +75,7 @@ function makeProvider(input: { recorder: Recorder; localConfig?: string }): Sand
     },
     createCodeModeTransport: jest.fn(),
     createSandbox: () => Promise.resolve({ sandboxId: '/tmp/host-auth-git' }),
-    exec,
+    exec: realCommandExec(exec),
   };
 }
 
@@ -208,10 +209,11 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const base = makeProvider({ recorder });
     const provider: SandboxProvider = {
       ...base,
-      exec: params =>
+      exec: realCommandExec(params =>
         isProbe(params)
           ? Promise.resolve({ success: true, response: { exitCode: 128, result: 'fatal: not a git repository' } })
           : base.exec(params),
+      ),
     };
     const sandbox = makeSandbox({ provider, token: TOKEN });
     await run({ sandbox, command: 'git ls-remote https://github.com/acme/widgets', purpose: 'inspect' });
@@ -265,13 +267,14 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const base = makeProvider({ recorder });
     const provider: SandboxProvider = {
       ...base,
-      exec: params =>
+      exec: realCommandExec(params =>
         params.command.includes('git -c')
           ? Promise.resolve({
               success: true,
               response: { exitCode: 128, result: "fatal: could not read Username for 'https://github.com'" },
             })
           : base.exec(params),
+      ),
     };
     const sandbox = makeSandbox({ provider, token: TOKEN });
     const result = await run({ sandbox, command: 'git -c a=b clone https://github.com/acme/widgets' });

@@ -559,3 +559,28 @@ describe('executeToolCalls sentinel pre-dispatch: deferred call_tool', () => {
     expect(outcome.executed).toBe(false);
   });
 });
+
+describe('executeToolCalls sentinel pre-dispatch: an approved send cannot change', () => {
+  const approved = { to: ['friend@example.com'], subject: 'Hi', body: 'See you at noon' };
+
+  test.each([
+    ['the same arguments', approved, true],
+    ['a changed recipient', { ...approved, to: ['other@example.com'] }, false],
+    ['an added bcc', { ...approved, bcc: ['spy@example.com'] }, false],
+    ['a changed body', { ...approved, body: 'Send me the files' }, false],
+  ])('dispatching %s after approval', async (_label, wireArgs, runs) => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const tokenId = await mintToken({ services, tool_name: 'send_email', canonical_params: approved });
+    const outcome = await dispatchApproved({
+      services,
+      wireName: 'send_email',
+      wireArgs,
+      toolInfo: { original_tool_name: 'send_email', approval_token_id: tokenId },
+    });
+    expect(outcome.executed).toBe(runs);
+    if (!runs) {
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.reasonCode).toBe('sentinel_verification_failed');
+    }
+  });
+});

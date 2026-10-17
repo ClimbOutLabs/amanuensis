@@ -32,30 +32,30 @@ function toggle(name: string): HTMLElement {
 }
 
 describe('MemorySharing', () => {
-  it('offers one toggle per other persona vault, derived from the persona list', () => {
+  it('offers one toggle per other persona collection, derived from the persona list', () => {
     renderSharing({});
 
     expect(screen.getAllByRole('switch')).toHaveLength(6);
-    expect(toggle("Alpha can read Beta's vault")).toBeTruthy();
-    expect(toggle("Alpha can read Gamma's vault")).toBeTruthy();
-    expect(toggle("Beta can read Alpha's vault")).toBeTruthy();
-    expect(toggle("Gamma can read Beta's vault")).toBeTruthy();
-    expect(screen.queryByRole('switch', { name: "Alpha can read Alpha's vault" })).toBeNull();
+    expect(toggle("Alpha can read Beta's collection")).toBeTruthy();
+    expect(toggle("Alpha can read Gamma's collection")).toBeTruthy();
+    expect(toggle("Beta can read Alpha's collection")).toBeTruthy();
+    expect(toggle("Gamma can read Beta's collection")).toBeTruthy();
+    expect(screen.queryByRole('switch', { name: "Alpha can read Alpha's collection" })).toBeNull();
   });
 
   it('shows the saved grants as on and everything else as off', () => {
     renderSharing({ shares: { [ALPHA.id]: [personaVaultNamespace('Beta')] } });
 
-    expect(toggle("Alpha can read Beta's vault").getAttribute('aria-checked')).toBe('true');
-    expect(toggle("Alpha can read Gamma's vault").getAttribute('aria-checked')).toBe('false');
-    expect(toggle("Beta can read Alpha's vault").getAttribute('aria-checked')).toBe('false');
+    expect(toggle("Alpha can read Beta's collection").getAttribute('aria-checked')).toBe('true');
+    expect(toggle("Alpha can read Gamma's collection").getAttribute('aria-checked')).toBe('false');
+    expect(toggle("Beta can read Alpha's collection").getAttribute('aria-checked')).toBe('false');
   });
 
-  it('saves granted persona vaults keyed by persona id', async () => {
+  it('saves granted persona collections keyed by persona id', async () => {
     const { onSave } = renderSharing({});
 
-    fireEvent.click(toggle("Alpha can read Beta's vault"));
-    fireEvent.click(toggle("Gamma can read Alpha's vault"));
+    fireEvent.click(toggle("Alpha can read Beta's collection"));
+    fireEvent.click(toggle("Gamma can read Alpha's collection"));
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -68,27 +68,27 @@ describe('MemorySharing', () => {
   it('drops a persona from the saved config once its last grant is turned off', async () => {
     const { onSave } = renderSharing({ shares: { [ALPHA.id]: ['persona:Beta'] } });
 
-    fireEvent.click(toggle("Alpha can read Beta's vault"));
+    fireEvent.click(toggle("Alpha can read Beta's collection"));
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ shares: {} }));
   });
 
-  it('offers topic vaults to every persona next to the persona vaults', () => {
+  it('offers topic collections to every persona next to the persona collections', () => {
     renderSharing({ personas: [ALPHA, BETA], namespaces: [{ value: 'finance', label: 'finance' }] });
 
     expect(screen.getAllByRole('switch')).toHaveLength(4);
-    expect(toggle('Alpha can read the finance vault')).toBeTruthy();
-    expect(toggle('Beta can read the finance vault')).toBeTruthy();
+    expect(toggle('Alpha can read the finance collection')).toBeTruthy();
+    expect(toggle('Beta can read the finance collection')).toBeTruthy();
   });
 
-  it('keeps grants for vaults it no longer lists', async () => {
+  it('keeps grants for collections it no longer lists', async () => {
     const { onSave } = renderSharing({
       personas: [ALPHA, BETA],
       shares: { [ALPHA.id]: ['persona:Retired'] },
     });
 
-    fireEvent.click(toggle("Alpha can read Beta's vault"));
+    fireEvent.click(toggle("Alpha can read Beta's collection"));
     fireEvent.click(screen.getByRole('button', { name: 'Save sharing' }));
 
     await waitFor(() =>
@@ -100,7 +100,7 @@ describe('MemorySharing', () => {
     renderSharing({ personas: [ALPHA] });
 
     expect(screen.queryAllByRole('switch')).toHaveLength(0);
-    expect(screen.getByText('No other vaults to read yet.')).toBeTruthy();
+    expect(screen.getByText('No other collections to read yet.')).toBeTruthy();
   });
 
   it('explains there is nothing to share when no persona exists', () => {

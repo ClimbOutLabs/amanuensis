@@ -11,6 +11,7 @@ import {
 } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { realCommandExec } from './realCommandExec';
 import { withUnpinnedCommands } from './unpinnedExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
@@ -47,7 +48,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     uploadFile: jest.fn().mockResolvedValue(undefined),
     createCodeModeTransport: jest.fn(),
     ...overrides,
-    exec,
+    exec: realCommandExec(exec),
   };
 }
 

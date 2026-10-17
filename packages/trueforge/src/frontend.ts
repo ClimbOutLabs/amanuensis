@@ -31,11 +31,11 @@ function applyShellTokens(options: { html: string; uiBasePath: string }): string
 }
 
 /**
- * Image Content-Security-Policy for the app shell. Defined once here and
+ * Image, media and font Content-Security-Policy for the app shell. Defined once here and
  * mirrored in `packages/frontend/index.html`; a test asserts the two stay
  * equal because the static HTML file cannot import this constant.
  */
-export const APP_SHELL_IMAGE_CSP = "img-src 'self' data: blob:; media-src 'self' data: blob:";
+export const APP_SHELL_IMAGE_CSP = "img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:";
 
 function createShellResponse(options: { html: string; method: string }): Response {
   const headers = new Headers({
@@ -43,9 +43,10 @@ function createShellResponse(options: { html: string; method: string }): Respons
     'Cache-Control': REVALIDATE_CACHE_CONTROL,
     Vary: 'Accept-Encoding',
     // Model-authored markdown can hide private data in a remote image URL. The
-    // chat component placeholder is the primary guard; this image-and-media-only
-    // policy is defense in depth so a slipped-through <img>, <video>, or <audio>
-    // still cannot fetch.
+    // chat component placeholder is the primary guard; this image, media and font
+    // policy is defense in depth so a slipped-through <img>, <video>, <audio>, or
+    // CSS @font-face URL still cannot fetch. Not a full default-src: the shell's
+    // inline bootstrap script and cross-origin API/tile hosts would break.
     // no-referrer keeps the page URL out of any request that does go out.
     'Content-Security-Policy': APP_SHELL_IMAGE_CSP,
     'Referrer-Policy': 'no-referrer',

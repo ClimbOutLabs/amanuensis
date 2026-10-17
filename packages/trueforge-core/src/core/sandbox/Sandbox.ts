@@ -97,7 +97,14 @@ import {
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
 import { pinnedProgramCommand, shellWord } from './pinnedProgram';
-import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
+import {
+  ensureExecSuccess,
+  shellEscape,
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from './provider/Provider';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
@@ -157,6 +164,7 @@ function validateDocumentPageLimit(value: number): number {
 const NATS_REQUEST_TIMEOUT_BUFFER_SECONDS = 30;
 
 // Write a script (base64-encoded, never interpolated raw) to a path and run it. Skill mounters reuse it.
+// Isolated mode keeps the script's folder and site-packages, both workspace-writable, off the import path.
 export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scriptContent: string }): string {
   const b64 = Buffer.from(params.scriptContent, 'utf-8').toString('base64');
   const scriptPath = shellEscape(params.scriptPath);
@@ -165,7 +173,7 @@ export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scri
     `rm -f ${scriptPath}`,
     `echo ${shellEscape(b64)} | base64 -d > ${scriptPath}`,
     `chmod a-w ${scriptPath}`,
-    `python3 ${scriptPath}`,
+    `python3 -I -S ${scriptPath}`,
   ].join(' && ');
 }
 
@@ -2310,6 +2318,10 @@ export class Sandbox extends LocalToolMCP {
       effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
+      // The whole stamp is carried; the failure and approval fields below are resolved against host checks.
+      ...(sentinelStamp === undefined
+        ? {}
+        : { ...sentinelStamp, tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }) }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
       // the raw wire arguments. Record the exact mint identity so pre-dispatch
@@ -2369,16 +2381,6 @@ export class Sandbox extends LocalToolMCP {
             : { pre_dispatch_failure: structuredEditPreDispatchFailure }
           : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
       is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
-      ...(sentinelStamp === undefined
-        ? {}
-        : {
-            tier: sentinelStamp.tier,
-            tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
-            tier2_kind: sentinelStamp.tier2_kind,
-            approval_token_id: sentinelStamp.approval_token_id,
-            approval_binding: sentinelStamp.approval_binding,
-            shell_binding: sentinelStamp.shell_binding,
-          }),
     };
   }
 
@@ -2420,6 +2422,7 @@ export class Sandbox extends LocalToolMCP {
   ): Promise<BoundRepositoryState | undefined> {
     const [stateResult, gitDirResult] = await Promise.all([
       this.execWorkspaceExclusive({
+        hostAuthored: true,
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
         command: BOUND_REPOSITORY_STATE_ARGVS.map(argv => this.pinnedHostCommand(argv)).join(' && '),
@@ -2427,6 +2430,7 @@ export class Sandbox extends LocalToolMCP {
         signal,
       }),
       this.execWorkspaceExclusive({
+        hostAuthored: true,
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
         command: this.pinnedHostCommand(['git', 'rev-parse', '--absolute-git-dir']),
@@ -2461,6 +2465,7 @@ export class Sandbox extends LocalToolMCP {
       );
     }
     const checkoutNodesResult = await this.execWorkspaceExclusive({
+      hostAuthored: true,
       sandboxId,
       workspaceRoot: binding.workspace_cwd,
       command: this.pinnedHostCommand(['ls', '-di', '--', '.git', gitDir]),
@@ -3199,11 +3204,11 @@ export class Sandbox extends LocalToolMCP {
     let cwdResult: ExecResult;
     try {
       [workspaceResult, cwdResult] = await Promise.all([
-        this.provider.exec({
+        this.hostExec({
           sandboxId,
           command: this.pinnedHostCommand(['realpath', '-e', '--', scope.workspaceCwd]),
         }),
-        this.provider.exec({
+        this.hostExec({
           sandboxId,
           command: this.pinnedHostCommand(['realpath', '-e', '--', scope.cwd]),
         }),
@@ -3232,7 +3237,7 @@ export class Sandbox extends LocalToolMCP {
     return { workspaceCwd: canonicalWorkspace, cwd: canonicalCwd, cwdRelative };
   }
   private async resolveWorkspaceRoot(sandboxId: string, cwd: string | undefined): Promise<string | undefined> {
-    const result = await this.provider.exec({
+    const result = await this.hostExec({
       sandboxId,
       command: this.pinnedHostCommand(['git', 'rev-parse', '--show-toplevel']),
       cwd,
@@ -3472,6 +3477,7 @@ export class Sandbox extends LocalToolMCP {
     paths: readonly string[];
   }): Promise<StructuredEditPrecondition> {
     const result = await this.execWorkspaceExclusive({
+      hostAuthored: true,
       sandboxId: input.sandboxId,
       workspaceRoot: input.lockRoot,
       cwd: input.cwd,
@@ -3532,20 +3538,34 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH.
+   * Every host-authored exec goes through here; only sandboxPathExec may reach the sandbox PATH.
+   */
+  private hostExec(params: SandboxExecParams): Promise<ExecResult> {
+    return this.provider.exec({ ...params, command: withTrustedPath(params.command) });
+  }
+
+  /** Runs the model's own command, or a builtin-only lookup of what that command's PATH resolves. */
+  private sandboxPathExec(params: SandboxExecParams): Promise<ExecResult> {
+    return this.provider.exec(params);
+  }
+
   private async execWorkspaceExclusive(input: {
     sandboxId: string;
     workspaceRoot: string | undefined;
+    /** Host-built commands run on the trusted PATH; only the model's own command sees the sandbox PATH. */
+    hostAuthored: boolean;
     command: string;
     cwd: string | undefined;
     env?: Record<string, string> | undefined;
     timeoutSeconds?: number | undefined;
     signal?: AbortSignal | undefined;
   }): Promise<ExecResult> {
-    // The in-sandbox lock wrapper resolves mkdir, flock, sh and others through PATH, which a
-    // model can shadow; a command carrying the token never runs inside it. The host-side
-    // workspace mutation lock already serialises it.
+    // A command carrying the token never runs inside the in-sandbox lock wrapper, so the token reaches
+    // only the pinned git process. The host-side workspace mutation lock already serialises it.
     const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
-    const operation = this.provider.exec({
+    const params: SandboxExecParams = {
       sandboxId: input.sandboxId,
       command: input.command,
       cwd: input.cwd,
@@ -3555,7 +3575,8 @@ export class Sandbox extends LocalToolMCP {
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
-    });
+    };
+    const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
   }
 
@@ -3593,7 +3614,7 @@ export class Sandbox extends LocalToolMCP {
       workspaceRoot: input.workspaceRoot,
       args: ['config', '--local', '--no-includes', '--list', '--name-only'],
     });
-    const result = await this.provider.exec({
+    const result = await this.hostExec({
       sandboxId: input.sandboxId,
       command: probe.command,
       cwd: input.cwd,
@@ -3619,7 +3640,7 @@ export class Sandbox extends LocalToolMCP {
       commandCwd: string | undefined;
     }): Promise<string | undefined> => {
       const git = this.hardenedGitRead({ workspaceRoot: hardeningRoot, args: input.args });
-      const result = await this.provider.exec({
+      const result = await this.hostExec({
         sandboxId,
         command: git.command,
         cwd: input.commandCwd,
@@ -3866,7 +3887,7 @@ export class Sandbox extends LocalToolMCP {
             pinnedPath: this.pinnedPath(),
           });
           const operationId = randomUUID();
-          const providerWork = this.provider.exec({
+          const providerWork = this.hostExec({
             sandboxId,
             command,
             env: { ...ABNORMAL_HANDOFF_GIT_ENVIRONMENT },
@@ -3968,7 +3989,7 @@ export class Sandbox extends LocalToolMCP {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
       const run = (): Promise<ExecResult> =>
         workspaceRoot === undefined
-          ? this.provider.exec({
+          ? this.sandboxPathExec({
               sandboxId,
               command: input.command,
               cwd: input.cwd,
@@ -3976,6 +3997,7 @@ export class Sandbox extends LocalToolMCP {
               ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
             })
           : this.execWorkspaceExclusive({
+              hostAuthored: false,
               sandboxId,
               workspaceRoot,
               command: input.command,
@@ -4093,6 +4115,7 @@ export class Sandbox extends LocalToolMCP {
                 return {
                   status: 'completed' as const,
                   result: await this.execWorkspaceExclusive({
+                    hostAuthored: false,
                     sandboxId,
                     workspaceRoot: lease.workspaceRoot,
                     command: input.command,
@@ -4364,7 +4387,8 @@ export class Sandbox extends LocalToolMCP {
         .map(bin => `command -v ${shellEscape(bin)} || echo MISSING ${shellEscape(bin)}`)
         .join('; ');
 
-      const result = await this.provider.exec({
+      // `command -v` and `echo` are builtins: this resolves names on the model's PATH without running them.
+      const result = await this.sandboxPathExec({
         sandboxId: input.sandboxId,
         command: checkCommands,
         cwd: '/',
@@ -4534,11 +4558,18 @@ export class Sandbox extends LocalToolMCP {
     const allowlist = this.sentinelContext?.services.shell_allowlist;
     const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
     const pinned =
-      allowlist === undefined || workspaceRoot === undefined
+      allowlist === undefined
         ? undefined
         : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (pinned === undefined) {
       return { exec: input.exec, env: {}, preflight: undefined };
+    }
+    if (pinned.git_needs_workspace_root) {
+      return {
+        exec: input.exec,
+        env: {},
+        preflight: () => Promise.resolve(GIT_CONFIG_UNREADABLE_REFUSAL),
+      };
     }
     const pinnedCommand = (argv: readonly string[]): string =>
       pinnedProgramCommand({ argv, pinnedPath: pinned.pinned_path });
@@ -4547,7 +4578,7 @@ export class Sandbox extends LocalToolMCP {
       probeArgv === null
         ? undefined
         : async () => {
-            const probe = await this.provider.exec({
+            const probe = await this.hostExec({
               sandboxId: input.sandboxId,
               command: pinnedCommand(probeArgv),
               cwd: input.exec.cwd,
@@ -4600,7 +4631,7 @@ export class Sandbox extends LocalToolMCP {
     const preflight: ExecPreflight | undefined = plan.readsRepositoryConfig
       ? async () => {
           const probeExec = buildHostAuthenticatedGitConfigProbe({ workspaceRoot });
-          const probe = await this.provider.exec({
+          const probe = await this.hostExec({
             sandboxId: input.sandboxId,
             command: probeExec.command,
             cwd: input.exec.cwd,
@@ -4947,9 +4978,10 @@ export class Sandbox extends LocalToolMCP {
         });
         return this.runReservedImplementationPlanDispatch(reservation, () =>
           this.execWorkspaceExclusive({
+            hostAuthored: true,
             sandboxId: rawId,
             workspaceRoot: workspaceLockRoot,
-            command: this.pinnedHostCommand(['python3', scriptPath, payloadPath]),
+            command: this.pinnedHostCommand(['python3', '-I', '-S', scriptPath, payloadPath]),
             cwd: undefined,
           }),
         );
@@ -5079,10 +5111,13 @@ export class Sandbox extends LocalToolMCP {
       return map;
     }
     const result = await this.execWorkspaceExclusive({
+      hostAuthored: true,
       sandboxId: input.sandboxId,
       workspaceRoot: input.workspaceRoot,
       command: this.pinnedHostCommand([
         'python3',
+        '-I',
+        '-S',
         '-c',
         OPENAI_PATCH_CONTENT_READ_SCRIPT,
         input.workspaceRoot,
@@ -5260,6 +5295,7 @@ export class Sandbox extends LocalToolMCP {
           approved: context?.structured_edit_precondition,
         });
         const check = await this.execWorkspaceExclusive({
+          hostAuthored: true,
           sandboxId: rawId,
           workspaceRoot,
           // --unidiff-zero: a hunk with only added lines (a pure insertion, e.g. from an
@@ -5291,6 +5327,7 @@ export class Sandbox extends LocalToolMCP {
         // before this callback can dispatch the repository mutation.
         const apply = await this.runReservedImplementationPlanDispatch(reservation, () =>
           this.execWorkspaceExclusive({
+            hostAuthored: true,
             sandboxId: rawId,
             workspaceRoot,
             command: this.pinnedHostCommand(['git', 'apply', '--recount', '--unidiff-zero', '--', patchPath]),
@@ -5502,9 +5539,10 @@ export class Sandbox extends LocalToolMCP {
           reservation,
           async (): Promise<ReplaceTextDispatchOutcome> => {
             const exec = await this.execWorkspaceExclusive({
+              hostAuthored: true,
               sandboxId: rawId,
               workspaceRoot,
-              command: this.pinnedHostCommand(['python3', scriptPath, payloadPath]),
+              command: this.pinnedHostCommand(['python3', '-I', '-S', scriptPath, payloadPath]),
               cwd: input.cwd,
             });
             return { kind: 'dispatched', exec, payloadDigest };
@@ -5812,7 +5850,7 @@ export class Sandbox extends LocalToolMCP {
       await this.removeSandboxFile({ sandboxId, filePath: snapshotPath });
     };
     try {
-      const result = await this.provider.exec({
+      const result = await this.hostExec({
         sandboxId,
         command,
         timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
@@ -5866,7 +5904,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   private async removeSandboxFile(input: { sandboxId: string; filePath: string }): Promise<void> {
-    const result = await this.provider.exec({
+    const result = await this.hostExec({
       sandboxId: input.sandboxId,
       command: this.pinnedHostCommand(['rm', '-f', '--', input.filePath]),
     });
@@ -5885,7 +5923,7 @@ export class Sandbox extends LocalToolMCP {
       throw new Error(`Document path must refer to a staged upload: ${filePath}`);
     }
     const canonicalize = async (path: string): Promise<string> => {
-      const result = await this.provider.exec({
+      const result = await this.hostExec({
         sandboxId,
         command: this.pinnedHostCommand(['realpath', '-e', '--', path]),
       });
@@ -5935,7 +5973,7 @@ export class Sandbox extends LocalToolMCP {
     // emits a form-feed (\x0C) between pages; Node.js splits on it. The old
     // per-page loop re-parsed the PDF's xref tree N times (up to 100 spawns).
     const command = `set -eu; ulimit -v 2097152; total=$(pdfinfo ${shellEscape(canonicalFilePath)} | awk '/^Pages:/ {print $2}'); test -n "$total"; page=${shellEscape(String(firstPage))}; end=$((page + ${String(maxPages)} - 1)); if [ "$end" -gt "$total" ]; then end=$total; fi; printf '%sTOTAL:%s\\n' ${shellEscape(`${marker}:`)} "$total"; printf '%sRANGE:%s-%s\\n' ${shellEscape(`${marker}:`)} "$page" "$end"; pdftotext -f "$page" -l "$end" -layout ${shellEscape(canonicalFilePath)} - | head -c ${String(MAX_CHARS_PER_DOCUMENT)}`;
-    const result = await this.provider.exec({
+    const result = await this.hostExec({
       sandboxId,
       command,
       timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
@@ -6018,7 +6056,7 @@ export class Sandbox extends LocalToolMCP {
           ? `${cleanupTrap} set -eu; ulimit -v 2097152; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; for page_number in ${requestedPages.map(page => shellEscape(String(page))).join(' ')}; do [ "$remaining" -gt 0 ] || break; page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); done`
           : `${cleanupTrap} set -eu; ulimit -v 2097152; total=$(pdfinfo ${shellEscape(canonicalFilePath)} | awk '/^Pages:/ {print $2}'); limit=$total; if [ "$limit" -gt ${String(maxPages)} ]; then limit=${String(maxPages)}; fi; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; page_number=1; while [ "$page_number" -le "$limit" ] && [ "$remaining" -gt 0 ]; do page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); page_number=$((page_number + 1)); done`
         : `${cleanupTrap} set -eu; ulimit -v 2097152; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${shellEscape(canonicalFilePath)} stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c ${String(MAX_CHARS_PER_DOCUMENT)} < "$raw_text_file" > "$text_file"; printf '%s1\\n' ${shellEscape(`${marker}:`)}; cat "$text_file"`;
-    const result = await this.provider.exec({
+    const result = await this.hostExec({
       sandboxId,
       command,
       timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
@@ -6082,7 +6120,7 @@ export class Sandbox extends LocalToolMCP {
   private async scrubLegacyGitCredentials(signal?: AbortSignal): Promise<void> {
     const sandboxId = this.providerSandboxId(this.requiredSandboxInfo.sandbox_id);
     const result = await awaitWithAbort({
-      operation: this.provider.exec({
+      operation: this.hostExec({
         sandboxId,
         // Credentials are never written to the sandbox any more; this keeps persisted sandboxes from earlier releases clean.
         command: this.pinnedHostCommand(['rm', '-f', this.provider.getGitCredentialsPath(sandboxId)]),
@@ -6120,7 +6158,7 @@ export class Sandbox extends LocalToolMCP {
     }
     ensureExecSuccess(
       await awaitWithAbort({
-        operation: this.provider.exec({
+        operation: this.hostExec({
           sandboxId,
           command: this.pinnedHostCommand(['mkdir', '-p', ...dirs]),
           ...(signal === undefined ? {} : { signal }),
@@ -6182,7 +6220,7 @@ export class Sandbox extends LocalToolMCP {
     if (initSteps.length > 0) {
       ensureExecSuccess(
         await awaitWithAbort({
-          operation: this.provider.exec({
+          operation: this.hostExec({
             sandboxId,
             command: initSteps.join(' && '),
             env: skillInit?.env,
