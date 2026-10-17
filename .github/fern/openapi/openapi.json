@@ -5127,7 +5127,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
@@ -10655,7 +10655,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
