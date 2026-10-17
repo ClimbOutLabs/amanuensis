@@ -29,7 +29,7 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 5; i += 1) {
       expect(attempt(l, 'a').allowed).toBe(true);
     }
-    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30, scope: 'address' });
     expect(attempt(l, 'b').allowed).toBe(true);
     clock += 30_001;
     expect(l.begin('a').allowed).toBe(true);
@@ -91,7 +91,7 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 5; i += 1) {
       attempt(l, 'a');
     }
-    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30, scope: 'address' });
   });
 
   it('clears the failures and the lockout history of an address that signed in', () => {
@@ -109,7 +109,7 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 5; i += 1) {
       attempt(l, 'a');
     }
-    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(l.begin('a')).toEqual({ allowed: false, retryAfterSeconds: 30, scope: 'address' });
   });
 
   it('makes unknown addresses wait when failures from all addresses pile up, but not an address that signed in today', () => {
@@ -118,7 +118,7 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 6; i += 1) {
       attempt(l, `ip${String(i)}`);
     }
-    expect(l.begin('someone-new')).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(l.begin('someone-new')).toEqual({ allowed: false, retryAfterSeconds: 30, scope: 'address' });
     expect(l.begin('device').allowed).toBe(true);
     clock += 31_000;
     expect(l.begin('someone-new').allowed).toBe(true);
@@ -138,11 +138,11 @@ describe('login attempt limiter', () => {
     const l = limiter({ maxKeys: 3 });
     for (let i = 0; i < 5; i += 1) {
       for (let k = 0; k < 5; k += 1) {
-        attempt(l, `ip${String(i)}`);
+        attempt(l, `ip${String(i)}`, 'failure', `person${String(i)}`);
       }
     }
-    expect(l.begin('ip4').allowed).toBe(false);
-    expect(l.begin('ip0').allowed).toBe(true);
+    expect(l.begin('ip4', 'person4').allowed).toBe(false);
+    expect(l.begin('ip0', 'person0').allowed).toBe(true);
   });
 
   it('allows plenty of sign-in page requests, then asks the address to wait until the minute is over', () => {
@@ -177,7 +177,7 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 5; i += 1) {
       attempt(l, 'a', 'failure', 'owner@example.com');
     }
-    expect(l.begin('a', 'owner@example.com')).toEqual({ allowed: false, retryAfterSeconds: 60 });
+    expect(l.begin('a', 'owner@example.com')).toEqual({ allowed: false, retryAfterSeconds: 60, scope: 'address' });
   });
 
   it('clears an account the person signs in to after their own typing mistakes', () => {
@@ -200,6 +200,70 @@ describe('login attempt limiter', () => {
     for (let i = 0; i < 5; i += 1) {
       attempt(l, 'a', 'failure', 'me@example.com');
     }
-    expect(l.begin('a', 'me@example.com')).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(l.begin('a', 'me@example.com')).toEqual({ allowed: false, retryAfterSeconds: 30, scope: 'address' });
+  });
+  describe('budget per account', () => {
+    const spread = (l: LoginAttemptLimiter, account: string, from: number, count: number) => {
+      for (let i = from; i < from + count; i += 1) {
+        attempt(l, `ip${String(i)}`, 'failure', account);
+      }
+    };
+
+    it('locks unknown addresses out of an account after 10 wrong passwords from different addresses', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      spread(l, 'owner@example.com', 0, 10);
+      expect(l.begin('ip-new', 'owner@example.com')).toEqual({
+        allowed: false,
+        retryAfterSeconds: 300,
+        scope: 'account',
+      });
+      expect(l.begin('ip-new', 'someone-else@example.com').allowed).toBe(true);
+    });
+
+    it('does not let a burst of guesses at one account through beyond the budget', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      const permits = Array.from({ length: 60 }, (_, i) => l.begin(`ip${String(i)}`, 'Owner@Example.com '));
+      expect(permits.filter(p => p.allowed)).toHaveLength(10);
+    });
+
+    it('keeps working for an address that signed in during the last day', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      attempt(l, 'home', 'success', 'owner@example.com');
+      spread(l, 'owner@example.com', 0, 10);
+      expect(l.begin('home', 'owner@example.com').allowed).toBe(true);
+      expect(l.begin('fresh', 'owner@example.com').allowed).toBe(false);
+    });
+
+    it('doubles the wait each time, up to the cap, and starts over after a day without failures', () => {
+      const l = limiter({ maxGlobalFailures: 1000, maxAccountLockoutMs: 20 * 60_000 });
+      const waits: number[] = [];
+      for (let round = 0; round < 4; round += 1) {
+        spread(l, 'owner@example.com', round * 10, 10);
+        const check = l.begin('fresh', 'owner@example.com');
+        waits.push(check.allowed ? 0 : check.retryAfterSeconds);
+        clock += 21 * 60_000;
+      }
+      expect(waits).toEqual([300, 600, 1200, 1200]);
+      clock += DAY + 1;
+      spread(l, 'owner@example.com', 100, 10);
+      const again = l.begin('fresh', 'owner@example.com');
+      expect(again.allowed ? 0 : again.retryAfterSeconds).toBe(300);
+    });
+
+    it('forgets old failures after an hour', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      spread(l, 'owner@example.com', 0, 9);
+      clock += 61 * 60_000;
+      spread(l, 'owner@example.com', 20, 9);
+      expect(l.begin('fresh', 'owner@example.com').allowed).toBe(true);
+    });
+
+    it('is not cleared by a sign-in, so a lucky guess does not give the next guesser a fresh budget', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      spread(l, 'owner@example.com', 0, 9);
+      attempt(l, 'ip-lucky', 'success', 'owner@example.com');
+      spread(l, 'owner@example.com', 20, 1);
+      expect(l.begin('fresh', 'owner@example.com').allowed).toBe(false);
+    });
   });
 });

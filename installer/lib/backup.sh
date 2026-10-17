@@ -146,11 +146,11 @@ backup_run() {
     fi
     n=$((n + 1))
   done
-  # The authority's key goes with every backup, so a restored computer keeps the one its devices already trust.
-  if [ -f "$(tls_ca_dir)/root.key" ]; then
+  # Only the authority's certificate goes into a backup, never its private key: a backup is not encrypted, and whoever
+  # holds that key can vouch for any name this computer is opened at. A restore makes a new key.
+  if [ -f "$(tls_ca_dir)/root.crt" ]; then
     ensure_private_dir "$dir/tls"
-    cp "$(tls_ca_dir)/root.crt" "$(tls_ca_dir)/root.key" "$dir/tls/"
-    chmod 600 "$dir/tls/root.key"
+    cp "$(tls_ca_dir)/root.crt" "$dir/tls/"
   fi
   cp "$RELEASE_DIR/release.json" "$dir/release.json"
   chmod 600 "$dir/release.json"
@@ -159,6 +159,9 @@ backup_run() {
   backup_prune
   log_event "backup $dir"
   say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
+  if [ -f "$dir/tls/root.crt" ]; then
+    say "It does not hold the private key of this computer's certificate authority. After a restore, Aman makes a new one and each device trusts it again."
+  fi
 }
 
 cmd_backup() {

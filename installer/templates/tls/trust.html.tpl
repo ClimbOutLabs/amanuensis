@@ -18,7 +18,7 @@
 <body>
 <h1>Make this device trust your home server</h1>
 <p>You only do this once per device.</p>
-<p class="note">Before you trust it, check that the fingerprint your device shows matches this one: <code>@@FINGERPRINT@@</code>. If it does not match, stop and do not trust it.</p>
+<p class="note">This page is not encrypted, so it cannot prove the file is the right one. Before you trust it, compare the fingerprint your device shows with the one in the terminal on the computer that runs Aman (the end of the install, or <code>aman doctor</code>). If they do not match, stop and do not trust it.</p>
 <p>
   <a class="download" href="/trust/aman.mobileconfig">Download for iPhone or iPad</a>
   <a class="download" href="/trust/ca.crt">Download for Android, Mac or Windows</a>

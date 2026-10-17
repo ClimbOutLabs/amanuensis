@@ -449,7 +449,7 @@ plan_tls() {
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     plan_add todo "Make this computer's certificate authority again" \
-      "The one from an earlier version has no limit on what it can vouch for. The new one is limited to private addresses and names. Each device trusts it again."
+      "The one from an earlier version can vouch for more names than it should. The new one covers only the names Aman is opened at and private addresses. Each device trusts it again."
   fi
   [ "$need" = 1 ] || return 0
   plan_image "$(tls_image)" "The https front end is downloaded" "Download the https front end" https-front

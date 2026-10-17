@@ -102,7 +102,7 @@ test_short_stdin_password_is_refused_before_any_change() {
   env_before=$(cat "$AMAN_HOME/instances/main/.env")
   add_user_stdin judge1 judge1@demo.invalid "short"
   assert_rc 2
-  assert_flat_contains "$ERR" "at least 8 characters"
+  assert_flat_contains "$ERR" "at least 12 characters"
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$env_before"
   assert_not_contains "$(registry)" "user_judge1"
   assert_not_contains "$(dex_env)" "JUDGE1"

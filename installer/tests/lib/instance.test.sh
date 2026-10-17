@@ -302,16 +302,43 @@ test_instances_are_isolated_and_images_stay_local() {
   assert_not_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "external: true" "no network is shared with other instances"
   assert_not_contains "$main" "aman_machine"
   assert_contains "$machine" "container_name: aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_main_stt aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_second_stt aman-stt"
+  assert_log_has "network connect --alias aman-stt-engine aman_main_stt aman-stt"
+  assert_log_has "network connect --alias aman-stt-engine aman_second_stt aman-stt"
   assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_stt aman-stt,aman_second_stt aman-stt," "the speech service is the only thing joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 2 "app and holder are never pulled"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 3 "app, holder and speech relay are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
   assert_rc 0
   assert_log_has "network disconnect -f aman_second_stt aman-stt"
   assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_stt"
+  sandbox_drop
+}
+
+test_speech_service_is_hardened_and_cannot_reach_the_instance() {
+  t_begin "the speech service is locked down and reaches an instance only through its relay"
+  sandbox_new
+  install_machine
+  local machine main relay_block loopback_block
+  machine=$(cat "$AMAN_HOME/machine/compose.yaml")
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$machine" "user: '10001:10001'" "not root"
+  assert_contains "$machine" "- ALL" "no capabilities"
+  assert_contains "$machine" "no-new-privileges:true"
+  assert_contains "$machine" "read_only: true"
+  assert_contains "$machine" "tmpfs:"
+  assert_contains "$machine" "mem_limit: 2g"
+  assert_contains "$machine" "pids_limit: 256"
+  relay_block=$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')
+  loopback_block=$(printf '%s\n' "$main" | sed -n '/^  loopback:/,/^  speech-link:/p')
+  assert_contains "$relay_block" "- aman-stt" "the app finds speech under the name it always used"
+  assert_contains "$relay_block" "read_only: true"
+  assert_contains "$relay_block" "no-new-privileges:true"
+  assert_contains "$relay_block" "pids_limit"
+  assert_contains "$loopback_block" "- link"
+  assert_not_contains "$loopback_block" "- stt" "the shared network of app, login and front end is not on the speech network"
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "internal: true"
+  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 2 "both speech networks are internal"
   sandbox_drop
 }
 
@@ -417,6 +444,7 @@ test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
 test_instances_are_isolated_and_images_stay_local
+test_speech_service_is_hardened_and_cannot_reach_the_instance
 test_app_env_lacks_dex_only_values
 test_purge_after_remove_deletes_the_leftover_volumes
 test_purge_failure_is_not_reported_as_success

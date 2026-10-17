@@ -70,11 +70,12 @@ machine_up() {
   done
 }
 
-# Each instance has its own network with only the speech service on it besides itself. The shared
-# service is connected to every one of those networks, so no instance has a route to another.
+# Each instance has its own internal network with only its speech relay on it besides the speech service. The shared
+# service is connected to every one of those networks, so no instance has a route to another, and the service has no
+# route into any instance except that relay.
 stt_attach() {
   local out
-  if out=$(D network connect --alias aman-stt "aman_${1}_stt" aman-stt 2>&1); then
+  if out=$(D network connect --alias aman-stt-engine "aman_${1}_stt" aman-stt 2>&1); then
     return 0
   fi
   case "$out" in

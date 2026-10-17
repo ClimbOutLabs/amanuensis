@@ -6,10 +6,20 @@ services:
     image: @@STT_IMAGE@@
     # Built on this machine and never pulled.
     pull_policy: never
-    # Instances reach it by this name on a network each of them has with it alone.
     container_name: aman-stt
+    # Each instance reaches it through a relay on a network of its own; the service starts nothing and holds no privileges.
+    user: '10001:10001'
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
     # No CPU pinning: transcription shares the machine cores with everything else.
     mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 256
     environment:
       AMAN_STT_CPU_THREADS: ${AMAN_STT_CPU_THREADS:-4}
       AMAN_STT_MODEL_DIR: /data/stt-cache

@@ -55,7 +55,7 @@ tls_node() { # app_image shell_command
 }
 
 # Every name any instance served over https is opened at: the authority may vouch only for these and for private
-# addresses and names.
+# addresses.
 tls_all_names() { # name of the instance being set up
   local other
   {
@@ -68,7 +68,7 @@ tls_all_names() { # name of the instance being set up
 
 # Makes the authority (once for this computer) and the certificate for the instance's addresses (again when they
 # change or it is close to its end). The authority is made again, with every device needing to trust it again, only
-# when it lacks a name that is now needed or has no limits at all (from an earlier version); TLS_AUTHORITY_REPLACED says
+# when it lacks a name that is now needed or has older limits (from an earlier version); TLS_AUTHORITY_REPLACED says
 # so for the closing lines, and every other instance gets a certificate under the new one. A failure is fatal because
 # the instance would be unreachable.
 TLS_AUTHORITY_REPLACED=0
@@ -99,8 +99,8 @@ tls_issue() { # name app_image
   esac
 }
 
-# An authority from before the limits were added has no record of the names it may vouch for; the next install replaces it.
-tls_authority_needs_replacing() { [ -f "$(tls_ca_dir)/root.crt" ] && [ ! -f "$(tls_ca_dir)/root.names" ]; }
+# An authority made before today's limits has no record of them (or an older one); the next install replaces it.
+tls_authority_needs_replacing() { [ -f "$(tls_ca_dir)/root.crt" ] && ! grep -q '"version":2' "$(tls_ca_dir)/root.names" 2>/dev/null; }
 
 # The fingerprint of the authority's certificate, in the form a device shows it.
 tls_fingerprint() { head -n 1 "$(tls_ca_dir)/root.fingerprint" 2>/dev/null || true; }
@@ -120,7 +120,7 @@ tls_publish_trust() { # name
     "UUID_CERTIFICATE=$(uuid_from_hex "${uuid:0:32}")" "UUID_PROFILE=$(uuid_from_hex "${uuid:32:32}")" |
     write_if_changed "$dir/aman.mobileconfig" 644 || true
   open_url=$(tls_open_url "$name")
-  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" "FINGERPRINT=$(tls_fingerprint)" | write_if_changed "$dir/index.html" 644 || true
+  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" | write_if_changed "$dir/index.html" 644 || true
 }
 
 # 32 hex digits as a UUID.

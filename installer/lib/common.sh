@@ -57,8 +57,8 @@ consent_root() {
 # 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
 password_problem() {
   local LC_ALL=C
-  if [ "${#1}" -lt 8 ]; then
-    echo "The password needs at least 8 characters."
+  if [ "${#1}" -lt 12 ]; then
+    echo "The password needs at least 12 characters."
   elif [ "${#1}" -gt 72 ]; then
     echo "The password can have at most 72 characters; accented or non-Latin letters take more room."
   fi
@@ -79,7 +79,7 @@ ask_password() {
   fi
   while [ "$__tries" -lt "$UI_MAX_TRIES" ]; do
     if [ -t 0 ]; then
-      ui_password __first "Password for ${I_EMAIL:-the owner account}, 8 to 72 characters" || die "No password was entered, so nothing more was changed."
+      ui_password __first "Password for ${I_EMAIL:-the owner account}, 12 to 72 characters" || die "No password was entered, so nothing more was changed."
       ui_password __second "Repeat the password" || die "No password was entered, so nothing more was changed."
     else
       IFS= read -r __first || die "No password was provided on stdin."

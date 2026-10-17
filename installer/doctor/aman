@@ -672,7 +672,7 @@ check_tls() {
       elif [ "$leaf_days" -lt 60 ] || [ "${root_days:-1000}" -lt 60 ]; then
         tls_note warn "The https certificate of instance $name ends in $([ "$leaf_days" -lt "${root_days:-1000}" ] && echo "$leaf_days" || echo "$root_days") days." "Run aman doctor tls --fix"
       elif [ "$constrained" = false ]; then
-        tls_note warn "The certificate authority of this computer, from an earlier version, has no limit on the names it can vouch for. A new one is limited to private addresses and names; each device then trusts it again." "Run aman doctor tls --fix"
+        tls_note warn "The certificate authority of this computer, from an earlier version, can vouch for more names than it should. A new one covers only the names Aman is opened at and private addresses; each device then trusts it again." "Run aman doctor tls --fix"
       elif [ "$covers" = false ]; then
         tls_note warn "The certificate authority of this computer does not cover every name of instance $name. A new one does; each device then trusts it again." "Run aman doctor tls --fix"
       else
@@ -701,6 +701,9 @@ check_tls() {
     tls_note warn "Daily backups are off, so the https certificate is renewed only when you run an aman command in its last 60 days, or run aman doctor tls --fix." "Run aman doctor backup --fix"
   fi
   if [ "$state" = ok ] && [ -z "$detail" ]; then detail="Https is on, with a certificate from this computer's own authority."; fi
+  if [ "$state" != ok ] && [ -s "$ca_dir/root.fingerprint" ]; then
+    detail="$detail Authority fingerprint, to compare on a device before trusting it: $(head -n 1 "$ca_dir/root.fingerprint")"
+  fi
   record machine tls "$state" "$detail" "$fix"
 }
 

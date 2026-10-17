@@ -312,6 +312,37 @@ describe('login proxy', () => {
       }
     });
 
+    it('tells unknown addresses in plain words how long to wait once an account has had too many wrong passwords', async () => {
+      const hono = new Hono();
+      hono.all(
+        '*',
+        createLoginProxy({
+          issuerUrl: ISSUER,
+          allowedOrigins: ORIGINS,
+          limiter,
+          clientKey: c => c.req.header('x-test-client') ?? 'unknown',
+        }),
+      );
+      const post = (address: string) =>
+        hono.request('http://192.168.1.20:8791/dex/auth/local/login?back=&state=s', {
+          method: 'POST',
+          headers: {
+            host: '192.168.1.20:8791',
+            'x-test-client': address,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=owner%40example.com&password=guess',
+        });
+      for (let i = 0; i < 10; i += 1) {
+        expect((await post(`198.51.100.${String(i)}`)).status).toBe(200);
+      }
+      const locked = await post('198.51.100.200');
+      expect(locked.status).toBe(429);
+      expect(await locked.text()).toBe('Too many wrong passwords. Try again in 5 minutes.');
+      expect(locked.headers.get('retry-after')).toBe('300');
+      expect(calls).toHaveLength(10);
+    });
+
     it('does not count a post the service refused for a bad request, such as an unknown sign-in state', async () => {
       answer = () => new Response('Bad request', { status: 400, headers: { 'content-type': 'text/html' } });
       for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -647,7 +678,7 @@ describe('login proxy in front of a public sign-in address', () => {
             'x-forwarded-for': forwardedFor,
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: 'login=a%40b.c&password=x',
+          body: `login=user-${forwardedFor}&password=x`,
         }),
         { incoming: { socket: { remoteAddress } } },
       );
@@ -683,7 +714,7 @@ describe('login proxy in front of a public sign-in address', () => {
             'x-forwarded-for': forwardedFor,
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: 'login=a%40b.c&password=x',
+          body: `login=user-${forwardedFor}&password=x`,
         }),
         { incoming: { socket: { remoteAddress } } },
       );

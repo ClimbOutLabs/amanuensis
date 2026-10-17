@@ -1,6 +1,8 @@
 // The local certificate authority of this computer and the one certificate its web front end serves, with no
 // dependencies beyond Node.js. One long-lived root signs a leaf that lists every address the instance opens at, so a
-// browser that sends no server name (anything opened by IP address) still gets a certificate that matches.
+// browser that sends no server name (anything opened by IP address) still gets a certificate that matches. The root can
+// vouch only for web servers, only directly (no authority below it), and only for the names this computer is opened at
+// plus private addresses.
 //
 //   node pki.mjs ensure-ca <ca-dir>
 //   node pki.mjs issue <ca-dir> <leaf-dir> <names...>      issues when missing, expiring or for other names
@@ -119,7 +121,7 @@ function writeFile({ file, text, mode }) {
   fs.renameSync(temporary, file);
 }
 
-/** What the authority may vouch for: private address ranges and names that only mean something on a private network. */
+/** The private address ranges the authority may vouch for; names are only those this computer is opened at. */
 const PERMITTED_RANGES = [
   [
     [10, 0, 0, 0],
@@ -142,32 +144,46 @@ const PERMITTED_RANGES = [
     [255, 0, 0, 0],
   ],
 ];
-const PERMITTED_SUFFIXES = ['local', 'lan', 'home.arpa', 'ts.net', 'localhost'];
+/** A host under the reserved .invalid top level, which never names anything. */
+const UNMATCHABLE_HOST = 'amanuensis.invalid';
+
+/** Bumped when the limits change; an authority written under an older version is made again. */
+const AUTHORITY_VERSION = 2;
 
 const isAddress = text => /^\d+\.\d+\.\d+\.\d+$/.test(text);
 
-/** True when the authority, with these extra names, may vouch for the name or address. */
+/** True when the authority, limited to these names, may vouch for the name or address. */
 export function permitted({ name: candidate, extras = [] }) {
   if (isAddress(candidate)) {
     const parts = candidate.split('.').map(Number);
     return PERMITTED_RANGES.some(([base, mask]) => parts.every((part, index) => (part & mask[index]) === base[index]));
   }
   const lower = candidate.toLowerCase();
-  return [...PERMITTED_SUFFIXES, ...extras].some(allowed => lower === allowed || lower.endsWith(`.${allowed}`));
+  return extras.some(allowed => lower === allowed || lower.endsWith(`.${allowed}`));
 }
 
+/**
+ * Private addresses and the given names are allowed. Email addresses and URIs are not constrained by leaving them out
+ * (that would allow any), so each has one permitted base nothing real can match, and every other one is refused.
+ */
 function nameConstraints(extras) {
   const subtree = base => seq(base);
   const addresses = PERMITTED_RANGES.map(([base, mask]) => subtree(der(0x87, Buffer.from([...base, ...mask]))));
-  const names = [...PERMITTED_SUFFIXES, ...extras].map(allowed => subtree(der(0x82, Buffer.from(allowed, 'ascii'))));
-  return seq(der(0xa0, ...names, ...addresses));
+  const names = extras.map(allowed => subtree(der(0x82, Buffer.from(allowed, 'ascii'))));
+  const nothing = [
+    subtree(der(0x81, Buffer.from(UNMATCHABLE_HOST, 'ascii'))),
+    subtree(der(0x86, Buffer.from(UNMATCHABLE_HOST, 'ascii'))),
+  ];
+  return seq(der(0xa0, ...names, ...addresses, ...nothing));
 }
 
 const namesFile = caDir => path.join(caDir, 'root.names');
 
+/** The names the authority was made for; undefined for a missing record or one from an earlier version. */
 function storedExtras(caDir) {
   try {
-    return JSON.parse(fs.readFileSync(namesFile(caDir), 'utf8'));
+    const record = JSON.parse(fs.readFileSync(namesFile(caDir), 'utf8'));
+    return record.version === AUTHORITY_VERSION && Array.isArray(record.names) ? record.names : undefined;
   } catch {
     return undefined;
   }
@@ -189,9 +205,9 @@ function pairMatches({ certFile, keyFile }) {
 
 /**
  * Makes the root certificate and its key unless a good one exists. The root may vouch only for private addresses and
- * names that mean something on a private network, plus the other names given here: a root that lacks a name asked for,
- * has no limits at all (from an earlier version), or is about to end is made again, and `rotated` says so, since every
- * device must then trust the new one. The key is readable by its owner only.
+ * the names given here, only for web servers, and not for any authority below it: a root that lacks a name asked for,
+ * has older limits, or is about to end is made again, and `rotated` says so, since every device must then trust the
+ * new one. The key is readable by its owner only.
  */
 export function ensureCa({ caDir, names = [], now = new Date() }) {
   const certFile = path.join(caDir, 'root.crt');
@@ -208,9 +224,7 @@ export function ensureCa({ caDir, names = [], now = new Date() }) {
       return { created: false, rotated: false, notAfter: current.validToDate, fingerprint: fingerprintOf(current) };
     }
   }
-  const extras = [...new Set([...(stored ?? []), ...asked.filter(candidate => !permitted({ name: candidate }))])]
-    .map(candidate => candidate.toLowerCase())
-    .sort();
+  const extras = [...new Set([...(stored ?? []), ...asked].map(candidate => candidate.toLowerCase()))].sort();
   const { publicKey, privateKey } = makeKey();
   const notBefore = new Date(now.getTime() - DAY_MS);
   const notAfter = new Date(now);
@@ -223,15 +237,16 @@ export function ensureCa({ caDir, names = [], now = new Date() }) {
     notBefore,
     notAfter,
     extensions: [
-      extension('2.5.29.19', seq(bool(true)), true),
+      extension('2.5.29.19', seq(bool(true), integer(Buffer.from([0]))), true),
       extension('2.5.29.15', bits(Buffer.from([0x06]), 1), true),
+      extension('2.5.29.37', seq(oid('1.3.6.1.5.5.7.3.1'))),
       extension('2.5.29.14', octets(keyId(publicKey))),
       extension('2.5.29.30', nameConstraints(extras), true),
     ],
   });
   writeFile({ file: keyFile, text: privateKey.export({ type: 'pkcs8', format: 'pem' }), mode: 0o600 });
   writeFile({ file: certFile, text: pem, mode: 0o644 });
-  writeFile({ file: namesFile(caDir), text: `${JSON.stringify(extras)}\n`, mode: 0o644 });
+  writeFile({ file: namesFile(caDir), text: `${JSON.stringify({ version: AUTHORITY_VERSION, names: extras })}\n`, mode: 0o644 });
   const created = new crypto.X509Certificate(pem);
   writeFile({ file: path.join(caDir, 'root.fingerprint'), text: `${fingerprintOf(created)}\n`, mode: 0o644 });
   return { created: true, rotated: exists, notAfter, fingerprint: fingerprintOf(created) };
