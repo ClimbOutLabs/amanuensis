@@ -567,6 +567,7 @@ describe('Data export route', () => {
     expect(manifest.redactions).toBeGreaterThan(0);
     expect(manifest.sections).toEqual([
       'chats.json',
+      'audit.json',
       'sessions.json',
       'folders.json',
       'personas.json',

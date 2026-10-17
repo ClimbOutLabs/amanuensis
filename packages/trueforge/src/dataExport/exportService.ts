@@ -2,7 +2,7 @@
  * Streams one user's data export archive: one JSON file per section, the
  * memory tree as Markdown, and uploaded files only when requested. Never
  * exported: model providers and their keys, OAuth tokens, registered OAuth
- * clients, approval tokens, always-allow grants, the audit log, sandbox
+ * clients, approval tokens, always-allow grants, sandbox
  * state, schedule run history, and anything another user owns.
  *
  * Every JSON value and every text file passes both secret layers before it
@@ -29,6 +29,7 @@ import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
+import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -48,6 +49,7 @@ import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettin
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
+import { AFTER_IMPORT_NOTICE } from './afterImportNotice';
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
 import { createExportScrubber, type ExportScrubber } from './secretScrub';
@@ -57,11 +59,10 @@ import { ZipStreamWriter } from './zipStreamWriter';
 export const EXPORT_FORMAT = 'aman-export';
 export const EXPORT_SCHEMA_VERSION = 1;
 
-/** What a person must redo after importing; shown in the manifest, README.txt, the CLI output and the docs. */
-export const AFTER_IMPORT_NOTICE =
-  'Model keys and connector sign-ins are not included. After you import, enter your model keys again and sign in to each connector again.';
-
 const PAGE_LIMIT = 200;
+
+/** More persona switches than any one chat plausibly has. */
+const PERSONA_ACTIVATION_LIMIT = 10_000;
 
 /** Same bound the memory vault API uses for one list call. */
 const MEMORY_LIST_TIMEOUT_MS = 10_000;
@@ -105,6 +106,7 @@ export interface DataExportDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  sentinelAuditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
@@ -260,6 +262,23 @@ export async function runDataExport<TTransaction>(
   }
   await writeJsonArrayEntry(context, 'chats.json', chats());
 
+  // audit.json: every permission decision this user caused, kept even when its chat was deleted.
+  async function* auditRows() {
+    for (let offset = 0; ; offset += PAGE_LIMIT) {
+      const rows = await deps.sentinelAuditStore.listByCreator({
+        tenant_id: tenantId,
+        created_by: subjectId,
+        limit: PAGE_LIMIT,
+        offset,
+      });
+      yield* rows;
+      if (rows.length < PAGE_LIMIT) {
+        return;
+      }
+    }
+  }
+  await writeJsonArrayEntry(context, 'audit.json', auditRows());
+
   // sessions.json: full fidelity (turns with snapshots, per-turn events, artifact index).
   const uploadedBlobs: { sessionId: string; artifact: TurnArtifactRecord }[] = [];
   async function* sessions(): AsyncIterable<unknown> {
@@ -292,7 +311,22 @@ export async function runDataExport<TTransaction>(
       }
       // Artifact rows are write-once, so their last change is their creation.
       const artifactRows = artifacts.map(artifact => ({ ...artifact, updated_at: artifact.created_at }));
-      yield withoutDeploymentBoundFields(toPlainJson({ session, turns: turnsWithEvents, artifacts: artifactRows }));
+      // Oldest first: the last entry is the persona the chat ends on.
+      const personaActivations = (
+        await deps.personaStore.listSessionPersonaActivations({
+          tenant_id: tenantId,
+          session_id: session.session_id,
+          limit: PERSONA_ACTIVATION_LIMIT,
+        })
+      ).reverse();
+      yield withoutDeploymentBoundFields(
+        toPlainJson({
+          session,
+          turns: turnsWithEvents,
+          artifacts: artifactRows,
+          persona_activations: personaActivations,
+        }),
+      );
       if (subject.includeUploads) {
         uploadedBlobs.push(...artifacts.map(artifact => ({ sessionId: session.session_id, artifact })));
       }

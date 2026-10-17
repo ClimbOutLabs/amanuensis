@@ -7,13 +7,10 @@ import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-co
 import { z } from 'zod';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
-import {
-  AFTER_IMPORT_NOTICE,
-  runDataExport,
-  type DataExportDeps,
-  type MemoryExportSource,
-} from '../../../src/dataExport/exportService';
+import { AFTER_IMPORT_NOTICE } from '../../../src/dataExport/afterImportNotice';
+import { runDataExport, type DataExportDeps, type MemoryExportSource } from '../../../src/dataExport/exportService';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -65,6 +62,7 @@ async function makeDeps(
     scheduleStore: new SqliteScheduleStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    sentinelAuditStore: new SentinelAuditStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     listAgents: () => Promise.resolve([]),
@@ -128,6 +126,93 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
     model_name: 'test-provider/test-model',
   });
 }
+
+describe('runDataExport persona history', () => {
+  it('keeps which persona answered each chat, oldest first', async () => {
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: listing({}).client });
+    await deps.sessionStore.createSession({
+      tenant_id: TENANT_ID,
+      session_id: 'persona-chat',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: {
+        type: 'inline',
+        spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+      },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
+    try {
+      for (const name of ['Researcher', 'Editor']) {
+        await deps.personaStore.recordPersonaActivation({
+          tenant_id: TENANT_ID,
+          session_id: 'persona-chat',
+          id: `activation-${name}`,
+          turn_id: null,
+          persona_id: null,
+          persona_name: name,
+          model_name: null,
+          source: 'explicit',
+        });
+      }
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const sessions = z
+        .array(z.object({ persona_activations: z.array(z.object({ persona_name: z.string().nullable() })) }))
+        .parse(zipEntryJson(readZipEntries(sink.buffer()), 'sessions.json'));
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.persona_activations.map(activation => activation.persona_name)).toEqual([
+        'Researcher',
+        'Editor',
+      ]);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('runDataExport audit rows', () => {
+  const decision = (input: { created_by: string; conversation_id: string; description: string }) => ({
+    tenant_id: TENANT_ID,
+    tier: 2,
+    tool_name: 'run_code',
+    outcome: 'ran' as const,
+    auto_deny_reason: null,
+    ...input,
+  });
+
+  it("exports the person's own audit rows, past one page and for a deleted chat, and no one else's", async () => {
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: listing({}).client });
+    try {
+      const ROWS = 205;
+      for (let i = 0; i < ROWS; i += 1) {
+        await deps.sentinelAuditStore.record(
+          decision({ created_by: 'alice', conversation_id: 'chat-deleted', description: `alice row ${String(i)}` }),
+        );
+      }
+      await deps.sentinelAuditStore.record(
+        decision({ created_by: 'bob', conversation_id: 'chat-bob', description: 'bob row' }),
+      );
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+      const rows = z
+        .array(z.object({ conversation_id: z.string(), description: z.string(), tool_name: z.string() }))
+        .parse(zipEntryJson(entries, 'audit.json'));
+      expect(rows).toHaveLength(ROWS);
+      expect(rows.every(row => row.conversation_id === 'chat-deleted' && row.description.startsWith('alice'))).toBe(
+        true,
+      );
+      expect(new Set(rows.map(row => row.description)).size).toBe(ROWS);
+      expect(zipEntryJson(entries, 'manifest.json')).toMatchObject({
+        sections: expect.arrayContaining(['audit.json']),
+      });
+    } finally {
+      await close();
+    }
+  });
+});
 
 describe('runDataExport after-import notice', () => {
   it('tells the person what to redo, in the manifest and in README.txt', async () => {

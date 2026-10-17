@@ -5,7 +5,7 @@ import path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
 
-import { AFTER_IMPORT_NOTICE } from '../../dataExport/exportService';
+import { AFTER_IMPORT_NOTICE } from '../../dataExport/afterImportNotice';
 import type { Command } from '../command';
 import { UsageError } from '../io';
 import type { ExportDataSession } from './session';
