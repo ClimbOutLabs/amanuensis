@@ -47,6 +47,12 @@ import {
 } from './IMCPServer';
 import { deniedToolCallText } from './ToolSet';
 
+/** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
+export interface ToolResultImage {
+  mime: string;
+  data: Buffer;
+}
+
 export interface ToolCallResult {
   message: LLMToolMessage;
   /** Exact normalized provider output before any response processor changes model-facing content. */
@@ -75,6 +81,32 @@ export interface ToolCallResult {
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
   outputTransform?: ToolOutputTransform | undefined;
   admissionProvenance: ToolAdmissionProvenance;
+  /** Image blocks of the provider result, set aside for the host. */
+  images: readonly ToolResultImage[];
+}
+
+/** The base64 image blocks of an MCP result's content, decoded. Anything malformed is skipped. */
+function toolResultImages(content: unknown): ToolResultImage[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const blocks: unknown[] = content;
+  const images: ToolResultImage[] = [];
+  for (const block of blocks) {
+    if (
+      typeof block === 'object' &&
+      block !== null &&
+      'type' in block &&
+      block.type === 'image' &&
+      'data' in block &&
+      typeof block.data === 'string' &&
+      'mimeType' in block &&
+      typeof block.mimeType === 'string'
+    ) {
+      images.push({ mime: block.mimeType, data: Buffer.from(block.data, 'base64') });
+    }
+  }
+  return images;
 }
 
 export function shouldStopAfterMemoizedReplay(
@@ -1856,6 +1888,7 @@ export async function executeToolCalls({
           content: 'Waiting for user to authenticate. Please try again 1 time.',
         },
         rawContent: 'Waiting for user to authenticate. Please try again 1 time.',
+        images: [],
         toolCallInfo: toolCall.tool_info,
         screen: undefined,
         failure: true,
@@ -1918,7 +1951,13 @@ export async function executeToolCalls({
         .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
         .map(c => c.text)
         .join('\n');
-      content = textContent || JSON.stringify(result.content);
+      // Image bytes go to the host, not into the model's text.
+      const otherBlocks = result.content.filter(c => c.type !== 'image');
+      content =
+        textContent ||
+        (otherBlocks.length === 0 && result.content.length > 0
+          ? `Returned ${String(result.content.length)} image(s).`
+          : JSON.stringify(otherBlocks));
     } else {
       content = JSON.stringify(result.content);
     }
@@ -1926,6 +1965,7 @@ export async function executeToolCalls({
     toolMessages.push({
       message: { role: 'tool', tool_call_id: toolCall.id, content },
       rawContent: content,
+      images: result.isError ? [] : toolResultImages(result.content),
       toolCallInfo: toolCall.tool_info,
       screen: undefined,
       failure: failure || result.isError === true,

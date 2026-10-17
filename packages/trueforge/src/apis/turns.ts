@@ -691,6 +691,7 @@ function createTurnResolver(deps: {
       sessionId,
       logger,
     },
+    { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
   );
 }
 

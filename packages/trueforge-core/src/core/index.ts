@@ -68,6 +68,7 @@ export type {
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
 } from './capabilities/AgentContextProcessor';
+export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
 
 // Built-in factories
 export { getModelOutputExceedsContextError } from '../schemas/modelTokenLimits';
@@ -229,7 +230,7 @@ export type {
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage, ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from './llm/LLMTypes';
 export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
-export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
+export type { ToolCallMemoSnapshot, ToolCallResult } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
 export { AgentThreadMetricsSchema } from './runtime/metrics';

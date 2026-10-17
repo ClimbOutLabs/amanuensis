@@ -31,6 +31,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
@@ -1244,7 +1245,13 @@ export interface SpaceTurnContext {
  * Spaces view to see, so it gets no space tools of its own.
  */
 export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
-  constructor(...args: [...ConstructorParameters<typeof MemoryTurnResourceResolver>, space: SpaceTurnContext]) {
+  constructor(
+    ...args: [
+      ...ConstructorParameters<typeof MemoryTurnResourceResolver>,
+      space: SpaceTurnContext,
+      toolImages: ToolImagesOptions,
+    ]
+  ) {
     const [
       deps,
       profile,
@@ -1255,12 +1262,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       personaKnowledgeHits,
       switchNotice,
       space,
+      toolImages,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
+    this.#toolImages = toolImages;
   }
 
   readonly #space: SpaceTurnContext;
+  readonly #toolImages: ToolImagesOptions;
 
   override async resolveAgentDefinition(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const resolved = await super.resolveAgentDefinition(input);
@@ -1274,6 +1284,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
+        toolImagesCapability(this.#toolImages),
       ],
     };
   }

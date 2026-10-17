@@ -144,6 +144,7 @@ function makeToolResult(params: {
   const toolSet = makeMockIMCPServer({ name: 'deferred-tools', preload: true });
   return {
     message: { role: 'tool', tool_call_id: 'call-1', content: rawContent },
+    images: [],
     rawContent,
     toolCallInfo: toolCallInfoFor(underlyingToolName),
     screen: undefined,
