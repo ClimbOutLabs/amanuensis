@@ -344,6 +344,18 @@ describe('reply images', () => {
     expect(env.fetched).toEqual([]);
   });
 
+  it('asks once this turn read the calendar, as a search would', async () => {
+    const events = [
+      modelMessage({ id: 'e0', content: '', calls: [{ id: 'calendar-0', name: 'list_events' }] }),
+      ...searchEvents(`![harbor](${returned})`),
+    ];
+    const env = setup({ events });
+    await expect(
+      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
+    ).resolves.toMatchObject({ status: 'ask' });
+    expect(env.fetched).toEqual([]);
+  });
+
   it('asks once an earlier turn of the chat read mail', async () => {
     const env = setup({ events: searchEvents(`![harbor](${returned})`), storedTurn: turnWithPrivateRead() });
     await expect(
