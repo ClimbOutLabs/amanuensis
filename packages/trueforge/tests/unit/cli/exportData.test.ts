@@ -5,6 +5,8 @@ import path from 'node:path';
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import { z } from 'zod';
 
+import { makeCreateTurnInput } from '../../../../trueforge-core/tests/agent-session/testHelpers';
+
 import { createExportData, type ExportDataDeps } from '../../../src/cli/exportData';
 import { openExportDataSession } from '../../../src/cli/exportData/runtime';
 import type { ExportDataSession } from '../../../src/cli/exportData/session';
@@ -443,11 +445,36 @@ describe('aman export-data against a real database', () => {
   });
 
   it("blanks the credentials of the old stack's settings file in memory and chat text", async () => {
-    await database(async db => {
-      await seedSession(db, 'alice', 'a1');
-    });
     const modelKey = 'invented-model-key-0000aaaa1111';
     const clientSecret = 'invented-client-secret-2222bbbb';
+    const model = 'tokenfactory/nvidia/nemotron-3-super-120b-a12b';
+    await database(async db => {
+      await seedSession(db, 'alice', 'a1');
+      await new SqliteSessionStore(db).createTurn(
+        makeCreateTurnInput({
+          sessionId: 'a1',
+          turnId: 'a1-turn-1',
+          new_context_appends: [
+            {
+              thread_id: 'main',
+              context: [
+                { role: 'user', content: `my key is ${modelKey}` },
+                { role: 'assistant', content: 'The daily cap is 20000000 tokens.' },
+              ],
+              current_context_usage: null,
+            },
+          ],
+        }),
+      );
+      await new SqliteAgentStore(db).createAgent({
+        tenant_id: 'default',
+        created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'Alice' },
+        name: 'writer',
+        description: 'Writes.',
+        manifest: AgentSpecSchema.parse({ model: { name: model }, instructions: 'Write.' }),
+        external_id: null,
+      });
+    });
     const settings = path.join(scratch, 'old.env');
     await writeFile(
       settings,
@@ -456,6 +483,8 @@ describe('aman export-data against a real database', () => {
         `NEBIUS_API_KEY=${modelKey}`,
         `export OIDC_CLIENT_SECRET="${clientSecret}"`,
         'PUBLIC_BASE_URL=http://localhost:8791/a-long-public-address',
+        'TOKEN_FACTORY_MODEL=nvidia/nemotron-3-super-120b-a12b',
+        'TOKEN_FACTORY_DAILY_TOKEN_CAP=20000000',
       ].join('\n'),
     );
     await mkdir(path.join(scratch, 'memory', 'default'), { recursive: true });
@@ -470,7 +499,13 @@ describe('aman export-data against a real database', () => {
       await real({ args: ['--user', 'alice', '--out', out, '--include-instance-data', '--secrets-env', settings], io }),
     ).toBe(0);
     const { readFile } = await import('node:fs/promises');
-    const memory = zipEntryText(readZipEntries(await readFile(out)), 'memory/default/MEMORY.md');
+    const entries = readZipEntries(await readFile(out));
+    const chats = zipEntryText(entries, 'chats.json');
+    expect(chats).toContain('my key is [redacted]');
+    expect(chats).toContain('The daily cap is 20000000 tokens.');
+    expect(zipEntryText(entries, 'sessions.json')).not.toContain(modelKey);
+    expect(zipEntryText(entries, 'agents.json')).toContain(`"${model}"`);
+    const memory = zipEntryText(entries, 'memory/default/MEMORY.md');
     expect(memory).not.toContain(modelKey);
     expect(memory).not.toContain(clientSecret);
     expect(memory).toContain('[redacted]');

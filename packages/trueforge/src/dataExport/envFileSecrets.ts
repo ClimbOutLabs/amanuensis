@@ -1,18 +1,27 @@
-import { urlPassword } from '../config';
+import { SECRET_SETTING_NAMES, SECRET_URL_SETTING_NAMES, secretSettingValues, urlPassword } from '../secretSettings';
 
-/** Setting names whose values are credentials, as an old compose stack's .env spells them. */
-const SECRET_SETTING_NAME = /(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)/i;
+const SECRET_NAMES: ReadonlySet<string> = new Set([...SECRET_SETTING_NAMES, ...SECRET_URL_SETTING_NAMES]);
+const DOUBLE_QUOTE_ESCAPES: Readonly<Record<string, string>> = { n: '\n', r: '\r', t: '\t' };
 
-function unquote(value: string): string {
-  const quoted = /^(['"])(.*)\1$/.exec(value);
-  return quoted?.[2] ?? value;
+/** A value as docker compose reads it: quotes removed, escapes in double quotes applied, inline comments dropped. */
+function settingValue(raw: string): string {
+  const single = /^'([^']*)'/.exec(raw);
+  if (single !== null) {
+    return single[1] ?? '';
+  }
+  const double = /^"((?:[^"\\]|\\.)*)"/.exec(raw);
+  if (double !== null) {
+    return (double[1] ?? '').replace(/\\(.)/g, (_, char: string) => DOUBLE_QUOTE_ESCAPES[char] ?? char);
+  }
+  return raw.replace(/\s+#.*$/, '');
 }
 
 /**
  * Credential values from a dotenv file, so an export made from a copy of an old stack also blanks keys that lived
- * only in that stack's settings. Other values (addresses, flags) are left alone, apart from a password inside a URL.
+ * only in that stack's settings. Only the known secret settings count, plus a password inside any URL value.
  */
 export function envFileSecretValues(text: string): string[] {
+  const settings: Record<string, string> = {};
   const values: string[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim().replace(/^export\s+/, '');
@@ -21,17 +30,15 @@ export function envFileSecretValues(text: string): string[] {
       continue;
     }
     const [, name = '', rawValue = ''] = match;
-    const value = unquote(rawValue.trim());
-    if (value === '') {
-      continue;
-    }
-    if (SECRET_SETTING_NAME.test(name)) {
-      values.push(value);
-    }
-    const password = urlPassword(value);
-    if (password !== undefined) {
-      values.push(password);
+    const value = settingValue(rawValue.trim());
+    if (SECRET_NAMES.has(name)) {
+      settings[name] = value;
+    } else {
+      const password = urlPassword(value);
+      if (password !== undefined) {
+        values.push(password);
+      }
     }
   }
-  return values;
+  return [...secretSettingValues(settings), ...values];
 }

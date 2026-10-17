@@ -41,6 +41,7 @@ import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
+import { secretSettingValues } from './secretSettings';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -2195,16 +2196,6 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
-/** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-export function urlPassword(raw: string): string | undefined {
-  try {
-    const password = decodeURIComponent(new URL(raw).password);
-    return password === '' ? undefined : password;
-  } catch {
-    return undefined;
-  }
-}
-
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
 export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
@@ -2220,27 +2211,25 @@ export type ConfiguredSecretSettings = Pick<
 
 /**
  * Secret values this process holds from its own configuration, for the outbound secret guard:
- * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
- * place to extend when a new secret setting is added.
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. A new secret
+ * setting is added to SECRET_SETTING_NAMES and read here.
  */
 export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
-  const candidates: (string | undefined)[] = [
-    config.TRUEFORGE_API_KEY,
-    config.NEBIUS_API_KEY,
-    config.MEMORY_SCREEN_AUTH_TOKEN,
-    config.OIDC?.OIDC_CLIENT_SECRET,
-  ];
-  if (!config.STANDALONE) {
-    candidates.push(
-      config.TRUEFOUNDRY_API_KEY,
-      config.TRUEFOUNDRY_SANDBOX_API_KEY,
-      config.DATABASE_URL,
-      urlPassword(config.DATABASE_URL),
-      config.REDIS_URL,
-      urlPassword(config.REDIS_URL),
-    );
-  }
-  return candidates.filter((value): value is string => value !== undefined && value !== '');
+  // POSTGRES_PASSWORD is left out: this process holds it inside DATABASE_URL.
+  return secretSettingValues({
+    TRUEFORGE_API_KEY: config.TRUEFORGE_API_KEY,
+    NEBIUS_API_KEY: config.NEBIUS_API_KEY,
+    MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
+    OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    ...(config.STANDALONE
+      ? {}
+      : {
+          TRUEFOUNDRY_API_KEY: config.TRUEFOUNDRY_API_KEY,
+          TRUEFOUNDRY_SANDBOX_API_KEY: config.TRUEFOUNDRY_SANDBOX_API_KEY,
+          DATABASE_URL: config.DATABASE_URL,
+          REDIS_URL: config.REDIS_URL,
+        }),
+  });
 }
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
