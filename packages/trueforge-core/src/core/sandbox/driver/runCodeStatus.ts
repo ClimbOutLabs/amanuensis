@@ -24,6 +24,8 @@ export function runCodeStatusFromReadiness(readiness: DriverReadiness): RunCodeS
         state: readiness.reason === 'isolation_refused' ? 'isolation_refused' : 'daemon_unavailable',
         detail: readiness.error,
       };
+    case 'sandbox_disabled':
+      return { state: 'disabled' };
     case 'slots_unavailable':
       return { state: 'slots_unavailable', detail: readiness.error };
     case 'unsupported_platform':
