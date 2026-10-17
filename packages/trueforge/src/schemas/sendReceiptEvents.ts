@@ -6,15 +6,8 @@
  * it an `.openapi()` name, the same way `skillEvents.ts` does.
  */
 import { z } from '@hono/zod-openapi';
-import {
-  SEND_RECEIPT_EVENT_TYPE,
-  SendReceiptEventSchema,
-  type SendReceiptEvent,
-} from '@truefoundry/trueforge-core/core/email/gmail/receiptEvents';
+import { SendReceiptEventSchema } from '@truefoundry/trueforge-core/core/email/gmail/receiptEvents';
 import { EventIdSchema } from '@truefoundry/trueforge-core/core/events/schema';
-
-export { SEND_RECEIPT_EVENT_TYPE, SendReceiptEventSchema };
-export type { SendReceiptEvent };
 
 export const SendReceiptPersistedEventSchema = z
   .object({

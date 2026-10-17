@@ -27,11 +27,14 @@ const MAX_RETRY_WAIT_MS = 10_000;
 /** Gmail refused or failed a request. The message is safe to show; it never carries mail content. */
 export class GmailApiError extends Error {
   readonly status: number;
+  /** True when the request may have taken effect: a server error or a lost connection after it went out. */
+  readonly outcomeUnknown: boolean;
 
   constructor(input: { status: number; message: string; cause?: unknown }) {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
     this.name = 'GmailApiError';
     this.status = input.status;
+    this.outcomeUnknown = input.status >= 500;
   }
 }
 

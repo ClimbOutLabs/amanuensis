@@ -115,6 +115,27 @@ function failureResult(error: unknown) {
   throw error;
 }
 
+/** Why a send that threw did not go out; only an error after Gmail was asked can leave the outcome unknown. */
+function notSentReasonOf(input: { error: unknown; gmailAsked: boolean }): NotSentReason {
+  const { error, gmailAsked } = input;
+  if (error instanceof GoogleReconnectRequiredError || error instanceof GoogleOAuthError) {
+    return 'reconnect_google';
+  }
+  if (!(error instanceof GmailApiError)) {
+    return 'cannot_send';
+  }
+  if (error.outcomeUnknown) {
+    return gmailAsked ? 'unconfirmed' : 'cannot_send';
+  }
+  if (error.status === 401 || error.status === 403) {
+    return 'reconnect_google';
+  }
+  if (error.status === 429) {
+    return 'rate_limited';
+  }
+  return gmailAsked ? 'gmail_refused' : 'cannot_send';
+}
+
 /**
  * Gmail for one user's turn, over Gmail's REST API with that user's own login. Reads are silent; what a call
  * may do is decided by the host classifier, never by this class.
@@ -621,7 +642,8 @@ export class GmailToolSet extends LocalToolMCP {
         forSend: true,
       });
       if (!assessed.ok) {
-        return notSent('cannot_send', errorResult(assessed.reason));
+        // A card is only shown for a draft that passed this check, so a failure here means it changed since.
+        return notSent('draft_changed', errorResult(assessed.reason));
       }
       const hash = hashDraft(assessed.draft);
       if (reviewed !== hash) {
@@ -653,10 +675,7 @@ export class GmailToolSet extends LocalToolMCP {
       });
     } catch (error) {
       const response = failureResult(error);
-      // A server error after the request went out leaves the outcome unknown; only a refusal is "not sent".
-      const unconfirmed = gmailAsked && error instanceof GmailApiError && error.status >= 500;
-      const reason: NotSentReason = unconfirmed ? 'unconfirmed' : gmailAsked ? 'gmail_refused' : 'cannot_send';
-      return notSent(reason, response);
+      return notSent(notSentReasonOf({ error, gmailAsked }), response);
     }
   }
 }

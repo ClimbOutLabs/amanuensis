@@ -1,9 +1,10 @@
+import { SEND_RECEIPT_EVENT_TYPE } from '@truefoundry/trueforge-core/core/email/gmail/receiptEvents';
 import type { z } from 'zod';
 import type { PersistedPassthroughEvent } from '../schemas/events';
 import { MEMORY_RECALL_EVENT_TYPE, MemoryRecallPersistedEventSchema } from '../schemas/memoryEvents';
 import { PROFILE_LEARNED_EVENT_TYPE, ProfileLearnedPersistedEventSchema } from '../schemas/profileLearningEvents';
 import { PROVISIONING_EVENT_TYPE, ProvisioningPersistedEventSchema } from '../schemas/provisionEvents';
-import { SEND_RECEIPT_EVENT_TYPE, SendReceiptPersistedEventSchema } from '../schemas/sendReceiptEvents';
+import { SendReceiptPersistedEventSchema } from '../schemas/sendReceiptEvents';
 import { SKILL_USED_EVENT_TYPE, SkillUsedPersistedEventSchema } from '../schemas/skillEvents';
 
 /**

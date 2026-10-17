@@ -6339,6 +6339,8 @@
           "needs_ok_again",
           "cannot_send",
           "gmail_refused",
+          "reconnect_google",
+          "rate_limited",
           "unconfirmed"
         ],
         "type": "string"

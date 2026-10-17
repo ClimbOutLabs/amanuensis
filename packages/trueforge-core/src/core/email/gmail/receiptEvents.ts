@@ -8,15 +8,17 @@ import { newEventId } from '../../events/schema';
 
 export const SEND_RECEIPT_EVENT_TYPE = 'aman.email.send_receipt' as const;
 
-export const NOT_SENT_REASONS = [
+const NOT_SENT_REASONS = [
   'draft_changed',
   'needs_ok_again',
   'cannot_send',
   'gmail_refused',
+  'reconnect_google',
+  'rate_limited',
   'unconfirmed',
 ] as const;
 
-export const NotSentReasonSchema = z
+const NotSentReasonSchema = z
   .enum(NOT_SENT_REASONS)
   .describe(
     'Why nothing was sent. unconfirmed: Gmail did not answer, so the message may have gone through; the Sent folder says.',
@@ -25,7 +27,7 @@ export const NotSentReasonSchema = z
 
 export type NotSentReason = z.infer<typeof NotSentReasonSchema>;
 
-export const SendReceiptMessageSchema = z
+const SendReceiptMessageSchema = z
   .object({
     to: z.array(z.string()).describe('Recipients, as the card showed them.'),
     cc: z.array(z.string()).describe('Copied recipients.'),
@@ -34,8 +36,6 @@ export const SendReceiptMessageSchema = z
     body: z.string().describe('The message text that was sent.'),
   })
   .openapi('SendReceiptMessage');
-
-export type SendReceiptMessage = z.infer<typeof SendReceiptMessageSchema>;
 
 const SentResultSchema = z
   .object({
@@ -54,7 +54,7 @@ const NotSentResultSchema = z
   })
   .openapi('SendReceiptNotSent');
 
-export const SendReceiptResultSchema = z
+const SendReceiptResultSchema = z
   .discriminatedUnion('outcome', [SentResultSchema, NotSentResultSchema])
   .openapi('SendReceiptResult');
 
