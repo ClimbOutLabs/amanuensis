@@ -1014,7 +1014,16 @@ describe('runDataImport failure handling', () => {
       expect(error).toMatchObject({ status: 500 });
       expect(error instanceof Error && error.message).toContain('could not be removed');
       expect(await chatsOf(target, 'bob')).toHaveLength(3);
-      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeDefined();
+      const marker = await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
+      expect(marker).toBeDefined();
+      const planned = recordAt(recordAt(JSON.parse(marker?.value ?? 'null'), 'marker').planned, 'planned');
+      expect(Object.keys(planned).sort()).toEqual([
+        'agent_ids',
+        'folder_ids',
+        'knowledge_db_paths',
+        'memory_files',
+        'session_ids',
+      ]);
 
       await sql`DROP TRIGGER import_fail_space_update`.execute(target.db);
       const result = await runDataImport(importDeps(target), importRequest(archive));

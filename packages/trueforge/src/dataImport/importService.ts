@@ -46,6 +46,7 @@ import type { RetainItem } from '../runtime/memory/hindsightClient';
 import { splitEntries, vaultEntryTimestamp, vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
+import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors } from './connectorImport';
 import { DataImportError } from './importError';
@@ -110,21 +111,6 @@ export interface DataImportRequest {
   };
   /** Cap for the archive itself and for its total uncompressed size. */
   maxBytes: number;
-}
-
-export interface DataImportResult {
-  chats: number;
-  memories: number;
-  personas: number;
-  spaces: number;
-  schedules: number;
-  folders: number;
-  agents: number;
-  connectors: number;
-  /** True when schedules were imported; they all arrive switched off. */
-  schedules_off: boolean;
-  /** Plain-words summary of what arrived and what did not. */
-  summary: string;
 }
 
 /** Per-file uncompressed cap inside the archive. */
@@ -613,7 +599,7 @@ function buildSummary({
   auditEntries,
   standInAgentNames,
 }: {
-  result: Omit<DataImportResult, 'summary' | 'schedules_off'>;
+  result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
@@ -786,7 +772,7 @@ const importsInFlight = new Set<string>();
 export async function runDataImport<TTransaction>(
   deps: DataImportDeps<TTransaction>,
   request: DataImportRequest,
-): Promise<DataImportResult> {
+): Promise<ImportDataResult> {
   const { tenantId } = request.subject;
   if (request.archive.byteLength > request.maxBytes) {
     throw new DataImportError('The file is larger than the import limit, so nothing was imported.', 400);
@@ -805,7 +791,7 @@ export async function runDataImport<TTransaction>(
 async function importArchive<TTransaction>(
   deps: DataImportDeps<TTransaction>,
   request: DataImportRequest,
-): Promise<DataImportResult> {
+): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
@@ -945,11 +931,11 @@ async function importArchive<TTransaction>(
 
   // --- Writes. The marker names everything planned before the first one lands. ---
   const planned: ImportLedger = {
-    agentIds: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
-    folderIds: folders.map(folder => folder.folder_id),
-    sessionIds: sessions.map(entry => entry.session.session_id),
-    knowledgeDbPaths: knowledgePlan.map(library => library.dbPath),
-    memoryFiles: plannedMemoryFiles.map(file => file.targetPath),
+    agent_ids: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
+    folder_ids: folders.map(folder => folder.folder_id),
+    session_ids: sessions.map(entry => entry.session.session_id),
+    knowledge_db_paths: knowledgePlan.map(library => library.dbPath),
+    memory_files: plannedMemoryFiles.map(file => file.targetPath),
   };
   await writeImportMarker(deps.globalSettingsStore, {
     started_at: new Date().toISOString(),
@@ -970,7 +956,7 @@ async function importArchive<TTransaction>(
         external_id: agent.external_id,
         created_by_subject: importerSubject,
       });
-      created.agentIds.push(agent.id);
+      created.agent_ids.push(agent.id);
     }
     for (const placeholder of agentPlan.placeholders) {
       await deps.agentStore.createAgent({
@@ -986,7 +972,7 @@ async function importArchive<TTransaction>(
         external_id: null,
         created_by_subject: importerSubject,
       });
-      created.agentIds.push(placeholder.id);
+      created.agent_ids.push(placeholder.id);
     }
 
     for (const folder of folders) {
@@ -996,11 +982,11 @@ async function importArchive<TTransaction>(
         created_by: subjectId,
         name: folder.name,
       });
-      created.folderIds.push(folder.folder_id);
+      created.folder_ids.push(folder.folder_id);
     }
     await restoreSessions(
       deps.sessionStore,
-      { ...restoreContext, onSessionCreated: sessionId => created.sessionIds.push(sessionId) },
+      { ...restoreContext, onSessionCreated: sessionId => created.session_ids.push(sessionId) },
       sessions,
     );
 
@@ -1217,7 +1203,7 @@ async function importArchive<TTransaction>(
       await clearImportMarker(deps.globalSettingsStore, tx);
     });
 
-    const result: Omit<DataImportResult, 'summary'> = {
+    const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.length,
       memories: memoryCount,
       personas: personas.length,
@@ -1242,7 +1228,7 @@ async function importArchive<TTransaction>(
     const failures = await compensate(deps, {
       tenantId,
       subjectId,
-      ledger: { ...created, knowledgeDbPaths: planned.knowledgeDbPaths, memoryFiles: planned.memoryFiles },
+      ledger: { ...created, knowledge_db_paths: planned.knowledge_db_paths, memory_files: planned.memory_files },
     });
     if (failures.length > 0) {
       throw new DataImportError(

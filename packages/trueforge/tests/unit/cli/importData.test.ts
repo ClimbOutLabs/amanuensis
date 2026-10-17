@@ -6,7 +6,7 @@ import { runCli } from '../../../src/cli/dispatch';
 import { createImportData, type ImportDataDeps } from '../../../src/cli/importData';
 import type { ImportDataSession } from '../../../src/cli/importData/session';
 import { DataImportError } from '../../../src/dataImport/importError';
-import type { DataImportResult } from '../../../src/dataImport/importService';
+import type { ImportDataResult } from '../../../src/schemas/dataImport';
 import { fakeIo } from './fakeIo';
 
 // The dispatcher must run without the server config, which throws on missing env.
@@ -15,7 +15,7 @@ jest.mock('../../../src/config', () => {
 });
 
 const OWNER = 'owner@example.com';
-const RESULT: DataImportResult = {
+const RESULT: ImportDataResult = {
   chats: 3,
   memories: 2,
   personas: 1,

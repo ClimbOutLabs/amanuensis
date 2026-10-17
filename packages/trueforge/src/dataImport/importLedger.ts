@@ -14,16 +14,16 @@ import { removeKnowledgeFiles } from './knowledgeImport';
  * import did not create.
  */
 const ImportLedgerSchema = z.object({
-  agentIds: z.array(z.string()),
-  folderIds: z.array(z.string()),
-  sessionIds: z.array(z.string()),
-  knowledgeDbPaths: z.array(z.string()),
-  memoryFiles: z.array(z.string()),
+  agent_ids: z.array(z.string()),
+  folder_ids: z.array(z.string()),
+  session_ids: z.array(z.string()),
+  knowledge_db_paths: z.array(z.string()),
+  memory_files: z.array(z.string()),
 });
 export type ImportLedger = z.infer<typeof ImportLedgerSchema>;
 
 export function emptyLedger(): ImportLedger {
-  return { agentIds: [], folderIds: [], sessionIds: [], knowledgeDbPaths: [], memoryFiles: [] };
+  return { agent_ids: [], folder_ids: [], session_ids: [], knowledge_db_paths: [], memory_files: [] };
 }
 
 /** Global-setting key of the crash marker; present only while an import is writing. */
@@ -96,23 +96,23 @@ export async function compensate<TTransaction>(
       failures.push(what);
     }
   };
-  for (const sessionId of ledger.sessionIds) {
+  for (const sessionId of ledger.session_ids) {
     await attempt(`chat ${sessionId}`, () =>
       deps.sessionStore.deleteSession({ tenant_id: tenantId, session_id: sessionId }),
     );
   }
-  for (const folderId of ledger.folderIds) {
+  for (const folderId of ledger.folder_ids) {
     await attempt(`folder ${folderId}`, () =>
       deps.sessionStore.deleteSessionFolder({ tenant_id: tenantId, folder_id: folderId, created_by: subjectId }),
     );
   }
-  for (const dbPath of ledger.knowledgeDbPaths) {
+  for (const dbPath of ledger.knowledge_db_paths) {
     await attempt(`knowledge file ${dbPath}`, () => removeKnowledgeFiles(dbPath));
   }
-  for (const filePath of ledger.memoryFiles) {
+  for (const filePath of ledger.memory_files) {
     await attempt(`memory file ${filePath}`, () => rm(filePath, { force: true }));
   }
-  for (const agentId of ledger.agentIds) {
+  for (const agentId of ledger.agent_ids) {
     await attempt(`agent ${agentId}`, () => deps.agentStore.deleteAgent({ tenant_id: tenantId, id: agentId }));
   }
   return failures;
