@@ -75,7 +75,7 @@ export function stampSentinelDecision(input: {
   const decision = input.decision;
   return {
     tier: decision.tier,
-    tier_reason: decision.reason,
+    tier_reason: decision.auto_deny ?? decision.reason,
     tier3_card: decision.card,
     tier2_kind: decision.tier2_kind,
     approval_token_id: decision.approval_token_id,

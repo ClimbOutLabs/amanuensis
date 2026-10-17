@@ -1118,7 +1118,7 @@ export async function executeToolCalls({
               reason_code: 'tool_policy_blocked',
               message:
                 toolCall.tool_info.tier_reason === 'incomplete_send_card'
-                  ? 'Nothing was sent, because the approval card could not show you everything. Ask the assistant to write it again with every recipient named and a shorter message.'
+                  ? 'Nothing was sent: it could not be shown in full. Ask again with every recipient named and a shorter message.'
                   : 'Use a tool that is allowed in this conversation or change strategy.',
               suggested_action: 'change_strategy',
             }

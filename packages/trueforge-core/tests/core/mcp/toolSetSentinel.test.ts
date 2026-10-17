@@ -8,6 +8,7 @@ import {
 } from '../../../src/core';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
@@ -145,6 +146,33 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(info.effect).toBe('inspect');
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('tells the owner in plain words, end to end, when a send is refused before it runs', async () => {
+    const reply: ToolSchema = { name: 'reply', description: 'Replies.', inputSchema: schema };
+    const toolSet = makeToolSet({ tools: [reply], services: servicesWithGrants([]) });
+    const info = await toolSet.toolCallInfo({ name: 'reply', arguments: { body: 'ok' } });
+    expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+
+    const result = await executeToolCalls({
+      assistantMessage: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok"}' }, tool_info: info },
+        ],
+      },
+      toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    const remediation = result.toolCallResults[0]?.remediation;
+    expect(result.toolCallResults[0]?.disposition).toBe('policy_blocked');
+    expect(remediation?.message).toContain('Nothing was sent');
+    expect(remediation?.message.length).toBeLessThan(120);
+    expect(remediation?.message).not.toMatch(/card/i);
   });
 
   it('refuses chat scope when the server hints escalate the tier', async () => {
