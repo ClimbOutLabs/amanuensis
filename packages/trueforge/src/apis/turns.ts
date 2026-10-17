@@ -45,6 +45,7 @@ import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } 
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -231,6 +232,8 @@ export interface TurnsRouterDeps {
   personalizationStore: IPersonalizationStore;
   personaStore: IPersonaStore;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -275,6 +278,8 @@ export type BeginTurnExecutionDeps = Pick<
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -326,6 +331,8 @@ function createTurnResolver(deps: {
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -371,6 +378,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     sessionTitle,
     spaceStore,
+    googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
     toolOutputScreenEnabled,
@@ -687,6 +695,8 @@ function createTurnResolver(deps: {
     switchNotice,
     {
       store: spaceStore,
+      // A demo instance never reaches a real mailbox.
+      googleConnections: configuration.DEMO_MODE ? undefined : googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       logger,
@@ -1147,6 +1157,7 @@ export async function beginTurnExecution(params: {
     repositoryStore: deps.repositoryStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
+    googleConnectionStore: deps.googleConnectionStore,
     logger: deps.logger,
     signal: abortController.signal,
     userRef,
@@ -1959,6 +1970,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
+      googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,

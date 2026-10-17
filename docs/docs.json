@@ -52,6 +52,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "google",
                   "skills",
                   "sandbox",
                   "deployment-security"

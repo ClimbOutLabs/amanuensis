@@ -1,0 +1,54 @@
+---
+title: 'Google'
+sidebarTitle: 'Google'
+description: 'Connect your own Google account so Aman can read your email and, with your approval, draft and send it.'
+---
+
+Aman can read and search your Gmail, and, if you allow it, save drafts and send email. Reading is quiet. Every draft and every send asks you first, and the approval card shows the whole message exactly as it will be sent.
+
+You connect your own Google account through a Google Cloud project that you create yourself. Aman does not use a shared project, so no verification or security review by Google is needed for your own use. The setup takes about ten minutes, once.
+
+## Connect
+
+Open Settings, then Connectors, then Google, and select Connect. The panel walks you through the steps in Google Cloud:
+
+1. Create a project, or use one you already have.
+2. Turn on the Gmail API.
+3. Set up the consent screen. Choose External and fill in an app name and your email address.
+4. On the Audience page, add the Gmail address you will connect as under Test users. Without this, Google shows an Access blocked page when you sign in.
+5. Create a client. Aman tells you which application type to choose for your install.
+6. Download the client file, then drop it into the panel, or paste the client ID and secret.
+
+Select Check my client to catch common mistakes before you sign in, then select Connect Google. A Google window opens. Google may say it hasn't verified the app. That is because you made the app yourself. Choose Advanced, then continue, and allow access.
+
+If your browser cannot reach Aman directly, the panel tells you to copy the address from the page that fails to load and paste it back. In Safari on a Mac, click the address bar, choose Select All (Cmd+A), then Copy, because Safari hides the start of the address.
+
+By default Aman asks only to read your email. Tick the box to also allow drafts and sending, or add it later from the panel with Allow drafts and sending.
+
+## Testing or Published
+
+A new Google project starts in Testing. You can choose either:
+
+- **Testing.** Nothing more to do. Google signs you out every 7 days, so you reconnect once a week.
+- **Published.** On the Audience page, select Publish app. Google then keeps you signed in. Google shows the unverified app screen once; choose Advanced, then continue. After you publish, reconnect once so the saved sign-in is issued in Published mode.
+
+## Attachments
+
+Ask Aman to open a PDF or image attached to an email and it reads the file in the sandbox, including scanned pages. This needs the sandbox to be on; without it, Aman tells you attachments cannot be opened. Text from an attachment is treated as untrusted, like the email itself.
+
+## Reconnect
+
+If Google no longer accepts the saved sign-in, the panel says Reconnect needed and mail is paused. Everything else in Aman keeps working. Select Reconnect and sign in again. Aman reuses the client you already saved, so there is nothing to retype.
+
+## Disconnect
+
+Select Disconnect, then confirm. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
+
+## What to know
+
+- Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.
+- Scheduled runs can read your email but never draft or send it.
+- After Aman reads your email in a conversation, web searches in that conversation ask first, so mail content isn't sent out in a query without you seeing it.
+- Offline mode turns Gmail off, because it needs the network.
+- Your client secret and sign-in are stored on your Aman server, in its data folder. They are not encrypted there, so keep that folder private.
+- Aman connects one Google account per person.

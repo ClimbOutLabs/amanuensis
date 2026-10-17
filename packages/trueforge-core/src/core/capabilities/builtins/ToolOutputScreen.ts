@@ -1,12 +1,9 @@
-import type {
-  ToolOutputScreenClassification,
-  ToolOutputScreenDecision,
-  ToolOutputScreenFailureReasonCode,
-} from '../../../schemas/toolOutputScreen';
+import type { ToolOutputScreenClassification, ToolOutputScreenDecision } from '../../../schemas/toolOutputScreen';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
-import type { AgentCapability } from '../AgentCapability';
+import type { AgentCapability, UntrustedTextScreen } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../ToolResponseProcessor';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from './DocumentTools';
 
 export interface ToolOutputScreenClassifier {
   classify(input: { text: string; timeoutMs: number }): Promise<ToolOutputScreenClassification>;
@@ -14,8 +11,22 @@ export interface ToolOutputScreenClassifier {
 
 const EXECUTED_DISPOSITIONS = new Set(['executed_ok', 'executed_nonzero', 'outcome_unknown']);
 
+/**
+ * Text read out of a file is untrusted but the tool is local and read-only, so it is screened by name
+ * rather than marked open-world, which would turn reading the user's own file into an approval.
+ */
+function isFileTextResult(result: ToolCallResult): boolean {
+  return (
+    result.info?.toolSet.name === DOCUMENTS_SERVER_ID &&
+    result.info.originalToolName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
+  );
+}
+
 function shouldScreen(result: ToolCallResult): boolean {
-  return result.toolCallInfo?.open_world_hint === true && EXECUTED_DISPOSITIONS.has(result.disposition);
+  return (
+    (result.toolCallInfo?.open_world_hint === true || isFileTextResult(result)) &&
+    EXECUTED_DISPOSITIONS.has(result.disposition)
+  );
 }
 
 function validScore(score: number): boolean {
@@ -31,7 +42,7 @@ function withheldContent(reasonCode: ToolOutputScreenDecision['reason_code']): s
   });
 }
 
-class ToolOutputScreenProcessor implements ToolResponseProcessor {
+class ToolOutputScreenProcessor implements ToolResponseProcessor, UntrustedTextScreen {
   private readonly classifier: ToolOutputScreenClassifier;
   private readonly timeoutMs: number;
 
@@ -52,69 +63,58 @@ class ToolOutputScreenProcessor implements ToolResponseProcessor {
     return {};
   }
 
-  private async processOne(result: ToolCallResult, signal: AbortSignal | undefined): Promise<void> {
-    if (!shouldScreen(result)) {
-      return;
+  async screenText(input: { text: string; signal: AbortSignal | undefined }): Promise<ToolOutputScreenDecision> {
+    if (input.signal?.aborted === true) {
+      return { status: 'unknown', action: 'withheld', reason_code: 'screen_cancelled' };
     }
-    if (signal?.aborted === true) {
-      this.withhold(result, 'screen_cancelled');
-      return;
-    }
-
     let classification: ToolOutputScreenClassification;
     try {
-      classification = await this.classifier.classify({ text: result.rawContent, timeoutMs: this.timeoutMs });
+      classification = await this.classifier.classify({ text: input.text, timeoutMs: this.timeoutMs });
     } catch {
-      this.withhold(result, 'screen_internal_error');
-      return;
+      return { status: 'unknown', action: 'withheld', reason_code: 'screen_internal_error' };
     }
-
     if (!classification.ok) {
-      this.withhold(result, classification.reasonCode ?? 'screen_internal_error');
-      return;
+      return {
+        status: 'unknown',
+        action: 'withheld',
+        reason_code: classification.reasonCode ?? 'screen_internal_error',
+      };
     }
     if (!validScore(classification.score)) {
-      this.withhold(result, 'screen_malformed_response');
-      return;
+      return { status: 'unknown', action: 'withheld', reason_code: 'screen_malformed_response' };
     }
     if (classification.flagged) {
-      const screen: ToolOutputScreenDecision = {
+      return {
         status: 'flagged',
         action: 'withheld',
         reason_code: 'classifier_malicious',
         score: classification.score,
       };
-      result.screen = screen;
-      result.message.content = withheldContent(screen.reason_code);
-      result.isStructuredContent = true;
-      return;
     }
-    result.screen = {
-      status: 'passed',
-      action: 'admitted',
-      reason_code: 'classifier_benign',
-      score: classification.score,
-    };
+    return { status: 'passed', action: 'admitted', reason_code: 'classifier_benign', score: classification.score };
   }
 
-  private withhold(result: ToolCallResult, reasonCode: ToolOutputScreenFailureReasonCode): void {
-    const screen: ToolOutputScreenDecision = {
-      status: 'unknown',
-      action: 'withheld',
-      reason_code: reasonCode,
-    };
+  private async processOne(result: ToolCallResult, signal: AbortSignal | undefined): Promise<void> {
+    if (!shouldScreen(result)) {
+      return;
+    }
+    const screen = await this.screenText({ text: result.rawContent, signal });
     result.screen = screen;
-    result.message.content = withheldContent(screen.reason_code);
-    result.isStructuredContent = true;
+    if (screen.action === 'withheld') {
+      result.message.content = withheldContent(screen.reason_code);
+      result.isStructuredContent = true;
+    }
   }
 }
 
-/** Screens structurally open-world tool results after dispatch and before model-context append. */
+/** Screens open-world tool results, file text read by the document tool, and text taken from uploaded files, before it reaches the model. */
 export function toolOutputScreen(input: {
   classifier: ToolOutputScreenClassifier;
   timeoutMs: number;
 }): AgentCapability {
+  const processor = new ToolOutputScreenProcessor(input);
   return {
-    toolResponseProcessors: [new ToolOutputScreenProcessor(input)],
+    toolResponseProcessors: [processor],
+    untrustedTextScreens: [processor],
   };
 }

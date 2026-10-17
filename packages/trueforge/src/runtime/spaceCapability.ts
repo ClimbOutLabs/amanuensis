@@ -10,8 +10,16 @@
  * user is keeping. Deleting a space is a UI-only action (`DELETE /api/v1/spaces/{space_id}`,
  * exposed from the space's own page), never something a running turn can reach.
  */
-import type { AgentCapability, AgentTracing, InstructionBuilder } from '@truefoundry/trueforge-core/core';
-import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, AgentTracing, InstructionBuilder, Sandbox } from '@truefoundry/trueforge-core/core';
+import {
+  createSentinelHostContext,
+  defineTool,
+  extractErrorLogFields,
+  LocalToolMCP,
+  toolResultResponse,
+  type ToolDefinition,
+} from '@truefoundry/trueforge-core/core';
+import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -31,6 +39,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { gmailCapability, sandboxAttachmentStager } from './gmailCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
@@ -1231,6 +1240,8 @@ export function spaceCapability(options: SpaceCapabilityOptions): AgentCapabilit
 
 export interface SpaceTurnContext {
   store: SpaceToolStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnections?: GoogleConnectionStore | undefined;
   authority: SpaceTurnAuthority;
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
@@ -1261,6 +1272,13 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   }
 
   readonly #space: SpaceTurnContext;
+  /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
+  private runSandbox: Sandbox | undefined;
+
+  override async resolveSandbox(input: Parameters<MemoryTurnResourceResolver['resolveSandbox']>[0]) {
+    this.runSandbox = await super.resolveSandbox(input);
+    return this.runSandbox;
+  }
 
   override async resolveAgentDefinition(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const resolved = await super.resolveAgentDefinition(input);
@@ -1268,13 +1286,46 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     if (isSubAgent) {
       return resolved;
     }
+    const gmail = await this.#gmail(input);
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
+        ...(gmail === undefined ? [] : [gmail]),
       ],
     };
+  }
+
+  /** A store that cannot be read costs the chat its mail tools, never the chat itself. */
+  async #gmail(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const connections = this.#space.googleConnections;
+    if (connections === undefined) {
+      return undefined;
+    }
+    try {
+      return await gmailCapability({
+        fetchImpl: undefined,
+        connections,
+        owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        tracing: input.tracing,
+        sentinel: createSentinelHostContext({
+          services: input.sentinel_services,
+          tenant_id: input.tenant_id,
+          created_by: input.created_by,
+          conversation_id: input.session_id,
+          workspace_cwd: input.workspace_cwd ?? null,
+          web_search: this.webSearchTurn,
+        }),
+        attachmentStager: sandboxAttachmentStager(this.runSandbox),
+      });
+    } catch (error) {
+      this.#space.logger.warn(
+        'Gmail tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return undefined;
+    }
   }
 }
