@@ -1059,6 +1059,7 @@ async function importArchive<TTransaction>(
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
     let filesLeftBehind = 0;
+    await lock.pauseRenewal();
     await deps.withTransaction(async tx => {
       for (const { persona } of personas) {
         await deps.personaStore.createPersona(
@@ -1261,6 +1262,7 @@ async function importArchive<TTransaction>(
       }),
     };
   } catch (cause) {
+    lock.resumeRenewal();
     // Files are removed by their planned paths (checked absent beforehand); ids only by what this run created.
     const failures = await compensate(deps, {
       tenantId,

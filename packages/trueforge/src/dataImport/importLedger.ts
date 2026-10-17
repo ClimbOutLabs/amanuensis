@@ -117,18 +117,13 @@ export class ImportLock<TTransaction> {
   #held = true;
   #keepForCleanup = false;
   #queue: Promise<void> = Promise.resolve();
-  readonly #timer: NodeJS.Timeout;
+  #timer: NodeJS.Timeout | undefined;
 
   private constructor(input: { store: IGlobalSettingsStore<TTransaction>; marker: ImportMarker; raw: string }) {
     this.#store = input.store;
     this.#marker = input.marker;
     this.#raw = input.raw;
-    this.#timer = setInterval(() => {
-      void this.#serialize(() => this.#write({ ...this.#marker, heartbeat_at: new Date().toISOString() })).catch(
-        () => undefined,
-      );
-    }, IMPORT_HEARTBEAT_MS);
-    this.#timer.unref();
+    this.resumeRenewal();
   }
 
   /** Takes the marker when no run holds one (`replacing` null), or replaces exactly the marker text read before. */
@@ -150,10 +145,35 @@ export class ImportLock<TTransaction> {
     await this.#serialize(() => this.#write({ ...marker, heartbeat_at: new Date().toISOString() }));
   }
 
+  /**
+   * Stops renewing and waits for a renewal already under way. Call it before
+   * opening the commit transaction: on SQLite a renewal queued behind that
+   * transaction would wait for it forever.
+   */
+  async pauseRenewal(): Promise<void> {
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+    await this.#queue;
+  }
+
+  /** Renews the marker again, as after a commit transaction that failed. */
+  resumeRenewal(): void {
+    if (!this.#held || this.#timer !== undefined) {
+      return;
+    }
+    this.#timer = setInterval(() => {
+      void this.#serialize(() => this.#write({ ...this.#marker, heartbeat_at: new Date().toISOString() })).catch(
+        () => undefined,
+      );
+    }, IMPORT_HEARTBEAT_MS);
+    this.#timer.unref();
+  }
+
   /** Removes the marker inside the commit transaction, so it disappears with the data it guards. */
   async removeIn(transaction: TTransaction): Promise<void> {
-    clearInterval(this.#timer);
-    await this.#queue;
+    if (this.#timer !== undefined) {
+      throw new Error('The import marker is still being renewed; pause renewal before the commit transaction.');
+    }
     const removed = await this.#store.compareAndSetSetting(
       { key: IMPORT_IN_PROGRESS_KEY, expected: this.#raw, value: null },
       transaction,
@@ -175,8 +195,7 @@ export class ImportLock<TTransaction> {
 
   /** Ends the hold: the marker goes, unless the run left work behind. */
   async end(): Promise<void> {
-    clearInterval(this.#timer);
-    await this.#queue;
+    await this.pauseRenewal();
     if (!this.#held) {
       return;
     }
@@ -206,6 +225,7 @@ export class ImportLock<TTransaction> {
     if (!written) {
       this.#held = false;
       clearInterval(this.#timer);
+      this.#timer = undefined;
       throw new ImportLockLostError();
     }
     this.#marker = marker;

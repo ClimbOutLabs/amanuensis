@@ -10,7 +10,7 @@ import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoun
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DataImportError } from '../../../src/dataImport/importError';
-import { IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
+import { IMPORT_HEARTBEAT_MS, IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
 import type { MemoryImportTarget } from '../../../src/dataImport/importPreflight';
 import { EXPIRED_CALL_RESULT } from '../../../src/dataImport/importSchemas';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
@@ -31,6 +31,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
@@ -47,7 +48,7 @@ import {
   seedRichInstance,
   type DataTransferSeedStores,
 } from '../../fixtures/dataTransferSeed';
-import { listAt, parseJson, recordAt, recordsAt, type JsonRecord } from '../../fixtures/jsonGuards';
+import { listAt, parseJson, recordAt, recordsAt, stringAt, type JsonRecord } from '../../fixtures/jsonGuards';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(120_000);
@@ -666,6 +667,37 @@ async function chatsOf(instance: Instance, userId: string) {
 
 async function importError(instance: Instance, archive: Buffer, deps = importDeps(instance)): Promise<unknown> {
   return runDataImport(deps, importRequest(archive)).catch((caught: unknown) => caught);
+}
+
+/**
+ * Advances fake timers in small steps, letting real I/O run between them, until `promise` settles or
+ * `limitMs` of fake time has passed.
+ */
+async function driveFakeClock<T>(
+  promise: Promise<T>,
+  limitMs: number,
+): Promise<{ settled: true; value: T } | { settled: false }> {
+  let outcome: { settled: true; value: T } | { settled: false } = { settled: false };
+  let failure: { error: unknown } | undefined;
+  promise.then(
+    value => {
+      outcome = { settled: true, value };
+    },
+    (error: unknown) => {
+      failure = { error };
+    },
+  );
+  for (let elapsed = 0; elapsed <= limitMs; elapsed += 100) {
+    if (failure !== undefined) {
+      throw failure.error;
+    }
+    if (outcome.settled) {
+      return outcome;
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    await jest.advanceTimersByTimeAsync(100);
+  }
+  return outcome;
 }
 
 /** An import that failed and could not remove what it wrote, as an interrupted process leaves it. */
@@ -1344,6 +1376,76 @@ describe('runDataImport failure handling', () => {
       expect(busy).toHaveLength(1);
       expect(busy[0]).toMatchObject({ error: { status: 409 } });
     } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('finishes a commit transaction that outlasts the marker renewal interval', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-long-commit');
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      const slowCommit: WithTransaction<Tx> = callback =>
+        target.db.transaction().execute(async tx => {
+          await new Promise(resolve => setTimeout(resolve, 3 * IMPORT_HEARTBEAT_MS));
+          return await callback(tx);
+        });
+      const run = runDataImport({ ...importDeps(target), withTransaction: slowCommit }, importRequest(archive));
+      // Renewals fire while the transaction is open; a renewal that waits for it would stall the run for good.
+      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('renews its marker while it runs, so other processes see it alive', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-renewal');
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      let reachedKnowledge: () => void = () => undefined;
+      const reached = new Promise<void>(resolve => {
+        reachedKnowledge = resolve;
+      });
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const run = runDataImport(
+        {
+          ...importDeps(target),
+          knowledgeEmbedder: {
+            ensureReady: () => Promise.resolve(true),
+            embedPassages: async texts => {
+              reachedKnowledge();
+              await gate;
+              return texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5));
+            },
+          },
+        },
+        importRequest(archive),
+      );
+      await driveFakeClock(reached, 40 * IMPORT_HEARTBEAT_MS);
+      const heartbeat = async () => {
+        const record = await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
+        return Date.parse(
+          stringAt(recordAt(JSON.parse(record?.value ?? 'null'), 'marker')['heartbeat_at'], 'heartbeat'),
+        );
+      };
+      const before = await heartbeat();
+      await driveFakeClock(
+        new Promise(resolve => setTimeout(resolve, 2 * IMPORT_HEARTBEAT_MS)),
+        3 * IMPORT_HEARTBEAT_MS,
+      );
+      expect(await heartbeat()).toBeGreaterThan(before);
+      release();
+      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+    } finally {
+      jest.useRealTimers();
       await source.close();
       await target.close();
     }
