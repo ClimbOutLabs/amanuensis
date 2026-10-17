@@ -73,6 +73,19 @@ describe('export secret scrubbing', () => {
     expect(scrubber.url('not a url')).toBe(REDACTED);
   });
 
+  it('replaces a token that sits in a connector URL path, and keeps ordinary segments', () => {
+    const scrubber = createExportScrubber([]);
+    expect(scrubber.url('https://host.example.com/mcp/tok_Zk3x9Qm2Lp8Rt5Wv1Yc7Nb4H')).toBe(
+      'https://host.example.com/mcp/[redacted]',
+    );
+    expect(scrubber.url('https://host.example.com/s/Zk3x9Qm2Lp8Rt5Wv1Yc7Nb4Hd6/mcp')).toBe(
+      'https://host.example.com/s/[redacted]/mcp',
+    );
+    expect(scrubber.url('https://host.example.com/api/v1/team-documents/search/sse')).toBe(
+      'https://host.example.com/api/v1/team-documents/search/sse',
+    );
+  });
+
   it('removes a whole PEM private key, body and END line included', () => {
     const pem = [
       ['-----BEGIN RSA', 'PRIVATE KEY-----'].join(' '),

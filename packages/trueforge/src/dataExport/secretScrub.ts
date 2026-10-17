@@ -45,6 +45,17 @@ const SECRET_KEYS = new Set([
 
 const CREDENTIAL_SCHEMES = 'postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|rediss?|amqps?';
 
+/** A path segment that reads as a token: a labelled value, a long mix of letters and digits, or a very long run. */
+function looksLikeTokenSegment(segment: string): boolean {
+  if (/^(?:tok|token|key|secret|pat|api)[_-][A-Za-z0-9_-]{8,}$/i.test(segment)) {
+    return true;
+  }
+  if (segment.length >= 32 && /^[A-Za-z0-9_-]+$/.test(segment)) {
+    return true;
+  }
+  return segment.length >= 20 && /^[A-Za-z0-9_-]+$/.test(segment) && /\d/.test(segment) && /[A-Za-z]/.test(segment);
+}
+
 function globally(pattern: RegExp): RegExp {
   return new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
 }
@@ -149,7 +160,7 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
         } catch {
           // A malformed escape is checked as written.
         }
-        if (!holdsSecret(segment) && !holdsSecret(decoded)) {
+        if (!holdsSecret(segment) && !holdsSecret(decoded) && !looksLikeTokenSegment(decoded)) {
           return segment;
         }
         redactions += 1;

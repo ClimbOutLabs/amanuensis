@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Writable } from 'node:stream';
 
 import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
@@ -23,6 +23,9 @@ import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-set
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { blobPath } from '../../../src/personaKnowledge/knowledgeIndexer';
+import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
+import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryClient, MemoryVaultEntry } from '../../../src/runtime/memory/memoryClient';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
@@ -184,6 +187,76 @@ describe('runDataExport shared vault note', () => {
       };
       expect(await noteWith(true)).toContain("every member's memories");
       expect(await noteWith(false)).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('runDataExport persona knowledge files', () => {
+  it('ships the uploaded source file of a document, even one that is not indexed yet', async () => {
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: listing({}).client });
+    const marker = 'MARKER-source-text-only-on-disk';
+    const key = ['sk', 'abcdefghij0123456789abcd'].join('-');
+    try {
+      await createPersona(deps, { id: 'persona-1', name: 'Researcher', owner: 'alice' });
+      const repository = openPersonaKnowledgeRepository({
+        dbPath: personaKnowledgeLocation({
+          knowledgeDir: deps.personaKnowledgeDir,
+          tenantId: TENANT_ID,
+          personaId: 'persona-1',
+        }).dbPath,
+      });
+      const textDoc = repository.createDocument({
+        title: 'notes',
+        titleExplicit: true,
+        source_kind: 'upload',
+        source_label: 'notes.txt',
+        source_url: null,
+      });
+      const binaryDoc = repository.createDocument({
+        title: 'scan',
+        titleExplicit: true,
+        source_kind: 'upload',
+        source_label: 'scan.pdf',
+        source_url: null,
+      });
+      repository.close();
+      const binary = Buffer.from([0xff, 0xfe, 0x00, 0x81]);
+      for (const [documentId, bytes] of [
+        [textDoc.id, Buffer.from(`${marker} ${key}`)],
+        [binaryDoc.id, binary],
+      ] as const) {
+        const file = blobPath({
+          knowledgeDir: deps.personaKnowledgeDir,
+          tenantId: TENANT_ID,
+          personaId: 'persona-1',
+          documentId,
+        });
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, bytes);
+      }
+
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+      const personas = z
+        .array(
+          z.object({
+            knowledge: z.object({
+              documents: z.array(z.object({ id: z.string(), source_file: z.string().nullable() })),
+            }),
+          }),
+        )
+        .parse(zipEntryJson(entries, 'personas.json'));
+      const documents = personas[0]?.knowledge.documents ?? [];
+      expect(documents.map(document => document.source_file).sort()).toEqual(
+        [`knowledge/persona-1/${binaryDoc.id}.bin`, `knowledge/persona-1/${textDoc.id}.bin`].sort(),
+      );
+      expect(zipEntryText(entries, `knowledge/persona-1/${textDoc.id}.bin`)).toBe(`${marker} [redacted]`);
+      expect(entries.find(entry => entry.name === `knowledge/persona-1/${binaryDoc.id}.bin`)?.data.equals(binary)).toBe(
+        true,
+      );
     } finally {
       await close();
     }

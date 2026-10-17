@@ -34,6 +34,7 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactStore';
+import { blobPath } from '../personaKnowledge/knowledgeIndexer';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
@@ -336,13 +337,24 @@ export async function runDataExport<TTransaction>(
 
   await writeJsonArrayEntry(context, 'folders.json', folders);
 
-  // personas.json: personas with their knowledge documents and chunk text.
+  // personas.json: personas with their knowledge documents and chunk text; each document's uploaded
+  // source file follows as knowledge/<persona id>/<document id>.bin.
+  const knowledgeSources: { personaId: string; documentId: string }[] = [];
   function* personaEntries(): Iterable<unknown> {
     for (const persona of personas) {
-      yield { persona, knowledge: readPersonaKnowledge(deps, tenantId, persona) };
+      const knowledge = readPersonaKnowledge(deps, tenantId, persona);
+      for (const document of knowledge.documents) {
+        if (document.source_file !== null) {
+          knowledgeSources.push({ personaId: persona.id, documentId: document.id });
+        }
+      }
+      yield { persona, knowledge };
     }
   }
   await writeJsonArrayEntry(context, 'personas.json', personaEntries());
+  for (const source of knowledgeSources) {
+    await writeKnowledgeSource(context, source);
+  }
 
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonEntry(context, 'personalization.json', profile ?? null);
@@ -463,11 +475,46 @@ export async function runDataExport<TTransaction>(
   return { bytesWritten: zip.bytesWritten, entries: zip.entryCount, redactions: scrub.redactionCount() };
 }
 
+type PersonaKnowledgeDocument = ReturnType<
+  ReturnType<typeof openPersonaKnowledgeRepository>['listDocuments']
+>[number] & { source_file: string | null; chunks: { chunk_index: number; text: string }[] };
+
+function knowledgeSourceEntryName(input: { personaId: string; documentId: string }): string {
+  return `knowledge/${input.personaId}/${input.documentId}.bin`;
+}
+
+async function writeKnowledgeSource<TTransaction>(
+  context: ExportContext<TTransaction>,
+  input: { personaId: string; documentId: string },
+): Promise<void> {
+  const { deps, zip, scrub, request } = context;
+  const bytes = await readFile(
+    blobPath({
+      knowledgeDir: deps.personaKnowledgeDir,
+      tenantId: request.subject.tenantId,
+      personaId: input.personaId,
+      documentId: input.documentId,
+    }),
+  );
+  const entryName = knowledgeSourceEntryName(input);
+  let text: string | undefined;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    text = undefined;
+  }
+  if (text !== undefined) {
+    await zip.addTextEntry(entryName, scrub.text(text));
+  } else {
+    await zip.addBufferedEntry(entryName, bytes);
+  }
+}
+
 function readPersonaKnowledge<TTransaction>(
   deps: DataExportDeps<TTransaction>,
   tenantId: string,
   persona: Persona,
-): { documents: unknown[] } {
+): { documents: PersonaKnowledgeDocument[] } {
   const location = personaKnowledgeLocation({
     knowledgeDir: deps.personaKnowledgeDir,
     tenantId,
@@ -480,6 +527,11 @@ function readPersonaKnowledge<TTransaction>(
   try {
     const documents = repository.listDocuments().map(document => ({
       ...document,
+      source_file: existsSync(
+        blobPath({ knowledgeDir: deps.personaKnowledgeDir, tenantId, personaId: persona.id, documentId: document.id }),
+      )
+        ? knowledgeSourceEntryName({ personaId: persona.id, documentId: document.id })
+        : null,
       chunks: repository
         .listDocumentChunks({ documentId: document.id })
         .map(chunk => ({ chunk_index: chunk.chunkIndex, text: chunk.text })),
