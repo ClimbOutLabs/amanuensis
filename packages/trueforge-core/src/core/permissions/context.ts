@@ -10,6 +10,7 @@
  */
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
+import { InMemoryPrivateDataReadStore, type PrivateDataReadStore } from './privateDataReads';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
 import type { Tier2ActionKind } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
@@ -22,6 +23,8 @@ export interface SentinelServices {
   audit: AuditLogWriter | null;
   shell_allowlist: ShellAllowlistConfig;
   tool_grants: ToolGrantStore;
+  /** Chats that have read something private, for the search provider's silent runs. */
+  private_reads: PrivateDataReadStore;
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Tier 2 kinds the user relaxed to run without asking. */
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
@@ -59,6 +62,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     audit: null,
     shell_allowlist: seedShellAllowlist(input.pinned_path),
     tool_grants: new InMemoryToolGrantStore(),
+    private_reads: new InMemoryPrivateDataReadStore(),
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),

@@ -763,6 +763,13 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   return title;
 }
 
+/** True when any user message in a create-turn input carries an attached file. */
+function inputAttachesFiles(input: TurnInputItem[]): boolean {
+  return input
+    .filter(isAgentInputUserMessage)
+    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
+}
+
 /**
  * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
  * joined with a blank line, or `''` when there is none. A turn's input can carry several user
@@ -915,6 +922,8 @@ export interface DrainTurnEventsInput {
     | {
         client: MemoryClient;
         userText: string;
+        /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
+        attachedFiles: boolean;
         sessionTitle: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
@@ -967,10 +976,10 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. This is the honest taint signal available at this chokepoint: the
-  // harness classifies no tool output as trusted, so "saw a tool result" is exactly "ingested
-  // untrusted content". A turn with no tool result is the user's own voice: `user_stated`.
-  let ingestedToolOutput = false;
+  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
+  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
+  // `user_stated`.
+  let ingestedToolOutput = memory?.attachedFiles === true;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -1061,19 +1070,7 @@ export interface TurnEventDrainInput {
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
-  memory?:
-    | {
-        client: MemoryClient;
-        userText: string;
-        sessionTitle: string | undefined;
-        /**
-         * Present only when turn summarization is enabled (the Settings toggle's
-         * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
-         * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
-         */
-        summarize?: SummarizeTurnContext | undefined;
-      }
-    | undefined;
+  memory?: DrainTurnEventsInput['memory'];
 }
 
 /**
@@ -1233,6 +1230,7 @@ export async function beginTurnExecution(params: {
           : {
               client: deps.memoryClient,
               userText: extractUserMessageText(input ?? []),
+              attachedFiles: inputAttachesFiles(input ?? []),
               sessionTitle: deps.sessionTitle,
               summarize: memorySummarize,
             },
@@ -2264,6 +2262,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           : {
               client: memoryClient,
               userText: extractUserMessageText(body.input),
+              attachedFiles: inputAttachesFiles(body.input ?? []),
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,

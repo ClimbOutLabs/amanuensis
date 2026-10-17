@@ -175,7 +175,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       }
     },
     info({
-      version = '27.1.1',
+      version = '28.0.1',
       arch = 'x86_64',
       security = '[name=seccomp,profile=builtin]',
       systime = DAEMON_TIME,
@@ -398,7 +398,7 @@ export function createWorld({ instances = ['main'] } = {}) {
   world.install('docker', FAKE_DOCKER);
   world.df(50 * GIB_KB);
   world.info();
-  world.set('cli_version', { out: 'Docker version 27.1.1, build abc\n' });
+  world.set('cli_version', { out: 'Docker version 28.0.1, build abc\n' });
   world.set('version', { out: 'Docker Engine - Community;containerd;runc;\n' });
   world.set('compose_version', { out: '2.29.1\n' });
   world.set('ps', { out: '' });

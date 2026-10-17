@@ -122,6 +122,24 @@ describe('classifyPreRecallGate', () => {
     expect(classifyPreRecallGate([userMessage(text)])).toBeUndefined();
   });
 
+  it('classifies only what the user typed, not an attached document', () => {
+    const document = `<untrusted-document>Extracted text for lease.pdf\n${'clause '.repeat(50)}</untrusted-document>`;
+    expect(
+      classifyPreRecallGate([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'thanks' },
+            { type: 'text', text: document },
+          ],
+        },
+      ]),
+    ).toBe('trivial_acknowledgement');
+    expect(
+      classifyPreRecallGate([userMessage('thanks'), { role: 'user', content: [{ type: 'text', text: document }] }]),
+    ).toBe('trivial_acknowledgement');
+  });
+
   it('recalls when there is no user message', () => {
     expect(classifyPreRecallGate([])).toBeUndefined();
     expect(classifyPreRecallGate([{ role: 'assistant', content: 'hello' }])).toBeUndefined();
