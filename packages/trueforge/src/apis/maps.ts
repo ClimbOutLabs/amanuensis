@@ -30,8 +30,20 @@ export const TILE_MAX_BODY_BYTES = 512 * 1024;
 const MAX_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const RATE_WINDOW_MS = 60_000;
-/** Never let a browser sniff an upstream body into something executable. */
-const TILE_RESPONSE_HEADERS = { 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' };
+const TILE_CACHE_CONTROL = 'private, max-age=86400';
+/** A tile is only ever an inert image: no sniffing, no script or framing if it is opened as a document. */
+const TILE_SAFETY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; sandbox",
+  'Content-Disposition': 'inline; filename="tile"',
+};
+const SERVABLE_TILE_TYPES: ReadonlySet<string> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
 
 interface TileCacheEntry {
   body: Uint8Array;
@@ -70,7 +82,8 @@ export class TileCache {
     if (entry === undefined) {
       return undefined;
     }
-    if (entry.expires_at <= this.now()) {
+    // Entries from before a stricter type policy are purged rather than served.
+    if (entry.expires_at <= this.now() || !SERVABLE_TILE_TYPES.has(entry.content_type)) {
       this.remove(key);
       return undefined;
     }
@@ -187,9 +200,13 @@ export function parseTileIndex(raw: string): number {
   return Number(raw);
 }
 
-/** SVG is an active format: served same-origin it could run script, so only raster images pass. */
-export function isServableTileType(contentType: string): boolean {
-  return contentType.startsWith('image/') && !contentType.startsWith('image/svg');
+/**
+ * Normalized media type of an upstream tile, or undefined when it is not an allowed raster type.
+ * Anything with parameters or a list of types is refused; callers serve the returned value, never the raw header.
+ */
+export function servableTileType(contentType: string): string | undefined {
+  const normalized = contentType.trim().toLowerCase();
+  return SERVABLE_TILE_TYPES.has(normalized) ? normalized : undefined;
 }
 
 /** Validate tile coordinates: z in 0..18, x/y in 0..2^z-1. */
@@ -237,6 +254,13 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
 
   const app = new OpenAPIHono();
 
+  app.use('/tiles/*', async (c, next) => {
+    await next();
+    for (const [name, value] of Object.entries(TILE_SAFETY_HEADERS)) {
+      c.res.headers.set(name, value);
+    }
+  });
+
   // Note: the route omits the `.png` suffix because Hono does not extract
   // params correctly from patterns like `:y.png`; the suffix is stripped below.
   app.get('/tiles/:z/:x/:y', async c => {
@@ -263,7 +287,7 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
     if (cached !== undefined) {
       return new Response(cached.body, {
         status: 200,
-        headers: { 'Content-Type': cached.content_type, ...TILE_RESPONSE_HEADERS },
+        headers: { 'Content-Type': cached.content_type, 'Cache-Control': TILE_CACHE_CONTROL },
       });
     }
 
@@ -288,9 +312,10 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
         await upstream.body?.cancel();
         return c.json({ error: { message: 'Tile upstream unavailable.' } }, 503);
       }
-      const contentType = upstream.headers.get('content-type') ?? '';
-      if (!isServableTileType(contentType)) {
-        deps.logger.warn('maps tile proxy dropped non-image upstream body', { contentType });
+      const rawContentType = upstream.headers.get('content-type') ?? '';
+      const mimeType = servableTileType(rawContentType);
+      if (mimeType === undefined) {
+        deps.logger.warn('maps tile proxy dropped non-image upstream body', { contentType: rawContentType });
         await upstream.body?.cancel();
         return c.json({ error: { message: 'Tile upstream returned a non-image response.' } }, 503);
       }
@@ -309,11 +334,10 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
         }
       }
       ttl = Math.min(ttl, MAX_CACHE_TTL_MS);
-      const mimeType = contentType.split(';')[0] ?? 'image/png';
       cache.set(cacheKey, { body, content_type: mimeType, expires_at: now() + ttl });
       return new Response(body, {
         status: 200,
-        headers: { 'Content-Type': mimeType, ...TILE_RESPONSE_HEADERS },
+        headers: { 'Content-Type': mimeType, 'Cache-Control': TILE_CACHE_CONTROL },
       });
     } catch (error) {
       deps.logger.warn('maps tile proxy upstream failure', { error });
