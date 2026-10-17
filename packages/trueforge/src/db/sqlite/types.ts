@@ -23,6 +23,7 @@ import type {
   ImplementationPlanGrant,
   JsonValue,
   MCPServerInitInfo,
+  OutboundEventKind,
   SandboxInfo,
   ShellApprovalBinding,
   SubAgentCompletionMarker,
@@ -169,6 +170,23 @@ export interface SentinelAuditTable {
   description: string;
   outcome: 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
   auto_deny_reason: string | null;
+  created_at: string;
+}
+
+/**
+ * One request that left this computer. Hosts and sizes only, never request text. PRIMARY KEY (id).
+ */
+export interface OutboundEventTable {
+  id: string;
+  tenant_id: string;
+  kind: OutboundEventKind;
+  host: string;
+  model: string | null;
+  tool_name: string | null;
+  request_bytes: number | null;
+  recipient_count: number | null;
+  subject: string | null;
+  conversation_id: string | null;
   created_at: string;
 }
 
@@ -673,6 +691,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  outbound_event: OutboundEventTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

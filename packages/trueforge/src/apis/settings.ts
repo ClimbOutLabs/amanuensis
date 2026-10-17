@@ -13,14 +13,17 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IOutboundEventStore } from '../db/outboundEventStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import type { DataLocationsInput } from '../runtime/dataLocations';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
 import { createModelProvidersRouter } from './modelProviders';
+import { createDataLocationsRouter, createOutboundEventsRouter } from './privacy';
 import { createRunCodeRouter } from './runCode';
 import { createSandboxProvidersRouter } from './sandboxProviders';
 import { createSkillsRouter, type ResolveSkillStore } from './skills';
@@ -38,6 +41,9 @@ export interface SettingsRouterDeps<TTransaction> {
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
   withTransaction: WithTransaction<TTransaction>;
+  outboundEventStore: IOutboundEventStore;
+  /** Where each kind of data lives, as the running server is configured. */
+  dataLocations: () => DataLocationsInput;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
 }
@@ -111,5 +117,13 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       logger: deps.logger,
     }),
   );
+  router.route(
+    '/outbound-events',
+    createOutboundEventsRouter({
+      outboundEventStore: deps.outboundEventStore,
+      resolveRequestContext: deps.resolveRequestContext,
+    }),
+  );
+  router.route('/data-locations', createDataLocationsRouter({ locations: deps.dataLocations }));
   return router;
 }

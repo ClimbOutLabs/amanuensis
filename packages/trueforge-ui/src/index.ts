@@ -366,10 +366,15 @@ export {
   extractSentinelFromEvent,
   extractSentinelSessionContext,
   parseAuditEntries,
+  parseDataLocations,
+  parseOutboundActivity,
   parseToolTier,
   parseUserSettings,
 } from './sentinel/types.js';
 export type {
+  DataLocation,
+  OutboundActivity,
+  OutboundEvent,
   SentinelApi,
   SentinelApprovalCard,
   SentinelApprovalInfo,
@@ -379,6 +384,7 @@ export type {
   SentinelUserSettings,
   ToolTier,
 } from './sentinel/types.js';
+export { WhatLeftYourMachine } from './sentinel/WhatLeftYourMachine.js';
 export {
   IMAGE_MAX_EDGE,
   IMAGE_PASSTHROUGH_BYTES,

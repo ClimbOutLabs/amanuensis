@@ -16,6 +16,7 @@ import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-setting
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteOutboundEventStore } from '../../../src/db/sqlite/outbound-event-store/SqliteOutboundEventStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
@@ -118,6 +119,13 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
+      outboundEventStore: new SqliteOutboundEventStore(db),
+      dataLocations: () => ({
+        database: { kind: 'sqlite', file: ':memory:' },
+        memory: { backend: 'markdown', dir: '/nonexistent/memory' },
+        personaKnowledgeDir: '/nonexistent/knowledge',
+        sandboxRunsDir: '/nonexistent/runs',
+      }),
       withTransaction: callback => db.transaction().execute(callback),
       logger: winston.createLogger({ silent: true }),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,

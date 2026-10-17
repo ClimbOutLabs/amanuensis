@@ -2,7 +2,7 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type OutboundEventWriter } from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -68,6 +68,7 @@ import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { IOutboundEventStore } from './db/outboundEventStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IRepositoryStore } from './db/repositoryStore';
@@ -86,6 +87,7 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
+import { dataLocationsInput } from './runtime/dataLocations';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import type { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -251,6 +253,10 @@ export interface ServerDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
+  /** Records and lists requests that left this computer. */
+  outboundEventStore: IOutboundEventStore;
+  /** Records requests that left this computer; never throws. */
+  outboundEvents: OutboundEventWriter;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -308,6 +314,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    outboundEvents: deps.outboundEvents,
   };
 
   if (configuration.ACCESS_LOGS) {
@@ -503,6 +510,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
         envManagedModelProviderNames: envManagedProviders,
+        outboundEventStore: deps.outboundEventStore,
+        dataLocations: () => dataLocationsInput(configuration),
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -590,6 +599,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
+        outboundEvents: deps.outboundEvents,
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
@@ -760,6 +770,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        outboundEvents: deps.outboundEvents,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

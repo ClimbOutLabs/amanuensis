@@ -11,7 +11,12 @@
  * tools are registered in FIRST_PARTY_REQUIRES_NETWORK, so offline mode filters
  * them from the model's tool list and auto-denies stale calls.
  */
-import type { AgentCapability, AgentTracing, ConnectorBinding } from '@truefoundry/trueforge-core/core';
+import type {
+  AgentCapability,
+  AgentTracing,
+  ConnectorBinding,
+  OutboundEventWriter,
+} from '@truefoundry/trueforge-core/core';
 import {
   defineTool,
   LocalToolMCP,
@@ -25,6 +30,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
 import { fetchSameOrigin, readCappedJson } from './mapsUpstream';
+import { recordMapRequest } from './outboundRecorder';
 
 export const MAPS_SERVER_ID = 'maps';
 
@@ -637,6 +643,9 @@ class MapsTool extends LocalToolMCP {
 export interface MapsCapabilityOptions {
   tracing: AgentTracing;
   logger: Logger;
+  /** Records each geocoder and router request; omitted records nothing. */
+  outboundEvents?: OutboundEventWriter | undefined;
+  tenant_id: string;
 }
 
 /** Build the maps capability from server config. One instance per server. */
@@ -649,6 +658,9 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
       url,
       headers: { 'User-Agent': user_agent, Accept: 'application/json' },
       timeoutMs: UPSTREAM_TIMEOUT_MS,
+      onRequest: host => {
+        recordMapRequest({ writer: options.outboundEvents, tenant_id: options.tenant_id, host });
+      },
     });
   const router_provider = createMapsRoutingProvider({
     provider_id: configuration.MAPS_ROUTER_PROVIDER,

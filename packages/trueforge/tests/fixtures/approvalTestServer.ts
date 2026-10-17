@@ -41,6 +41,7 @@ import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-s
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteOutboundEventStore } from '../../src/db/sqlite/outbound-event-store/SqliteOutboundEventStore';
 import { SqlitePersonaStore } from '../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteRepositoryStore } from '../../src/db/sqlite/repository-store/SqliteRepositoryStore';
@@ -55,6 +56,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { createOutboundRecorder } from '../../src/runtime/outboundRecorder';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
@@ -108,9 +110,18 @@ function buildApp(input: {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
+  const outboundEventStore = new SqliteOutboundEventStore(db);
+  // The fixture's model and connector servers listen on this machine; counting them as outside
+  // services lets the recording be checked end to end.
+  const outboundEvents = createOutboundRecorder({
+    store: outboundEventStore,
+    logger: createLogger({ silent: true }),
+    isLocalHost: () => false,
+  });
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
+    outbound: outboundEvents,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
@@ -145,6 +156,8 @@ function buildApp(input: {
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,
     sentinelAuditStore,
+    outboundEventStore,
+    outboundEvents,
     sentinelSettingsStore,
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),

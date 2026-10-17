@@ -2152,6 +2152,51 @@
         ],
         "type": "object"
       },
+      "DataLocation": {
+        "properties": {
+          "id": {
+            "enum": [
+              "chats",
+              "memory",
+              "personas",
+              "files_from_runs",
+              "settings",
+              "backups"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Plain name shown to the owner.",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "Size on disk, or null when it is not measured.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "size_covers": {
+            "description": "What the size includes when several kinds share one location.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "where": {
+            "description": "Where it lives on this computer, in plain words, with the real path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "where",
+          "size_bytes",
+          "size_covers"
+        ],
+        "type": "object"
+      },
       "DaytonaSandboxProviderAuth": {
         "additionalProperties": false,
         "description": "Daytona authentication credentials.",
@@ -3846,6 +3891,20 @@
         ],
         "type": "object"
       },
+      "ListDataLocationsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DataLocation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListImplementationPlanGrantsResponse": {
         "properties": {
           "data": {
@@ -3944,6 +4003,31 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "ListOutboundEventsResponse": {
+        "properties": {
+          "data": {
+            "description": "Requests from the last 24 hours, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/OutboundEvent"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "True when more requests exist in the window than `limit` returned.",
+            "type": "boolean"
+          },
+          "window_start": {
+            "description": "Start of the 24-hour window, ISO-8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "window_start",
+          "truncated"
         ],
         "type": "object"
       },
@@ -6064,6 +6148,87 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "OutboundEvent": {
+        "properties": {
+          "conversation_id": {
+            "description": "Chat the request belongs to, when it came from one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When the request was sent, ISO-8601 UTC.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Host of the service that received the request.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "What was sent: a model request, an email, a web search, a map lookup or another connector call.",
+            "enum": [
+              "model_request",
+              "email_sent",
+              "web_search",
+              "map_lookup",
+              "connector_call"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "Model name for model requests; null otherwise.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recipient_count": {
+            "description": "Recipients named in an email; null when the call names none.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "request_bytes": {
+            "description": "Size of the request body in bytes, when measured.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Email subject, shortened; null for other kinds.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_name": {
+            "description": "Connector tool called; null for model requests and map lookups.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "host",
+          "model",
+          "tool_name",
+          "request_bytes",
+          "recipient_count",
+          "subject",
+          "conversation_id",
+          "created_at"
         ],
         "type": "object"
       },
@@ -18327,6 +18492,52 @@
         }
       }
     },
+    "/api/v1/settings/data-locations": {
+      "get": {
+        "description": "Returns each kind of data Aman keeps (chats, memory, personas, files from runs, settings, backups) with its real location on this computer and its size when measured.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDataLocationsResponse"
+                }
+              }
+            },
+            "description": "One entry per kind of data."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the caller is authenticated but not an admin."
+          }
+        },
+        "summary": "List where Aman keeps data on this computer",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "dataLocations"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
     "/api/v1/settings/mcp-servers": {
       "get": {
         "description": "Configured MCP servers with auth_status. Header secrets are redacted.",
@@ -19074,6 +19285,65 @@
           "modelProviders"
         ],
         "x-fern-sdk-method-name": "delete"
+      }
+    },
+    "/api/v1/settings/outbound-events": {
+      "get": {
+        "description": "Returns requests sent to outside services in the last 24 hours, newest first: model requests, emails, web searches, map lookups and connector calls. Hosts and sizes only, never request text.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOutboundEventsResponse"
+                }
+              }
+            },
+            "description": "Requests in the window."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the caller is authenticated but not an admin."
+          }
+        },
+        "summary": "List what left this computer in the last 24 hours",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "outboundEvents"
+        ],
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/api/v1/settings/run-code/status": {

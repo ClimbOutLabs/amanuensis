@@ -30,6 +30,7 @@ import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-stor
 import { SqliteMcpServerStore } from '../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteOutboundEventStore } from '../src/db/sqlite/outbound-event-store/SqliteOutboundEventStore';
 import { SqlitePersonaStore } from '../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteRepositoryStore } from '../src/db/sqlite/repository-store/SqliteRepositoryStore';
@@ -79,6 +80,7 @@ const agentStore = new SqliteAgentStore(db);
 const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
+const outboundEventStore = new SqliteOutboundEventStore(db);
 const app = createServerApp({
   modelCatalog: ModelCatalog.load(),
   mcpCatalog: McpCatalog.load(),
@@ -112,6 +114,8 @@ const app = createServerApp({
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+  outboundEventStore,
+  outboundEvents: outboundEventStore,
   sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
   sessions: new Sessions({ sessionStore }),
   activeTurns: new ActiveTurnRegistry(),

@@ -1,5 +1,5 @@
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import configuration from '../config';
@@ -122,6 +122,8 @@ export interface ResolveTurnSummarizeContextParams {
   tenantId: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
   agentStore: IAgentStore;
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
@@ -152,6 +154,7 @@ export async function resolveTurnSummarizeContext(
     tenantId,
     modelProviderStore,
     tokenFactoryBudget,
+    onModelRequest,
     agentStore,
     personaModelName,
     sessionAgent,
@@ -196,7 +199,7 @@ export async function resolveTurnSummarizeContext(
       return undefined;
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget };
+    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, onModelRequest };
   } catch (error) {
     logger.debug('Memory summarization disabled for this turn: the model FQN did not resolve', {
       sessionId,

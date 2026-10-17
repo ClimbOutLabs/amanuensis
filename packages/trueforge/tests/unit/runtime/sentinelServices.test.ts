@@ -14,6 +14,7 @@ import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteApprovalTokenStore } from '../../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
+import { SqliteOutboundEventStore } from '../../../src/db/sqlite/outbound-event-store/SqliteOutboundEventStore';
 import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { createSentinelServices } from '../../../src/runtime/sentinelServices';
 
@@ -30,6 +31,7 @@ const action: SentinelAction = {
 function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
   return createSentinelServices({
     audit: new SentinelAuditStore(db),
+    outbound: new SqliteOutboundEventStore(db),
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: new SqliteMcpToolGrantStore(db),
@@ -60,9 +62,11 @@ describe('createSentinelServices', () => {
     const approvalTokens = new InMemoryApprovalTokenStore();
     const db = createSqliteDb(databaseFile);
     const toolGrants = new SqliteMcpToolGrantStore(db);
+    const outbound = new SqliteOutboundEventStore(db);
     try {
       const services = createSentinelServices({
         audit: new SentinelAuditStore(db),
+        outbound,
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
         toolGrants,
@@ -70,6 +74,7 @@ describe('createSentinelServices', () => {
       });
       expect(services.token_store).toBe(approvalTokens);
       expect(services.tool_grants).toBe(toolGrants);
+      expect(services.outbound).toBe(outbound);
     } finally {
       await db.destroy();
     }

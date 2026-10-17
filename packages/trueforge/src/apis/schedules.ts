@@ -8,6 +8,7 @@ import {
   type Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { OutboundEventWriter } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
@@ -105,6 +106,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Where requests leaving this computer are recorded; omitted records nothing. */
+  outboundEvents?: OutboundEventWriter | undefined;
 }
 
 export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecutionDeps<TTransaction> {
@@ -157,6 +160,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      outboundEvents: deps.outboundEvents,
       logger: deps.logger,
     },
   });

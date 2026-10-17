@@ -561,3 +561,9 @@ export function isExternalServiceAction(toolName: string): boolean {
   }
   return EXTERNAL_SERVICE_FRAGMENTS.some(f => toolName.toLowerCase().includes(f));
 }
+
+/** How many distinct recipients a call names, at any depth; null when it names none. */
+export function countRecipients(params: Record<string, unknown>): number | null {
+  const count = new Set(nestedRecipientValues(params)).size;
+  return count === 0 ? null : count;
+}

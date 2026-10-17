@@ -137,6 +137,69 @@ export type SentinelUserSettings = {
   search_without_asking: boolean;
 };
 
+/** What kinds of request the owner's outgoing list can show. Pinned to the backend list. */
+export const OUTBOUND_EVENT_KINDS = [
+  'model_request',
+  'email_sent',
+  'web_search',
+  'map_lookup',
+  'connector_call',
+] as const;
+
+export type OutboundEventKind = (typeof OUTBOUND_EVENT_KINDS)[number];
+
+function parseOutboundEventKind(value: unknown): OutboundEventKind | undefined {
+  for (const kind of OUTBOUND_EVENT_KINDS) {
+    if (value === kind) return kind;
+  }
+  return undefined;
+}
+
+/** One request that left this computer: hosts and sizes only, never request text. */
+export type OutboundEvent = {
+  id: string;
+  kind: OutboundEventKind;
+  host: string;
+  model: string | null;
+  tool_name: string | null;
+  request_bytes: number | null;
+  recipient_count: number | null;
+  subject: string | null;
+  conversation_id: string | null;
+  /** ISO timestamp. */
+  created_at: string;
+};
+
+/** The owner's list of requests from the last 24 hours, newest first. */
+export type OutboundActivity = {
+  events: OutboundEvent[];
+  /** ISO timestamp where the 24-hour window starts. */
+  window_start: string;
+  /** True when the window holds more requests than were returned. */
+  truncated: boolean;
+};
+
+export const DATA_LOCATION_IDS = ['chats', 'memory', 'personas', 'files_from_runs', 'settings', 'backups'] as const;
+
+export type DataLocationId = (typeof DATA_LOCATION_IDS)[number];
+
+function parseDataLocationId(value: unknown): DataLocationId | undefined {
+  for (const id of DATA_LOCATION_IDS) {
+    if (value === id) return id;
+  }
+  return undefined;
+}
+
+/** One kind of data Aman keeps, where it lives on this computer, and its size when measured. */
+export type DataLocation = {
+  id: DataLocationId;
+  name: string;
+  where: string;
+  size_bytes: number | null;
+  /** What the size includes when several kinds share one location. */
+  size_covers: string | null;
+};
+
 /**
  * Host-provided Sentinel backend access. The frontend implements this against the
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
@@ -144,6 +207,8 @@ export type SentinelUserSettings = {
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
+ * - `GET /api/v1/settings/outbound-events` -> `{ data: [...], window_start, truncated }` (owner only)
+ * - `GET /api/v1/settings/data-locations` -> `{ data: [...] }` (owner only)
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
@@ -155,6 +220,10 @@ export type SentinelApi = {
    * stream already delivered.
    */
   listSentinelSessionContext: (sessionId: string) => Promise<SentinelSessionContext>;
+  /** Requests that left this computer in the last 24 hours. Owner only. */
+  listOutboundActivity: () => Promise<OutboundActivity>;
+  /** Where each kind of data lives on this computer. Owner only. */
+  listDataLocations: () => Promise<DataLocation[]>;
 };
 
 /** Durable per-tool-call Sentinel state for one session. */
@@ -377,4 +446,74 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
   };
+}
+
+function nullableInteger(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
+}
+
+function parseOutboundEvent(value: unknown): OutboundEvent | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = optionalString(value, 'id');
+  const kind = parseOutboundEventKind(value.kind);
+  const host = optionalString(value, 'host');
+  const created_at = optionalString(value, 'created_at');
+  if (id === undefined || kind === undefined || host === undefined || created_at === undefined) return undefined;
+  return {
+    id,
+    kind,
+    host,
+    model: nullableString(value, 'model'),
+    tool_name: nullableString(value, 'tool_name'),
+    request_bytes: nullableInteger(value, 'request_bytes'),
+    recipient_count: nullableInteger(value, 'recipient_count'),
+    subject: nullableString(value, 'subject'),
+    conversation_id: nullableString(value, 'conversation_id'),
+    created_at,
+  };
+}
+
+/** Parses the outgoing-requests response; rows that are not recognizably whole are dropped, never guessed. */
+export function parseOutboundActivity(body: unknown): OutboundActivity {
+  const list = isRecord(body) ? body.data : undefined;
+  const events: OutboundEvent[] = [];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const event = parseOutboundEvent(item);
+      if (event !== undefined) events.push(event);
+    }
+  }
+  return {
+    events,
+    window_start: (isRecord(body) ? optionalString(body, 'window_start') : undefined) ?? '',
+    truncated: isRecord(body) && body.truncated === true,
+  };
+}
+
+function parseDataLocation(value: unknown): DataLocation | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = parseDataLocationId(value.id);
+  const name = optionalString(value, 'name');
+  const where = optionalString(value, 'where');
+  if (id === undefined || name === undefined || where === undefined) return undefined;
+  return {
+    id,
+    name,
+    where,
+    size_bytes: nullableInteger(value, 'size_bytes'),
+    size_covers: nullableString(value, 'size_covers'),
+  };
+}
+
+/** Parses the data-locations response (`{ data: [...] }`). */
+export function parseDataLocations(body: unknown): DataLocation[] {
+  const list = isRecord(body) ? body.data : undefined;
+  if (!Array.isArray(list)) return [];
+  const locations: DataLocation[] = [];
+  for (const item of list) {
+    const location = parseDataLocation(item);
+    if (location !== undefined) locations.push(location);
+  }
+  return locations;
 }

@@ -118,6 +118,55 @@ export interface VercelAILLMConfig {
   fallbackProviderConfig?: VercelAIProviderConfig | undefined;
   /** Called, before any output, each time a request actually fell over to the fallback provider. */
   onFallback?: (() => void) | undefined;
+  /** Called as each request is sent to the provider, with its host and size only. */
+  onRequest?: ((event: ModelRequestEvent) => void) | undefined;
+}
+
+/** What is known about one request to a model provider; never its content. */
+export interface ModelRequestEvent {
+  host: string;
+  model_id: string;
+  /** Bytes of the request body, or null when the body is not a string or byte array. */
+  request_bytes: number | null;
+}
+
+function bodyBytes(body: unknown): number | null {
+  if (typeof body === 'string') {
+    return new TextEncoder().encode(body).length;
+  }
+  if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+    return body.byteLength;
+  }
+  return null;
+}
+
+function requestHost(input: Parameters<typeof fetch>[0]): string | undefined {
+  try {
+    return new URL(input instanceof Request ? input.url : input).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A fetch that reports each request's host and size before sending it; a failing observer never blocks it. */
+function observedFetch({
+  modelId,
+  onRequest,
+}: {
+  modelId: string;
+  onRequest: (event: ModelRequestEvent) => void;
+}): typeof fetch {
+  return (input, init) => {
+    const host = requestHost(input);
+    if (host !== undefined) {
+      try {
+        onRequest({ host, model_id: modelId, request_bytes: bodyBytes(init?.body) });
+      } catch {
+        // Observing a request must never stop it.
+      }
+    }
+    return fetch(input, init);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +204,13 @@ function isFunctionToolCall<T extends { type: string }>(toolCall: T): toolCall i
  */
 export const TOKEN_FACTORY_DEFAULT_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
 
-function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
+function compatibleModel({
+  config,
+  fetchOption,
+}: {
+  config: VercelAIProviderConfig;
+  fetchOption: { fetch?: typeof fetch };
+}): LanguageModelV4 {
   const { provider, model, apiKey, headers, baseUrl } = config;
   if (baseUrl === undefined) {
     throw new Error(`Provider "${provider.type}" requires a baseUrl`);
@@ -169,13 +224,18 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
     // These endpoints omit token counts from streamed responses unless asked.
     includeUsage: true,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...fetchOption,
   });
   return client(model.id);
 }
 
-export function buildLanguageModel(config: VercelAIProviderConfig): LanguageModelV4 {
+export function buildLanguageModel(
+  config: VercelAIProviderConfig,
+  onRequest?: (event: ModelRequestEvent) => void,
+): LanguageModelV4 {
   const { provider, model, baseUrl, apiKey, headers } = config;
   const extraHeaders = Object.keys(headers).length > 0 ? headers : undefined;
+  const fetchOption = onRequest === undefined ? {} : { fetch: observedFetch({ modelId: model.id, onRequest }) };
 
   switch (provider.type) {
     case 'openai': {
@@ -183,6 +243,7 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
         apiKey,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
+        ...fetchOption,
       });
       return client.responses(model.id);
     }
@@ -191,6 +252,7 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
         apiKey,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
+        ...fetchOption,
       });
       return client(model.id);
     }
@@ -199,6 +261,7 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
         apiKey,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
+        ...fetchOption,
       });
       return client(model.id);
     }
@@ -207,6 +270,7 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
         apiKey,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
+        ...fetchOption,
       });
       return client(model.id);
     }
@@ -219,6 +283,7 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
         apiKey,
         baseURL: baseUrl,
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
+        ...fetchOption,
       });
       return client(model.id);
     }
@@ -227,13 +292,13 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
     case 'together':
     case 'custom':
     case 'truefoundry': {
-      return compatibleModel(config);
+      return compatibleModel({ config, fetchOption });
     }
     case 'tokenfactory': {
       // Token Factory is OpenAI-compatible. A provider record may override the base
       // URL (for example the regional endpoint); otherwise the default applies.
       const baseUrl = config.baseUrl ?? TOKEN_FACTORY_DEFAULT_BASE_URL;
-      return compatibleModel({ ...config, baseUrl });
+      return compatibleModel({ config: { ...config, baseUrl }, fetchOption });
     }
     default: {
       const _exhaustive: never = provider.type;
@@ -1754,13 +1819,13 @@ export class VercelAILLM implements ILLM {
   async *create(
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-    const { providerConfig, fallbackProviderConfig, onFallback } = this.config;
-    const primaryModel = buildLanguageModel(providerConfig);
+    const { providerConfig, fallbackProviderConfig, onFallback, onRequest } = this.config;
+    const primaryModel = buildLanguageModel(providerConfig, onRequest);
     const languageModel =
       fallbackProviderConfig !== undefined
         ? withFailover({
             primary: primaryModel,
-            secondary: buildLanguageModel(fallbackProviderConfig),
+            secondary: buildLanguageModel(fallbackProviderConfig, onRequest),
             logger: this.logger,
             onFallback,
           })

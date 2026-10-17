@@ -175,7 +175,13 @@ export {
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
 } from './llm/VercelAILLM';
-export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
+export type {
+  ModelRequestEvent,
+  StreamTimeout,
+  VercelAILLMConfig,
+  VercelAIProviderConfig,
+  VercelAIProviderName,
+} from './llm/VercelAILLM';
 
 // Event contracts
 export {
@@ -421,6 +427,8 @@ export {
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
+export { OUTBOUND_EVENT_KINDS, isLoopbackHost } from './permissions/outboundEvents';
+export type { OutboundEventInput, OutboundEventKind, OutboundEventWriter } from './permissions/outboundEvents';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

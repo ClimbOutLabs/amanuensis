@@ -1,3 +1,4 @@
+import type { OutboundEventInput } from '@truefoundry/trueforge-core/core';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
@@ -221,6 +222,70 @@ describe('tile proxy route', () => {
     expect(
       fetchSpy.mock.calls.every(call => String(call[0]).startsWith(new URL(configuration.MAPS_TILE_URL).origin)),
     ).toBe(true);
+  });
+});
+
+describe('tile proxy outbound recording', () => {
+  const store = new InMemorySentinelSettingsStore();
+  const logger = createLogger({ silent: true });
+  let rows: OutboundEventInput[];
+  let app: Hono;
+
+  beforeEach(() => {
+    rows = [];
+    app = new Hono();
+    app.use('*', createUiSessionAuthMiddleware(cookieAuthenticator));
+    app.route(
+      '/api/maps',
+      createMapsRouter({
+        sentinelSettingsStore: store,
+        resolveRequestContext,
+        logger,
+        now: () => 1_000_000,
+        outboundEvents: {
+          record: input => {
+            rows.push(input);
+            return Promise.resolve();
+          },
+        },
+      }),
+    );
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(pngResponse()));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const get = (path: string) =>
+    Promise.resolve(app.request(`/api/maps/tiles/${path}`, { headers: { Cookie: 'accessToken=session' } }));
+
+  it('records each tile fetched from the map service with its host only, and nothing for a cached tile', async () => {
+    expect((await get('3/1/1.png')).status).toBe(200);
+    expect((await get('3/1/1.png')).status).toBe(200);
+    expect((await get('3/2/2.png')).status).toBe(200);
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toEqual({
+        tenant_id: 't1',
+        kind: 'map_lookup',
+        host: new URL(configuration.MAPS_TILE_URL).host,
+        model: null,
+        tool_name: null,
+        request_bytes: null,
+        recipient_count: null,
+        subject: null,
+        conversation_id: null,
+      });
+    }
+    expect(JSON.stringify(rows)).not.toMatch(/\/3\/1\/1/);
+  });
+
+  it('records nothing for a refused request', async () => {
+    expect((await get('19/0/0.png')).status).toBe(400);
+    expect(await app.request('/api/maps/tiles/3/1/1.png')).toHaveProperty('status', 401);
+    expect(rows).toEqual([]);
   });
 });
 

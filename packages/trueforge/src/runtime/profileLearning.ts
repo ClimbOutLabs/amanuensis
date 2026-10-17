@@ -36,7 +36,7 @@
  * registry, the same way runtime/memory/memoryEvents.ts registers `aman.memory.recall`.
  */
 import type { SessionAgent, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { newEventId, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import { newEventId, VercelAILLM, type ILLM, type ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Logger } from 'winston';
@@ -341,6 +341,8 @@ export interface ProfileLearningDrainMember {
   eventStore: ICompletedTurnEventStore;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
   memoryClient: MemoryClient | undefined;
   tenantId: string;
   createdBy: string;
@@ -474,6 +476,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
           logger: params.logger,
           signal: AbortSignal.timeout(DISTILLATION_TIMEOUT_MS),
           streamTimeout,
+          onRequest: params.onModelRequest,
         }),
         providerType: providerConfig.provider.type,
         budget: params.tokenFactoryBudget,

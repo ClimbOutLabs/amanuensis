@@ -52,6 +52,7 @@ export const TABLES_TO_MOVE = [
   'global_settings',
   'token_factory_usage',
   'sentinel_audit',
+  'outbound_event',
   'sentinel_user_settings',
   'approval_token',
 ] as const;

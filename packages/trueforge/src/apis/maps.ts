@@ -13,11 +13,13 @@
  * offline mode is on or when upstream fails.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
+import type { OutboundEventWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import { fetchSameOrigin, readCappedBody } from '../runtime/mapsUpstream';
+import { recordMapRequest } from '../runtime/outboundRecorder';
 import { TENANT_ID } from '../tenancy';
 
 const MAX_IN_FLIGHT = 4;
@@ -48,6 +50,8 @@ export interface MapsRouterDeps {
   sentinelSettingsStore: ISentinelSettingsStore;
   resolveRequestContext: ResolveRequestContext;
   logger: Logger;
+  /** Records each upstream tile fetch; cache hits send nothing and record nothing. */
+  outboundEvents?: OutboundEventWriter | undefined;
   now?: () => number;
 }
 
@@ -283,6 +287,9 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
         url: upstreamUrl,
         headers: { 'User-Agent': configuration.MAPS_USER_AGENT, Accept: 'image/png,image/*' },
         timeoutMs: UPSTREAM_TIMEOUT_MS,
+        onRequest: host => {
+          recordMapRequest({ writer: deps.outboundEvents, tenant_id: requestContext.tenant_id, host });
+        },
       });
       if (!upstream.ok) {
         await upstream.body?.cancel();

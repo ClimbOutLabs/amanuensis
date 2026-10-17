@@ -81,7 +81,8 @@ export type SettingsSection =
   | 'sandbox'
   | 'personalization'
   | 'themes'
-  | 'permissions';
+  | 'permissions'
+  | 'what-left';
 
 export type HistoryAgentFilter = {
   agentId?: string;
