@@ -11,7 +11,8 @@ describe('createChatImagesCatalog', () => {
     const fetch = vi.fn((_url: RequestInfo | URL, _init?: RequestInit) =>
       Promise.resolve(jsonResponse({ data: { status: 'ask', count: 2, host: null } })),
     );
-    const catalog = createChatImagesCatalog({ baseUrl: '/app/', token: 'invented-token', fetch });
+    const bearer = 'invented-bearer-value';
+    const catalog = createChatImagesCatalog({ baseUrl: '/app/', token: bearer, fetch });
     await expect(
       catalog.showTurnImages({
         sessionId: 's 1',
@@ -23,7 +24,7 @@ describe('createChatImagesCatalog', () => {
     const [url, init] = fetch.mock.calls[0] ?? [];
     expect(url).toBe('/app/api/chat-images/sessions/s%201/turns/t1');
     expect(init?.credentials).toBe('same-origin');
-    expect(JSON.stringify(init?.headers)).not.toContain('invented-token');
+    expect(JSON.stringify(init?.headers)).not.toContain(bearer);
     expect(init?.body).toBe(JSON.stringify({ source: { kind: 'email', tool_call_id: 'm' }, approved: false }));
   });
 

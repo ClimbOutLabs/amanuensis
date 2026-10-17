@@ -12,7 +12,7 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]);
 const owner = { tenant_id: 'default', created_by: 'user-a' };
 const ref = { owner, session_id: 's1', turn_id: 't1' };
 const CREATED = '2026-10-17T00:00:00.000Z';
-const INVENTED_SECRET = 'invented-server-secret-value';
+const SERVER_HELD_VALUE = 'invented-server-held-value';
 
 function turnCreated(fileData: string[]): PersistedTurnEvent {
   return {
@@ -105,7 +105,7 @@ function setup(options: {
       audit: { record: input => Promise.resolve(void audits.push(input)) },
       isOffline: () => Promise.resolve(options.offline ?? false),
       searchWithoutAsking: () => Promise.resolve(options.searchWithoutAsking ?? true),
-      outboundSecrets: () => Promise.resolve([INVENTED_SECRET]),
+      outboundSecrets: () => Promise.resolve([SERVER_HELD_VALUE]),
     },
     fetchDeps: {
       fetchImpl: async (url: unknown) => {
@@ -292,7 +292,7 @@ describe('reply images', () => {
   });
 
   it('asks when the outbound guard trips, and blocks a server secret even after approval', async () => {
-    const leaky = `https://example.com/p.png?k=${INVENTED_SECRET}`;
+    const leaky = `https://example.com/p.png?k=${SERVER_HELD_VALUE}`;
     const env = setup({ events: [modelMessage({ id: 'e1', content: `![x](${leaky})` })] });
     await expect(
       env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: leaky }, approved: false } }),
