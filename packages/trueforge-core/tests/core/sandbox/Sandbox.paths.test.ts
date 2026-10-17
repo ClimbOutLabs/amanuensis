@@ -825,7 +825,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result =
@@ -913,7 +913,7 @@ describe('Sandbox provider-owned paths', () => {
     );
 
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
-    const applyIndex = commandOrder.findIndex(command => command.startsWith('git apply --recount --unidiff-zero -- '));
+    const applyIndex = commandOrder.findIndex(command => command.includes('git apply --recount --unidiff-zero -- '));
     const durableIndex = commandOrder.lastIndexOf('load-durable-grant');
     const checkoutIndex = commandOrder.map(command => command.startsWith('ls -di ')).lastIndexOf(true);
     const branchIndex = commandOrder.findIndex(
@@ -950,7 +950,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse HEAD') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: grant.plan.head_sha } });
       }
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result = params.command === 'git rev-parse --show-toplevel' ? '/repo' : 'ok';
@@ -2428,7 +2428,7 @@ describe('Sandbox provider-owned paths', () => {
         content: Buffer.from(patch.replace('@@ -1 +1 @@', '@@ -1,1 +1,1 @@'), 'utf-8'),
       }),
     );
-    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.startsWith('git apply'));
+    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]).toEqual(expect.objectContaining({ cwd: '/repo' }));
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
@@ -2553,7 +2553,7 @@ describe('Sandbox provider-owned paths', () => {
     );
     const patchCalls = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .filter(callArgs => callArgs.command.startsWith('git apply'));
+      .filter(callArgs => callArgs.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
     expect(patchCalls[1]?.command).toContain('git apply --recount --');
@@ -2641,7 +2641,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toMatch(/mixes|embeds/i);
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(callArgs => callArgs[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(callArgs => callArgs[0].command.includes('git apply'))).toBe(false);
   });
 
   it('rejects ambiguous plain multi-file diffs instead of corrupting their hunk boundaries', async () => {
@@ -2664,7 +2664,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toContain('Git-format unified diff');
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(call => call[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(call => call[0].command.includes('git apply'))).toBe(false);
   });
 
   it('sends exact text replacements as data through one approval-gated edit', async () => {
@@ -3058,7 +3058,7 @@ describe('Sandbox provider-owned paths', () => {
 
     const response = await sandbox.callTool(call, { status: 'allow', scope: 'once' }, context);
 
-    expect(exec.mock.calls.filter(call => call[0].command.startsWith('git apply'))).toHaveLength(1);
+    expect(exec.mock.calls.filter(call => call[0].command.includes('git apply'))).toHaveLength(1);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
   });
 
@@ -3348,10 +3348,7 @@ describe('Sandbox provider-owned paths', () => {
     try {
       let trackedChanged = false;
       const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-        if (
-          params.command.startsWith('git apply --recount --unidiff-zero -- ') &&
-          !params.command.includes('--check')
-        ) {
+        if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
           trackedChanged = true;
           // The provider mutated the checkout, then did not return until after
           // the original fixed 90-second workspace lease had expired.

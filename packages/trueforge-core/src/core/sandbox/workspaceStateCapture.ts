@@ -30,26 +30,42 @@ export interface TrackedWorktreeEntry {
 }
 
 /**
- * Pairs each regular file with its hash and checks the listing covers exactly the index's paths.
- * Submodules are left out, matching the capture's `diff.ignoreSubmodules=all`.
+ * True when a path came out of the exec output altered: undecodable bytes turn into U+FFFD, so two
+ * distinct names could read as one and an edit to either would go unseen.
+ */
+export function pathLostBytes(path: string): boolean {
+  return path.includes('\uFFFD');
+}
+
+/**
+ * Pairs each regular file with its hash and checks the listing covers exactly the index's paths, as
+ * often as the index lists them (once per conflict stage). Fails closed on any path that lost bytes
+ * or repeats where the index does not. Submodules are left out, matching `diff.ignoreSubmodules=all`.
  */
 export function parseTrackedWorktreeListing(input: {
   listing: string;
   indexEntries: string;
 }): TrackedWorktreeEntry[] | undefined {
-  const indexPaths = new Set<string>();
+  const indexCounts = new Map<string, number>();
+  const indexKeys = new Set<string>();
   const submodulePaths = new Set<string>();
   for (const entry of input.indexEntries.split('\0')) {
     if (entry === '') {
       continue;
     }
-    const match = /^(\d{6}) [0-9a-f]+ \d\t(.+)$/su.exec(entry);
+    const match = /^(\d{6}) [0-9a-f]+ (\d)\t(.+)$/su.exec(entry);
     const mode = match?.[1];
-    const path = match?.[2];
-    if (mode === undefined || path === undefined) {
+    const stage = match?.[2];
+    const path = match?.[3];
+    if (mode === undefined || stage === undefined || path === undefined || pathLostBytes(path)) {
       return undefined;
     }
-    indexPaths.add(path);
+    const key = `${stage}\t${path}`;
+    if (indexKeys.has(key)) {
+      return undefined;
+    }
+    indexKeys.add(key);
+    indexCounts.set(path, (indexCounts.get(path) ?? 0) + 1);
     if (mode === '160000') {
       submodulePaths.add(path);
     }
@@ -58,7 +74,7 @@ export function parseTrackedWorktreeListing(input: {
   if (tokens.pop() !== '') {
     return undefined;
   }
-  const entries = new Map<string, TrackedWorktreeEntry>();
+  const listed: TrackedWorktreeEntry[] = [];
   let unhashed: TrackedWorktreeEntry[] = [];
   let index = 0;
   while (index < tokens.length) {
@@ -77,17 +93,39 @@ export function parseTrackedWorktreeListing(input: {
     }
     const path = tokens[index + 1];
     const value = tokens[index + 2];
-    if (kind === undefined || !/^[lfxdom]$/u.test(kind) || path === undefined || value === undefined) {
+    if (
+      kind === undefined ||
+      !/^[lfxdom]$/u.test(kind) ||
+      path === undefined ||
+      value === undefined ||
+      pathLostBytes(path)
+    ) {
       return undefined;
     }
     const entry = { path, kind, value };
-    entries.set(path, entry);
+    listed.push(entry);
     if (kind === 'f' || kind === 'x') {
       unhashed.push(entry);
     }
     index += 3;
   }
-  if (unhashed.length > 0 || entries.size !== indexPaths.size || [...indexPaths].some(path => !entries.has(path))) {
+  if (unhashed.length > 0) {
+    return undefined;
+  }
+  const entries = new Map<string, TrackedWorktreeEntry>();
+  const listedCounts = new Map<string, number>();
+  for (const entry of listed) {
+    const earlier = entries.get(entry.path);
+    if (earlier !== undefined && (earlier.kind !== entry.kind || earlier.value !== entry.value)) {
+      return undefined;
+    }
+    entries.set(entry.path, entry);
+    listedCounts.set(entry.path, (listedCounts.get(entry.path) ?? 0) + 1);
+  }
+  if (
+    listedCounts.size !== indexCounts.size ||
+    [...indexCounts].some(([path, count]) => listedCounts.get(path) !== count)
+  ) {
     return undefined;
   }
   return [...entries.values()].filter(entry => !submodulePaths.has(entry.path));

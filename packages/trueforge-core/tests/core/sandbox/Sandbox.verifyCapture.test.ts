@@ -23,6 +23,7 @@ import {
 } from '../../../src/core/sandbox/provider/Provider';
 import {
   Sandbox,
+  SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   type BoundRepository,
@@ -318,6 +319,78 @@ describe('verification state capture in a bound repository', () => {
         approved: true,
       });
       expect(changed.text).toContain(CHANGED_STATE);
+      expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('tracked names that differ only in undecodable bytes fail closed instead of hiding an edit', async () => {
+    const fixture = repoFixture();
+    try {
+      execFileSync('sh', ['-c', `printf 1 > "$(printf 'x\\376')" && printf 1 > "$(printf 'x\\377')" && git add -A`], {
+        cwd: fixture.repo,
+      });
+      git(fixture.repo, ['commit', '-q', '-m', 'two']);
+      const sandbox = boundSandbox(fixture, realProvider(fixture, []));
+
+      const result = await run({
+        sandbox,
+        fixture,
+        command: projectCheck({ fixture, name: 'check-undecodable', body: `printf CHANGED > "$(printf 'x\\376')"` }),
+        purpose: 'verify',
+        approved: true,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('Could not capture the Git repository state');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('an approved apply_patch never runs a filter program the repository config defines', async () => {
+    const fixture = repoFixture();
+    try {
+      git(fixture.repo, ['checkout', '--', 'f.txt']);
+      writeFileSync(join(fixture.repo, '.gitattributes'), '* filter=evil\n');
+      git(fixture.repo, ['add', '.gitattributes']);
+      git(fixture.repo, ['commit', '-q', '-m', 'attributes']);
+      git(fixture.repo, ['config', 'filter.evil.clean', fixture.script]);
+      git(fixture.repo, ['config', 'filter.evil.smudge', fixture.script]);
+      git(fixture.repo, ['config', 'filter.evil.required', 'true']);
+      rmSync(fixture.marker, { force: true });
+      const sandbox = boundSandbox(fixture, realProvider(fixture, []));
+      const call = {
+        name: SANDBOX_APPLY_PATCH_TOOL_NAME,
+        arguments: {
+          intent: 'change the file',
+          cwd: fixture.repo,
+          patch_lines: [
+            'diff --git a/f.txt b/f.txt',
+            '--- a/f.txt',
+            '+++ b/f.txt',
+            '@@ -1 +1 @@',
+            '-one',
+            '+patched',
+            '',
+          ],
+        },
+      };
+      const info = await sandbox.toolCallInfo(call, true);
+      const result = toolText(
+        await sandbox.callTool(
+          call,
+          { status: 'allow', scope: 'once' },
+          {
+            admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+            ...(info.structured_edit_precondition === undefined
+              ? {}
+              : { structured_edit_precondition: info.structured_edit_precondition }),
+          },
+        ),
+      );
+      expect(result.isError).toBe(false);
+      expect(readFileSync(join(fixture.repo, 'f.txt'), 'utf8')).toBe('patched\n');
       expect(existsSync(fixture.marker)).toBe(false);
     } finally {
       fixture.cleanup();

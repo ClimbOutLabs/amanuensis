@@ -7,6 +7,10 @@ function index(entries: readonly [mode: string, path: string][]): string {
   return entries.map(([mode, path]) => `${mode} ${SHA_A} 0\t${path}\0`).join('');
 }
 
+function conflictIndex(path: string): string {
+  return ['1', '2', '3'].map(stage => `100644 ${SHA_A} ${stage}\t${path}\0`).join('');
+}
+
 describe('parseTrackedWorktreeListing', () => {
   it('pairs each regular file with its batch hash and keeps symlink targets and missing paths', () => {
     const listing = `f\0a.txt\0\0l\0link\0a.txt\n\0m\0gone.txt\0\0x\0run.sh\0\0H\0${SHA_A}\n${SHA_B}\n\0`;
@@ -44,5 +48,41 @@ describe('parseTrackedWorktreeListing', () => {
     ['output that is not a listing', 'ok'],
   ])('rejects %s', (_name, listing) => {
     expect(parseTrackedWorktreeListing({ listing, indexEntries: index([['100644', 'a.txt']]) })).toBeUndefined();
+  });
+
+  it('accepts a conflicted path listed once per index stage', () => {
+    expect(
+      parseTrackedWorktreeListing({
+        listing: `f\0c.txt\0\0f\0c.txt\0\0f\0c.txt\0\0H\0${SHA_B}\n${SHA_B}\n${SHA_B}\n\0`,
+        indexEntries: conflictIndex('c.txt'),
+      }),
+    ).toEqual([{ path: 'c.txt', kind: 'f', value: SHA_B }]);
+  });
+
+  it.each([
+    [
+      'an index path that lost bytes in decoding',
+      { listing: `f\0x\uFFFD\0\0H\0${SHA_A}\n\0`, indexEntries: index([['100644', 'x\uFFFD']]) },
+    ],
+    [
+      'a listed path that lost bytes in decoding',
+      { listing: `f\0a\uFFFD\0\0H\0${SHA_A}\n\0`, indexEntries: index([['100644', 'a.txt']]) },
+    ],
+    [
+      'two index entries that decode to one name',
+      {
+        listing: `f\0x\0\0f\0x\0\0H\0${SHA_A}\n${SHA_B}\n\0`,
+        indexEntries: index([
+          ['100644', 'x'],
+          ['100644', 'x'],
+        ]),
+      },
+    ],
+    [
+      'a path listed more often than the index holds it',
+      { listing: `f\0x\0\0f\0x\0\0H\0${SHA_A}\n${SHA_B}\n\0`, indexEntries: index([['100644', 'x']]) },
+    ],
+  ])('rejects %s', (_name, input) => {
+    expect(parseTrackedWorktreeListing(input)).toBeUndefined();
   });
 });

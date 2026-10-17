@@ -113,6 +113,7 @@ import { pushCardFields } from './slots/git/pushCard';
 import {
   GIT_INDEX_ENTRIES_COMMAND,
   parseTrackedWorktreeListing,
+  pathLostBytes,
   TRACKED_WORKTREE_COMMAND,
 } from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
@@ -778,6 +779,26 @@ function normalizedRepositoryPath(value: string): string {
   const normalized = value.trim().replace(/\\/gu, '/');
   const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/u, '') : normalized;
   return /^[A-Za-z]:\//u.test(withoutTrailingSlash) ? withoutTrailingSlash.toLowerCase() : withoutTrailingSlash;
+}
+
+/**
+ * `git apply` against a throwaway empty repository, so the workspace's own config is never read: a
+ * `.gitattributes` may still name a filter driver, but no driver program is defined to run. Paths
+ * resolve as before, against the toplevel discovered from the cwd when there is one.
+ */
+function buildIsolatedGitApplyCommand(input: { patchPath: string; scratchDir: string; check: boolean }): string {
+  return [
+    '(',
+    'top=$(git rev-parse --show-toplevel 2>/dev/null) || top=',
+    `git_dir=$(mktemp -d ${shellEscape(`${input.scratchDir}/git-apply.XXXXXX`)}) || exit 1`,
+    'git init -q --bare --template= "$git_dir" >/dev/null || { rm -rf "$git_dir"; exit 1; }',
+    'if [ -n "$top" ]; then GIT_WORK_TREE=$top; export GIT_WORK_TREE; else unset GIT_WORK_TREE; fi',
+    `GIT_DIR=$git_dir git apply --recount --unidiff-zero${input.check ? ' --check' : ''} -- ${shellEscape(input.patchPath)}`,
+    'status=$?',
+    'rm -rf "$git_dir"',
+    'exit $status',
+    ')',
+  ].join('\n');
 }
 
 function buildAbnormalHandoffCaptureCommand(input: { artifactPath: string; expectedWorkspaceRoot: string }): string {
@@ -3633,6 +3654,9 @@ export class Sandbox extends LocalToolMCP {
         .split('\0')
         .filter(path => path.length > 0)
         .sort((left, right) => left.localeCompare(right));
+      if (untrackedPaths.some(pathLostBytes) || new Set(untrackedPaths).size !== untrackedPaths.length) {
+        return undefined;
+      }
       const untrackedFiles: { path: string; objectSha: string }[] = [];
       for (const path of untrackedPaths) {
         const objectSha = (
@@ -5262,7 +5286,8 @@ export class Sandbox extends LocalToolMCP {
     }
     const normalizedPatch = finalNormalizedPatch;
     const normalizedPatchDigest = createHash('sha256').update(normalizedPatch).digest('hex');
-    const patchPath = `${this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '')}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
+    const patchDir = this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '');
+    const patchPath = `${patchDir}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
     await this.provider.uploadFile({
       sandboxId: rawId,
       remotePath: patchPath,
@@ -5295,7 +5320,7 @@ export class Sandbox extends LocalToolMCP {
           // OpenAI-format apply_patch hunk with no removed/context lines) declares a zero-length
           // old side. Without this flag `git apply` silently mis-locates such a hunk — it applies
           // without error, but at the wrong offset — instead of honoring the declared position.
-          command: `git apply --recount --unidiff-zero --check -- ${shellEscape(patchPath)}`,
+          command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: true }),
           env: gitHardeningEnv({ workspaceRoot }),
           cwd: input.cwd,
         });
@@ -5324,7 +5349,7 @@ export class Sandbox extends LocalToolMCP {
             hostAuthored: true,
             sandboxId: rawId,
             workspaceRoot,
-            command: `git apply --recount --unidiff-zero -- ${shellEscape(patchPath)}`,
+            command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: false }),
             env: gitHardeningEnv({ workspaceRoot }),
             cwd: input.cwd,
           }),
