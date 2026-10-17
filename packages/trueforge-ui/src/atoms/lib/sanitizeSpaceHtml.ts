@@ -85,7 +85,7 @@ function isAllowedUseReference(value: string): boolean {
  * optional plain-word fallback paint (`url(#grad) red`).
  */
 function isFragmentUrl(value: string): boolean {
-  return /^url\(\s*(['"]?)#[^'"()\s]*\1\s*\)(?:\s+[a-zA-Z0-9#%.,\s-]+)?$/i.test(value.trim());
+  return /^url\(\s*(['"]?)#[^'"()\s]*\1\s*\)(?:\s+[a-zA-Z0-9#%.,-][a-zA-Z0-9#%.,\s-]*)?$/i.test(value.trim());
 }
 
 /**
@@ -265,10 +265,28 @@ const SVG_PRESENTATION_ATTRIBUTES = [
  * The element allow-lists, one per namespace: tag name to the attributes that element may carry
  * beyond the global set. HTML and SVG share tag names (`a`, `style`, `title`) but not rules, so
  * they never share an entry. SVG tag names are spelled as parsed (`clipPath`, `linearGradient`,
- * ...). An element in any other namespace (MathML, unknown), or absent from its list, is removed with its contents: scripts, frames, forms and every form control,
- * media elements, embedded documents, SMIL animation, `template`, and anything unrecognised.
+ * ...). An HTML element absent from its list is unwrapped: its tag goes and its sanitised children
+ * stay, so wording in `del`, `label` or `center` is never lost. Elements in `DROPPED_HTML_ELEMENTS`,
+ * unlisted SVG elements and anything in another namespace (MathML, unknown) are removed with their
+ * contents.
  */
 const HTML_ELEMENTS = new Map<string, ReadonlySet<string>>();
+
+/** HTML elements whose contents are code, embedded documents or hidden payloads, never page text. */
+const DROPPED_HTML_ELEMENTS: ReadonlySet<string> = new Set([
+  'applet',
+  'embed',
+  'frame',
+  'frameset',
+  'iframe',
+  'noembed',
+  'noframes',
+  'noscript',
+  'object',
+  'script',
+  'template',
+  'title',
+]);
 const SVG_ELEMENTS = new Map<string, ReadonlySet<string>>();
 
 function allowElement(tag: string, attributes: readonly string[]): void {
@@ -438,7 +456,7 @@ function allowedAttributesFor(element: Element): ReadonlySet<string> | undefined
  */
 type UrlRule = 'link' | 'use-reference' | 'fragment';
 
-function urlRuleFor(tag: string, attribute: string): UrlRule | null {
+function urlRuleFor({ tag, attribute }: { tag: string; attribute: string }): UrlRule | null {
   if (attribute === 'href' || attribute === 'xlink:href') {
     if (tag === 'a') return 'link';
     if (tag === 'use') return 'use-reference';
@@ -455,11 +473,23 @@ function urlPasses(rule: UrlRule, value: string): boolean {
   return isFragmentReference(value);
 }
 
+/** Drops the tag and keeps its children, sanitised first so nothing unsafe is promoted. */
+function unwrapElement(element: Element): void {
+  for (const child of Array.from(element.children)) {
+    sanitiseElement(child);
+  }
+  element.replaceWith(...Array.from(element.childNodes));
+}
+
 function sanitiseElement(element: Element): void {
   const tag = element.localName;
   const allowedAttributes = allowedAttributesFor(element);
   if (allowedAttributes === undefined) {
-    element.remove();
+    if (element.namespaceURI === HTML_NAMESPACE && !DROPPED_HTML_ELEMENTS.has(tag)) {
+      unwrapElement(element);
+    } else {
+      element.remove();
+    }
     return;
   }
 
@@ -498,7 +528,7 @@ function sanitiseElement(element: Element): void {
       element.setAttribute('style', scrubCss(attr.value));
       continue;
     }
-    const rule = urlRuleFor(tag, name);
+    const rule = urlRuleFor({ tag, attribute: name });
     if (rule !== null && !urlPasses(rule, attr.value)) {
       element.removeAttribute(name);
       continue;
