@@ -11,6 +11,26 @@ lowercase() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 # An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
 # allowed email each. The installer removes them and the doctor reports them, both through this one rule.
 
+# The lines of an env file that Compose reads as KEY, as a POSIX ERE for awk under LC_ALL=C: any blanks (a no-break
+# space too) before it, `export` and blanks, blanks before `=` or `:`, or the bare key, which takes the caller's value.
+# Broad on purpose: a line it wrongly takes is only removed, a line it missed would keep its users.
+env_key_line_re() { # key
+  printf '^[^#A-Za-z0-9_]*(export[^#A-Za-z0-9_]+)?%s[^#A-Za-z0-9_=:]*([=:]|$)' "$1"
+}
+
+# The value of every line Compose reads as KEY, as Compose reads it: unquoted, without a trailing comment or CR.
+env_key_values() { # env file, key
+  [ -f "$1" ] || return 0
+  LC_ALL=C awk -v re="$(env_key_line_re "$2")" -v q="'" '
+    $0 ~ re {
+      sub(re, ""); sub(/\r$/, ""); sub(/^[ \t]+/, "")
+      c = substr($0, 1, 1)
+      if (c == "\"" || c == q) { $0 = substr($0, 2); n = index($0, c); if (n) $0 = substr($0, 1, n - 1) }
+      else { sub(/[ \t]#.*/, ""); sub(/[ \t]+$/, "") }
+      print
+    }' "$1"
+}
+
 # What to call the sign-in users of an instance beyond its owner, comma separated: their emails, else the names behind
 # leftover records and password hashes. Empty when only the owner can sign in. Every OIDC_ALLOWED_EMAILS line counts
 # because Compose reads the last one, wherever it sits. Hashes are never printed.
@@ -19,13 +39,12 @@ extra_sign_in_users() { # registry file, instance folder
   owner=$(sed -n 's/^owner_email=//p' "$reg" 2>/dev/null | head -n 1)
   # With the record gone, the first allowed email is taken for the owner's.
   if [ -z "$owner" ]; then
-    owner=$(sed -n 's/^\(export[ \t]*\)\{0,1\}OIDC_ALLOWED_EMAILS=//p' "$dir/.env" 2>/dev/null | head -n 1 | cut -d, -f1)
-    owner=$(printf '%s' "$owner" | awk '{ gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, ""); print }')
+    owner=$(env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | head -n 1 | cut -d, -f1)
   fi
   emails=$(
     {
       sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
-      sed -n 's/^\(export[ \t]*\)\{0,1\}OIDC_ALLOWED_EMAILS=//p' "$dir/.env" 2>/dev/null | tr ',' '\n'
+      env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | tr ',' '\n'
     } | LC_ALL=C awk -v owner="$(lowercase "$owner")" '
       { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
       e != "" && e != owner && !seen[e]++ { print e }'

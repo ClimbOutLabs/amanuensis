@@ -28,7 +28,7 @@ The hosted default (`STANDALONE=false`; standalone always needs login). Do **not
   The Helm chart defaults to this mode (`configs.oidc.enabled: false`) plus a well-known bundled Postgres password and Redis without auth — see the [chart README](https://github.com/truefoundry/trueforge/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing) before exposing a release.
 </Warning>
 
-## Option B — turn login on
+## Option B: turn login on
 
 The installer and the Compose `login` profile ([Turn on login](/quickstart#turn-on-login)) set Aman's sign-in service up and fill in the values below. To set it up by hand, set these variables together; partial config fails startup.
 

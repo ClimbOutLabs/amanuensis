@@ -655,17 +655,17 @@ describe('instance settings file', () => {
     const OWNER = 'owner@x.invalid';
     const fixCommand = 'Run aman doctor instance --fix';
 
-    function setUp({ allowed, hashes = [], registered = true }) {
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
       world?.dispose();
       make();
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
-      world.writeEnv('main', 0o600, allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`);
+      world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
         mkdirSync(dir, { recursive: true });
-        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n`);
+        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n${records}`);
       }
       return find(world.json().doc.instances.main, 'config');
     }
@@ -722,6 +722,51 @@ describe('instance settings file', () => {
       const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
       assert.equal(check.state, 'warn');
       assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+    });
+
+    for (const [what, line] of [
+      ['an indented line', '  OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['a tab-indented line', '\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and a tab', 'export\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and several spaces', '  export   OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['blanks around the equals sign', 'OIDC_ALLOWED_EMAILS = late@x.invalid'],
+      ['a colon for the equals sign', 'OIDC_ALLOWED_EMAILS: late@x.invalid'],
+      ['a no-break space before it', '\u00a0OIDC_ALLOWED_EMAILS=late@x.invalid'],
+    ]) {
+      it(`reads an allowed-emails line Compose also reads: ${what}`, () => {
+        const check = setUp({ envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n${line}\n` });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+        assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    it('warns about a user record left in the registry when the emails are the owner only', () => {
+      const check = setUp({ allowed: OWNER, records: 'user_judge1=member:judge1@x.invalid\n' });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+    });
+
+    for (const [what, value] of [
+      ['double quotes', `"${OWNER}"`],
+      ['single quotes', `'${OWNER}'`],
+      ['quotes and a comment', `"${OWNER}" # the owner`],
+      ['a comment', `${OWNER} # the owner`],
+      ['a Windows line ending', `${OWNER}\r`],
+    ]) {
+      it(`is quiet when the owner-only value has ${what}`, () => {
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `  export OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n`, registered: false }).state, 'ok');
+      });
+    }
+
+    it('does not take a comment or a longer name for the allowed emails', () => {
+      const check = setUp({
+        envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n# OIDC_ALLOWED_EMAILS=late@x.invalid\nOIDC_ALLOWED_EMAILS_NOTE=late@x.invalid\n`,
+      });
+      assert.equal(check.state, 'ok');
     });
 
     it('no longer mentions members or add-user', () => {

@@ -54,8 +54,8 @@ Point the client at your server's `baseUrl`, and pass a `token` only when the se
 
     **Where to get the ID token:**
 
-    - **From the sign-in service** — run a standard OIDC Authorization Code flow against Aman's sign-in service (the one TrueForge is configured with) and read the `id_token` from the response.
-    - **From a browser session** — after you sign in to the TrueForge UI, the sign-in service has already issued an ID token; reuse one from that same flow.
+    - **From the sign-in service**: run a standard OIDC Authorization Code flow against Aman's sign-in service (the one TrueForge is configured with) and read the `id_token` from the response.
+    - **From a browser session**: after you sign in to the TrueForge UI, the sign-in service has already issued an ID token; reuse one from that same flow.
 
     There's no device-code or client-credentials flow yet, so keep ID token lifetimes short and refresh as needed. A missing or expired token against an OIDC-enabled server returns `401`.
   </Tab>

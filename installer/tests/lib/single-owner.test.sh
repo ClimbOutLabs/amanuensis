@@ -161,6 +161,31 @@ test_a_late_allowed_emails_line_is_removed() {
   sandbox_drop
 }
 
+test_every_allowed_emails_line_compose_reads_is_removed() {
+  t_begin "indented, export and spaced allowed-emails lines are counted, planned and removed like plain ones"
+  sandbox_new
+  install_machine
+  local env=$AMAN_HOME/instances/main/.env line
+  printf 'MY_OWN_SETTING=keep-me\n' >>"$env"
+  for line in '  OIDC_ALLOWED_EMAILS=late@demo.invalid' $'\tOIDC_ALLOWED_EMAILS=late@demo.invalid' \
+    $'export\tOIDC_ALLOWED_EMAILS=late@demo.invalid' '  export   OIDC_ALLOWED_EMAILS=late@demo.invalid' \
+    'OIDC_ALLOWED_EMAILS = late@demo.invalid' 'OIDC_ALLOWED_EMAILS: late@demo.invalid' \
+    $'\xc2\xa0OIDC_ALLOWED_EMAILS=late@demo.invalid'; do
+    printf '%s\n' "$line" >>"$env"
+    run_install --dry-run
+    assert_rc 0
+    assert_flat_contains "$OUT" "Remove late@demo.invalid from instance main"
+    assert_contains "$(cat "$env")" "$line" "a dry run changes nothing"
+    run_install instance refresh main
+    assert_rc 0
+    assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed late@demo.invalid from instance main."
+    assert_eq "$(grep -c 'OIDC_ALLOWED_EMAILS' "$env")" 1 "only the managed allowlist line is left"
+    assert_single_owner
+    assert_contains "$(cat "$env")" "MY_OWN_SETTING=keep-me"
+  done
+  sandbox_drop
+}
+
 test_refresh_removes_extra_users() {
   t_begin "instance refresh, which is the doctor's fix, removes the extra users"
   sandbox_new
@@ -234,6 +259,7 @@ test_install_rerun_removes_extra_users
 test_upgrade_removes_extra_users
 test_upgrade_recreates_an_instance_that_lost_users
 test_a_late_allowed_emails_line_is_removed
+test_every_allowed_emails_line_compose_reads_is_removed
 test_refresh_removes_extra_users
 test_leftover_hashes_without_emails
 test_a_hand_edited_allowlist_is_cut_back_to_the_owner

@@ -279,7 +279,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | `postgresql.enabled`   | `true`  | Bundle Postgres; set `false` + `externalPostgres.*` to bring your own.   |
     | `redis.enabled`        | `true`  | Bundle Redis; set `false` + `externalRedis.url` (string or `valueFrom`). |
     | `server.publicBaseUrl` | `""`    | Public origin; required for OIDC and MCP OAuth callbacks.                |
-    | `configs.oidc.enabled` | `false` | Enable login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
+    | `configs.oidc.enabled` | `false` | Enable login via `configs.oidc.*`. Default off = shared local admin; see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
 
   </Tab>
 </Tabs>
