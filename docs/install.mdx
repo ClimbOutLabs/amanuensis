@@ -234,7 +234,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ### Exporting one person's data
 
-To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. This is a command for whoever runs the instance; the app itself has no export button yet. The command reads the database and memory files directly, so it needs no sign-in and the instance must be running.
+To move a person's chats (with their persona history), agents, personas, spaces, schedules, connectors (without credentials), settings, memory and audit log to another instance, export them from the old one. This is a command for whoever runs the instance; the app itself has no export button yet. The command reads the database and memory files directly, so it needs no sign-in and the instance must be running.
 
 ```bash
 aman export-data --list-users                              # who owns chats, and how many
