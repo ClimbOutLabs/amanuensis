@@ -9,14 +9,14 @@
  */
 import type { SearchProviderGrant } from '@truefoundry/trueforge-core/core';
 import configuration from '../config';
-import { McpCatalogFileSchema, type CatalogMcpServer } from '../schemas/mcpCatalog';
+import { McpCatalogFileSchema, type CatalogMcpServer, type CatalogPreset } from '../schemas/mcpCatalog';
 import { loadYamlAtPath, parseYamlString } from './loadYaml';
 import { shippedMcpCatalogYaml } from './mcpCatalog.gen';
 
 export class McpCatalog {
-  private readonly mcpServers: readonly CatalogMcpServer[];
+  private readonly mcpServers: readonly CatalogPreset[];
 
-  constructor(mcpServers: readonly CatalogMcpServer[]) {
+  constructor(mcpServers: readonly CatalogPreset[]) {
     this.mcpServers = mcpServers;
   }
 
@@ -26,19 +26,29 @@ export class McpCatalog {
       const file = loadYamlAtPath(configuration.MCP_CATALOG_PATH, McpCatalogFileSchema);
       return new McpCatalog(file.mcp_servers);
     }
+    return McpCatalog.loadShipped();
+  }
+
+  /** The catalog this build ships, ignoring `MCP_CATALOG_PATH`, so a migration gives the same result on every database. */
+  static loadShipped(): McpCatalog {
     const file = parseYamlString(shippedMcpCatalogYaml, McpCatalogFileSchema, 'shipped mcp-catalog');
     return new McpCatalog(file.mcp_servers);
   }
 
+  /** The presets as the public catalog shows them, without what only the server reads. */
   list(): readonly CatalogMcpServer[] {
-    return this.mcpServers;
+    return this.mcpServers.map(entry => {
+      const { search_plumbing_fields: serverOnly, ...preset } = entry;
+      void serverOnly;
+      return preset;
+    });
   }
 
   /**
    * The preset at this endpoint, undefined for any other server. Matched on origin and path so a
    * key carried in the query string does not hide a known provider.
    */
-  presetForUrl(url: string): CatalogMcpServer | undefined {
+  presetForUrl(url: string): CatalogPreset | undefined {
     const key = endpointKey(url);
     if (key === undefined) {
       return undefined;

@@ -10,7 +10,7 @@
  */
 import { sql, type Kysely, type RawBuilder } from 'kysely';
 import type { McpCatalog } from '../catalog/McpCatalog';
-import type { CatalogMcpServer } from '../schemas/mcpCatalog';
+import type { CatalogPreset } from '../schemas/mcpCatalog';
 import { asRecord } from './applyNameHyphenOnlyMigration';
 
 export interface SearchProviderDefaultDialect {
@@ -35,7 +35,7 @@ function searchProviderPreset({
 }: {
   connector: StoredConnector;
   catalog: McpCatalog;
-}): CatalogMcpServer | undefined {
+}): CatalogPreset | undefined {
   const url = connector.manifest['url'];
   if (connector.manifest['type'] !== 'remote' || typeof url !== 'string') {
     return undefined;
@@ -51,7 +51,7 @@ function connectorToDesignate({
 }: {
   connectors: readonly StoredConnector[];
   catalog: McpCatalog;
-}): { id: string; preset: CatalogMcpServer } | undefined {
+}): { id: string; preset: CatalogPreset } | undefined {
   if (connectors.some(connector => connector.manifest['search_provider'] !== undefined)) {
     return undefined;
   }

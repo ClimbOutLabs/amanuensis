@@ -433,6 +433,23 @@ describe('outbound guard: provider plumbing fields', () => {
     expect(ruleWithPlumbing({ args: { model_name: 'm'.repeat(OUTBOUND_MAX_PLUMBING_CHARS + 1) } })).toBe('too_long');
   });
 
+  test('an encoded secret in a plumbing field is held, not exempt', () => {
+    const base64Token = Buffer.from(githubToken).toString('base64');
+    const hexToken = Buffer.from(githubToken).toString('hex');
+    const base64UrlText = Buffer.from('my private notes about the lease dispute with the landlord').toString(
+      'base64url',
+    );
+    for (const value of [base64Token, hexToken, base64UrlText]) {
+      expect(value.length).toBeGreaterThan(OUTBOUND_MAX_PLUMBING_CHARS);
+      expect(ruleWithPlumbing({ args: { session_id: value } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { model_name: value } })).toBe('encoded_run');
+    }
+  });
+
+  test('a plumbing value outside the identifier shape is read as user text', () => {
+    expect(ruleWithPlumbing({ args: { session_id: `${inventedHexId} ${inventedBase64Url}` } })).toBe('encoded_run');
+  });
+
   test('a secret split between a plumbing value and the next call is still seen whole', () => {
     const first = collectOutboundStrings({ session_id: githubToken.slice(0, 12) }, plumbing);
     if (first === undefined) {
