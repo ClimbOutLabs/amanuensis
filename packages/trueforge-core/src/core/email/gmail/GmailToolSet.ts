@@ -83,8 +83,9 @@ interface GmailToolSetOptions {
   listDeadlineMs: number;
 }
 
+/** Every error is cleaned on the way out too, so no error path can carry raw mail text to the model. */
 function errorResult(error: string) {
-  return toolResultResponse({ text: JSON.stringify({ error }), isError: true });
+  return toolResultResponse({ text: JSON.stringify(neutralizeDeep({ error })), isError: true });
 }
 
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
