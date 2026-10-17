@@ -550,6 +550,17 @@ async function verifySentinelPreDispatch(input: {
     }
     canonicalParams = rederived;
   }
+  try {
+    const live = await input.toolInfo.toolSet.liveMintParams?.({
+      name: input.toolInfo.originalToolName,
+      arguments: wireArguments,
+    });
+    if (live !== undefined) {
+      canonicalParams = live;
+    }
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
@@ -1510,6 +1521,9 @@ export async function executeToolCalls({
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
+            ...(toolCall.tool_info.mint_canonical_params === undefined
+              ? {}
+              : { approved_params: toolCall.tool_info.mint_canonical_params }),
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),

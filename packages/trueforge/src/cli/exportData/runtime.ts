@@ -39,6 +39,7 @@ async function buildSession<TTransaction>({
     sandboxProviders: stores.sandboxProviderStore,
     mcpServers: stores.mcpServerStore,
     tokens: stores.tokenStore,
+    googleConnections: stores.googleConnectionStore,
   });
   // Memory provider lookups log through this; the command reports failures itself.
   const logger = createLogger({ silent: true });
