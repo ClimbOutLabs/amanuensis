@@ -103,7 +103,9 @@ import {
 import {
   hasReadPrivateData,
   markPrivateDataRead,
+  namesHostAtFetchLimit,
   SEARCH_SILENT_REASON,
+  SILENT_FETCHES_PER_HOST,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
   type SearchAskReason,
@@ -1408,6 +1410,13 @@ async function classifySearchProviderTool(input: {
       'this chat read your email or calendar, and a search could carry it out',
     );
   }
+  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
+  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read something private, like a key or a secrets file, and a search could carry it out',
+    );
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
@@ -1416,6 +1425,12 @@ async function classifySearchProviderTool(input: {
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
     return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+  }
+  if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
+    return held(
+      'mcp_search_host_limit',
+      `this turn already fetched ${String(SILENT_FETCHES_PER_HOST)} pages from that site without asking`,
+    );
   }
   return tier1Decision({
     reason: SEARCH_SILENT_REASON,
@@ -1977,6 +1992,9 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
+  if (decision.sensitive_read && decision.auto_deny === null) {
+    ctx.services.private_reads.markPrivateDataRead(ctx);
+  }
   await recordClassificationAudit({
     services: ctx.services,
     identity: {
