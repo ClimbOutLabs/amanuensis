@@ -229,12 +229,44 @@ describe('the local certificate authority', () => {
         const out = spawnSync('openssl', args, { encoding: 'utf8' });
         assert.equal(out.status, 0, out.stderr);
       };
-      run(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', key, '-out', csr, '-subj', '/CN=x']);
+      run([
+        'req',
+        '-new',
+        '-newkey',
+        'ec',
+        '-pkeyopt',
+        'ec_paramgen_curve:prime256v1',
+        '-nodes',
+        '-keyout',
+        key,
+        '-out',
+        csr,
+        '-subj',
+        '/CN=x',
+      ]);
       writeFileSync(
         ext,
-        ca ? 'basicConstraints=critical,CA:TRUE\nkeyUsage=keyCertSign\n' : `subjectAltName=${san}\nextendedKeyUsage=serverAuth\n`,
+        ca
+          ? 'basicConstraints=critical,CA:TRUE\nkeyUsage=keyCertSign\n'
+          : `subjectAltName=${san}\nextendedKeyUsage=serverAuth\n`,
       );
-      run(['x509', '-req', '-in', csr, '-CA', path.join(issuerDir ?? caDir, 'root.crt'), '-CAkey', path.join(caDir, 'root.key'), '-CAcreateserial', '-days', '30', '-extfile', ext, '-out', crt]);
+      run([
+        'x509',
+        '-req',
+        '-in',
+        csr,
+        '-CA',
+        path.join(issuerDir ?? caDir, 'root.crt'),
+        '-CAkey',
+        path.join(caDir, 'root.key'),
+        '-CAcreateserial',
+        '-days',
+        '30',
+        '-extfile',
+        ext,
+        '-out',
+        crt,
+      ]);
       return { crt, key, work };
     };
     const accepted = ({ caDir, leaf, untrusted }) =>
@@ -244,7 +276,7 @@ describe('the local certificate authority', () => {
         { encoding: 'utf8' },
       ).status === 0;
 
-    it('accepts this computer\'s names and private addresses, and nothing else', () => {
+    it("accepts this computer's names and private addresses, and nothing else", () => {
       const { caDir } = fresh();
       ensureCa({ caDir, names: NAMES });
       for (const san of ['DNS:spark.local', 'DNS:localhost', 'IP:192.168.1.77', 'IP:10.1.2.3']) {
@@ -271,13 +303,54 @@ describe('the local certificate authority', () => {
       const below = signed({ caDir, ca: true });
       assert.ok(accepted({ caDir, leaf: below.crt }), 'the authority itself is signed by the root');
       const work = mkdtempSync(path.join(tmpdir(), 'aman-pki-below-'));
-      const sub = spawnSync('openssl', ['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(work, 'k.pem'), '-out', path.join(work, 'r.csr'), '-subj', '/CN=leaf'], { encoding: 'utf8' });
+      const sub = spawnSync(
+        'openssl',
+        [
+          'req',
+          '-new',
+          '-newkey',
+          'ec',
+          '-pkeyopt',
+          'ec_paramgen_curve:prime256v1',
+          '-nodes',
+          '-keyout',
+          path.join(work, 'k.pem'),
+          '-out',
+          path.join(work, 'r.csr'),
+          '-subj',
+          '/CN=leaf',
+        ],
+        { encoding: 'utf8' },
+      );
       assert.equal(sub.status, 0, sub.stderr);
       writeFileSync(path.join(work, 'e.cnf'), 'subjectAltName=DNS:spark.local\nextendedKeyUsage=serverAuth\n');
       const leaf = path.join(work, 'leaf.crt');
-      const sign = spawnSync('openssl', ['x509', '-req', '-in', path.join(work, 'r.csr'), '-CA', below.crt, '-CAkey', below.key, '-CAcreateserial', '-days', '30', '-extfile', path.join(work, 'e.cnf'), '-out', leaf], { encoding: 'utf8' });
+      const sign = spawnSync(
+        'openssl',
+        [
+          'x509',
+          '-req',
+          '-in',
+          path.join(work, 'r.csr'),
+          '-CA',
+          below.crt,
+          '-CAkey',
+          below.key,
+          '-CAcreateserial',
+          '-days',
+          '30',
+          '-extfile',
+          path.join(work, 'e.cnf'),
+          '-out',
+          leaf,
+        ],
+        { encoding: 'utf8' },
+      );
       assert.equal(sign.status, 0, sign.stderr);
-      assert.ok(!accepted({ caDir, leaf, untrusted: below.crt }), 'a leaf under an authority the root signed is refused');
+      assert.ok(
+        !accepted({ caDir, leaf, untrusted: below.crt }),
+        'a leaf under an authority the root signed is refused',
+      );
     });
   });
 

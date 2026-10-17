@@ -246,7 +246,11 @@ export function ensureCa({ caDir, names = [], now = new Date() }) {
   });
   writeFile({ file: keyFile, text: privateKey.export({ type: 'pkcs8', format: 'pem' }), mode: 0o600 });
   writeFile({ file: certFile, text: pem, mode: 0o644 });
-  writeFile({ file: namesFile(caDir), text: `${JSON.stringify({ version: AUTHORITY_VERSION, names: extras })}\n`, mode: 0o644 });
+  writeFile({
+    file: namesFile(caDir),
+    text: `${JSON.stringify({ version: AUTHORITY_VERSION, names: extras })}\n`,
+    mode: 0o644,
+  });
   const created = new crypto.X509Certificate(pem);
   writeFile({ file: path.join(caDir, 'root.fingerprint'), text: `${fingerprintOf(created)}\n`, mode: 0o644 });
   return { created: true, rotated: exists, notAfter, fingerprint: fingerprintOf(created) };
