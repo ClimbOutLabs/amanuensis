@@ -1117,7 +1117,7 @@ export async function executeToolCalls({
           ? {
               reason_code: 'tool_policy_blocked',
               message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
-              suggested_action: 'change_strategy',
+              suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',

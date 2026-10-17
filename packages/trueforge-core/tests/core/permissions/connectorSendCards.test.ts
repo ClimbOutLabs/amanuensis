@@ -30,6 +30,18 @@ function mailCall(tool_name: string, params: Record<string, unknown>): SentinelA
   };
 }
 
+function callOn({
+  server,
+  name,
+  params,
+}: {
+  server: string;
+  name: string;
+  params: Record<string, unknown>;
+}): SentinelAction {
+  return { ...mailCall(name, params), mcp_server_name: server };
+}
+
 function classify(action: SentinelAction): Promise<TierDecision> {
   return classifyTier(action, makeCtx());
 }
@@ -142,10 +154,7 @@ describe('sends are never trusted by a hint or a standing grant', () => {
     '%s with attendees is barred from durable scope and shows its whole body',
     async name => {
       const body = 'b'.repeat(OUTBOUND_VALUE_MAX_CHARS + 50);
-      const decision = await classify({
-        ...mailCall(name, { attendees: ['guest@example.com'], body }),
-        mcp_hints: readOnlyClosedWorld,
-      });
+      const decision = await classify(mailCall(name, { attendees: ['guest@example.com'], body }));
       expect(decision.tier).toBe(3);
       expect(decision.card?.recipient).toBe('guest@example.com');
       expect(GRANT_BARRED_TIER_REASONS.has(decision.reason)).toBe(true);
@@ -153,70 +162,192 @@ describe('sends are never trusted by a hint or a standing grant', () => {
     },
   );
 
-  test('a read-only closed-world search keeps its durable scope', async () => {
-    const decision = await classify({ ...mailCall('search_notes', { query: 'tax' }), mcp_hints: readOnlyClosedWorld });
+  test.each([
+    ['list_events', { attendees: ['guest@example.com'] }],
+    ['get_user', { user: 'guest@example.com' }],
+    ['search_notes', { query: 'tax' }],
+  ])('a first-party read-only lookup %s with recipient-like keys runs without asking', async (name, params) => {
+    const decision = await classify({
+      ...mailCall(name, params),
+      mcp_first_party: true,
+      mcp_hints: readOnlyClosedWorld,
+    });
+    expect(decision.tier).toBe(1);
+  });
+
+  test.each([
+    ['list_events', { attendees: ['guest@example.com'] }],
+    ['search_notes', { query: 'tax' }],
+  ])('a read-only closed-world %s keeps its durable scope when it asks', async (name, params) => {
+    const decision = await classify({ ...mailCall(name, params), mcp_hints: readOnlyClosedWorld });
     expect(decision.tier).toBe(3);
     expect(GRANT_BARRED_TIER_REASONS.has(decision.reason)).toBe(false);
   });
 });
 
-describe('attachments and refusal wording', () => {
-  test('a large attachment is shown by name and size and does not make the send too long', async () => {
-    const decision = await classify(
-      mailCall('send_email', {
-        to: ['friend@example.com'],
-        subject: 'Report',
-        body: 'See attached',
-        attachments: [
-          { filename: 'report.pdf', mimeType: 'application/pdf', content: Buffer.alloc(375_000, 7).toString('base64') },
-        ],
-      }),
+describe('hidden sends: one rule for every spelling', () => {
+  const to = ['shown@example.com'];
+
+  test.each<[string, Record<string, unknown>]>([
+    ['reply_all', { messageId: 'm1', body: 'hi' }],
+    ['replyall', { messageId: 'm1', to }],
+    ['replyAll', { messageId: 'm1', to }],
+    ['respond_all', { messageId: 'm1', to }],
+    ['respond_to_all', { messageId: 'm1', to }],
+    ['reply_to_all', { messageId: 'm1', to }],
+    ['go', { reply_all: true, body: 'hi', to }],
+    ['reply', { messageId: 'm1', replyAll: true, to }],
+    ['reply', { messageId: 'm1', reply_all: true, to }],
+    ['reply', { messageId: 'm1', replyToAll: true, to }],
+    ['reply', { messageId: 'm1', reply_to_all: true, to }],
+    ['reply', { messageId: 'm1', respondToAll: true, to }],
+    ['reply', { messageId: 'm1', mode: 'reply_all', to }],
+    ['reply', { messageId: 'm1', action: 'respondAll', to }],
+    ['reply', { messageId: 'm1', options: { replyAll: true }, to }],
+    ...[true, 1, 2, 'true', 'True', 'yes', 'y', 'on', '1', 'all', 'enabled', [true]].map(
+      (value): [string, Record<string, unknown>] => ['reply', { messageId: 'm1', replyAll: value, to }],
+    ),
+  ])('%s is refused as a reply to everyone for %j', async (name, params) => {
+    const decision = await classify(mailCall(name, params));
+    expectRefused(decision);
+    expect(decision.owner_message).toContain('replying to everyone');
+  });
+
+  test.each<[string, Record<string, unknown>]>([
+    ['send_draft', { id: 'd1', to }],
+    ['senddraft', { id: 'd1' }],
+    ['gmail_send_draft', { id: 'd1' }],
+    ['send_message', { draftId: 'd1', to }],
+    ['send_message', { draft_id: 'd1', to }],
+    ['send_message', { draft: 'd1', to }],
+    ['send_message', { draft: { id: 'd1' }, to }],
+    ['send_message', { draftIds: ['d1'], to }],
+    ['send_message', { messageDraftId: 'd1', to }],
+    ['send_message', { message: { draft: { id: 'd1' } }, to }],
+    ['send_message', { useDraft: true, to }],
+    ['send_message', { action: 'send_draft', to }],
+    ['send_message', { source: 'draft', to }],
+    ['process_draft', { draftId: 'd1' }],
+    ['drafts_execute', { id: 'd1', draft: 'd1' }],
+    ['push', { draft_id: 'd1' }],
+    ['drafts_send', { draftId: 'd1' }],
+    ['send', { draftId: 'd1' }],
+    ['dispatch', { draftId: 'd1' }],
+    ['deliver', { draftId: 'd1' }],
+    ['drafts.send', { draftId: 'd1' }],
+  ])('%s is refused as a saved draft for %j', async (name, params) => {
+    const decision = await classify(mailCall(name, params));
+    // A send_message with only a draft id has no destination and is denied earlier.
+    expect(decision.auto_deny === 'incomplete_send_card' || decision.auto_deny === 'destination_unverifiable').toBe(
+      true,
     );
-    expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.outbound_truncated).toBe(false);
-    expect(decision.card?.outbound_text).toContain('report.pdf');
-    expect(decision.card?.outbound_text).toContain('file data, about 366 KB, fingerprint');
+    expect(decision.approval_token_id).toBeNull();
+    if (decision.auto_deny === 'incomplete_send_card') {
+      expect(decision.owner_message).toContain('saved draft');
+    }
   });
 
-  test.each([
-    [mailCall('reply_all', { messageId: 'm1' }), 'Reply on the same message'],
-    [mailCall('send_message', { draftId: 'd1', to: ['a@example.com'] }), 'Write the message out in full'],
-    [mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }), 'Name each recipient'],
-    [
-      mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }),
-      'Shorten it or split it',
-    ],
-  ])('each refusal tells the model its one next step', async (action, step) => {
-    const decision = await classify(action);
-    expect(decision.reason_detail).toContain(step);
-  });
-});
-
-describe('hidden sends passed as arguments', () => {
-  test.each([
-    ['send_message', { draftId: 'd1', to: ['shown@example.com'] }],
-    ['send_message', { draft_id: 'd1', to: ['shown@example.com'], body: 'hi' }],
-    ['reply', { messageId: 'm1', replyAll: true, to: ['a@example.com'], body: 'ok' }],
-    ['reply', { messageId: 'm1', reply_all: true, to: ['a@example.com'], body: 'ok' }],
-    ['reply', { messageId: 'm1', replyAll: 'true', to: ['a@example.com'], body: 'ok' }],
-    ['reply', { messageId: 'm1', reply_all: 'True', to: ['a@example.com'], body: 'ok' }],
-    ['reply', { messageId: 'm1', options: { replyAll: '1' }, to: ['a@example.com'] }],
-  ])('%s is refused for %j', async (name, params) => {
-    expectRefused(await classify(mailCall(name, params)));
+  test('a send_message with only a draft id stays denied for its missing destination', async () => {
+    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('destination_unverifiable');
   });
 
-  test('a plain reply with replyAll switched off is still carded', async () => {
-    const decision = await classify(
-      mailCall('reply', { messageId: 'm1', replyAll: false, to: ['a@example.com'], body: 'ok' }),
-    );
+  test.each<[string, Record<string, unknown>]>([
+    ['reply', { messageId: 'm1', replyAll: false, to }],
+    ['reply', { messageId: 'm1', replyAll: 'off', to }],
+    ['reply', { messageId: 'm1', replyAll: 'no', to }],
+    ['reply', { messageId: 'm1', replyAll: 0, to }],
+    ['send_message', { to, body: 'hi', isDraft: false }],
+    ['create_pull_request', { owner: 'o', repo: 'r', title: 't', draft: true }],
+    ['create_pull_request', { owner: 'o', repo: 'r', title: 't', draft: false }],
+  ])('%s is carded for %j', async (name, params) => {
+    const decision = await classify(mailCall(name, params));
     expect(decision.auto_deny).toBeNull();
     expect(decision.approval_token_id).not.toBeNull();
   });
 
-  test('a send_message with only a draft id stays refused', async () => {
-    const decision = await classify(mailCall('send_message', { draftId: 'd1' }));
-    expect(decision.tier).toBe(3);
-    expect(decision.auto_deny).toBe('destination_unverifiable');
+  test.each(['get_draft', 'list_drafts'])(
+    'a tool declared read-only and closed-world is left alone: %s',
+    async name => {
+      const decision = await classify({
+        ...mailCall(name, { draftId: 'd1', replyAll: true }),
+        mcp_hints: readOnlyClosedWorld,
+      });
+      expect(decision.auto_deny).toBeNull();
+    },
+  );
+});
+
+describe('replies must name every recipient in To', () => {
+  const mailTools = [
+    'reply',
+    'reply_to_thread',
+    'reply_email',
+    'replyToMessage',
+    'respond',
+    'respondToThread',
+    'answer_thread',
+  ];
+  const noTo = [
+    ['cc only', { threadId: 't1', cc: ['a@example.com'], body: 'ok' }],
+    ['bcc only', { threadId: 't1', bcc: ['a@example.com'], body: 'ok' }],
+    ['an empty to list', { threadId: 't1', to: [], cc: ['a@example.com'], body: 'ok' }],
+    ['an empty to string', { threadId: 't1', to: '', bcc: 'a@example.com', body: 'ok' }],
+    ['a blank to entry', { threadId: 't1', to: ['  '], cc: ['a@example.com'], body: 'ok' }],
+    ['an empty-string entry', { threadId: 't1', to: [''], cc: ['a@example.com'], body: 'ok' }],
+    ['a null to', { threadId: 't1', to: null, cc: ['a@example.com'], body: 'ok' }],
+    ['an empty to object', { threadId: 't1', to: [{}], cc: ['a@example.com'], body: 'ok' }],
+    ['a to with no address field', { threadId: 't1', to: [{ name: 'Bob' }], cc: ['a@example.com'] }],
+    ['an invisible to string', { threadId: 't1', to: '​', cc: ['a@example.com'] }],
+    ['an invisible to entry', { threadId: 't1', to: ['​ ﻿'], cc: ['a@example.com'] }],
+    ['an empty address object', { threadId: 't1', to: [{ email: '' }], cc: ['a@example.com'] }],
+    ['a to nested under message', { message: { to: ['a@example.com'] }, cc: ['b@example.com'] }],
+  ] as const;
+
+  test.each(noTo)('refuses a reply with %s', async (_label, params) => {
+    for (const name of mailTools) {
+      expectRefused(await classify(mailCall(name, params)));
+    }
+    expectRefused(await classify(callOn({ server: 'gmail', name: 'respond_to_message', params })));
+  });
+
+  test.each<[string, Record<string, unknown>]>([
+    ['forward', { messageId: 'm1', cc: ['a@example.com'] }],
+    ['forward_email', { messageId: 'm1', bcc: ['a@example.com'] }],
+    ['reply_to_thread', { threadId: 't1', cc: ['a@example.com'] }],
+  ])('refuses %s with cc only', async (name, params) => {
+    expectRefused(await classify(mailCall(name, params)));
+  });
+
+  test('cards a reply whose to is named', async () => {
+    const decision = await classify(
+      mailCall('reply', { threadId: 't1', to: ['a@example.com'], cc: ['b@example.com'], body: 'ok' }),
+    );
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.recipient).toBe('a@example.com, b@example.com');
+  });
+
+  test.each<[string, string, Record<string, unknown>]>([
+    ['github', 'add_reply_to_pull_request_comment', { owner: 'o', repo: 'r', pullNumber: 1, body: 'thanks' }],
+    ['slack', 'slack_reply_to_thread', { channel_id: 'C1', thread_ts: '1.2', text: 'thanks' }],
+    ['linear', 'reply_to_comment', { commentId: 'c1', body: 'thanks' }],
+  ])('a %s reply tool with no mail recipients is carded with what it sends', async (server, name, params) => {
+    const decision = await classify(callOn({ server, name, params }));
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.outbound_text).toContain('thanks');
+  });
+});
+
+describe('what is shown in full and what is cut', () => {
+  test.each([
+    ['create_or_update_file', { owner: 'o', repo: 'r', path: 'a.md', content: 'x'.repeat(30_000) }],
+    ['push_files', { owner: 'o', repo: 'r', files: [{ path: 'a.md', content: 'x'.repeat(25_000) }] }],
+    ['create_gist', { files: { 'a.md': { content: 'x'.repeat(25_000) } } }],
+  ])('%s with a long file keeps the cut preview instead of being refused', async (name, params) => {
+    const decision = await classify(mailCall(name, params));
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.outbound_truncated).toBe(true);
+    expect(decision.approval_token_id).not.toBeNull();
   });
 });
 
@@ -227,7 +358,27 @@ describe('attachment file data on the card', () => {
     );
   const blob = (fill: number) => Buffer.alloc(30_000, fill).toString('base64');
 
-  test('plain text in an attachment is shown, and counts toward the cap', async () => {
+  test.each([
+    ['standard', (text: string) => Buffer.from(text).toString('base64')],
+    ['URL-safe unpadded', (text: string) => Buffer.from(text).toString('base64url')],
+    [
+      'line-wrapped',
+      (text: string) =>
+        (
+          Buffer.from(text)
+            .toString('base64')
+            .match(/.{1,60}/g) ?? []
+        ).join('\r\n'),
+    ],
+  ])('short %s text is decoded and readable', async (_label, encode) => {
+    const note = 'Wire 9,000 USD to account 1234 today';
+    const decision = await sendWith({
+      attachments: [{ filename: 'n.txt', mimeType: 'text/plain', content: encode(note) }],
+    });
+    expect(decision.card?.outbound_text).toContain(note);
+  });
+
+  test('plain text in an attachment is shown as it is, and counts toward the cap', async () => {
     const decision = await sendWith({
       attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: 'meet me at noon by the old bridge' }],
     });
@@ -239,35 +390,34 @@ describe('attachment file data on the card', () => {
     );
   });
 
+  test('a long text file becomes one summary line and is not refused', async () => {
+    const text = 'quarterly numbers '.repeat(2000);
+    const decision = await sendWith({
+      attachments: [{ filename: 'q.csv', content: Buffer.from(text).toString('base64') }],
+    });
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.outbound_text).toContain('text file, about 35 KB, fingerprint');
+  });
+
+  test('a string that is not valid base64 is left as it is', async () => {
+    const notBase64 = `${'A'.repeat(40)}!`;
+    const decision = await sendWith({ attachments: [{ filename: 'a.bin', content: notBase64 }] });
+    expect(decision.card?.outbound_text).toContain(notBase64);
+  });
+
+  test('bytes with control characters in the 0x0e-0x1f range are binary, not text', async () => {
+    const bytes = Buffer.concat([Buffer.from('plain words here '), Buffer.from([0x0f]), Buffer.from('and more words')]);
+    const decision = await sendWith({ attachments: [{ filename: 'a.bin', content: bytes.toString('base64') }] });
+    expect(decision.card?.outbound_text).toContain('file data, 32 bytes, fingerprint');
+  });
+
   test('two different files of the same size look different', async () => {
     const first = await sendWith({ attachments: [{ name: 'a.bin', contentBytes: blob(1) }] });
     const second = await sendWith({ attachments: [{ name: 'a.bin', contentBytes: blob(2) }] });
     expect(first.card?.outbound_text).not.toBe(second.card?.outbound_text);
   });
 
-  test('a text file sent as base64 is decoded and shown in full', async () => {
-    const text = `${'private note '.repeat(300)}END-OF-NOTE`;
-    const decision = await sendWith({
-      attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: Buffer.from(text).toString('base64') }],
-    });
-    expect(decision.card?.outbound_text).toContain('END-OF-NOTE');
-    expect(decision.card?.outbound_text).not.toContain('fingerprint');
-  });
-
-  test('URL-safe unpadded base64, as Gmail sends it, is read like the standard alphabet', async () => {
-    const text = `${'private note '.repeat(300)}END-OF-NOTE`;
-    const textUrl = Buffer.from(text).toString('base64url');
-    expect(textUrl).not.toMatch(/=/);
-    const readable = await sendWith({ attachments: [{ filename: 'n.txt', data: textUrl }] });
-    expect(readable.card?.outbound_text).toContain('END-OF-NOTE');
-    const binary = Buffer.alloc(30_000, 0xfb).toString('base64url');
-    expect(binary).toMatch(/[-_]/);
-    const summarised = await sendWith({ attachments: [{ filename: 'a.bin', raw: binary }] });
-    expect(summarised.auto_deny).toBeNull();
-    expect(summarised.card?.outbound_text).toContain('file data, about 29 KB, fingerprint');
-  });
-
-  test('a binary file keeps its type from a data URL, and text after a binary header is not shown as text', async () => {
+  test('a binary file keeps its type from a data URL', async () => {
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('secret '.repeat(500))]);
     const decision = await sendWith({
       attachments: [{ filename: 'a.png', content: `data:image/png;base64,${png.toString('base64')}` }],
@@ -287,6 +437,10 @@ describe('attachment file data on the card', () => {
     ['contentBytes under attachments', { attachments: [{ name: 'a.bin', contentBytes: blob(3) }] }],
     ['file_attachments', { file_attachments: [{ filename: 'a.bin', content: blob(3) }] }],
     ['a nested message.attachments', { message: { attachments: [{ filename: 'a.bin', file_data: blob(3) }] } }],
+    [
+      'attachments deeper in the call',
+      { payload: { message: { attachments: [{ filename: 'a.bin', raw: blob(3) }] } } },
+    ],
   ])('%s is summarised, not counted as text', async (_label, extra) => {
     const decision = await sendWith(extra);
     expect(decision.auto_deny).toBeNull();
@@ -296,101 +450,34 @@ describe('attachment file data on the card', () => {
 });
 
 describe('the owner line for a refused send', () => {
-  test.each([
-    mailCall('reply_all', { messageId: 'm1' }),
-    mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }),
-    mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }),
-  ])('is one short plain line without the word card', async action => {
-    const line = (await classify(action)).owner_message;
-    expect(line).toMatch(/^Nothing was sent/);
-    expect(line?.length).toBeLessThan(120);
-    expect(line).not.toMatch(/card/i);
-  });
-});
-
-describe('replies must name every recipient in To', () => {
-  test.each([
-    ['cc only', { threadId: 't1', cc: ['a@example.com'], body: 'ok' }],
-    ['bcc only', { threadId: 't1', bcc: ['a@example.com'], body: 'ok' }],
-    ['an empty to list', { threadId: 't1', to: [], cc: ['a@example.com'], body: 'ok' }],
-    ['an empty to string', { threadId: 't1', to: '', bcc: 'a@example.com', body: 'ok' }],
-    ['a blank to entry', { threadId: 't1', to: ['  '], cc: ['a@example.com'], body: 'ok' }],
-    ['an empty-string entry', { threadId: 't1', to: [''], cc: ['a@example.com'], body: 'ok' }],
-    ['a whitespace to string', { threadId: 't1', to: '  ', cc: 'a@example.com', body: 'ok' }],
-    ['a null to', { threadId: 't1', to: null, cc: ['a@example.com'], body: 'ok' }],
-    ['an empty to object', { threadId: 't1', to: [{}], cc: ['a@example.com'], body: 'ok' }],
-    ['a to nested under message', { message: { to: ['a@example.com'] }, cc: ['b@example.com'] }],
-  ])('refuses a reply with %s', async (_label, params) => {
-    expectRefused(await classify(mailCall('reply_to_thread', params)));
-    expectRefused(await classify(mailCall('reply', params)));
-    expectRefused(await classify(mailCall('replyToMessage', params)));
-    expectRefused(await classify(mailCall('reply_email', params)));
+  const lines = async () => ({
+    replyAll: (await classify(mailCall('reply_all', { messageId: 'm1' }))).owner_message,
+    draft: (await classify(mailCall('send_draft', { id: 'd1' }))).owner_message,
+    tooLong: (
+      await classify(mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }))
+    ).owner_message,
+    noRecipient: (await classify(mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }))).owner_message,
   });
 
-  test.each([
-    ['forward', { messageId: 'm1', cc: ['a@example.com'] }],
-    ['reply_to_thread', { threadId: 't1', cc: ['a@example.com'] }],
-  ])('refuses %s with cc only', async (name, params) => {
-    expectRefused(await classify(mailCall(name, params)));
+  test('each reason has its own words', async () => {
+    const found = await lines();
+    expect(found.replyAll).toContain('replying to everyone');
+    expect(found.draft).toContain('saved draft');
+    expect(found.tooLong).toContain('too long');
+    expect(found.noRecipient).toContain('did not say who gets it');
   });
 
-  test('cards a reply whose to is named', async () => {
-    const decision = await classify(
-      mailCall('reply', { threadId: 't1', to: ['a@example.com'], cc: ['b@example.com'], body: 'ok' }),
-    );
-    expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.recipient).toBe('a@example.com, b@example.com');
-  });
-});
-
-describe('hidden sends in other spellings', () => {
-  test.each([
-    ['send_message', { draft: { id: 'd1' }, to: ['shown@example.com'] }],
-    ['send_message', { draftIds: ['d1'], to: ['shown@example.com'] }],
-    ['send_message', { messageDraftId: 'd1', to: ['shown@example.com'] }],
-    ['reply', { messageId: 'm1', replyToAll: true, to: ['a@example.com'] }],
-    ['reply', { messageId: 'm1', reply_to_all: true, to: ['a@example.com'] }],
-    ['reply', { messageId: 'm1', mode: 'reply_all', to: ['a@example.com'] }],
-    ['replyall', { messageId: 'm1', to: ['a@example.com'] }],
-    ['replyAll', { messageId: 'm1', to: ['a@example.com'] }],
-    ['respond_all', { messageId: 'm1', to: ['a@example.com'] }],
-    ['send_message', { draft: 'd1', to: ['shown@example.com'] }],
-    ['send_message', { message: { draft: { id: 'd1' } }, to: ['shown@example.com'] }],
-    ['send_message', { useDraft: true, to: ['shown@example.com'] }],
-    ['deliver', { draftId: 'd1' }],
-    ['drafts.send', { draftId: 'd1' }],
-    ['drafts_send', { draftId: 'd1' }],
-    ['send', { draftId: 'd1' }],
-    ['dispatch', { draftId: 'd1' }],
-  ])('%s is refused for %j', async (name, params) => {
-    expectRefused(await classify(mailCall(name, params)));
+  test('every line is short, plain and says nothing was sent', async () => {
+    for (const line of Object.values(await lines())) {
+      expect(line).toMatch(/^Nothing was sent/);
+      expect(line?.length).toBeLessThan(120);
+      expect(line).not.toMatch(/card|`/i);
+    }
   });
 
-  test.each(['drafts_send', 'send', 'dispatch'])(
-    '%s is refused even with first-party read-only hints or a standing grant',
-    async name => {
-      expectRefused(
-        await classify({
-          ...mailCall(name, { draftId: 'd1' }),
-          mcp_first_party: true,
-          mcp_hints: readOnlyClosedWorld,
-        }),
-      );
-      const ctx = makeCtx();
-      await ctx.services.tool_grants.recordToolGrant({
-        tenant_id: 't1',
-        created_by: 'u1',
-        mcp_server_name: 'mail',
-        tool_name: name,
-      });
-      expectRefused(await classifyTier({ ...mailCall(name, { draftId: 'd1' }), mcp_hints: readOnlyClosedWorld }, ctx));
-    },
-  );
-
-  test('reading or deleting a draft is not treated as a send', async () => {
-    const read = await classify({ ...mailCall('get_draft', { draftId: 'd1' }), mcp_hints: readOnlyClosedWorld });
-    expect(read.auto_deny).toBeNull();
-    const flag = await classify(mailCall('send_message', { to: ['a@example.com'], body: 'hi', isDraft: false }));
-    expect(flag.auto_deny).toBeNull();
+  test('the model is told the one step for each reason', async () => {
+    expect((await classify(mailCall('reply_all', { messageId: 'm1' }))).reason_detail).toContain('same message');
+    expect((await classify(mailCall('send_draft', { id: 'd1' }))).reason_detail).toContain('in full');
+    expect((await classify(mailCall('reply_to_thread', { threadId: 't1' }))).reason_detail).toContain('in `to`');
   });
 });

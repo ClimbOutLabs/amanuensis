@@ -2270,6 +2270,10 @@ export class Sandbox extends LocalToolMCP {
       effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
+      // The whole stamp is carried; the failure and approval fields below are resolved against host checks.
+      ...(sentinelStamp === undefined
+        ? {}
+        : { ...sentinelStamp, tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }) }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
       // the raw wire arguments. Record the exact mint identity so pre-dispatch
@@ -2329,17 +2333,6 @@ export class Sandbox extends LocalToolMCP {
             : { pre_dispatch_failure: structuredEditPreDispatchFailure }
           : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
       is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
-      ...(sentinelStamp === undefined
-        ? {}
-        : {
-            tier: sentinelStamp.tier,
-            tier_reason: sentinelStamp.tier_reason,
-            tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
-            tier2_kind: sentinelStamp.tier2_kind,
-            approval_token_id: sentinelStamp.approval_token_id,
-            approval_binding: sentinelStamp.approval_binding,
-            shell_binding: sentinelStamp.shell_binding,
-          }),
     };
   }
 

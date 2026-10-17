@@ -1312,6 +1312,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
+    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
   });
   if (offline) {
     if (extraction.external_service) {

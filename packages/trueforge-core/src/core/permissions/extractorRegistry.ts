@@ -270,8 +270,7 @@ function keyDisplay(key: string): string {
   return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
 }
 
-const BASE64_DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
-const BASE64_BLOB = /^[A-Za-z0-9+/_-]+={0,2}$/;
+const DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
 const ATTACHMENT_KEY_SET = new Set(
   ['attachment', 'attachments', 'file_attachment', 'file_attachments'].map(normalizeKey),
 );
@@ -279,20 +278,24 @@ const FILE_DATA_KEY_SET = new Set(
   ['content', 'data', 'bytes', 'content_bytes', 'file_data', 'base64', 'raw'].map(normalizeKey),
 );
 const ATTACHMENT_MAX_DEPTH = 6;
+/** Longest attachment text shown on the card; a longer file is summarised like binary data. */
+const FILE_TEXT_MAX_CHARS = 5000;
+/** Shorter unprefixed strings are more likely plain words than encoded data. */
+const MIN_ENCODED_CHARS = 16;
 
-/** True for text holding control characters other than tab, newline and carriage return, which marks it as binary. */
-function hasBinaryControl(text: string): boolean {
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code <= 8 || (code >= 0x0e && code <= 0x1f)) {
-      return true;
-    }
+/** The text in these bytes, or null when they are not UTF-8 text (control characters other than tab and newlines mark binary). */
+function decodeText(bytes: Buffer): string | null {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return Array.from(text).some(char => {
+      const code = char.charCodeAt(0);
+      return code <= 8 || (code >= 0x0e && code <= 0x1f);
+    })
+      ? null
+      : text;
+  } catch {
+    return null;
   }
-  return false;
-}
-
-function isAttachmentKey(key: string): boolean {
-  return ATTACHMENT_KEY_SET.has(normalizeKey(key));
 }
 
 function sizeLabel(bytes: number): string {
@@ -300,63 +303,44 @@ function sizeLabel(bytes: number): string {
 }
 
 /**
- * Long base64 file data under an attachment: readable text is decoded and shown, anything else becomes its
- * type, size and a short fingerprint. Short values and non-base64 strings are returned unchanged.
+ * File data under an attachment: base64 (standard or URL-safe, padded or not) is decoded and short text is
+ * shown; longer text and binary become one line with type, size and a fingerprint of the bytes.
+ * Anything that is not valid base64 is returned unchanged.
  */
 function decodeFileData(value: string): string {
-  if (value.length <= OUTBOUND_VALUE_MAX_CHARS) {
+  const prefixed = DATA_URL.test(value);
+  const mime = DATA_URL.exec(value)?.[1] ?? '';
+  const body = value
+    .replace(DATA_URL, '')
+    .replace(/[\r\n]/g, '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .replace(/=+$/, '');
+  if ((!prefixed && body.length < MIN_ENCODED_CHARS) || !/^[A-Za-z0-9+/]+$/.test(body)) {
     return value;
   }
-  const mime = BASE64_DATA_URL.exec(value)?.[1] ?? '';
-  const raw = value.replace(BASE64_DATA_URL, '').replace(/[\r\n]/g, '');
-  // Standard and URL-safe alphabets both occur (Gmail uses the URL-safe one, often unpadded).
-  const body = raw.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
   const bytes = Buffer.from(body, 'base64');
-  if (!BASE64_BLOB.test(raw) || body.length % 4 === 1 || bytes.toString('base64').replace(/=+$/, '') !== body) {
+  if (bytes.toString('base64').replace(/=+$/, '') !== body) {
     return value;
   }
-  try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (!hasBinaryControl(text)) {
-      return text;
-    }
-  } catch {
-    // Not UTF-8 text: summarised below.
+  const text = decodeText(bytes);
+  if (text !== null && text.length <= FILE_TEXT_MAX_CHARS) {
+    return text;
   }
-  const fingerprint = createHash('sha256').update(body).digest('hex').slice(0, 12);
-  return `(file data, ${mime === '' ? '' : `${mime}, `}${sizeLabel(bytes.length)}, fingerprint ${fingerprint})`;
-}
-
-function summarizeAttachment(value: unknown, depth = 0): unknown {
-  if (depth > ATTACHMENT_MAX_DEPTH) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(item => summarizeAttachment(item, depth + 1));
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, field]) => [
-      key,
-      FILE_DATA_KEY_SET.has(normalizeKey(key)) && typeof field === 'string'
-        ? decodeFileData(field)
-        : summarizeAttachment(field, depth + 1),
-    ]),
-  );
+  const fingerprint = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
+  return `(${text === null ? 'file data' : 'text file'}, ${mime === '' ? '' : `${mime}, `}${sizeLabel(bytes.length)}, fingerprint ${fingerprint})`;
 }
 
 /**
- * File data is bound into the approval but only summarised on the card when it is binary, so a large
- * attachment never counts against the length a send may have. Readable text is always shown.
+ * File data is bound into the approval but shown on the card as text or a one-line summary, so a large
+ * attachment never counts against the length a send may have. Attachment keys are found at any depth.
  */
-function withAttachmentSummaries(value: unknown, depth = 0): unknown {
+function summarizeAttachments(value: unknown, inAttachment = false, depth = 0): unknown {
   if (depth > ATTACHMENT_MAX_DEPTH) {
     return value;
   }
   if (Array.isArray(value)) {
-    return value.map(item => withAttachmentSummaries(item, depth + 1));
+    return value.map(item => summarizeAttachments(item, inAttachment, depth + 1));
   }
   if (!isRecord(value)) {
     return value;
@@ -364,7 +348,9 @@ function withAttachmentSummaries(value: unknown, depth = 0): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => [
       key,
-      isAttachmentKey(key) ? summarizeAttachment(field) : withAttachmentSummaries(field, depth + 1),
+      inAttachment && FILE_DATA_KEY_SET.has(normalizeKey(key)) && typeof field === 'string'
+        ? decodeFileData(field)
+        : summarizeAttachments(field, inAttachment || ATTACHMENT_KEY_SET.has(normalizeKey(key)), depth + 1),
     ]),
   );
 }
@@ -375,7 +361,7 @@ function renderOutboundLines(
 ): { lines: string[]; truncated: boolean } {
   let truncated = false;
   const lines = Object.entries(params).map(([key, value]) => {
-    const shownValue = isAttachmentKey(key) ? summarizeAttachment(value) : withAttachmentSummaries(value);
+    const shownValue = summarizeAttachments(value, ATTACHMENT_KEY_SET.has(normalizeKey(key)));
     const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
     const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
     truncated ||= rest > 0;
@@ -496,8 +482,10 @@ interface ConnectorCallInput {
 interface ConnectorFamily {
   match: (words: string, params: Record<string, unknown>) => boolean;
   describe: (input: ConnectorCallInput) => string;
-  /** The call sends data to someone; its card must show all of it. `recipient` also needs a named recipient; `to` needs one in `to`. */
-  sends?: 'content' | 'recipient' | 'to';
+  /** The call sends data out and is never trusted by a hint or grant. A `message` also has to be shown in full. */
+  sends?: 'message' | 'content';
+  /** The card has to name a recipient. */
+  needs_recipient?: boolean;
   /** Replaces the destination when the params name a more precise one. */
   destination?: (params: Record<string, unknown>) => string | null;
 }
@@ -506,11 +494,10 @@ const FORWARD_KEY_SET = new Set(FORWARD_KEYS.map(normalizeKey));
 
 /** True when any argument, at any depth, sets a forwarding address. */
 function hasForwardAction(params: Record<string, unknown>): boolean {
-  return hasArgument({
-    value: params,
-    matchKey: key => FORWARD_KEY_SET.has(key),
-    test: field => typeof field === 'string' && field.trim() !== '',
-  });
+  return someArgument(
+    params,
+    (key, field) => FORWARD_KEY_SET.has(key) && typeof field === 'string' && field.trim() !== '',
+  );
 }
 
 function repositoryLabel(params: Record<string, unknown>): string | null {
@@ -550,18 +537,19 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: (words, params) => hasPhrase(words, 'create_filter') && hasForwardAction(params),
-    sends: 'recipient',
+    sends: 'message',
+    needs_recipient: true,
     describe: ({ tool_name, where, fields }) =>
       `Forward every matching message${toRecipient(fields)}, now and from here on, with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'forward'),
-    sends: 'to',
+    sends: 'message',
     describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
-    sends: 'to',
+    sends: 'message',
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -626,72 +614,85 @@ export interface ExtractionResult {
   incomplete_send: IncompleteSend | null;
 }
 
-/** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
-const REPLY_ALL_PHRASES = ['reply_all', 'replyall', 'reply_to_all', 'replytoall', 'respond_all', 'respondall'];
-const DRAFT_SEND_PHRASES = ['send_draft', 'senddraft'];
-/** Whole words that make a tool a send even when no recipient is named. */
-const SEND_NAME_WORDS = ['send', 'dispatch', 'deliver', 'reply', 'respond', 'forward', 'submit'];
-
-const REPLY_ALL_KEY_SET = new Set(['reply_all', 'reply_to_all', 'respond_all'].map(normalizeKey));
-
-function isTruthyFlag(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return ['true', '1', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
-  }
-  return value === true || value === 1;
-}
-
-/** A reference to a stored draft: any value except an empty one or a switched-off flag. */
-function isDraftReference(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === 0) {
-    return false;
-  }
-  return !(typeof value === 'string' && ['', 'false', '0'].includes(value.trim().toLowerCase()));
-}
-
-/** A string that names the reply-to-everyone mode, whatever key carries it. */
-function isReplyAllMode(value: unknown): boolean {
-  return typeof value === 'string' && REPLY_ALL_KEY_SET.has(normalizeKey(value));
-}
-
-/** True when any argument, at any depth, has a key (compared by `normalizeKey`) passing `matchKey` and a value passing `test`. */
-function hasArgument(input: {
-  value: unknown;
-  matchKey: (normalizedKey: string) => boolean;
-  test: (v: unknown) => boolean;
-  depth?: number;
-}): boolean {
-  const { value, matchKey, test, depth = 0 } = input;
+/** True when any argument, at any depth, passes `test`, given its normalized key and value. */
+function someArgument(value: unknown, test: (key: string, field: unknown) => boolean, depth = 0): boolean {
   if (Array.isArray(value)) {
-    return (
-      depth <= NESTED_RECIPIENT_MAX_DEPTH &&
-      value.some(item => hasArgument({ value: item, matchKey, test, depth: depth + 1 }))
-    );
+    return depth <= NESTED_RECIPIENT_MAX_DEPTH && value.some(item => someArgument(item, test, depth + 1));
   }
   if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
     return false;
   }
-  return Object.entries(value).some(([key, field]) =>
-    matchKey(normalizeKey(key)) && test(field) ? true : hasArgument({ value: field, matchKey, test, depth: depth + 1 }),
+  return Object.entries(value).some(
+    ([key, field]) => test(normalizeKey(key), field) || someArgument(field, test, depth + 1),
   );
 }
 
-/** The call names a stored draft, whose recipients and text are filled in after approval. */
-function hasDraftReference(params: Record<string, unknown>): boolean {
-  return hasArgument({ value: params, matchKey: key => key.includes('draft'), test: isDraftReference });
+/**
+ * Sends whose recipients or text are filled in after approval, so no card can show them: replying to
+ * everyone, and sending a saved draft. One list each; names, argument keys and string values all use it.
+ */
+const REPLY_ALL_PHRASES = ['reply_all', 'reply_to_all', 'respond_all', 'respond_to_all'];
+const REPLY_ALL_SET = new Set(REPLY_ALL_PHRASES.map(normalizeKey));
+const DRAFT_SEND_PHRASES = ['send_draft'];
+const DRAFT_VALUE_SET = new Set([...DRAFT_SEND_PHRASES, 'draft'].map(normalizeKey));
+const OFF_VALUES = new Set(['', 'false', '0', 'no', 'n', 'off', 'none', 'null']);
+
+/** Under a reply-all or draft key, anything that is not clearly off counts as on. */
+function isOff(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === 0) {
+    return true;
+  }
+  return typeof value === 'string' && OFF_VALUES.has(value.trim().toLowerCase());
 }
 
-/** The call asks for the reply to go to everyone on the thread, which is filled in after approval. */
-function hasReplyAllArgument(params: Record<string, unknown>): boolean {
-  return (
-    hasArgument({ value: params, matchKey: key => REPLY_ALL_KEY_SET.has(key), test: isTruthyFlag }) ||
-    hasArgument({ value: params, matchKey: () => true, test: isReplyAllMode })
-  );
+function namesPhrase({ key, field, set }: { key: string; field: unknown; set: Set<string> }): boolean {
+  return (set.has(key) && !isOff(field)) || (typeof field === 'string' && set.has(normalizeKey(field)));
 }
+
+type HiddenSend = 'reply_all' | 'draft';
+
+/** Which hidden send the call is, read from its name and any argument at any depth. */
+function hiddenSendKind({
+  tool_name,
+  words,
+  params,
+}: {
+  tool_name: string;
+  words: string;
+  params: Record<string, unknown>;
+}): HiddenSend | null {
+  const nameKey = normalizeKey(tool_name);
+  if (
+    hasPhrase(words, ...REPLY_ALL_PHRASES) ||
+    REPLY_ALL_SET.has(nameKey) ||
+    someArgument(params, (key, field) => namesPhrase({ key, field, set: REPLY_ALL_SET }))
+  ) {
+    return 'reply_all';
+  }
+  // A plain `draft` flag (a draft pull request) is state, not a reference to a stored draft.
+  const isStateFlag = (key: string, field: unknown) =>
+    typeof field === 'boolean' && (key === 'draft' || key === 'isdraft');
+  if (
+    hasPhrase(words, ...DRAFT_SEND_PHRASES) ||
+    nameKey === 'senddraft' ||
+    someArgument(
+      params,
+      (key, field) =>
+        !isStateFlag(key, field) &&
+        ((key.includes('draft') && !isOff(field)) ||
+          (typeof field === 'string' && DRAFT_VALUE_SET.has(normalizeKey(field)))),
+    )
+  ) {
+    return 'draft';
+  }
+  return null;
+}
+
+const BLANK = /[\p{Cf}\s]/gu;
 
 function addressStrings(value: unknown): string[] {
   if (typeof value === 'string') {
-    return value.trim() === '' ? [] : [value];
+    return value.replace(BLANK, '') === '' ? [] : [value];
   }
   if (Array.isArray(value)) {
     return value.flatMap(addressStrings);
@@ -704,56 +705,81 @@ function addressStrings(value: unknown): string[] {
     .flatMap(([, field]) => addressStrings(field));
 }
 
-/** True when the top-level `to` resolves to at least one non-empty address. */
+/** True when the top-level `to` resolves to at least one visible address. */
 function namesToRecipient(params: Record<string, unknown>): boolean {
   return Object.entries(params).some(([key, value]) => normalizeKey(key) === 'to' && addressStrings(value).length > 0);
 }
 
+const REPLY_WORDS = ['reply', 'respond', 'answer', 'forward'];
+const MAIL_WORDS = ['mail', 'email', 'gmail', 'outlook', 'inbox'];
+
+/**
+ * A reply or forward through a mail connector goes to its default recipients when `to` is empty, so `to`
+ * must name them. Other reply tools (comments, threads in chat apps) have no `to` and are not mail-shaped.
+ */
+function isMailReply({ words, params }: { words: string; params: Record<string, unknown> }): boolean {
+  return (
+    hasPhrase(words, ...REPLY_WORDS) &&
+    (hasPhrase(words, ...MAIL_WORDS) ||
+      Object.keys(params).some(key => ['to', 'cc', 'bcc'].includes(normalizeKey(key))))
+  );
+}
+
 interface IncompleteSend {
-  /** What the model is told, ending in the one thing to do. */
+  /** What the model is told: the one thing to do. */
   model_message: string;
-  /** One short plain line for the owner. */
+  /** One short plain line for the owner, shown without the agent details. */
   owner_message: string;
 }
 
+const REFUSALS: Record<HiddenSend | 'too_long' | 'no_recipient', IncompleteSend> = {
+  reply_all: {
+    model_message:
+      'Replying to everyone fills in the recipients after approval, so it cannot be shown. Reply on the same message with every person who should get it named in `to`.',
+    owner_message:
+      'Nothing was sent: replying to everyone would not show you who gets it. The assistant needs to name each person.',
+  },
+  draft: {
+    model_message:
+      'A saved draft is sent with recipients and text that are filled in after approval, so it cannot be shown. Write the message out in full with every recipient named in `to`.',
+    owner_message:
+      'Nothing was sent: a saved draft hides who gets it and what it says. The assistant must write it out in full.',
+  },
+  too_long: {
+    model_message:
+      'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller messages.',
+    owner_message: 'Nothing was sent: it is too long to show you in full. The assistant needs to shorten it.',
+  },
+  no_recipient: {
+    model_message: 'This does not name who receives it. Name each recipient in `to` and try again.',
+    owner_message: 'Nothing was sent: it did not say who gets it. The assistant needs to name each person.',
+  },
+};
+
+/**
+ * Why a send cannot be shown to the owner in full, or null. The reply-to-everyone and saved-draft rule
+ * holds for every tool that is not declared read-only and closed-world, whatever it is called.
+ */
 function incompleteSend(input: {
-  sends: boolean;
-  params: Record<string, unknown>;
-  words: string;
+  hidden: HiddenSend | null;
+  message_send: boolean;
+  truncated: boolean;
   needs_recipient: boolean;
   needs_to: boolean;
+  params: Record<string, unknown>;
   fields: ExtractedCardFields;
-  truncated: boolean;
 }): IncompleteSend | null {
-  if (hasPhrase(input.words, ...REPLY_ALL_PHRASES) || (input.sends && hasReplyAllArgument(input.params))) {
-    return {
-      model_message:
-        'Replying to everyone fills in the recipients after approval, so the card cannot show them. Reply on the same message with every person who should get it named in `to`.',
-      owner_message: 'Nothing was sent: replying to everyone is not shown in full. Ask for each person to be named.',
-    };
+  if (input.hidden !== null) {
+    return REFUSALS[input.hidden];
   }
-  if (hasPhrase(input.words, ...DRAFT_SEND_PHRASES) || (input.sends && hasDraftReference(input.params))) {
-    return {
-      model_message:
-        'A saved draft is sent with recipients and text that are filled in after approval, so the card cannot show them. Write the message out in full with every recipient named in `to`.',
-      owner_message: 'Nothing was sent: a saved draft cannot be shown in full. Ask for the message to be written out.',
-    };
-  }
-  if (input.sends && input.truncated) {
-    return {
-      model_message:
-        'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller parts, or tell the user it is too long to approve.',
-      owner_message: 'Nothing was sent: it is too long to show you in full. Ask for a shorter message, or split it up.',
-    };
+  if (input.message_send && input.truncated) {
+    return REFUSALS.too_long;
   }
   if (
     (input.needs_recipient && input.fields.recipient === null) ||
     (input.needs_to && !namesToRecipient(input.params))
   ) {
-    return {
-      model_message: 'The card cannot name who receives this. Name each recipient in `to` and try again.',
-      owner_message: 'Nothing was sent: it does not say who gets it. Ask the assistant to name each recipient.',
-    };
+    return REFUSALS.no_recipient;
   }
   return null;
 }
@@ -771,6 +797,8 @@ export function extractCardFields(input: {
   server_host?: string | undefined;
   /** The connector's configured name. */
   server_name?: string | undefined;
+  /** The tool is declared read-only and closed-world: a recipient or draft argument alone does not make it a send. */
+  read_only_closed_world?: boolean | undefined;
 }): ExtractionResult {
   const entry = EXTRACTOR_REGISTRY.find(e => e.match(input.tool_name));
   const externalService =
@@ -787,6 +815,7 @@ export function extractCardFields(input: {
       incomplete_send: null,
     };
   }
+  const readOnly = input.read_only_closed_world === true;
   const words = nameWords(input.tool_name);
   // Deleting or installing is described by the classifier's own destructive and install cards.
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
@@ -795,14 +824,18 @@ export function extractCardFields(input: {
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
   const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
-  const hiddenArgument = hasDraftReference(input.canonical_params) || hasReplyAllArgument(input.canonical_params);
+  const hidden = readOnly
+    ? null
+    : hiddenSendKind({ tool_name: input.tool_name, words, params: input.canonical_params });
   const sends =
     externalService ||
     family?.sends !== undefined ||
-    recipients.length > 0 ||
-    (hiddenArgument && hasPhrase(words, ...SEND_NAME_WORDS));
+    hidden !== null ||
+    (readOnly ? hasPhrase(words, 'send') : recipients.length > 0);
+  // Repository writes and gists keep the cut preview; their arguments are still bound into the approval.
+  const messageSend = sends && family?.sends !== 'content';
   const outbound = renderOutboundArguments(input.canonical_params, {
-    valueMaxChars: sends ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
+    valueMaxChars: messageSend ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
   });
   const fields: ExtractedCardFields = {
     ...base,
@@ -820,13 +853,13 @@ export function extractCardFields(input: {
     external_service: externalService,
     sends,
     incomplete_send: incompleteSend({
-      sends,
-      params: input.canonical_params,
-      words,
-      needs_recipient: family?.sends === 'recipient',
-      needs_to: family?.sends === 'to',
-      fields,
+      hidden,
+      message_send: messageSend,
       truncated: outbound.truncated,
+      needs_recipient: family?.needs_recipient === true,
+      needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
+      params: input.canonical_params,
+      fields,
     }),
     connector_what:
       family === undefined

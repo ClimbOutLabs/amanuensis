@@ -88,9 +88,6 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
 function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
-  if (typeof info.tier3_card?.recipient === 'string') {
-    return true;
-  }
   if (info.tier_reason === undefined) {
     return info.tier === 3;
   }

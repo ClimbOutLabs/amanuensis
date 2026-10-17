@@ -151,16 +151,16 @@ describe('ToolSet Sentinel classification of connector tools', () => {
   it('tells the owner in plain words, end to end, when a send is refused before it runs', async () => {
     const reply: ToolSchema = { name: 'reply', description: 'Replies.', inputSchema: schema };
     const toolSet = makeToolSet({ tools: [reply], services: servicesWithGrants([]) });
-    const info = await toolSet.toolCallInfo({ name: 'reply', arguments: { body: 'ok' } });
+    const info = await toolSet.toolCallInfo({ name: 'reply', arguments: { body: 'ok', cc: ['a@example.com'] } });
     expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
-    expect(info.pre_dispatch_failure?.message).toContain('Then tell the user: "Nothing was sent');
+    expect(info.pre_dispatch_failure?.owner_message).toMatch(/^Nothing was sent/);
 
     const result = await executeToolCalls({
       assistantMessage: {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok"}' }, tool_info: info },
+          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' }, tool_info: info },
         ],
       },
       toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),
@@ -171,6 +171,8 @@ describe('ToolSet Sentinel classification of connector tools', () => {
 
     const remediation = result.toolCallResults[0]?.remediation;
     expect(result.toolCallResults[0]?.disposition).toBe('policy_blocked');
+    expect(remediation?.suggested_action).toBe('contact_user');
+    expect(remediation?.reason_code).toBe('tool_policy_blocked');
     expect(remediation?.message).toContain('Nothing was sent');
     expect(remediation?.message.length).toBeLessThan(120);
     expect(remediation?.message).not.toMatch(/card/i);

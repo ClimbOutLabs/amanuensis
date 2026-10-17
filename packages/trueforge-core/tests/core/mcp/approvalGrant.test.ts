@@ -232,29 +232,39 @@ describe('chat grant key', () => {
     expect(new Set([keyA, keyB, keyC]).size).toBe(3);
   });
 
-  it('bars durable scope when the card names a recipient or the tier has no reason', () => {
-    const info: InternalToolCallInfo = { ...toolInfo('notes', 'invite_user'), effect: 'inspect', tier: 3 };
+  it('bars durable scope when the tier has no reason, and keeps it for a plain read that names a recipient', () => {
+    const info: InternalToolCallInfo = { ...toolInfo('notes', 'list_events'), effect: 'inspect', tier: 3 };
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
-    const named = {
-      ...info,
-      tier_reason: 'unrecognized_tool',
-      tier3_card: {
-        plain_what: 'x',
-        plain_why: null,
-        cannot_be_undone: null,
-        why_asked_again: null,
-        destination: null,
-        recipient: 'guest@example.com',
-        amount: null,
-        parsed_command: null,
-        outbound_text: null,
-        destination_host: null,
-        outbound_truncated: false,
-      },
-    };
-    expect(allowsChatApproval(named)).toBe(false);
-    expect(allowsToolGrant(named)).toBe(false);
+    const read = { ...info, tier_reason: 'unrecognized_tool' };
+    expect(allowsChatApproval(read)).toBe(true);
+    expect(allowsToolGrant(read)).toBe(true);
+  });
+
+  it('changes the key when only the host or only the recipient changes', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = (overrides: Partial<NonNullable<InternalToolCallInfo['tier3_card']>>) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+      ...overrides,
+    });
+    const keys = [
+      approvalGrantKey({ ...base, tier3_card: card({}) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'a.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'b.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'a@example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'b@example.com' }) }),
+    ];
+    expect(new Set(keys).size).toBe(5);
   });
 
   it('never admits a Tier 3 send-class call from a chat grant, even a forged one', () => {
