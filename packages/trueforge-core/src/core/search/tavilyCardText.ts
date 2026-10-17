@@ -5,8 +5,6 @@ import {
   TAVILY_SEARCH_TOOL_NAME,
 } from './TavilyClient';
 
-const NO_KEY_NOTE = "If you have not added a Tavily key, it uses Tavily's free allowance instead.";
-
 function creditWord(count: number): string {
   return `${String(count)} Tavily ${count === 1 ? 'credit' : 'credits'}`;
 }
@@ -30,14 +28,14 @@ export function tavilyApprovalWhat(input: {
   if (input.tool_name === TAVILY_SEARCH_TOOL_NAME && typeof query === 'string') {
     return (
       `Search the web with Tavily for: ${cut(query)}. This sends those words to ${TAVILY_API_HOST} ` +
-      `and uses ${creditWord(TAVILY_SEARCH_CREDITS)}. ${NO_KEY_NOTE}`
+      `and uses ${creditWord(TAVILY_SEARCH_CREDITS)}.`
     );
   }
   if (input.tool_name === TAVILY_EXTRACT_TOOL_NAME && Array.isArray(urls)) {
     const links = urls.filter((url): url is string => typeof url === 'string').join(', ');
     return (
       `Read these web pages with Tavily: ${cut(links)}. This sends those links to ${TAVILY_API_HOST} ` +
-      `and uses up to ${creditWord(1)}. ${NO_KEY_NOTE}`
+      `and uses up to ${creditWord(1)}.`
     );
   }
   return null;

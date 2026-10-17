@@ -95,6 +95,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(card?.plain_what).toContain('api.tavily.com');
     expect(card?.plain_what).not.toMatch(/endpoint/);
     expect(card?.plain_what).not.toContain('/search');
+    expect(card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(card?.plain_what).toContain('2 Tavily credits');
     expect(card?.destination_host).toBe('api.tavily.com');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
@@ -111,6 +112,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier3_card?.plain_what).toContain('api.tavily.com');
     expect(info.tier3_card?.plain_what).not.toMatch(/endpoint/);
     expect(info.tier3_card?.plain_what).not.toContain('/extract');
+    expect(info.tier3_card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
     expect(info.tier3_card?.destination_host).toBe('api.tavily.com');
     expect(info.tier3_card?.why_asked_again).toMatch(/no search result this turn returned/);
