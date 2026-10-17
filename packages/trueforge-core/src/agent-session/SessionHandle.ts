@@ -15,6 +15,7 @@ import {
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
   forUnattendedRun,
+  TurnToolGrants,
   withoutRelaxations,
   type SentinelHostContext,
   type SentinelServices,
@@ -322,12 +323,15 @@ export class SessionHandle<
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
     // A scheduled chat never gets the owner's relaxations, even on turns they type: its context still
     // holds what the run read. Only holding what would ask stays with the unattended turn itself.
-    const sentinelServices =
+    const turnSentinelServices =
       input.unattended === true
         ? forUnattendedRun(this.sentinelServices)
         : this.session.source?.type === 'schedule'
           ? withoutRelaxations(this.sentinelServices)
           : this.sentinelServices;
+    // "Always allow" choices wait here until the turn carrying the decision has committed.
+    const turnToolGrants = new TurnToolGrants(turnSentinelServices.tool_grants);
+    const sentinelServices = { ...turnSentinelServices, tool_grants: turnToolGrants };
 
     // Dispose-on-early-failure: any resource acquired below (sandbox handle,
     // MCP connections) is owned by createTurn() until the TurnHandle is returned; from then
@@ -526,6 +530,9 @@ export class SessionHandle<
         update_session_title_if_not_exist: input.update_session_title_if_not_exist ?? null,
       });
       turnCommitted = true;
+      await turnToolGrants.commit().catch((error: unknown) => {
+        input.resolver.logger.warn('Always allow grant could not be saved after the turn committed', { err: error });
+      });
 
       const refreshed = await this.store.getSession({
         tenant_id: this.tenant_id,

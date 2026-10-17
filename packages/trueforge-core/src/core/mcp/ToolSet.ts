@@ -1,7 +1,7 @@
 import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
-import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
+import type { ConnectorIdentity, InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
   recordStandingTrustRun,
@@ -377,6 +377,11 @@ export class ToolSet implements IToolSet {
     return undefined;
   }
 
+  /** The connector identity this tool set was built from, or undefined when the host supplied none. */
+  get connector(): ConnectorIdentity | undefined {
+    return this.source.connector;
+  }
+
   resolveConnector(): ConnectorBinding {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
@@ -433,7 +438,11 @@ export class ToolSet implements IToolSet {
         classification: undefined,
       };
     }
-    const info = { ...toolEffectHints(tool), ...sourceInfo };
+    const info = {
+      ...toolEffectHints(tool),
+      ...sourceInfo,
+      ...(this.source.connector === undefined ? {} : { mcp_connector: this.source.connector }),
+    };
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -445,6 +454,7 @@ export class ToolSet implements IToolSet {
         mcp_server_name: info.mcp_server_name,
         mcp_server_id: info.mcp_server_id,
         mcp_server_host: this.source.serverHost,
+        mcp_connector: this.source.connector,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),

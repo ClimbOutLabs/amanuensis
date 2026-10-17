@@ -25,6 +25,7 @@ import { makeSilentLogger } from '../harnessMocks';
 
 const ROOT_ID = 'thread_root';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
+const MAIL_CONNECTOR = { id: 'srv_mail', fingerprint: 'fp-1' };
 const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?' });
 
 type CallSpec = { id: string; name: string; args: string };
@@ -89,6 +90,7 @@ function makeSource(callTool: CallToolMock): ToolSource {
         wasInitialized: undefined,
       }),
     callTool,
+    connector: MAIL_CONNECTOR,
     toolCallInfo: params =>
       Promise.resolve({
         type: 'mcp',
@@ -262,7 +264,12 @@ describe('an unattended run', () => {
 
   it('still runs a read-only tool the owner always allowed, silently', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      connector: MAIL_CONNECTOR,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -498,7 +505,7 @@ describe('approving a held action later', () => {
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', connector: MAIL_CONNECTOR };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });

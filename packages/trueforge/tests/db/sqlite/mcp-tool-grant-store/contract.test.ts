@@ -13,5 +13,21 @@ describe('SqliteMcpToolGrantStore (IMcpToolGrantStore contract)', () => {
     await env?.teardown();
   });
 
-  runMcpToolGrantStoreContractSuite(() => new SqliteMcpToolGrantStore(env.db));
+  runMcpToolGrantStoreContractSuite(
+    () => new SqliteMcpToolGrantStore(env.db),
+    async key => {
+      await env.db
+        .insertInto('mcp_tool_grant')
+        .values({
+          tenant_id: key.tenant_id,
+          created_by: key.created_by,
+          mcp_server_name: key.mcp_server_name,
+          tool_name: key.tool_name,
+          mcp_server_id: '',
+          connector_fingerprint: '',
+          created_at: new Date().toISOString(),
+        })
+        .execute();
+    },
+  );
 });

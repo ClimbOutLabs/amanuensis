@@ -53,6 +53,7 @@ import { InstructionBuilder, ROOT_AGENT_IDENTITY } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
   type CompletionUsage,
+  type ConnectorIdentity,
   type ExtendedChatCompletionChunk,
   type FinishReason,
   type InternalEnrichedAssistantMessage,
@@ -1762,16 +1763,21 @@ export class AgentThread {
           ) {
             this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
           }
+          const approvedConnector = pending.tool_info.mcp_connector;
           if (
             approval.approval.scope === 'always' &&
             this.sentinel !== undefined &&
-            allowsToolGrant(pending.tool_info)
+            allowsToolGrant(pending.tool_info) &&
+            approvedConnector !== undefined &&
+            this.liveConnectorMatches({ server_id: pending.tool_info.mcp_server_id, approved: approvedConnector })
           ) {
+            // Buffered until the turn commits; a card answered after the connector changed saves nothing.
             await this.sentinel.services.tool_grants.recordToolGrant({
               tenant_id: this.sentinel.tenant_id,
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
               tool_name: pending.tool_info.original_tool_name,
+              connector: approvedConnector,
             });
           }
         }
@@ -1851,6 +1857,14 @@ export class AgentThread {
     } finally {
       this.contextBusy = false;
     }
+  }
+
+  /** Whether the connector the card was shown for is still the one this turn's tool set reaches. */
+  private liveConnectorMatches({ server_id, approved }: { server_id: string; approved: ConnectorIdentity }): boolean {
+    const live = [...(this.definition.toolSets ?? []), ...this.systemToolSets].find(
+      toolSet => toolSet.id === server_id,
+    )?.connector;
+    return live?.id === approved.id && live.fingerprint === approved.fingerprint;
   }
 
   private throwIfContextBusy(): void {

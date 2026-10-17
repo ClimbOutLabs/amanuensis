@@ -26,10 +26,29 @@ describePg('PostgresMcpToolGrantStore (IMcpToolGrantStore contract)', () => {
     }
   });
 
-  runMcpToolGrantStoreContractSuite(() => {
-    if (env === undefined) {
-      throw new Error('Postgres test environment not initialized');
-    }
-    return new PostgresMcpToolGrantStore(env.db);
-  });
+  runMcpToolGrantStoreContractSuite(
+    () => {
+      if (env === undefined) {
+        throw new Error('Postgres test environment not initialized');
+      }
+      return new PostgresMcpToolGrantStore(env.db);
+    },
+    async key => {
+      if (env === undefined) {
+        throw new Error('Postgres test environment not initialized');
+      }
+      await env.db
+        .insertInto('mcp_tool_grant')
+        .values({
+          tenant_id: key.tenant_id,
+          created_by: key.created_by,
+          mcp_server_name: key.mcp_server_name,
+          tool_name: key.tool_name,
+          mcp_server_id: '',
+          connector_fingerprint: '',
+          created_at: new Date(),
+        })
+        .execute();
+    },
+  );
 });

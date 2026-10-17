@@ -312,6 +312,7 @@ describe('ConnectorDetails always-allowed tools', () => {
     const revoke = await screen.findByRole('button', { name: 'Stop always allowing list_issues' });
     expect(screen.getByRole('heading', { name: /Always allowed/ })).toBeInTheDocument();
     expect(listToolGrants).toHaveBeenCalledWith({ id: connector.id });
+    expect(screen.getByText(/Changing its address or sign-in clears them/)).toBeInTheDocument();
 
     fireEvent.click(revoke);
 

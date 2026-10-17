@@ -380,10 +380,12 @@ export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 
 // Sentinel: three-tier permission system for tool execution
+export type { ConnectorIdentity } from './llm/LLMTypes';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
   hashApprovalTokenId,
+  hashCanonicalParams,
   prepareApprovalToken,
   restoreApprovalToken,
 } from './permissions/approvalTokens';
@@ -440,6 +442,7 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
+export { TurnToolGrants } from './permissions/toolGrants';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { createWebSearchTurnState } from './permissions/webSearch';
 export type { WebSearchTurnState } from './permissions/webSearch';

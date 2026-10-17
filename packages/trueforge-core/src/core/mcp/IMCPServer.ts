@@ -7,7 +7,7 @@ import type {
   MCPServerInitInfo,
   ToolAdmissionProvenance,
 } from '../events/schema';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { ConnectorIdentity, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
@@ -125,6 +125,8 @@ export interface IToolSet {
   readonly name: string;
   readonly id: string;
   readonly description?: string | undefined;
+  /** The connector identity this tool set was built from; absent when the host supplied none. */
+  readonly connector?: ConnectorIdentity | undefined;
 
   // True when every exposed tool is eager. DeferredTool uses the inverse.
   readonly preload: boolean;
@@ -173,6 +175,8 @@ export interface ToolSource {
   readonly description?: string | undefined;
   /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
   readonly serverHost?: string | undefined;
+  /** Stored connector id and configuration digest, bound to standing tool grants; absent for local sources. */
+  readonly connector?: ConnectorIdentity | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 

@@ -19,6 +19,7 @@ import {
   defaultSentinelServices,
   type SentinelHostContext,
 } from '../../src/core/permissions/context';
+import { TurnToolGrants } from '../../src/core/permissions/toolGrants';
 import { InternalEventType } from '../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../src/core/runtime/contextUsage';
 import { withTimeout } from '../../src/core/util/promiseUtils';
@@ -1947,7 +1948,8 @@ describe('TurnResourceResolver caches', () => {
       void event;
     }
     expect(received).toHaveLength(1);
-    expect(received[0]?.services).toBe(sentinelServices);
+    expect(received[0]?.services).toEqual({ ...sentinelServices, tool_grants: expect.any(TurnToolGrants) });
+    expect(received[0]?.services.token_store).toBe(sentinelServices.token_store);
     expect(received[0]?.tenant_id).toBe('t');
     expect(received[0]?.created_by).toBe('user-1');
     expect(received[0]?.conversation_id).toBe('s');
@@ -2032,7 +2034,17 @@ describe('TurnResourceResolver caches', () => {
       expect(received.map(context => context.services.unattended)).toEqual([true, false]);
       expect(received[0]?.services.token_store).toBe(sentinelServices.token_store);
       expect(received[1]?.services.token_store).toBe(sentinelServices.token_store);
-      expect(received[0]?.services.tool_grants).toBe(sentinelServices.tool_grants);
+      // Grants are read from the shared store; writes wait on the turn (see toolGrantCommit.test.ts).
+      const grant = {
+        tenant_id: 't',
+        created_by: 'user-1',
+        mcp_server_name: 'm',
+        tool_name: 'x',
+        connector: { id: 'c', fingerprint: 'f' },
+      };
+      await sentinelServices.tool_grants.recordToolGrant(grant);
+      expect(await received[0]?.services.tool_grants.hasToolGrant(grant)).toBe(true);
+      expect(await received[1]?.services.tool_grants.hasToolGrant(grant)).toBe(true);
       // The owner typing still gets no relaxations: the chat's context holds what the run read.
       expect([
         ...((await received[1]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' })) ?? []),
