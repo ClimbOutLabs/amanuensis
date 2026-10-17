@@ -194,7 +194,7 @@ async function restoreTurn(
       created_at: new Date(turn.created_at),
       updated_at: new Date(turn.updated_at),
     },
-    sandbox_info: turn.snapshot.sandbox_info ?? null,
+    sandbox_info: null,
     approval_grants: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: retainedThreadIds,
@@ -220,13 +220,6 @@ async function restoreTurn(
     })),
     update_session_title_if_not_exist: isFirstTurn ? session.title : null,
   });
-
-  if (turn.snapshot.mcp_servers !== null) {
-    const servers = Object.values(turn.snapshot.mcp_servers);
-    if (servers.length > 0) {
-      await store.patchMCPServers({ session_id: sessionId, turn_id: turn.turn_id, mcp_servers: servers });
-    }
-  }
 
   for (const threadId of divergentThreadIds) {
     const thread = exportedThreads.get(threadId);

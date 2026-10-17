@@ -17,7 +17,7 @@ import {
   TurnInputItemSchema,
   TurnStateSchema,
 } from '@truefoundry/trueforge-core/agent-session';
-import { ModelMessageEventSchema, TaskStateSchema, type JsonValue } from '@truefoundry/trueforge-core/core';
+import { EventType, ModelMessageEventSchema, TaskStateSchema, type JsonValue } from '@truefoundry/trueforge-core/core';
 import {
   AgentInfoSchema,
   AgentParentSchema,
@@ -111,9 +111,45 @@ const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx)
   return { ...message, tool_calls: toolCalls };
 });
 
+/** Result a call that was still open when the archive was made gets; it never ran here. */
+export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
+
+/** Context entries that record an admission or a dispatch; they are matched by call id, so an archive must not carry any. */
+const ARCHIVED_ADMISSION_TYPES: ReadonlySet<string> = new Set([
+  EventType.USER_TOOL_APPROVAL,
+  EventType.TOOL_EXECUTION_STARTED,
+  'internal.tool.execution_tracking',
+]);
+
+type ImportContextMessage = z.infer<typeof ImportContextMessageSchema>;
+
+/** Drops archived decisions and markers, then answers every call still open so the chat can take a new message. */
+function withoutArchivedAdmissions(context: ImportContextMessage[]): ImportContextMessage[] {
+  const kept = context.filter(message => !('type' in message && ARCHIVED_ADMISSION_TYPES.has(message.type)));
+  const answered = new Set<string>();
+  for (const message of kept) {
+    if ('role' in message && message.role === 'tool') {
+      answered.add(message.tool_call_id);
+    }
+  }
+  const out: ImportContextMessage[] = [];
+  for (const message of kept) {
+    out.push(message);
+    if ('tool_calls' in message) {
+      for (const call of message.tool_calls ?? []) {
+        if (!answered.has(call.id)) {
+          answered.add(call.id);
+          out.push({ role: 'tool', tool_call_id: call.id, content: EXPIRED_CALL_RESULT });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 const ImportThreadSnapshotSchema = z.looseObject({
   thread_id: z.string().min(1),
-  context: z.array(ImportContextMessageSchema),
+  context: z.array(ImportContextMessageSchema).transform(withoutArchivedAdmissions),
   current_context_usage: CurrentContextUsageSchema,
   parent: AgentParentSchema.nullable().optional(),
   agent_info: AgentInfoSchema.nullable().optional(),
@@ -124,11 +160,6 @@ const ImportThreadSnapshotSchema = z.looseObject({
 });
 export type ImportThreadSnapshot = z.infer<typeof ImportThreadSnapshotSchema>;
 
-const ImportMcpServerSnapshotSchema = z.looseObject({
-  id: z.string(),
-  name: z.string(),
-});
-
 export const ImportTurnRecordSchema = z.object({
   turn_id: z.string().min(1),
   session_id: z.string().min(1),
@@ -137,12 +168,8 @@ export const ImportTurnRecordSchema = z.object({
   previous_turn_id: z.string().nullable(),
   state: TurnStateSchema,
   input: z.array(TurnInputItemSchema),
-  snapshot: z.object({
-    threads: z.record(z.string(), ImportThreadSnapshotSchema),
-    mcp_servers: z.record(z.string(), ImportMcpServerSnapshotSchema).nullable(),
-    // Sandbox handles belong to the source deployment; the export leaves them out.
-    sandbox_info: z.looseObject({ sandbox_id: z.string() }).nullish(),
-  }),
+  // Server connections and sandbox handles belong to the source deployment and are never restored.
+  snapshot: z.object({ threads: z.record(z.string(), ImportThreadSnapshotSchema) }),
   custom: z.unknown(),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
