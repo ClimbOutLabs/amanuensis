@@ -77,6 +77,7 @@ import {
   splitCompoundSegments,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  writeTargetTouchesSandboxTools,
   type FileDigest,
   type PathResolution,
   type TrackedExecutableScope,
@@ -1047,6 +1048,40 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       },
       reason: 'git_control_write',
       reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
+  // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
+  if (
+    writeTargetTouchesSandboxTools({
+      p: target,
+      cwd: identityCwd,
+      roots: [ctx.workspace_cwd],
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return tier3Decision({
+      card: {
+        plain_what: `Save \`${target}\` in a folder where this workspace keeps programs it can run.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone:
+          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: 'sandbox_tool_write',
+      reason_detail: 'Writes into the sandbox tool folders always require approval.',
       sensitive_read: false,
       approval_token_id: await mintPlainToken({
         ctx,
