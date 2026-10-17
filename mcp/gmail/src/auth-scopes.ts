@@ -4,7 +4,7 @@
 //   1. --scopes=foo,bar        CLI flag
 //   2. GMAIL_SCOPES env var    same syntax
 //   3. interactive checkbox    (TTY only)
-//   4. DEFAULT_SCOPES          (non-interactive fallback)
+//   4. DEFAULT_SCOPES          (non-interactive fallback, read-only)
 //
 // Interactive prompt is skipped when --non-interactive is passed,
 // CI=<truthy> is set, GMAIL_AUTH_NON_INTERACTIVE=1 is set, or stdin
@@ -12,7 +12,13 @@
 // don't hang waiting for input).
 
 import { checkbox } from "@inquirer/prompts";
-import { DEFAULT_SCOPES, getAvailableScopeNames, parseScopes, validateScopes } from "./scopes.js";
+import {
+  DEFAULT_SCOPES,
+  getAvailableScopeNames,
+  parseScopes,
+  SCOPE_LABELS,
+  validateScopes,
+} from "./scopes.js";
 
 export type ScopeSource = "cli" | "env" | "interactive" | "default";
 
@@ -64,29 +70,6 @@ function validateOrThrow(scopes: string[]): string[] {
   return scopes;
 }
 
-function describe(name: string): string {
-  switch (name) {
-    case "gmail.readonly":
-      return "Read-only (subset of gmail.modify)";
-    case "gmail.modify":
-      return "Read + write, no send. Supersedes gmail.readonly and gmail.labels.";
-    case "gmail.compose":
-      return "Create drafts + send. Supersedes gmail.send.";
-    case "gmail.send":
-      return "Send only (subset of gmail.compose)";
-    case "gmail.labels":
-      return "Manage labels only (subset of gmail.modify)";
-    case "gmail.full":
-      return "Full mailbox access, including permanent deletion. Does not include settings.";
-    case "gmail.settings.basic":
-      return "Manage filters and basic settings";
-    case "gmail.settings.sharing":
-      return "Manage delegation/sharing settings (rare)";
-    default:
-      return "";
-  }
-}
-
 export async function resolveScopes(input: ResolveScopesInput): Promise<ResolveScopesResult> {
   const argv = input.argv;
   const env = input.env;
@@ -112,7 +95,7 @@ export async function resolveScopes(input: ResolveScopesInput): Promise<ResolveS
     value: name,
     name: DEFAULT_SCOPES.includes(name) ? `${name}  (default)` : name,
     checked: DEFAULT_SCOPES.includes(name),
-    description: describe(name),
+    description: SCOPE_LABELS[name] ?? "",
   }));
 
   const selected = await prompt({
