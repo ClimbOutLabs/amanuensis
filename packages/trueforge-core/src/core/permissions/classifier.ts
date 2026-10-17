@@ -13,6 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
+import { CALENDAR_SERVER_ID, isCalendarReadToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
 import {
   GMAIL_SERVER_ID,
@@ -22,6 +23,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
+import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
   approvalTokenExpiry,
@@ -974,28 +976,66 @@ function connectorBindingFor(action: SentinelAction): ConnectorBinding | undefin
     : { server_id: action.mcp_server_id, destination_host: action.mcp_server_host ?? null };
 }
 
-async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+function writeCard(input: { plain_what: string; cannot_be_undone: string; ctx: ClassifyContext }): Tier3Card {
+  return {
+    plain_what: input.plain_what,
+    plain_why: plainWhy(input.ctx.agent_intent),
+    cannot_be_undone: input.cannot_be_undone,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+}
+
+/** The files a sandbox write changes, as the paths to resolve against `cwd`; null when they cannot be determined. */
+function sandboxWriteTargets(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  identityCwd: string;
+}): { paths: string[]; cwd: string } | null {
+  const { action, ctx } = input;
+  if (ctx.workspace_cwd === null) {
+    return null;
+  }
+  if (action.tool_name === 'apply_patch') {
+    const targets = applyPatchTargets({
+      params: action.canonical_params,
+      workspace_root: ctx.workspace_cwd,
+      cwd: input.identityCwd,
+    });
+    // Patch targets are workspace-relative whatever the call's cwd is.
+    return targets.status === 'valid' ? { paths: targets.paths, cwd: ctx.workspace_cwd } : null;
+  }
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
   // Relative targets resolve against the call's cwd, matching dispatch.
+  return target === null ? null : { paths: [target], cwd: input.identityCwd };
+}
+
+const MAX_NAMED_WRITE_TARGETS = 5;
+
+function namedWriteTargets(paths: readonly string[]): string {
+  const shown = paths.slice(0, MAX_NAMED_WRITE_TARGETS).map(target => `\`${target}\``);
+  const hidden = paths.length - shown.length;
+  return hidden > 0 ? `${shown.join(', ')} and ${String(hidden)} more` : shown.join(', ');
+}
+
+async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
-  // Fail closed on null target or missing workspace: treat as outside workspace.
-  if (target === null || ctx.workspace_cwd === null) {
-    return tier3Decision({
-      card: {
-        plain_what: 'Write a file outside the workspace.',
-        plain_why: plainWhy(ctx.agent_intent),
+  const targets = sandboxWriteTargets({ action, ctx, identityCwd });
+  const outsideWorkspace = async (input: { plain_what: string; reason_detail: string }): Promise<TierDecision> =>
+    tier3Decision({
+      card: writeCard({
+        ctx,
+        plain_what: input.plain_what,
         cannot_be_undone: 'This file will be saved outside your workspace.',
-        why_asked_again: null,
-        destination: null,
-        recipient: null,
-        amount: null,
-        parsed_command: null,
-        outbound_text: null,
-        destination_host: null,
-        outbound_truncated: false,
-      },
+      }),
       reason: 'write_outside_workspace',
-      reason_detail: 'Write target is null or workspace is unknown.',
+      reason_detail: input.reason_detail,
       sensitive_read: false,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -1003,67 +1043,56 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         params: action.canonical_params,
       }),
     });
+  // Fail closed on undeterminable targets or a missing workspace: treat as outside workspace.
+  if (targets === null || ctx.workspace_cwd === null) {
+    return outsideWorkspace({
+      plain_what: 'Write a file outside the workspace.',
+      reason_detail: 'Write target is null or workspace is unknown.',
+    });
   }
-  // Resolve the write target via its parent directory: the target itself may
+  const workspaceRoot = ctx.workspace_cwd;
+  const absolute = targets.paths.map(target =>
+    action.tool_name === 'apply_patch'
+      ? absolutePatchTarget({ workspace_root: workspaceRoot, relative_path: target, resolution: ctx.path_resolution })
+      : target,
+  );
+  // Resolve each write target via its parent directory: the target itself may
   // not exist yet, and resolving it directly would misread every new-file
   // write as outside the workspace.
-  const inside = (() => {
-    const identity = canonicalWriteTarget({ p: target, cwd: identityCwd, resolution: ctx.path_resolution });
+  const insideWorkspace = (target: string): boolean => {
+    const identity = canonicalWriteTarget({ p: target, cwd: targets.cwd, resolution: ctx.path_resolution });
     if (identity === null) {
       return false;
     }
     if (ctx.path_resolution === 'remote') {
-      const root = lexicalPath({ p: ctx.workspace_cwd, cwd: '/' });
+      const root = lexicalPath({ p: workspaceRoot, cwd: '/' });
       return root !== null && isUnderRoot({ identity, root, separator: '/' });
     }
     try {
-      const root = realpathSync(ctx.workspace_cwd);
+      const root = realpathSync(workspaceRoot);
       return identity === root || identity.startsWith(`${root}${path.sep}`);
     } catch {
       return false;
     }
-  })();
-  if (!inside) {
-    return tier3Decision({
-      card: {
-        plain_what: `Write a file outside the workspace at \`${target}\`.`,
-        plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'This file will be saved outside your workspace.',
-        why_asked_again: null,
-        destination: null,
-        recipient: null,
-        amount: null,
-        parsed_command: null,
-        outbound_text: null,
-        destination_host: null,
-        outbound_truncated: false,
-      },
-      reason: 'write_outside_workspace',
+  };
+  const outside = targets.paths.filter((_, index) => !insideWorkspace(absolute[index] ?? ''));
+  if (outside.length > 0) {
+    return outsideWorkspace({
+      plain_what: `Write a file outside the workspace at ${namedWriteTargets(outside)}.`,
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
-      sensitive_read: false,
-      approval_token_id: await mintPlainToken({
-        ctx,
-        tool_name: action.tool_name,
-        params: action.canonical_params,
-      }),
     });
   }
   // Git control files can make later allowlisted git commands run code.
-  if (writeTargetTouchesGitControl({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
+  const controlTargets = targets.paths.filter((_, index) =>
+    writeTargetTouchesGitControl({ p: absolute[index] ?? '', cwd: targets.cwd, resolution: ctx.path_resolution }),
+  );
+  if (controlTargets.length > 0) {
     return tier3Decision({
-      card: {
-        plain_what: `Write Git control file \`${target}\`.`,
-        plain_why: plainWhy(ctx.agent_intent),
+      card: writeCard({
+        ctx,
+        plain_what: `Write Git control file ${namedWriteTargets(controlTargets)}.`,
         cannot_be_undone: 'Git settings can make Git run other programs.',
-        why_asked_again: null,
-        destination: null,
-        recipient: null,
-        amount: null,
-        parsed_command: null,
-        outbound_text: null,
-        destination_host: null,
-        outbound_truncated: false,
-      },
+      }),
       reason: 'git_control_write',
       reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
       sensitive_read: false,
@@ -1075,29 +1104,22 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     });
   }
   // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
-  if (
+  const toolTargets = targets.paths.filter((_, index) =>
     writeTargetTouchesSandboxTools({
-      p: target,
-      cwd: identityCwd,
-      roots: [ctx.workspace_cwd],
+      p: absolute[index] ?? '',
+      cwd: targets.cwd,
+      roots: [workspaceRoot],
       resolution: ctx.path_resolution,
-    })
-  ) {
+    }),
+  );
+  if (toolTargets.length > 0) {
     return tier3Decision({
-      card: {
-        plain_what: `Save \`${target}\` in a folder where this workspace keeps programs it can run.`,
-        plain_why: plainWhy(ctx.agent_intent),
+      card: writeCard({
+        ctx,
+        plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run.`,
         cannot_be_undone:
           'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
-        why_asked_again: null,
-        destination: null,
-        recipient: null,
-        amount: null,
-        parsed_command: null,
-        outbound_text: null,
-        destination_host: null,
-        outbound_truncated: false,
-      },
+      }),
       reason: 'sandbox_tool_write',
       reason_detail: 'Writes into the sandbox tool folders always require approval.',
       sensitive_read: false,
@@ -1112,11 +1134,11 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     ctx,
     action,
     kind: 'file_write',
-    plain_what: `Change \`${target}\` in your workspace.`,
+    plain_what: `Change ${namedWriteTargets(targets.paths)} in your workspace.`,
     parsed_command: null,
     reason: 'sandbox_write',
-    reason_detail: `Sandbox file write to \`${target}\`.`,
-    sensitive_read: isSensitivePath(target),
+    reason_detail: `Sandbox file write to ${namedWriteTargets(targets.paths)}.`,
+    sensitive_read: targets.paths.some(isSensitivePath),
   });
 }
 
@@ -1341,7 +1363,10 @@ async function classifySearchProviderTool(input: {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }
   if (hasReadPrivateData(ctx.web_search)) {
-    return held('mcp_search_after_private_read', 'this chat read your email, and a search could carry it out');
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read your email or calendar, and a search could carry it out',
+    );
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
@@ -1491,6 +1516,30 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
     sensitive_read: false,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Calendar tools are the host's own, named by server. They only read: a read is silent but flagged as sensitive
+ * (so a session that read the calendar can no longer search silently), in a chat and in a scheduled run alike,
+ * and any other name fails closed.
+ */
+async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Google Calendar needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (!isCalendarReadToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: 'calendar_read',
+    reason_detail: 'Read your calendar.',
+    sensitive_read: true,
   });
 }
 
@@ -1764,6 +1813,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
     return classifyGmailTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
+    return classifyCalendarTool(action, ctx);
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool

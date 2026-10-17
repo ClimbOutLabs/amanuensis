@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
 import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
-import { GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
+import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
+import { errorResult, failureResult, jsonResult as neutralizedJsonResult } from '../../google/toolResults';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
@@ -16,7 +17,7 @@ import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox'
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
-import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
+import { GmailApi, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
@@ -24,7 +25,6 @@ import {
   getDraftResult,
   listDraftsResult,
   listThreadsResult,
-  neutralizeDeep,
   readEmailResult,
   threadResult,
   UNTRUSTED_NOTICE,
@@ -84,34 +84,14 @@ interface GmailToolSetOptions {
   listDeadlineMs: number;
 }
 
-/** Every error is cleaned on the way out too, so no error path can carry raw mail text to the model. */
-function errorResult(error: string) {
-  return toolResultResponse({ text: JSON.stringify(neutralizeDeep({ error })), isError: true });
-}
-
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
 function sandboxCreatedOverrides(created: SandboxInfo | undefined) {
   return created === undefined ? undefined : { sandboxCreated: true, sandboxInfo: created };
 }
 
-/** Every success result is mail-derived, so every string in it is neutralized on the way out. */
+/** Mail-derived results carry the sandbox a staging call had to create, so the next turn finds it. */
 function jsonResult(value: unknown, sandboxCreated?: SandboxInfo) {
-  return toolResultResponse({
-    text: JSON.stringify(neutralizeDeep(value)),
-    overrides: sandboxCreatedOverrides(sandboxCreated),
-  });
-}
-
-/** A failure the model can act on, in words that never carry mail content or a credential. */
-function failureResult(error: unknown) {
-  if (
-    error instanceof GoogleReconnectRequiredError ||
-    error instanceof GmailApiError ||
-    error instanceof GoogleOAuthError
-  ) {
-    return errorResult(error.message);
-  }
-  throw error;
+  return neutralizedJsonResult(value, sandboxCreatedOverrides(sandboxCreated));
 }
 
 /**
@@ -301,7 +281,7 @@ export class GmailToolSet extends LocalToolMCP {
   async #liveDraft(draftId: string) {
     const draft = await this.#options.api.getDraft(draftId);
     if (draft.message === undefined) {
-      throw new GmailApiError({ status: 404, message: 'Gmail has no such message, thread or draft.' });
+      throw new GoogleApiError({ status: 404, message: 'Gmail has no such message, thread or draft.' });
     }
     return draft.message;
   }
@@ -352,7 +332,7 @@ export class GmailToolSet extends LocalToolMCP {
     } catch (error) {
       if (
         error instanceof GoogleReconnectRequiredError ||
-        error instanceof GmailApiError ||
+        error instanceof GoogleApiError ||
         error instanceof GoogleOAuthError
       ) {
         return { failure: `This could not be shown to you, so nothing was done. ${error.message}` };
