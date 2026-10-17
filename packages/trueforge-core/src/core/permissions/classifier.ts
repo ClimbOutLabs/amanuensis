@@ -1333,7 +1333,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   // A send the card cannot show exactly as it will go out is refused: approval must cover all of it.
   const refusal = sendRefusal({
-    tool_name: action.tool_name,
+    extraction,
     canonical_params: action.canonical_params,
     tool_type: action.tool_type,
   });

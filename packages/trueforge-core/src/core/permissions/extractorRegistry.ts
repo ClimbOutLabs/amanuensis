@@ -16,7 +16,7 @@
  * Tier 3 with the destination marked unknown.
  */
 
-import { containsHiddenCharacters, isHiddenCodePoint } from './hiddenCharacters';
+import { containsHiddenCharacters, containsHiddenMessageCharacters, isHiddenCodePoint } from './hiddenCharacters';
 
 export interface ExtractedCardFields {
   destination: string | null;
@@ -55,6 +55,9 @@ const RECIPIENT_KEYS = [
   'members',
   'emails',
   'webhook_url',
+  'reply_to',
+  'from',
+  'sender',
 ];
 
 /** Field names that hold the address inside an object recipient such as `{ email, name }`. */
@@ -292,9 +295,6 @@ export function renderOutboundArguments(params: Record<string, unknown>): { text
 const HIDDEN_SEND_REFUSAL = "This message contains hidden characters, so Aman won't send it.";
 const LONG_KEY_SEND_REFUSAL = "This message has a field name too long to show in full, so Aman won't send it.";
 
-/** Tools that deliver or stage mail; every part of their arguments must be fully visible. */
-const MAIL_WORDS = ['email', 'mail', 'gmail', 'reply', 'forward', 'draft'];
-
 /** True when a recipient value, at any depth, holds a hidden character. */
 function hasHiddenRecipient(value: unknown, depth = 0): boolean {
   if (Array.isArray(value)) {
@@ -310,20 +310,21 @@ function hasHiddenRecipient(value: unknown, depth = 0): boolean {
 
 /**
  * Why a send cannot be shown on its card exactly as it will go out, or null; such a send is refused,
- * never carded. Mail is refused on any hidden character; other sends only on a hidden recipient,
- * since hidden text elsewhere is shown as codes. A key the card would cut refuses a connector send.
+ * never carded. A message to a person is refused on any hidden character outside a well-formed emoji
+ * or script sequence; other sends only on a hidden recipient, since hidden text elsewhere is shown as
+ * codes. A key the card would cut refuses a connector send.
  */
 export function sendRefusal(input: {
-  tool_name: string;
+  extraction: ExtractionResult;
   canonical_params: Record<string, unknown>;
-  tool_type?: 'truefoundry-system' | 'mcp' | undefined;
+  tool_type: 'truefoundry-system' | 'mcp' | undefined;
 }): string | null {
   const params = input.canonical_params;
-  const mail = hasPhrase(nameWords(input.tool_name), ...MAIL_WORDS);
-  if (!mail && !isExternalServiceAction(input.tool_name)) {
+  const { delivers_message: message, external_service: external } = input.extraction;
+  if (!message && !external) {
     return null;
   }
-  if (mail ? containsHiddenCharacters(params) : hasHiddenRecipient(params)) {
+  if (hasHiddenRecipient(params) || (message && containsHiddenMessageCharacters(params))) {
     return HIDDEN_SEND_REFUSAL;
   }
   const keyIsCut = Object.keys(params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0);
@@ -344,6 +345,8 @@ interface ExtractorEntry {
   match: (toolName: string) => boolean;
   extract: CardFieldExtractor;
   external_service: boolean;
+  /** Delivers a message to a person, so every part of its arguments must be fully visible. */
+  delivers_message: boolean;
 }
 
 function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
@@ -360,29 +363,34 @@ function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
  */
 const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
   {
-    match: nameIncludes('send_email', 'sendemail', 'email_send'),
+    match: nameIncludes('send_email', 'sendemail', 'email_send', 'emails_send'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: true,
   },
   {
-    match: nameIncludes('send_message', 'sendmessage', 'message_send', 'send_sms', 'sendsms'),
+    match: nameIncludes('send_message', 'sendmessage', 'message_send', 'messages_send', 'send_sms', 'sendsms'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: true,
   },
   {
     match: nameIncludes('post_message', 'publish_post', 'create_post', 'post_tweet', 'share_post'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
   {
     match: nameIncludes('payment', 'pay_invoice', 'spend', 'transfer_funds', 'charge_card', 'create_charge'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
   {
     match: nameIncludes('share', 'webhook'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
 ];
 
@@ -414,6 +422,8 @@ interface ConnectorCallInput {
 
 interface ConnectorFamily {
   match: (words: string) => boolean;
+  /** Sends or stages a message to a person, so every part of its arguments must be fully visible. */
+  delivers_message: boolean;
   describe: (input: ConnectorCallInput) => string;
   /** Replaces the destination when the params name a more precise one. */
   destination?: (params: Record<string, unknown>) => string | null;
@@ -442,10 +452,12 @@ const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 
 const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'gist'),
+    delivers_message: false,
     describe: ({ tool_name, where }) => `Publish a gist with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
+    delivers_message: false,
     describe: ({ tool_name, where, params }) => {
       const repo = repositoryLabel(params);
       return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with ${tool_name}${where}.`;
@@ -454,18 +466,22 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: words => hasPhrase(words, 'send_draft'),
+    delivers_message: true,
     describe: ({ tool_name, where, fields }) => `Send a saved draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'forward'),
+    delivers_message: true,
     describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
+    delivers_message: true,
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
+    delivers_message: true,
     describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -484,10 +500,12 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
+    delivers_message: false,
     describe: ({ tool_name, where }) => `Fetch a web page with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'search'),
+    delivers_message: false,
     describe: ({ tool_name, where, words }) =>
       `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with ${tool_name}${where}.`,
   },
@@ -518,6 +536,8 @@ export interface ExtractionResult {
   /** True when the fallback fired: external-service action, no verifiable destination. */
   destination_unverifiable: boolean;
   external_service: boolean;
+  /** True for a call that sends or stages a message to a person, as its registry or connector entry says. */
+  delivers_message: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
 }
@@ -546,6 +566,7 @@ export function extractCardFields(input: {
       fields: base,
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
+      delivers_message: entry?.delivers_message ?? false,
       connector_what: null,
     };
   }
@@ -572,6 +593,7 @@ export function extractCardFields(input: {
     fields,
     destination_unverifiable: destinationUnverifiable,
     external_service: externalService,
+    delivers_message: entry?.delivers_message === true || family?.delivers_message === true,
     connector_what:
       family === undefined
         ? null
@@ -583,13 +605,4 @@ export function extractCardFields(input: {
             params: input.canonical_params,
           }),
   };
-}
-
-/** True when the tool name denotes an external-service action. */
-export function isExternalServiceAction(toolName: string): boolean {
-  const entry = EXTRACTOR_REGISTRY.find(e => e.match(toolName));
-  if (entry !== undefined) {
-    return entry.external_service;
-  }
-  return EXTERNAL_SERVICE_FRAGMENTS.some(f => toolName.toLowerCase().includes(f));
 }
