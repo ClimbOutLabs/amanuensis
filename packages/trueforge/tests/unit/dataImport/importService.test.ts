@@ -899,6 +899,39 @@ describe('runDataImport reads what compaction writes', () => {
   });
 });
 
+describe('runDataImport keeps model usage', () => {
+  it("restores a turn's aman.model.usage event", async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-usage');
+    try {
+      const usage = {
+        type: 'aman.model.usage',
+        id: 'event-usage',
+        created_at: '2026-09-10T06:00:30.000Z',
+        role: 'chat',
+        model_name: 'default',
+        model_id: 'provider/model',
+        display_name: 'Model',
+        provider: 'tokenfactory',
+        calls: 2,
+        reported_calls: 2,
+        input_tokens: 1200,
+        output_tokens: 300,
+        cost_usd: 0.0042,
+      };
+      const withUsage = await editScheduledTurn(archive, ({ turnEntry }) => {
+        listAt(turnEntry['events'], 'events').push(usage);
+      });
+      await runDataImport(importDeps(target), importRequest(withUsage));
+      const { events } = await importedScheduledChat(target);
+      expect(events).toContainEqual(usage);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport refuses an instance that is not fresh', () => {
   it('names every kind of data it finds', async () => {
     const { source, archive } = await seededArchive();
