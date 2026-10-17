@@ -53,6 +53,62 @@ test_default_install_answers_at_every_address() {
   sandbox_drop
 }
 
+test_sign_in_service_listens_on_loopback_only_where_the_app_fronts_it() {
+  t_begin "the sign-in service listens on 127.0.0.1 when the app passes its pages through, and on every address when a browser reaches it directly"
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 127.0.0.1:5556"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "0.0.0.0"
+  sandbox_drop
+  sandbox_new_plain
+  fixture_full_machine
+  INSTALL_EXTRA=(--local-only)
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 0.0.0.0:5556"
+  sandbox_drop
+}
+
+test_cloud_server_stays_on_this_computer() {
+  t_begin "on a cloud server the app is published on 127.0.0.1 only, with a warning, unless --home-network is given"
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  install_machine
+  assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_flat_contains "$OUT$ERR" "--home-network"
+  assert_eq "$(reg_value main origins)" ""
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  sandbox_drop
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  INSTALL_EXTRA=(--home-network)
+  install_machine
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+}
+
+test_home_machine_is_not_taken_for_a_cloud_server() {
+  t_begin "a computer whose hardware names no cloud provider answers on the home network without a warning"
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'LENOVO\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  install_machine
+  unset AMAN_DMI_DIR
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  sandbox_drop
+}
+
 test_sign_in_is_registered_for_every_address() {
   t_begin "the sign-in service has one fixed internal issuer and a return address for each listed origin, and no other"
   sandbox_new_plain
@@ -534,6 +590,9 @@ test_numeric_looking_names_are_not_names() {
 }
 
 test_default_install_answers_at_every_address
+test_sign_in_service_listens_on_loopback_only_where_the_app_fronts_it
+test_cloud_server_stays_on_this_computer
+test_home_machine_is_not_taken_for_a_cloud_server
 test_sign_in_is_registered_for_every_address
 test_a_machine_with_only_loopback_still_works
 test_public_addresses_are_not_used_over_http

@@ -13,6 +13,10 @@ interface UpstreamCall {
   body: string | undefined;
 }
 
+/** What the sign-in service shows again after a wrong password. */
+const PASSWORD_FORM = '<form method="post"><input name="login"><input type="password" name="password"></form>';
+const wrongPassword = () => new Response(PASSWORD_FORM, { status: 200, headers: { 'content-type': 'text/html' } });
+
 describe('login proxy', () => {
   const realFetch = globalThis.fetch;
   let calls: UpstreamCall[];
@@ -223,6 +227,10 @@ describe('login proxy', () => {
         body: 'login=a%40b.c&password=wrong',
       });
 
+    beforeEach(() => {
+      answer = wrongPassword;
+    });
+
     it('locks an address out after repeated failures, with a wait that grows, and tells it how long', async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         expect((await login()).status).toBe(200);
@@ -267,7 +275,7 @@ describe('login proxy', () => {
         });
         return new Promise(resolve => {
           setTimeout(() => {
-            resolve(new Response('<html>login</html>', { status: 200 }));
+            resolve(wrongPassword());
           }, 20);
         });
       };
@@ -290,18 +298,89 @@ describe('login proxy', () => {
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: `login=${account}&password=guess`,
         });
-      answer = () => new Response('<html>form</html>', { status: 200 });
+      answer = wrongPassword;
       for (let round = 0; round < 3; round += 1) {
         for (let attempt = 0; attempt < 4; attempt += 1) {
           expect((await post('owner%40example.com')).status).toBe(200);
         }
         answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
         expect((await post('member%40example.com')).status).toBe(303);
-        answer = () => new Response('<html>form</html>', { status: 200 });
+        answer = wrongPassword;
         await post('owner%40example.com');
         expect((await post('owner%40example.com')).status).toBe(429);
         clock += 31 * 60_000;
       }
+    });
+
+    it('does not count a post the service refused for a bad request, such as an unknown sign-in state', async () => {
+      answer = () => new Response('Bad request', { status: 400, headers: { 'content-type': 'text/html' } });
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        expect((await login()).status).toBe(400);
+      }
+      answer = wrongPassword;
+      expect((await login()).status).toBe(200);
+    });
+
+    it('does not let junk posts from many addresses lock out a person who is signing in', async () => {
+      let n = 0;
+      const many = new Hono();
+      many.all(
+        '*',
+        createLoginProxy({
+          issuerUrl: ISSUER,
+          allowedOrigins: ORIGINS,
+          limiter,
+          clientKey: () => `10.0.0.${String(n++)}`,
+        }),
+      );
+      answer = () => new Response('Bad request', { status: 400 });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await many.request('http://192.168.1.20:8791/dex/auth/local/login?state=junk', {
+          method: 'POST',
+          headers: { host: '192.168.1.20:8791', 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'login=a%40b.c&password=x',
+        });
+      }
+      answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
+      const res = await many.request('http://192.168.1.20:8791/dex/auth/local/login', {
+        method: 'POST',
+        headers: { host: '192.168.1.20:8791', 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'login=a%40b.c&password=right',
+      });
+      expect(res.status).toBe(303);
+    });
+
+    it('keeps the owner signing in through a shared gateway address while strangers fail together', async () => {
+      const gatewayLimiter = new LoginAttemptLimiter({ now: () => clock, maxGlobalFailures: 6 });
+      const hono = new Hono();
+      hono.all(
+        '*',
+        createLoginProxy({
+          issuerUrl: ISSUER,
+          allowedOrigins: ORIGINS,
+          limiter: gatewayLimiter,
+          clientKey: c => c.req.header('x-test-client') ?? 'gateway',
+        }),
+      );
+      const post = (client: string) =>
+        hono.request('http://192.168.1.20:8791/dex/auth/local/login', {
+          method: 'POST',
+          headers: {
+            host: '192.168.1.20:8791',
+            'x-test-client': client,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=a%40b.c&password=x',
+        });
+      answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
+      expect((await post('gateway')).status).toBe(303);
+      answer = wrongPassword;
+      for (let i = 0; i < 6; i += 1) {
+        await post(`stranger-${String(i)}`);
+      }
+      expect((await post('stranger-new')).status).toBe(429);
+      answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
+      expect((await post('gateway')).status).toBe(303);
     });
 
     it('limits how often one address can start a sign-in, which stores a request in the sign-in service', async () => {
@@ -557,7 +636,7 @@ describe('login proxy in front of a public sign-in address', () => {
   });
 
   it('limits each visitor behind a reverse proxy on this computer by the address it recorded, and ignores that header elsewhere', async () => {
-    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    globalThis.fetch = () => Promise.resolve(wrongPassword());
     const app = gateway();
     const post = (remoteAddress: string, forwardedFor: string) =>
       app.fetch(
@@ -584,7 +663,7 @@ describe('login proxy in front of a public sign-in address', () => {
   });
 
   it('believes X-Forwarded-For from a configured proxy address, and from no other address', async () => {
-    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    globalThis.fetch = () => Promise.resolve(wrongPassword());
     const hono = new Hono();
     hono.all(
       '*',
@@ -617,6 +696,25 @@ describe('login proxy in front of a public sign-in address', () => {
       expect((await post('172.18.0.9', `10.0.0.${String(i)}`)).status).toBe(200);
     }
     expect((await post('172.18.0.9', '10.9.9.9')).status).toBe(429);
+  });
+
+  it('limits IPv6 visitors by their /64, so a changing address does not start the guessing over', async () => {
+    globalThis.fetch = () => Promise.resolve(wrongPassword());
+    const app = gateway();
+    const post = (remoteAddress: string) =>
+      app.fetch(
+        new Request('https://login.example.com/dex/auth/local/login', {
+          method: 'POST',
+          headers: { host: 'login.example.com', 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'login=a%40b.c&password=x',
+        }),
+        { incoming: { socket: { remoteAddress } } },
+      );
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post(`2001:db8:1:2:${String(i)}::${String(i + 1)}`)).status).toBe(200);
+    }
+    expect((await post('2001:db8:1:2:ffff:aaaa:bbbb:cccc')).status).toBe(429);
+    expect((await post('2001:db8:1:3::1')).status).toBe(200);
   });
 
   it('needs the service to have the same path in both places', () => {

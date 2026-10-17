@@ -24,7 +24,7 @@ case "$cmd" in
     if [ "${1:-}" = "--format" ]; then
       secopts=$(printf '[name=seccomp,profile=builtin%s%s]' "${STUB_ROOTLESS:+ name=rootless}" "${STUB_APPARMOR:+ name=apparmor}")
       case "${2:-}" in
-        *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+        *ServerVersion*) printf '28.0.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
         *MemTotal*) printf '%s\n' "${STUB_DOCKER_MEM_BYTES:-17179869184}" ;;
         *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
         *CgroupVersion*) printf '%s\n' "${STUB_CGROUP:-2}" ;;
@@ -33,7 +33,7 @@ case "$cmd" in
       esac
       exit 0
     fi
-    echo "Server Version: 27.1.1"
+    echo "Server Version: 28.0.1"
     echo " Security Options:"
     echo "  seccomp"
     [ -n "${STUB_ROOTLESS:-}" ] && echo "  rootless"
@@ -41,7 +41,7 @@ case "$cmd" in
     ;;
   version)
     if [ "${1:-}" = "--format" ]; then
-      echo "${STUB_ENGINE_VERSION:-27.1.1}"
+      echo "${STUB_ENGINE_VERSION:-28.0.1}"
       exit 0
     fi
     echo "Client: Docker Engine"

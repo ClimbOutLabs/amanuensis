@@ -70,6 +70,7 @@ DOCKER_ROOT=""
 DOCKER_SYSTEM_TIME=""
 DOCKER_SECURITY=""
 DOCKER_OS=""
+DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
@@ -357,6 +358,7 @@ check_docker() {
   DOCKER_SECURITY=$security
   DOCKER_OS=$os
   DOCKER_MEM=$mem
+  DOCKER_VERSION=$version
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
@@ -400,6 +402,11 @@ check_runtime() {
       return
       ;;
   esac
+  if docker_engine_leaks_loopback "$DOCKER_VERSION" "$DOCKER_OS"; then
+    record machine runtime fail "$(docker_leaks_loopback_text "$DOCKER_VERSION")" \
+      "Install a current Docker Engine (install.sh --print-root-steps shows the steps), then run aman doctor."
+    return
+  fi
   record machine runtime ok "A supported Docker runtime is in use." ""
 }
 
