@@ -64,6 +64,13 @@ describe('TokenFactoryUsagePanel', () => {
     expect(screen.getByText('UTC day 2026-10-15. Counters reset at midnight UTC.')).toBeInTheDocument();
   });
 
+  it('labels the cost column as a list-price estimate, never as the bill', async () => {
+    renderPanel(serverWithUsage(async () => USAGE));
+
+    const header = await screen.findByRole('columnheader', { name: 'Cost at list price' });
+    expect(header).toHaveAttribute('title', 'Estimated from per-million-token list prices, not your bill.');
+  });
+
   it('says there is no cap when none is set', async () => {
     renderPanel(serverWithUsage(async () => ({ ...USAGE, capTokens: null, remainingTokens: null })));
 

@@ -43,17 +43,18 @@ Under each answer a quiet line names the model that answered, its provider, and 
 of the whole turn, with any helper calls folded into the total:
 
 ```text
-Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 · + 2 helper calls on Nemotron 3 Nano
+Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano
 ```
 
 With **Show agent details** on for the chat, each role that ran (the answer, sub-agents, compaction,
 turn summarization, profile learning, the library relevance check) is listed with its model, calls,
-tokens and cost. The numbers are the usage the provider reported for each call. A call whose
+tokens and cost. Token counts are the usage the provider reported for each call. A call whose
 provider reported none is shown as `usage not reported`, never as zero or an estimate.
 
-Cost comes from a price table in USD per million tokens. Token Factory models have built-in
-defaults; set `TOKEN_FACTORY_PRICES` to change them or to price a model on another provider. A model
-with no price shows tokens only. **Settings, Themes, Answers** hides the line and the helper rows
+Cost is an estimate from a price table in USD per million tokens, shown "at list price" because it
+is not your bill. Token Factory models have built-in list prices read on 2026-10-15; set
+`TOKEN_FACTORY_PRICES` to change them or to price a model on another provider. A model with no
+price shows tokens only. **Settings, Themes, Answers** hides the line and the helper rows
 for you without stopping usage from being counted, and **Settings, Models** shows today's tokens
 and cost per Token Factory model with the daily cap remaining.
 

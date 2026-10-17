@@ -76,6 +76,14 @@ export function formatCostUsd(cost: number): string {
   return `$${cost.toFixed(cost >= 1 ? 2 : 4)}`;
 }
 
+/** Costs come from a price table, not the provider's invoice, so every place that shows one says so. */
+export const LIST_PRICE_HINT = 'Estimated from per-million-token list prices, not your bill.';
+
+/** "$0.0011 at list price". */
+export function describeListPriceCost(cost: number): string {
+  return `${formatCostUsd(cost)} at list price`;
+}
+
 function sumCost(costs: readonly (number | null)[]): number | null {
   let total = 0;
   for (const cost of costs) {

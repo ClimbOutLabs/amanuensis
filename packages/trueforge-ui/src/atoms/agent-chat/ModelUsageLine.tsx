@@ -4,16 +4,17 @@ import type { ReactNode } from 'react';
 
 import {
   describeHelperCalls,
+  describeListPriceCost,
   describeTokenSplit,
-  formatCostUsd,
   formatTokens,
+  LIST_PRICE_HINT,
   type ModelUsageSummary,
 } from '../../utils/modelUsage.js';
 
 /**
  * The quiet line under an answer: which model answered, on which provider, and what the whole turn
- * cost, helper calls included. Numbers are the provider's reported usage; a turn whose provider
- * reported none says so rather than showing zero.
+ * cost, helper calls included. Tokens are the provider's reported usage; a turn whose provider
+ * reported none says so rather than showing zero. Cost is a list-price estimate and is labelled so.
  */
 export function ModelUsageLine({ summary }: { summary: ModelUsageSummary }): ReactNode {
   const helpers = describeHelperCalls(summary);
@@ -34,7 +35,9 @@ export function ModelUsageLine({ summary }: { summary: ModelUsageSummary }): Rea
           {summary.costUsd === null ? null : (
             <>
               <span aria-hidden> · </span>
-              <span>{formatCostUsd(summary.costUsd)}</span>
+              <span data-testid="model-usage-cost" title={LIST_PRICE_HINT}>
+                {describeListPriceCost(summary.costUsd)}
+              </span>
             </>
           )}
           {summary.unreportedCalls > 0 ? (

@@ -3,8 +3,8 @@
 import type { ReactNode } from 'react';
 
 import {
+  describeListPriceCost,
   describeTokenSplit,
-  formatCostUsd,
   formatTokens,
   type ModelUsageRow,
   type ModelUsageSummary,
@@ -13,7 +13,7 @@ import {
 function rowFigures(row: ModelUsageRow): string {
   if (row.reportedCalls === 0) return 'usage not reported';
   const parts = [`${formatTokens(row.inputTokens + row.outputTokens)} tokens (${describeTokenSplit(row)})`];
-  if (row.costUsd !== null) parts.push(formatCostUsd(row.costUsd));
+  if (row.costUsd !== null) parts.push(describeListPriceCost(row.costUsd));
   return parts.join(' · ');
 }
 

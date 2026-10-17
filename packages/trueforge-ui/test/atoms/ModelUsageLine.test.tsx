@@ -18,16 +18,26 @@ describe('ModelUsageLine', () => {
     render(<ModelUsageLine summary={summaryOf(SUPER_EVENT)} />);
 
     expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
-      'Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0008',
+      'Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0008 at list price',
     );
     expect(screen.queryByTestId('model-usage-helpers')).not.toBeInTheDocument();
+  });
+
+  it('labels the cost as a list-price estimate, never as the bill', () => {
+    render(<ModelUsageLine summary={summaryOf(SUPER_EVENT)} />);
+
+    const cost = screen.getByTestId('model-usage-cost');
+    expect(cost).toHaveTextContent('$0.0008 at list price');
+    expect(cost).toHaveAttribute('title', 'Estimated from per-million-token list prices, not your bill.');
   });
 
   it('folds helper calls into the total and names the model they ran on', () => {
     render(<ModelUsageLine summary={summaryOf(SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT)} />);
 
     const line = screen.getByTestId('model-usage-line');
-    expect(line).toHaveTextContent('Nemotron 3 Super · Token Factory · 6,990 tokens (6,300 in, 690 out) · $0.0012');
+    expect(line).toHaveTextContent(
+      'Nemotron 3 Super · Token Factory · 6,990 tokens (6,300 in, 690 out) · $0.0012 at list price',
+    );
     expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
   });
 
@@ -41,6 +51,8 @@ describe('ModelUsageLine', () => {
     const line = screen.getByTestId('model-usage-line');
     expect(line).toHaveTextContent('local-model · Custom provider · 2,140 tokens (1,800 in, 340 out)');
     expect(line).not.toHaveTextContent('$');
+    expect(line).not.toHaveTextContent('list price');
+    expect(screen.queryByTestId('model-usage-cost')).not.toBeInTheDocument();
   });
 
   it('says usage was not reported instead of showing zeros', () => {
@@ -79,13 +91,13 @@ describe('ModelUsageDetails', () => {
     const rows = screen.getAllByTestId('model-usage-row');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent(
-      'Answer·Nemotron 3 Super, Token Factory·2 calls·2,140 tokens (1,800 in, 340 out) · $0.0008',
+      'Answer·Nemotron 3 Super, Token Factory·2 calls·2,140 tokens (1,800 in, 340 out) · $0.0008 at list price',
     );
     expect(rows[1]).toHaveTextContent(
-      'Memory summary·Nemotron 3 Nano, Token Factory·1 call·550 tokens (500 in, 50 out) · <$0.0001',
+      'Memory summary·Nemotron 3 Nano, Token Factory·1 call·550 tokens (500 in, 50 out) · <$0.0001 at list price',
     );
     expect(rows[2]).toHaveTextContent(
-      'Compaction·Nemotron 3 Nano, Token Factory·1 call·4,300 tokens (4,000 in, 300 out) · $0.0003',
+      'Compaction·Nemotron 3 Nano, Token Factory·1 call·4,300 tokens (4,000 in, 300 out) · $0.0003 at list price',
     );
   });
 

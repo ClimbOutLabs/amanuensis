@@ -211,7 +211,7 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after either variable changes, so roles, personas and agents that still point at it keep working.
 
 **Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, except the helper jobs below: while a turn runs on Token Factory, they use the small model unless you pick one for that role.
 
@@ -242,12 +242,12 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 
 **Where cost shows.**
 
-- Under each answer, a quiet line names the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
+- Under each answer, a quiet line names the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
 - With **Show agent details** on for the chat, each role that ran appears in the turn's details with its model, calls, tokens and cost.
 - **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
 - **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
 
-The numbers are the usage the provider reported for each call. Nothing is estimated: if a provider reports no usage for a call, the line says `usage not reported`. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
+Token counts are the usage the provider reported for each call and are never estimated: if a provider reports no usage for a call, the line says `usage not reported`. Cost is an estimate from the price table above, labelled "at list price", not your bill. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
 
 **Daily cap.** Set `TOKEN_FACTORY_DAILY_TOKEN_CAP` to limit Token Factory tokens per UTC day for the whole instance. Input and output tokens from every Token Factory call count, including helper calls and the fallback in `TOKEN_FACTORY_MODE=fallback`. The cap is checked before every model call: once it is reached, a new turn on a Token Factory model is refused with a 429 (`token_factory_daily_cap_reached`) and a turn already running stops before its next model call. It resets at midnight UTC. Without the variable there is no cap, but the daily tokens are still counted per model for the Settings view.
 

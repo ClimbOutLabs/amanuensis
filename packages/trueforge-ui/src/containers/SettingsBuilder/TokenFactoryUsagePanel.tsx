@@ -2,7 +2,7 @@
 
 import { Button } from '@/atoms/primitives/Button.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
-import { formatCostUsd, formatTokens } from '@/utils/modelUsage.js';
+import { formatCostUsd, formatTokens, LIST_PRICE_HINT } from '@/utils/modelUsage.js';
 import { useTokenFactoryUsage } from './tokenFactoryUsage.js';
 
 function Cost({ value }: { value: number | null }) {
@@ -112,8 +112,8 @@ export function TokenFactoryUsagePanel({ providerConfigured }: { providerConfigu
                   <th scope="col" className="py-1 text-right font-medium">
                     Output
                   </th>
-                  <th scope="col" className="py-1 text-right font-medium">
-                    Cost
+                  <th scope="col" title={LIST_PRICE_HINT} className="py-1 text-right font-medium">
+                    Cost at list price
                   </th>
                 </tr>
               </thead>
