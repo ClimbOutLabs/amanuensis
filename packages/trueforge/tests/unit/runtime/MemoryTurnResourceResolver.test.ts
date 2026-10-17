@@ -84,7 +84,10 @@ function stubModelClient(): ILLM {
   };
 }
 
-function memoryContext(providerServerName: string | undefined): MemoryTurnContext {
+function memoryContext(
+  providerServerName: string | undefined,
+  searchProviderServerName?: () => Promise<string | undefined>,
+): MemoryTurnContext {
   return {
     // No client: these scenarios are about tool exposure, not about recall or retain.
     client: undefined,
@@ -93,12 +96,14 @@ function memoryContext(providerServerName: string | undefined): MemoryTurnContex
     previousTurnId: null,
     sessionTitle: undefined,
     providerServerName,
+    searchProviderServerName,
   };
 }
 
 function makeResolver(input: {
   url: string;
   providerServerName: string | undefined;
+  searchProviderServerName?: () => Promise<string | undefined>;
   toolOutputScreen?: ToolOutputScreenConfig;
 }) {
   return new MemoryTurnResourceResolver(
@@ -117,7 +122,7 @@ function makeResolver(input: {
     },
     undefined,
     undefined,
-    memoryContext(input.providerServerName),
+    memoryContext(input.providerServerName, input.searchProviderServerName),
     input.toolOutputScreen ?? TOOL_OUTPUT_SCREEN_CONFIG,
   );
 }
@@ -259,5 +264,54 @@ describe('MemoryTurnResourceResolver tool exposure', () => {
     expect(disabled.extraCapabilities?.flatMap(capability => capability.toolResponseProcessors ?? []) ?? []).toEqual(
       [],
     );
+  });
+});
+
+describe('the designated web search provider on every turn', () => {
+  const SEARCH_SERVER = 'parallel-web';
+  let inert: InertMcpServer;
+
+  beforeAll(async () => {
+    inert = await startInertMcpServer();
+  });
+
+  afterAll(async () => {
+    await inert.close();
+  });
+
+  const bareSpec = () => AgentSpecSchema.parse({ model: { name: CHAT_MODEL }, instructions: 'Answer the user.' });
+
+  function withSearchProvider(name: string | undefined) {
+    return makeResolver({
+      url: inert.url,
+      providerServerName: undefined,
+      searchProviderServerName: () => Promise.resolve(name),
+    });
+  }
+
+  it('offers its tools on a first turn whose spec lists no connector', async () => {
+    const resolved = await resolve(withSearchProvider(SEARCH_SERVER), bareSpec());
+
+    expect(resolved.definition.toolSets?.map(toolSet => toolSet.name)).toEqual([SEARCH_SERVER]);
+    expect((await listedTools(mountFor(resolved, SEARCH_SERVER))).map(tool => tool.name)).toEqual(ALL_TOOLS);
+  });
+
+  it('adds it beside the connectors a spec lists, and never twice', async () => {
+    const added = await resolve(withSearchProvider(SEARCH_SERVER), makeSpec());
+    expect(added.definition.toolSets?.map(toolSet => toolSet.name).sort()).toEqual(
+      [MEMORY_PROVIDER_SERVER, OTHER_SERVER, SEARCH_SERVER].sort(),
+    );
+
+    const spec = AgentSpecSchema.parse({ model: { name: CHAT_MODEL }, mcp_servers: [{ name: SEARCH_SERVER }] });
+    const listed = await resolve(withSearchProvider(SEARCH_SERVER), spec);
+    expect(listed.definition.toolSets).toHaveLength(1);
+  });
+
+  it('adds nothing when no provider is designated, and nothing to a sub-agent', async () => {
+    const none = await resolve(withSearchProvider(undefined), bareSpec());
+    expect(none.definition.toolSets ?? []).toHaveLength(0);
+
+    const child = await resolve(withSearchProvider(SEARCH_SERVER), bareSpec(), true);
+    expect(child.definition.toolSets ?? []).toHaveLength(0);
   });
 });
