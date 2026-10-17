@@ -130,3 +130,50 @@ test('readAllSessionEvents pages through every event without asking for more tha
   assert.ok(requested.every(request => request.limit <= SESSION_EVENTS_PAGE_SIZE));
   assert.equal(SESSION_EVENTS_PAGE_SIZE, 100);
 });
+
+const outboundEvent = {
+  id: 'evt-1',
+  kind: 'web_search',
+  host: 'search.example.com',
+  model: null,
+  tool_name: 'lookup',
+  request_bytes: 120,
+  recipient_count: null,
+  subject: null,
+  conversation_id: 'chat-1',
+  created_at: '2026-10-17T10:00:00.000Z',
+};
+
+test('outbound activity reads the owner-only list and parses the window', async () => {
+  const { api, seen } = recordingApi(() => ({
+    data: [outboundEvent, { id: 'broken' }],
+    window_start: '2026-10-16T10:00:00.000Z',
+    truncated: true,
+  }));
+  const activity = await api.listOutboundActivity();
+  assert.deepEqual(seen, [{ url: '/api/v1/settings/outbound-events', method: 'GET', body: undefined }]);
+  assert.equal(activity.events.length, 1);
+  assert.equal(activity.events[0]?.host, 'search.example.com');
+  assert.equal(activity.window_start, '2026-10-16T10:00:00.000Z');
+  assert.equal(activity.truncated, true);
+});
+
+test('data locations reads the owner-only list', async () => {
+  const { api, seen } = recordingApi(() => ({
+    data: [
+      { id: 'chats', name: 'Chats', where: 'Inside the database file /d.sqlite.', size_bytes: 10, size_covers: null },
+    ],
+  }));
+  const locations = await api.listDataLocations();
+  assert.deepEqual(seen, [{ url: '/api/v1/settings/data-locations', method: 'GET', body: undefined }]);
+  assert.equal(locations[0]?.name, 'Chats');
+});
+
+test('a member is told in plain words that only the owner can see these pages', async () => {
+  const api = createSentinelApi({
+    fetcher: async () => Response.json({ error: { message: 'Admin access required' } }, { status: 403 }),
+    listSessionEvents: async () => [],
+  });
+  await assert.rejects(api.listOutboundActivity(), /Only the owner of this computer can see this page\./);
+  await assert.rejects(api.listDataLocations(), /Only the owner of this computer can see this page\./);
+});

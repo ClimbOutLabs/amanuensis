@@ -31,6 +31,7 @@ import {
   VercelAILLM,
   type BoundRepository,
   type HeldRefusalReason,
+  type OutboundEventWriter,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -78,6 +79,7 @@ import { submitRetainWithVerification, type SummarizeTurnContext } from '../runt
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import { modelRequestObserver } from '../runtime/outboundRecorder';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
@@ -210,6 +212,8 @@ export interface TurnsRouterDeps {
   globalSettingsStore: IGlobalSettingsStore;
   /** Per-instance daily Token Factory cap; a no-op without `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Where requests leaving this computer are recorded; omitted records nothing. */
+  outboundEvents?: OutboundEventWriter | undefined;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
@@ -230,7 +234,13 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
+  | 'activeTurns'
+  | 'turnDrains'
+  | 'eventSubscriptions'
+  | 'logger'
+  | 'globalSettingsStore'
+  | 'tokenFactoryBudget'
+  | 'outboundEvents'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -305,6 +315,7 @@ function createTurnResolver(deps: {
   toolOutputScreenEnabled: boolean;
   /** Limits and counts the turn's Token Factory calls against the daily cap. */
   tokenFactoryBudget: TokenFactoryBudget;
+  outboundEvents?: OutboundEventWriter | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpServerStore,
@@ -338,6 +349,7 @@ function createTurnResolver(deps: {
     clientTimezone,
     toolOutputScreenEnabled,
     tokenFactoryBudget,
+    outboundEvents,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -377,6 +389,7 @@ function createTurnResolver(deps: {
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
+            onRequest: modelRequestObserver({ writer: outboundEvents, tenant_id, conversation_id: sessionId }),
           });
         const role = tokenFactoryRole({
           primaryType: routed.providerConfig.provider.type,
@@ -618,6 +631,7 @@ function createTurnResolver(deps: {
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       logger,
+      outboundEvents,
     },
   );
 }
@@ -1016,6 +1030,7 @@ export async function beginTurnExecution(params: {
     tenantId: tenant_id,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    onModelRequest: modelRequestObserver({ writer: deps.outboundEvents, tenant_id, conversation_id: sessionId }),
     agentStore: deps.agentStore,
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
@@ -1043,6 +1058,7 @@ export async function beginTurnExecution(params: {
     modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    onModelRequest: modelRequestObserver({ writer: deps.outboundEvents, tenant_id, conversation_id: sessionId }),
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
@@ -1076,6 +1092,7 @@ export async function beginTurnExecution(params: {
     toolOutputScreenEnabled,
     turnArtifactStore: deps.turnArtifactStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    outboundEvents: deps.outboundEvents,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1669,6 +1686,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      onModelRequest: modelRequestObserver({
+        writer: deps.outboundEvents,
+        tenant_id: requestContext.tenant_id,
+        conversation_id: sessionId,
+      }),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1773,6 +1795,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           eventStore: deps.sessionStore,
           modelProviderStore,
           tokenFactoryBudget: deps.tokenFactoryBudget,
+          onModelRequest: modelRequestObserver({
+            writer: deps.outboundEvents,
+            tenant_id: requestContext.tenant_id,
+            conversation_id: sessionId,
+          }),
           memoryClient,
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
@@ -1803,6 +1830,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       tenantId: requestContext.tenant_id,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      onModelRequest: modelRequestObserver({
+        writer: deps.outboundEvents,
+        tenant_id: requestContext.tenant_id,
+        conversation_id: sessionId,
+      }),
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
@@ -1862,6 +1894,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      outboundEvents: deps.outboundEvents,
     });
 
     // First turn only: derive the title from the first user message. The store

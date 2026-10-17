@@ -1,4 +1,4 @@
-import { VercelAILLM, type LLMCreateParams } from '@truefoundry/trueforge-core/core';
+import { VercelAILLM, type LLMCreateParams, type ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
@@ -110,6 +110,8 @@ export function createKnowledgeRelevanceJudge(input: {
   modelName: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
   logger: Logger;
 }): KnowledgeRelevanceJudge {
   return async (question, candidates) => {
@@ -135,6 +137,7 @@ export function createKnowledgeRelevanceJudge(input: {
         logger: input.logger,
         signal: AbortSignal.timeout(RELEVANCE_JUDGE_TIMEOUT_MS),
         streamTimeout,
+        onRequest: input.onModelRequest,
       }),
       providerType: providerConfig.provider.type,
       budget: input.tokenFactoryBudget,

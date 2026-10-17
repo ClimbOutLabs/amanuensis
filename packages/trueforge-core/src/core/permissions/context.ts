@@ -10,6 +10,7 @@
  */
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
+import type { OutboundEventWriter } from './outboundEvents';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
 import type { Tier2ActionKind } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
@@ -20,6 +21,8 @@ export interface SentinelServices {
   tracked_store: TrackedExecutableStore;
   token_store: ApprovalTokenStore;
   audit: AuditLogWriter | null;
+  /** Where requests that leave this computer are recorded; null records nothing. */
+  outbound: OutboundEventWriter | null;
   shell_allowlist: ShellAllowlistConfig;
   tool_grants: ToolGrantStore;
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
@@ -55,6 +58,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     tracked_store: new InMemoryTrackedExecutableStore(),
     token_store: new InMemoryApprovalTokenStore(),
     audit: null,
+    outbound: null,
     shell_allowlist: seedShellAllowlist(input.pinned_path),
     tool_grants: new InMemoryToolGrantStore(),
     isOffline: () => Promise.resolve(false),

@@ -1,4 +1,5 @@
 import type { SessionHandle, TurnHandle, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import type { ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -87,6 +88,8 @@ export async function resolveTurnInternalSources(input: {
   modelDir: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
   logger: Logger;
 }): Promise<TurnInternalSources> {
   const internalSourceState = createInternalSourceState();
@@ -122,6 +125,7 @@ export async function resolveTurnInternalSources(input: {
       modelName: input.persona.modelName,
       modelProviderStore: input.modelProviderStore,
       tokenFactoryBudget: input.tokenFactoryBudget,
+      onModelRequest: input.onModelRequest,
       logger: input.logger,
     }),
     sourceState: internalSourceState,

@@ -10,7 +10,12 @@
  * user is keeping. Deleting a space is a UI-only action (`DELETE /api/v1/spaces/{space_id}`,
  * exposed from the space's own page), never something a running turn can reach.
  */
-import type { AgentCapability, AgentTracing, InstructionBuilder } from '@truefoundry/trueforge-core/core';
+import type {
+  AgentCapability,
+  AgentTracing,
+  InstructionBuilder,
+  OutboundEventWriter,
+} from '@truefoundry/trueforge-core/core';
 import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
@@ -1236,6 +1241,8 @@ export interface SpaceTurnContext {
   sessionId: string;
   /** Operational log for delta-edit failures. */
   logger: Logger;
+  /** Where the turn's map lookups are recorded; omitted records nothing. */
+  outboundEvents?: OutboundEventWriter | undefined;
 }
 
 /**
@@ -1273,7 +1280,12 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
+        mapsCapability({
+          tracing: input.tracing,
+          logger: this.#space.logger,
+          outboundEvents: this.#space.outboundEvents,
+          tenant_id: this.#space.authority.tenantId,
+        }),
       ],
     };
   }

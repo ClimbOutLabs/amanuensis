@@ -30,6 +30,9 @@ const ThemeSettings = lazy(() => import('./ThemeSettings.js'));
 const PersonalizationSettings = lazy(() =>
   import('@/components/PersonalizationPanel.js').then(module => ({ default: module.PersonalizationPanel })),
 );
+const WhatLeftYourMachine = lazy(() =>
+  import('@/sentinel/WhatLeftYourMachine.js').then(module => ({ default: module.WhatLeftYourMachine })),
+);
 const SentinelSettings = lazy(() =>
   import('@/sentinel/SentinelSettings.js').then(module => ({ default: module.SentinelSettings })),
 );
@@ -78,7 +81,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasSentinel && section === 'permissions') {
+    if (!hasSentinel && (section === 'permissions' || section === 'what-left')) {
       setSettingsOpen(settingsOpen, 'models');
     }
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
@@ -99,13 +102,35 @@ const TruefoundrySettingsBuilder = () => {
     Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
+      icon:
+        | 'cpu'
+        | 'brain'
+        | 'plug'
+        | 'box-archive'
+        | 'lightbulb'
+        | 'cube'
+        | 'robot'
+        | 'palette'
+        | 'save'
+        | 'lock'
+        | 'square-arrow-out-up-right';
     }>
   >(() => {
     const baseSections: Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
+      icon:
+        | 'cpu'
+        | 'brain'
+        | 'plug'
+        | 'box-archive'
+        | 'lightbulb'
+        | 'cube'
+        | 'robot'
+        | 'palette'
+        | 'save'
+        | 'lock'
+        | 'square-arrow-out-up-right';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
@@ -127,6 +152,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
+      baseSections.push({ id: 'what-left', label: 'What left your machine', icon: 'square-arrow-out-up-right' });
     }
     return baseSections;
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
@@ -194,6 +220,7 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
               {section === 'permissions' && hasSentinel ? <SentinelSettings /> : null}
+              {section === 'what-left' && hasSentinel ? <WhatLeftYourMachine /> : null}
             </Suspense>
           </div>
         </section>

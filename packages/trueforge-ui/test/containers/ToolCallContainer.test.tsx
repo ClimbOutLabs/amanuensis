@@ -894,6 +894,8 @@ describe('ToolCallContainer', () => {
       });
       const api: SentinelApi = {
         listAuditEntries: vi.fn(async () => []),
+        listOutboundActivity: vi.fn(async () => ({ events: [], window_start: '', truncated: false })),
+        listDataLocations: vi.fn(async () => []),
         getUserSettings: vi.fn(async () => ({
           offline_mode: false,
           tier2_auto_allow: [],

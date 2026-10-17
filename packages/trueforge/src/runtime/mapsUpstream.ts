@@ -93,12 +93,16 @@ export async function fetchSameOrigin({
   url,
   headers,
   timeoutMs,
+  onRequest,
 }: {
   url: string;
   headers: Record<string, string>;
   timeoutMs: number;
+  /** Called with the upstream host just before each request is sent. */
+  onRequest?: ((host: string) => void) | undefined;
 }): Promise<Response> {
   const signal = AbortSignal.timeout(timeoutMs);
+  onRequest?.(new URL(url).host);
   const first = await fetch(url, { headers, signal, redirect: 'manual' });
   if (!isRedirect(first)) {
     return first;
@@ -110,6 +114,7 @@ export async function fetchSameOrigin({
   if (target === null) {
     throw new Error('Upstream redirected to another origin');
   }
+  onRequest?.(new URL(target).host);
   const second = await fetch(target, { headers, signal, redirect: 'manual' });
   if (isRedirect(second)) {
     await second.body?.cancel();

@@ -1,0 +1,4 @@
+member outbound-events -> 403
+anonymous outbound-events -> 401
+member data-locations -> 403
+anonymous data-locations -> 401

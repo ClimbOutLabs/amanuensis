@@ -81,6 +81,7 @@ import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerSto
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { IOutboundEventStore } from './db/outboundEventStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
@@ -107,6 +108,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { createOutboundRecorder, OUTBOUND_EVENT_RETENTION_MS } from './runtime/outboundRecorder';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -167,6 +169,7 @@ interface ServerPersistence<TTransaction> {
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  outboundEventStore: IOutboundEventStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
@@ -336,6 +339,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
+      import('./db/sqlite/outbound-event-store/SqliteOutboundEventStore'),
     ]),
   ]);
   const [
@@ -358,6 +362,7 @@ async function createStandalonePersistence(options: {
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
+    { SqliteOutboundEventStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -394,6 +399,7 @@ async function createStandalonePersistence(options: {
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+    outboundEventStore: new SqliteOutboundEventStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
@@ -448,6 +454,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
+      import('./db/postgres/outbound-event-store/PostgresOutboundEventStore'),
     ]),
   ]);
   const [
@@ -470,6 +477,7 @@ async function createDistributedPersistence(options: {
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
+    { PostgresOutboundEventStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -557,6 +565,7 @@ async function createDistributedPersistence(options: {
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+    outboundEventStore: new PostgresOutboundEventStore(db),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
@@ -595,6 +604,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokenFactoryUsageStore,
     mcpToolGrantStore,
     sentinelAuditStore,
+    outboundEventStore,
     sentinelSettingsStore,
     approvalTokenStore,
     destroyDb,
@@ -647,8 +657,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundEvents = createOutboundRecorder({ store: outboundEventStore, logger });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
+    outbound: outboundEvents,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
@@ -745,6 +757,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,
+    outboundEventStore,
+    outboundEvents,
     sentinelSettingsStore,
     sessions,
     activeTurns,
@@ -767,6 +781,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     redis,
     requestReplyRouter,
     sessionStore,
+    outboundEventStore,
     turnArtifactStore,
     turnDrains,
   };
@@ -842,6 +857,7 @@ try {
     redis,
     requestReplyRouter,
     sessionStore,
+    outboundEventStore,
     turnArtifactStore,
     turnDrains,
   } = configuration.STANDALONE
@@ -879,6 +895,20 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // The owner's page reads the last 24 hours; older rows are kept a month for support, then dropped.
+  const sweepOutboundEvents = async (): Promise<void> => {
+    try {
+      await outboundEventStore.deleteBefore({ before: new Date(Date.now() - OUTBOUND_EVENT_RETENTION_MS) });
+    } catch (error) {
+      logger.warn('Outbound event retention sweep failed', extractErrorLogFields(error));
+    }
+  };
+  void sweepOutboundEvents();
+  const outboundRetentionTimer = setInterval(() => {
+    void sweepOutboundEvents();
+  }, 86_400_000);
+  outboundRetentionTimer.unref();
 
   if (
     mountFrontend(app, {

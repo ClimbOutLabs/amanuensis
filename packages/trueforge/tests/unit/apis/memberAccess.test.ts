@@ -61,6 +61,8 @@ const SETTINGS_PATHS = [
   '/api/v1/settings/tool-output-screens',
   '/api/v1/settings/memory-screens',
   '/api/v1/settings/memory-summarize',
+  '/api/v1/settings/outbound-events',
+  '/api/v1/settings/data-locations',
   '/api/v1/settings/anything-added-later',
 ];
 const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];

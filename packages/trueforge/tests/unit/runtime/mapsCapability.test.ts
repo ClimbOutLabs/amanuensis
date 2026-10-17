@@ -1,6 +1,7 @@
-import { mapsDestinationHosts } from '@truefoundry/trueforge-core/core';
+import { mapsDestinationHosts, type OutboundEventInput } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
+import configuration from '../../../src/config';
 import {
   GeocodeCache,
   MAPS_ORIGIN_COORDINATE_PRECISION,
@@ -307,7 +308,11 @@ describe('MapsService.route origin privacy', () => {
 
 describe('maps connector binding', () => {
   it('binds approvals to the configured upstream hosts, matching what the approval card names', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      tenant_id: 'default',
+    });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
       throw new Error('maps capability has no tool sets');
@@ -318,5 +323,51 @@ describe('maps connector binding', () => {
       throw new Error('maps hosts were not stamped');
     }
     expect(binding).toEqual({ server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(info.maps_hosts) });
+  });
+});
+
+describe('maps outbound recording', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('records each geocoder request the tool makes with the service host only, never the place', async () => {
+    const rows: OutboundEventInput[] = [];
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse([
+            { lat: '48.85', lon: '2.29', display_name: 'Paris, France', address: { city: 'Paris' }, boundingbox: [] },
+          ]),
+        ),
+      );
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      tenant_id: 't1',
+      outboundEvents: {
+        record: input => {
+          rows.push(input);
+          return Promise.resolve();
+        },
+      },
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('maps capability has no tool sets');
+    }
+
+    await toolSet.callTool({ name: 'render_map', arguments: { place_name: 'Secret Hideout Lane' } });
+    await Promise.resolve();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tenant_id: 't1',
+      kind: 'map_lookup',
+      host: new URL(configuration.MAPS_GEOCODER_URL).host,
+      conversation_id: null,
+    });
+    expect(JSON.stringify(rows)).not.toContain('Secret Hideout Lane');
   });
 });

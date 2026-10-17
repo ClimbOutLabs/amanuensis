@@ -4,6 +4,7 @@ import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
+  connectorCallEvent,
   recordStandingTrustRun,
   type SentinelHostContext,
   type TierDecision,
@@ -272,6 +273,7 @@ export class ToolSet implements IToolSet {
       });
     }
 
+    await this.recordOutbound(params);
     const response = normalizeGithubFileContentsResponse({
       serverName: this.name,
       params,
@@ -291,6 +293,26 @@ export class ToolSet implements IToolSet {
       return { ...response, wasInitialized: listed.wasInitialized };
     }
     return response;
+  }
+
+  /** Writes the row for a call that is about to leave this computer; nothing for a local connector. */
+  private async recordOutbound(params: CallToolRequest['params']): Promise<void> {
+    const sentinel = this.sentinel;
+    const writer = sentinel?.services.outbound ?? null;
+    if (sentinel === undefined || writer === null) {
+      return;
+    }
+    const event = connectorCallEvent({
+      tenant_id: sentinel.tenant_id,
+      conversation_id: sentinel.conversation_id,
+      host: this.source.serverHost,
+      tool_name: params.name,
+      args: isRecord(params.arguments) ? params.arguments : undefined,
+      search_provider: this.searchProvider,
+    });
+    if (event !== null) {
+      await writer.record(event);
+    }
   }
 
   /**

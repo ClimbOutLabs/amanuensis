@@ -13,7 +13,7 @@
  * stampede the model.
  */
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import { VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import { VercelAILLM, type ILLM, type ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
@@ -146,6 +146,8 @@ export async function summarizeTurnContent(params: {
   /** Model to summarize with; when undefined the turn is not summarized. */
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
   logger: Logger;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
@@ -187,6 +189,7 @@ export async function summarizeTurnContent(params: {
               logger,
               signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
               streamTimeout,
+              onRequest: params.onModelRequest,
             }),
             providerType: providerConfig.provider.type,
             budget: params.tokenFactoryBudget,

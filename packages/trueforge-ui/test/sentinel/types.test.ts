@@ -6,6 +6,8 @@ import {
   extractSentinelFromEvent,
   extractSentinelSessionContext,
   parseAuditEntries,
+  parseDataLocations,
+  parseOutboundActivity,
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
@@ -452,5 +454,72 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
     });
+  });
+});
+
+describe('parseOutboundActivity', () => {
+  const whole = {
+    id: 'e1',
+    kind: 'email_sent',
+    host: 'mail.example.test',
+    model: null,
+    tool_name: 'send_email',
+    request_bytes: 321,
+    recipient_count: 2,
+    subject: 'Hello',
+    conversation_id: 'c1',
+    created_at: '2026-10-17T10:00:00.000Z',
+  };
+
+  it('keeps whole rows and the window, and drops rows it cannot read instead of guessing', () => {
+    const activity = parseOutboundActivity({
+      data: [
+        whole,
+        { ...whole, id: 'unknown-kind', kind: 'carrier_pigeon' },
+        { ...whole, id: 'no-host', host: undefined },
+        'not a row',
+      ],
+      window_start: '2026-10-16T10:00:00.000Z',
+      truncated: true,
+    });
+
+    expect(activity.events).toEqual([whole]);
+    expect(activity.window_start).toBe('2026-10-16T10:00:00.000Z');
+    expect(activity.truncated).toBe(true);
+  });
+
+  it('reads absent optional fields as null, never as zero', () => {
+    const [row] = parseOutboundActivity({
+      data: [{ id: 'e2', kind: 'map_lookup', host: 'maps.example.test', created_at: '2026-10-17T10:00:00.000Z' }],
+    }).events;
+
+    expect(row).toMatchObject({ request_bytes: null, recipient_count: null, model: null, subject: null });
+  });
+
+  it('reads an unrecognizable body as an empty list', () => {
+    expect(parseOutboundActivity(null)).toEqual({ events: [], window_start: '', truncated: false });
+    expect(parseOutboundActivity({ data: 'nope' }).events).toEqual([]);
+  });
+});
+
+describe('parseDataLocations', () => {
+  it('keeps the six known kinds with their real fields and drops anything else', () => {
+    const locations = parseDataLocations({
+      data: [
+        { id: 'chats', name: 'Chats', where: 'Inside /d.sqlite.', size_bytes: 10, size_covers: 'chats and settings' },
+        { id: 'backups', name: 'Backups', where: 'On request.', size_bytes: null, size_covers: null },
+        { id: 'secrets', name: 'Secrets', where: 'Nowhere.', size_bytes: 1, size_covers: null },
+        { id: 'memory', name: 'Memory' },
+      ],
+    });
+
+    expect(locations).toEqual([
+      { id: 'chats', name: 'Chats', where: 'Inside /d.sqlite.', size_bytes: 10, size_covers: 'chats and settings' },
+      { id: 'backups', name: 'Backups', where: 'On request.', size_bytes: null, size_covers: null },
+    ]);
+  });
+
+  it('reads an unrecognizable body as an empty list', () => {
+    expect(parseDataLocations({})).toEqual([]);
   });
 });

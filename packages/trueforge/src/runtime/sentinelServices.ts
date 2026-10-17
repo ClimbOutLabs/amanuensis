@@ -3,6 +3,7 @@ import {
   defaultSentinelServices,
   type ApprovalTokenStore,
   type AuditLogWriter,
+  type OutboundEventWriter,
   type SentinelServices,
   type ToolGrantStore,
 } from '@truefoundry/trueforge-core/core';
@@ -15,6 +16,7 @@ import { sentinelSettingsServices } from './sentinelSettingsServices';
  */
 export function createSentinelServices(stores: {
   audit: AuditLogWriter;
+  outbound: OutboundEventWriter;
   settings: ISentinelSettingsStore;
   approvalTokens: ApprovalTokenStore;
   toolGrants: ToolGrantStore;
@@ -24,6 +26,7 @@ export function createSentinelServices(stores: {
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: stores.audit,
+    outbound: stores.outbound,
     token_store: stores.approvalTokens,
     tool_grants: stores.toolGrants,
     outboundSecrets: stores.outboundSecrets,

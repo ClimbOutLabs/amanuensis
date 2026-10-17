@@ -50,6 +50,30 @@ describe('fetchSameOrigin', () => {
     }
   });
 
+  it('reports the host of each request it sends, and nothing more', async () => {
+    const hosts: string[] = [];
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(redirect('/next'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await fetchSameOrigin({
+      url: 'https://geo.example:8443/search?q=private-place',
+      headers,
+      timeoutMs: 1000,
+      onRequest: host => hosts.push(host),
+    });
+    expect(hosts).toEqual(['geo.example:8443', 'geo.example:8443']);
+  });
+
+  it('reports no request for a redirect it refuses to follow', async () => {
+    const hosts: string[] = [];
+    jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(redirect('https://evil.example/x'));
+    await expect(
+      fetchSameOrigin({ url: 'https://geo.example/s', headers, timeoutMs: 1000, onRequest: host => hosts.push(host) }),
+    ).rejects.toThrow('another origin');
+    expect(hosts).toEqual(['geo.example']);
+  });
+
   it('throws on a redirect to another host without contacting it', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(redirect('https://evil.example/x'));
     await expect(fetchSameOrigin({ url: 'https://geo.example/s', headers, timeoutMs: 1000 })).rejects.toThrow(

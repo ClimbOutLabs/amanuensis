@@ -34,6 +34,7 @@ export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from '
 export { MAPS_TOOL_NAMES, RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, isMapsToolName } from './mapsToolNames';
 export { provenanceForToolType, requiresNetwork } from './networkRequirements';
 export type { ToolProvenance } from './networkRequirements';
+export { connectorCallEvent } from './outboundEvents';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { RunnerWorkflow } from './runner';
 export {

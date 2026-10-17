@@ -6,6 +6,7 @@
  * exchange twice (the drain hook's own submission, and the capability's reliability-loop
  * resubmission for a vanished operation) is a no-op on the memory provider's side.
  */
+import type { ModelRequestEvent } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
@@ -108,6 +109,8 @@ export interface SummarizeTurnContext {
   /** Model to summarize with; an undefined/blank value skips summarization. */
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Called as each model request is sent; omitted records nothing. */
+  onModelRequest?: ((event: ModelRequestEvent) => void) | undefined;
 }
 
 export interface SubmitRetainParams {
@@ -172,6 +175,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       modelProviderStore: summarize.modelProviderStore,
       summarizationModelFqn: summarize.summarizationModelFqn,
       tokenFactoryBudget: summarize.tokenFactoryBudget,
+      onModelRequest: summarize.onModelRequest,
       logger: params.logger,
     });
     if (result.status === 'summarized') {

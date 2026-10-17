@@ -1,6 +1,8 @@
 import {
   extractSentinelSessionContext,
   parseAuditEntries,
+  parseDataLocations,
+  parseOutboundActivity,
   parseUserSettings,
   type SentinelApi,
   type SentinelSessionContext,
@@ -12,6 +14,10 @@ import {
 // response bodies are parsed defensively: unknown shapes are dropped, never asserted.
 const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
+const OUTBOUND_EVENTS_URL = '/api/v1/settings/outbound-events';
+const DATA_LOCATIONS_URL = '/api/v1/settings/data-locations';
+
+const OWNER_ONLY_MESSAGE = 'Only the owner of this computer can see this page.';
 
 async function readError(response: Response): Promise<Error> {
   const body: unknown = await response.json().catch(() => null);
@@ -106,6 +112,28 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
         throw await readError(response);
       }
       return parseUserSettings(await response.json());
+    },
+
+    async listOutboundActivity() {
+      const response = await fetcher(OUTBOUND_EVENTS_URL);
+      if (response.status === 403) {
+        throw new Error(OWNER_ONLY_MESSAGE);
+      }
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseOutboundActivity(await response.json());
+    },
+
+    async listDataLocations() {
+      const response = await fetcher(DATA_LOCATIONS_URL);
+      if (response.status === 403) {
+        throw new Error(OWNER_ONLY_MESSAGE);
+      }
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseDataLocations(await response.json());
     },
 
     async listSentinelSessionContext(sessionId: string): Promise<SentinelSessionContext> {
