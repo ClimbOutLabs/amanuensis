@@ -1572,7 +1572,9 @@ describe('aman backup and aman upgrade', () => {
     assert.equal(world.shim(['password']).code, 0);
     assert.equal(world.shim(['password', '--instance', 'main', '--password-stdin']).code, 0);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password`));
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password --instance main --password-stdin`));
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} instance password --instance main --password-stdin`),
+    );
   });
 
   it('aman --help says the password command is run on the computer where Aman is installed', () => {
