@@ -304,7 +304,33 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
         arguments: { intent: 'push', purpose: 'push', command: 'git push origin main', cwd: repo },
       });
       expect(shown.git_remote_precondition?.remotes).toEqual([{ name: 'origin', url: `${SHOWN_REPOSITORY}.git` }]);
-      expect(toToolCallInfo(shown).host_observed_target_summary).toContain(`${SHOWN_REPOSITORY}.git`);
+      expect(toToolCallInfo(shown).host_observed_target_summary).toBe(
+        'This uses origin, which is https://github.com/o/r.git. Your GitHub sign-in is only offered to this repository.',
+      );
+    });
+
+    test('a second address added above the shown one after approval is refused, and no token leaves the host', async () => {
+      const { repo, record, sandbox } = setup();
+      const command = 'git fetch origin';
+      const shown = await sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'sync', purpose: 'edit', command, cwd: repo },
+      });
+      expect(shown.git_remote_precondition?.remotes).toEqual([{ name: 'origin', url: `${SHOWN_REPOSITORY}.git` }]);
+      // Fetch contacts the first address, so this one would receive the request while the shown one stays last.
+      const config = join(repo, '.git', 'config');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace('[remote "origin"]\n', `[remote "origin"]\n\turl = ${REPOINTED}\n`),
+      );
+      expect(execFileSync(GIT, ['config', '--get-all', 'remote.origin.url'], { cwd: repo, encoding: 'utf8' })).toBe(
+        `${REPOINTED}\n${SHOWN_REPOSITORY}\n`,
+      );
+      const result = await run({ sandbox, command, cwd: repo, purpose: 'edit', shown });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('not the one shown for approval');
+      expect(existsSync(record)).toBe(false);
+      expect(existsSync(`${record}.token`)).toBe(false);
     });
 
     test.each(['git push origin main', 'git fetch origin', 'git pull --ff-only', 'git push'])(
@@ -330,13 +356,13 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       },
     );
 
-    test('control: an unchanged remote runs with the token, the address pinned and the credential limited to it', async () => {
+    test('control: an unchanged remote runs with the token and the credential limited to it', async () => {
       const { repo, record, sandbox } = setup();
       const result = await run({ sandbox, command: 'git push origin main', cwd: repo, purpose: 'push' });
       expect(result.isError).toBe(false);
       expect(existsSync(`${record}.token`)).toBe(true);
       const recorded = readFileSync(record, 'utf8');
-      expect(recorded).toMatch(/^GIT_CONFIG_VALUE_\d+=https:\/\/github\.com\/o\/r\.git$/mu);
+      expect(recorded).not.toMatch(/^GIT_CONFIG_KEY_\d+=remote\./mu);
       expect(recorded).toContain('=credential.https://github.com/o/r.git.helper');
       expect(recorded).not.toContain('credential.https://github.com.helper');
     });

@@ -1,3 +1,4 @@
+import { z } from '@hono/zod-openapi';
 import {
   GIT_HARDENING_ENV,
   gitHardeningConfigEntries,
@@ -93,7 +94,9 @@ interface SubcommandPolicy {
 
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
 export const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
-const GITHUB_REPOSITORY = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/u;
+const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/u;
+const GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/u;
+const GITHUB_REPOSITORY_NAME = /^[A-Za-z0-9._-]{1,100}$/u;
 export const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
 
@@ -177,14 +180,23 @@ const POLICIES: Readonly<Record<HostAuthenticatedGitSubcommand, SubcommandPolicy
   },
 };
 
-/** The owner/name and canonical address of a plain github.com repository URL, or undefined for anything else. */
+/**
+ * The owner/name and canonical address of a plain github.com repository URL, or undefined for anything else.
+ * Dot-only names are refused: git normalizes them away, so a credential scoped to one would cover a whole owner
+ * or all of github.com.
+ */
 export function parseGithubRepository(url: string): { slug: string; canonical: string } | undefined {
-  const match = GITHUB_REPOSITORY.exec(url);
+  const match = GITHUB_REPOSITORY_URL.exec(url);
   const owner = match?.[1];
-  const name = match?.[2];
-  return owner === undefined || name === undefined
-    ? undefined
-    : { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
+  const segment = match?.[2];
+  if (owner === undefined || segment === undefined || !GITHUB_OWNER.test(owner)) {
+    return undefined;
+  }
+  const name = segment.endsWith('.git') ? segment.slice(0, -'.git'.length) : segment;
+  if (!GITHUB_REPOSITORY_NAME.test(name) || /^\.+$/u.test(name)) {
+    return undefined;
+  }
+  return { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
 }
 
 function isGithubRepositoryUrl(value: string): boolean {
@@ -352,7 +364,7 @@ function credentialEntries(input: { repositories: readonly string[] }): GitConfi
 }
 
 /** The owner/name slugs of GitHub URLs; a URL that is not a plain github.com repository contributes none. */
-export function githubSlugs(urls: readonly string[]): string[] {
+function githubSlugs(urls: readonly string[]): string[] {
   return urls.flatMap(url => {
     const repository = parseGithubRepository(url);
     return repository === undefined ? [] : [repository.slug];
@@ -435,6 +447,11 @@ export interface HostAuthenticatedGitExec {
   env: Record<string, string>;
 }
 
+/** A named remote and the canonical GitHub address it was observed to have. */
+export const GitRemoteSchema = z.object({ name: z.string().min(1), url: z.string().min(1) });
+
+export type GitRemote = z.infer<typeof GitRemoteSchema>;
+
 /**
  * Network git is the one place a token must reach the sandbox: providers offer
  * no stdin or secret channel. It appears only in this process env, scoped by git
@@ -445,23 +462,16 @@ export function buildHostAuthenticatedGit(input: {
   plan: HostAuthenticatedGitPlan;
   token: string;
   workspaceRoot: string | undefined;
-  /** The remotes observed before approval; their URLs are pinned for this run and are the only repositories offered the token. */
-  remotes: readonly GitRemoteUrl[];
+  /** The remotes observed before approval and re-checked at run time; the only repositories offered the token. */
+  remotes: readonly GitRemote[];
 }): HostAuthenticatedGitExec {
   const command = pinnedGitCommand([input.plan.subcommand, ...input.plan.args]);
   const urlOperand = input.plan.remote.kind === 'url' ? [input.plan.remote.url] : [];
   const repositories = githubSlugs([...urlOperand, ...input.remotes.map(remote => remote.url)]);
-  const pinned = input.remotes.map((remote): GitConfigEntry => [`remote.${remote.name}.url`, remote.url]);
   const env = gitConfigEnv({
-    entries: [...hardeningEntries(input.workspaceRoot), ...pinned, ...credentialEntries({ repositories })],
+    entries: [...hardeningEntries(input.workspaceRoot), ...credentialEntries({ repositories })],
   });
   return { command, env: { ...env, [TOKEN_ENV_KEY]: input.token } };
-}
-
-/** A named remote and the canonical GitHub address it was observed to have. */
-export interface GitRemoteUrl {
-  name: string;
-  url: string;
 }
 
 /** Token-free, offline git run in the checkout, for reading its own state before anything is authenticated. */

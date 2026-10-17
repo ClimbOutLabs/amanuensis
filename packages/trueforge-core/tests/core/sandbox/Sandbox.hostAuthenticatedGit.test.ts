@@ -42,7 +42,7 @@ function remoteProbeAnswer(input: { command: string; remoteUrl: string }): strin
   if (command.includes("'--get' 'branch.main.remote'")) {
     return 'origin\n';
   }
-  if (command.includes("'--get' 'remote.origin.url'")) {
+  if (command.includes("'--get-all' 'remote.origin.url'")) {
     return `${input.remoteUrl}\n`;
   }
   return undefined;

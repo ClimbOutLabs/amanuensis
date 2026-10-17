@@ -1,19 +1,17 @@
 import { z } from '@hono/zod-openapi';
 import {
   BRANCH_NAME,
-  REMOTE_NAME,
   buildHostAuthenticatedGitProbe,
+  GitRemoteSchema,
   parseGithubRepository,
-  type GitRemoteUrl,
+  REMOTE_NAME,
+  type GitRemote,
   type HostAuthenticatedGitExec,
   type HostAuthenticatedGitPlan,
 } from './hostAuthenticatedGit';
 
 export const GitRemotePreconditionSchema = z.object({
-  remotes: z
-    .array(z.object({ name: z.string().min(1), url: z.string().min(1) }))
-    .min(1)
-    .max(32),
+  remotes: z.array(GitRemoteSchema).min(1).max(32),
   summary: z.string().min(1),
 });
 
@@ -46,11 +44,21 @@ async function probeLines(input: {
   return output === undefined ? undefined : lines(output);
 }
 
-/** The remote a bare `fetch`, `pull` or `push` contacts: the branch's configured remote, else origin. */
-async function defaultRemoteName(input: { run: GitProbeRunner; workspaceRoot: string | undefined }): Promise<string> {
+/**
+ * The remote a bare `fetch`, `pull` or `push` contacts: the branch's configured remote, else origin, which is
+ * also what git uses on a detached HEAD. Undefined for a branch whose remote cannot be safely looked up, so the
+ * card never names a guess.
+ */
+async function defaultRemoteName(input: {
+  run: GitProbeRunner;
+  workspaceRoot: string | undefined;
+}): Promise<string | undefined> {
   const branch = (await probeLines({ ...input, gitArguments: ['symbolic-ref', '--short', '-q', 'HEAD'] }))?.[0];
-  if (branch === undefined || !BRANCH_NAME.test(branch)) {
+  if (branch === undefined) {
     return 'origin';
+  }
+  if (!BRANCH_NAME.test(branch)) {
+    return undefined;
   }
   const configured = (
     await probeLines({
@@ -71,16 +79,29 @@ async function remoteNames(input: {
       return [];
     case 'named':
       return [input.plan.remote.name];
-    case 'default':
-      return [await defaultRemoteName(input)];
+    case 'default': {
+      const name = await defaultRemoteName(input);
+      return name === undefined ? undefined : [name];
+    }
     case 'all':
       return probeLines({ ...input, gitArguments: ['remote'] });
   }
 }
 
-function summaryOf(remotes: readonly GitRemoteUrl[]): string {
-  const list = remotes.map(remote => `${remote.name} is ${remote.url}`).join('; ');
-  return `Host resolved the git remote before approval: ${list}. The command is bound to it and the credential is offered to no other repository.`;
+/**
+ * Fetch uses a remote's first url and push uses every one, so only a remote with exactly one value, empty ones
+ * included, has an address the card can truthfully name.
+ */
+function singleValue(output: string | undefined): string | undefined {
+  const values = output?.replace(/\r?\n$/u, '').split(/\r?\n/u);
+  return values?.length === 1 ? values[0] : undefined;
+}
+
+function summaryOf(remotes: readonly GitRemote[]): string {
+  const named = remotes.map(remote => `${remote.name}, which is ${remote.url}`);
+  const list = named.length > 1 ? `${named.slice(0, -1).join(', ')}, and ${named.slice(-1).join('')}` : named.join('');
+  const scope = remotes.length === 1 ? 'this repository' : 'these repositories';
+  return `This uses ${list}. Your GitHub sign-in is only offered to ${scope}.`;
 }
 
 /**
@@ -97,15 +118,16 @@ export async function observeGitRemotes(input: {
   if (names === undefined || names.length === 0 || names.length > 32 || !names.every(name => REMOTE_NAME.test(name))) {
     return undefined;
   }
-  const remotes: GitRemoteUrl[] = [];
+  const remotes: GitRemote[] = [];
   for (const name of names) {
-    const raw = (
-      await probeLines({
-        run: input.run,
-        workspaceRoot: input.workspaceRoot,
-        gitArguments: ['config', '--local', '--no-includes', '--get', `remote.${name}.url`],
-      })
-    )?.[0];
+    const raw = singleValue(
+      await input.run(
+        buildHostAuthenticatedGitProbe({
+          gitArguments: ['config', '--local', '--no-includes', '--get-all', `remote.${name}.url`],
+          workspaceRoot: input.workspaceRoot,
+        }),
+      ),
+    );
     const repository = raw === undefined ? undefined : parseGithubRepository(raw);
     if (repository === undefined) {
       return undefined;

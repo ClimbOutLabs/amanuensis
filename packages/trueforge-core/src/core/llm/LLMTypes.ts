@@ -191,7 +191,7 @@ export const TrueFoundrySystemToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('TrueFoundrySystemToolInfo');
@@ -205,7 +205,7 @@ export const MCPToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     silent_search_query: z
       .string()
       .optional()

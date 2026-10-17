@@ -1,4 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildHostAuthenticatedGit,
   buildHostAuthenticatedGitConfigProbe,
@@ -185,9 +188,9 @@ describe('buildHostAuthenticatedGit', () => {
     expect(probe.command).toContain("'config' '--local'");
   });
 
-  test('pins the observed remote address and offers the token to that repository alone', () => {
+  test('offers the token to the observed repository alone and adds no remote address', () => {
     const pairs = configPairs(built.env);
-    expect(pairs.get('remote.origin.url')).toBe('https://github.com/o/r.git');
+    expect([...pairs.keys()].filter(key => key.startsWith('remote.'))).toEqual([]);
     expect(pairs.get('credential.useHttpPath')).toBe('true');
     expect(pairs.has('credential.https://github.com.helper')).toBe(false);
     expect([...pairs.keys()].filter(key => key.startsWith('credential.https://'))).toEqual([
@@ -244,6 +247,57 @@ describe('parseGithubRepository', () => {
     ]) {
       expect(parseGithubRepository(url)).toBeUndefined();
     }
+  });
+
+  test.each([
+    ['o/r', 'o/r'],
+    ['o/r.git', 'o/r'],
+    ['o/my.repo', 'o/my.repo'],
+    ['o/.github', 'o/.github'],
+    ['my-org/under_score', 'my-org/under_score'],
+  ])('accepts %s', (path, slug) => {
+    expect(parseGithubRepository(`https://github.com/${path}`)?.slug).toBe(slug);
+  });
+
+  // git normalizes dot segments, so a credential scoped to one would cover a whole owner or all of github.com.
+  test.each(['o/.', 'o/..', 'o/...', 'o/..git', './r', '../r', '-o/r', 'o/.git', 'o_o/r', 'o/r%2F..', 'o/r/x'])(
+    'rejects %s',
+    path => {
+      expect(parseGithubRepository(`https://github.com/${path}`)).toBeUndefined();
+    },
+  );
+});
+
+const describeWithGit = existsSync('/usr/bin/git') && existsSync('/usr/bin/env') ? describe : describe.skip;
+
+describeWithGit('buildHostAuthenticatedGit in a real checkout', () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'host-auth-git-env-'));
+    execFileSync('/usr/bin/git', ['init', '-q'], { cwd: repo });
+    execFileSync('/usr/bin/git', ['remote', 'add', 'origin', 'https://github.com/o/r'], { cwd: repo });
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('leaves the remote with exactly one address, so a push goes out once', () => {
+    const plan = planHostAuthenticatedGit({ command: 'git push origin main' });
+    if (plan === undefined) {
+      throw new Error('expected a plan');
+    }
+    const built = buildHostAuthenticatedGit({
+      plan,
+      token: TOKEN,
+      workspaceRoot: repo,
+      remotes: [{ name: 'origin', url: 'https://github.com/o/r.git' }],
+    });
+    const output = execFileSync('/usr/bin/git', ['config', '--get-all', 'remote.origin.url'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: built.env,
+    });
+    expect(output).toBe('https://github.com/o/r\n');
   });
 });
 

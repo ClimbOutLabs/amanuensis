@@ -50,7 +50,28 @@ describeWithGit('observeGitRemotes against a real checkout', () => {
   test('a named remote resolves to its canonical GitHub address and a card summary', async () => {
     const seen = await observe('git push origin main');
     expect(seen?.remotes).toEqual([{ name: 'origin', url: 'https://github.com/o/r.git' }]);
-    expect(seen?.summary).toContain('origin is https://github.com/o/r.git');
+    expect(seen?.summary).toBe(
+      'This uses origin, which is https://github.com/o/r.git. Your GitHub sign-in is only offered to this repository.',
+    );
+  });
+
+  test('several remotes are each named on the card', async () => {
+    expect((await observe('git fetch --all'))?.summary).toBe(
+      'This uses origin, which is https://github.com/o/r.git, and upstream, which is https://github.com/up/stream.git. Your GitHub sign-in is only offered to these repositories.',
+    );
+  });
+
+  // Fetch contacts the first address and push every one, so no single address could be shown.
+  test('a remote with more than one address yields no observation', async () => {
+    git('config', '--add', 'remote.origin.url', 'https://github.com/o/other');
+    expect(await observe('git push origin main')).toBeUndefined();
+    expect(await observe('git fetch --all')).toBeUndefined();
+  });
+
+  test('a branch whose remote cannot be looked up safely yields no observation instead of a guessed origin', async () => {
+    git('symbolic-ref', 'HEAD', 'refs/heads/na\u00efve');
+    git('config', 'branch.na\u00efve.remote', 'upstream');
+    expect(await observe('git pull')).toBeUndefined();
   });
 
   test('a bare command follows the branch remote, and origin when none is configured', async () => {
