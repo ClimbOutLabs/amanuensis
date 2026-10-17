@@ -364,9 +364,10 @@ export function createWorld({ instances = ['main'] } = {}) {
     run(args = [], options) {
       return world.shim(['doctor', ...args], options);
     },
-    shim(argv, { env = {} } = {}) {
+    shim(argv, { env = {}, input } = {}) {
       const result = spawnSync('bash', [DOCTOR, ...argv], {
         encoding: 'utf8',
+        input,
         env: {
           PATH: `${bin}:${tools}`,
           HOME: root,
