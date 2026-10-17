@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { createServer, type Server } from 'node:http';
 import { chromium, type Browser, type Page } from 'playwright-core';
+import { findChromiumExecutable } from '../../../../frontend/tests/support/findChromiumExecutable';
 import { createLoginProxy } from '../../../src/auth/loginProxy';
 import { createRequestGuardMiddleware } from '../../../src/auth/requestGuard';
 
@@ -49,15 +50,14 @@ function signInService(passwordPosts: string[]): Server {
 }
 
 describe('signing in through the proxied page in a real browser', () => {
-  let browser: Browser;
-  let upstream: Server;
-  let appServer: ReturnType<typeof serve>;
+  let browser: Browser | undefined;
+  let upstream: Server | undefined;
+  let appServer: ReturnType<typeof serve> | undefined;
   let origin: string;
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    const executablePath = process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'];
-    browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
+    browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
     passwordPosts = [];
     upstream = signInService(passwordPosts);
     const upstreamPort = await listen(upstream);
@@ -82,10 +82,15 @@ describe('signing in through the proxied page in a real browser', () => {
   });
 
   afterAll(async () => {
-    await browser.close();
-    appServer.close();
-    upstream.close();
+    await browser?.close();
+    appServer?.close();
+    upstream?.close();
   });
+
+  async function openPage(): Promise<Page> {
+    if (browser === undefined) throw new Error('The browser did not start.');
+    return browser.newPage();
+  }
 
   async function submit({ page, password }: { page: Page; password: string }): Promise<number> {
     await page.fill('input[name=password]', password);
@@ -97,7 +102,7 @@ describe('signing in through the proxied page in a real browser', () => {
   }
 
   it('sends the page URL as a same-origin referrer only and accepts the correct password', async () => {
-    const page = await browser.newPage();
+    const page = await openPage();
     const postedOrigins: (string | undefined)[] = [];
     page.on('request', r => {
       if (r.method() === 'POST') postedOrigins.push(r.headers()['origin']);
@@ -112,7 +117,7 @@ describe('signing in through the proxied page in a real browser', () => {
   });
 
   it('still counts wrong passwords in the browser and stops answering after the limit', async () => {
-    const page = await browser.newPage();
+    const page = await openPage();
     await page.goto(`${origin}/dex/auth?client_id=c`);
     passwordPosts.length = 0;
     const statuses: number[] = [];
