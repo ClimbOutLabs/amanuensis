@@ -223,7 +223,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)
