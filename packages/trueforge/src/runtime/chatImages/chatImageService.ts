@@ -52,6 +52,7 @@ const SECRET_RULES: ReadonlySet<OutboundGuardRule> = new Set([
 const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 const AUDIT_TOOL_NAME = 'show_image';
 const AUDIT_URL_MAX_CHARS = 500;
+const EMAIL_FETCH_BATCH = 4;
 
 interface Owner {
   tenant_id: string;
@@ -245,14 +246,20 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
       return { status: 'ask', count: urls.length, host: null };
     }
     const images: ChatImageOutcome[] = [];
-    for (const url of urls) {
+    // A few at a time: each has its own time budget, and the sandbox takes two at once anyway.
+    for (let start = 0; start < urls.length; start += EMAIL_FETCH_BATCH) {
+      const batch = urls.slice(start, start + EMAIL_FETCH_BATCH);
       images.push(
-        await showRemote({
-          ref: input.ref,
-          url,
-          source_key: `email:${input.tool_call_id}:${url}`,
-          origin: 'remote_approved',
-        }),
+        ...(await Promise.all(
+          batch.map(url =>
+            showRemote({
+              ref: input.ref,
+              url,
+              source_key: `email:${input.tool_call_id}:${url}`,
+              origin: 'remote_approved',
+            }),
+          ),
+        )),
       );
     }
     return { status: 'done', images };

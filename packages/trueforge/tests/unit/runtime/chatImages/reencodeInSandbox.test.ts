@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { HarvestedFile, RunCodeCallOptions, RunCodeResult } from '@truefoundry/trueforge-core/core';
+import type {
+  HarvestedFile,
+  RunCodeCallOptions,
+  RunCodeErrorCode,
+  RunCodeResult,
+} from '@truefoundry/trueforge-core/core';
 
 import { z } from 'zod';
 import { CHAT_IMAGE_LOCAL_MAX_BYTES } from '../../../../src/runtime/chatImages/limits';
@@ -128,6 +133,35 @@ describe('createImageReencoder refusals', () => {
     const noisy: ImageSandbox = { driverKind: 'slots', runCode: () => Promise.resolve(okResult('Traceback ...')) };
     const reencode = createImageReencoder({ resolveSandbox: () => noisy });
     await expect(reencode({ bytes: png })).resolves.toEqual({ ok: false, reason: 'undecodable' });
+  });
+
+  it('reads a failed run as a verdict only when it says something about the image', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+    const failing = (error_code: RunCodeErrorCode) =>
+      createImageReencoder({
+        resolveSandbox: () => ({
+          driverKind: 'slots',
+          runCode: () =>
+            Promise.resolve({
+              status: 'failed',
+              error_code,
+              error: 'invented failure',
+              stdout: '',
+              stderr: '',
+              stdout_truncated: false,
+              stderr_truncated: false,
+              files_out: [],
+              harvest_warnings: [],
+            }),
+        }),
+      });
+    await expect(failing('memory_exceeded')({ bytes: png })).resolves.toEqual({ ok: false, reason: 'too_large' });
+    await expect(failing('timeout')({ bytes: png })).resolves.toEqual({ ok: false, reason: 'too_large' });
+    await expect(failing('image_unavailable')({ bytes: png })).resolves.toEqual({
+      ok: false,
+      reason: 'sandbox_unavailable',
+    });
+    await expect(failing('concurrency_exceeded')({ bytes: png })).rejects.toThrow('concurrency_exceeded');
   });
 
   it('runs at most two re-encodes at once', async () => {

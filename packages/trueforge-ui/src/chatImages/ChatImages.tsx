@@ -27,12 +27,20 @@ type ShowState =
  */
 const pending = new Map<string, Promise<TurnImagesResult>>();
 
+function requestKey(input: {
+  scope: Pick<ChatImageScopeValue, 'sessionId' | 'turnId'>;
+  source: ChatImageSource;
+  approved: boolean;
+}): string {
+  return JSON.stringify([input.scope.sessionId, input.scope.turnId, input.source, input.approved]);
+}
+
 function showOnce(input: {
   scope: Pick<ChatImageScopeValue, 'port' | 'sessionId' | 'turnId'>;
   source: ChatImageSource;
   approved: boolean;
 }) {
-  const key = JSON.stringify([input.scope.sessionId, input.scope.turnId, input.source, input.approved]);
+  const key = requestKey(input);
   let request = pending.get(key);
   if (request === undefined) {
     request = input.scope.port.showTurnImages({
@@ -41,9 +49,17 @@ function showOnce(input: {
       source: input.source,
       approved: input.approved,
     });
+    // Once approved, a remounted card shows the images instead of asking again.
+    const keys = input.approved ? [key, requestKey({ ...input, approved: false })] : [key];
+    for (const each of keys) {
+      pending.set(each, request);
+    }
     // A failed request may be retried on the next render.
-    request.catch(() => pending.delete(key));
-    pending.set(key, request);
+    request.catch(() => {
+      for (const each of keys) {
+        pending.delete(each);
+      }
+    });
   }
   return request;
 }

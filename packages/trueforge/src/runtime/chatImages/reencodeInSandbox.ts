@@ -1,4 +1,9 @@
-import type { HarvestedFile, RunCodeCallOptions, RunCodeResult } from '@truefoundry/trueforge-core/core';
+import type {
+  HarvestedFile,
+  RunCodeCallOptions,
+  RunCodeErrorCode,
+  RunCodeResult,
+} from '@truefoundry/trueforge-core/core';
 import { z } from 'zod';
 
 import { ChatImageRefusalSchema, type ChatImageRefusal } from '../../schemas/chatImages';
@@ -41,6 +46,19 @@ const SandboxVerdictSchema = z.discriminatedUnion('ok', [
     reason: ChatImageRefusalSchema.extract(['unsupported_type', 'too_large', 'undecodable']),
   }),
 ]);
+
+/** What a failed sandbox run says about the image; codes not listed are transient and thrown. */
+const FAILURE_REASONS: Partial<Record<RunCodeErrorCode, ChatImageRefusal>> = {
+  timeout: 'too_large',
+  memory_exceeded: 'too_large',
+  disk_exceeded: 'too_large',
+  output_exceeded: 'too_large',
+  image_unavailable: 'sandbox_unavailable',
+  daemon_unavailable: 'sandbox_unavailable',
+  docker_unavailable: 'sandbox_unavailable',
+  isolation_refused: 'sandbox_unavailable',
+  invalid_input: 'undecodable',
+};
 
 function lastJsonLine(stdout: string): unknown {
   const line = stdout.trim().split('\n').pop() ?? '';
@@ -96,7 +114,15 @@ export function createImageReencoder(deps: { resolveSandbox: () => ImageSandbox 
         },
       },
     );
-    if (result.status !== 'ok' || result.exit_code !== 0) {
+    if (result.status === 'failed') {
+      const reason = FAILURE_REASONS[result.error_code];
+      if (reason === undefined) {
+        // Busy or broken for a moment: not a verdict on the image, so the caller may try again.
+        throw new Error(`The sandbox could not re-encode the image: ${result.error_code}`);
+      }
+      return { ok: false, reason };
+    }
+    if (result.exit_code !== 0) {
       return { ok: false, reason: 'undecodable' };
     }
     const verdict = SandboxVerdictSchema.safeParse(lastJsonLine(result.stdout));
