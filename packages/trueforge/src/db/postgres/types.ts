@@ -38,6 +38,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
 /**
@@ -237,6 +238,23 @@ export interface TurnArtifactTable {
   size: number | null;
   mime: string | null;
   skip_reason: string | null;
+  created_at: Date;
+}
+
+/** Re-encoded chat image. PRIMARY KEY (session_id, image_id); UNIQUE (session_id, source_key); session cascade. */
+export interface ChatImageTable {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  turn_id: string;
+  image_id: string;
+  source_key: string;
+  origin: ChatImageOrigin;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  data: Buffer;
   created_at: Date;
 }
 
@@ -893,6 +911,7 @@ export interface Database {
   repository_workspace_verification: RepositoryWorkspaceVerificationTable;
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
+  chat_image: ChatImageTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
