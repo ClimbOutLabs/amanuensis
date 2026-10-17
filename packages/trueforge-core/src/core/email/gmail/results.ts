@@ -58,7 +58,7 @@ function envelope(context: ResultContext) {
 
 /** Most messages of one thread a result lists, and most attachments it names per message. */
 const MAX_THREAD_MESSAGES = 60;
-const MAX_ATTACHMENTS_LISTED = 20;
+export const MAX_ATTACHMENTS_LISTED = 20;
 
 /** Most labels a row names, and the longest label id kept. */
 const MAX_LABELS_LISTED = 30;

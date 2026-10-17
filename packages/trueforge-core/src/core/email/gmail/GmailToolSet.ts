@@ -23,6 +23,7 @@ import {
   getDraftResult,
   listDraftsResult,
   listThreadsResult,
+  MAX_ATTACHMENTS_LISTED,
   neutralizeDeep,
   readEmailResult,
   threadResult,
@@ -87,6 +88,14 @@ interface GmailToolSetOptions {
 
 function errorResult(error: string) {
   return toolResultResponse({ text: JSON.stringify({ error }), isError: true });
+}
+
+/** An error that quotes mail content (such as file names) gets the same cleaning and notice as a success result. */
+function untrustedErrorResult(error: string) {
+  return toolResultResponse({
+    text: JSON.stringify(neutralizeDeep({ error, untrusted_content: UNTRUSTED_NOTICE })),
+    isError: true,
+  });
 }
 
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
@@ -460,10 +469,13 @@ export class GmailToolSet extends LocalToolMCP {
       const available = listAttachments({ message, max: Number.POSITIVE_INFINITY }).attachments;
       const attachment = available.find(file => file.handle === input.attachment_handle);
       if (attachment === undefined) {
-        const names = available.map(file => `${file.handle} (${file.filename})`);
-        return errorResult(
+        const names = available.slice(0, MAX_ATTACHMENTS_LISTED).map(file => `${file.filename} (${file.handle})`);
+        const more = available.length - names.length;
+        return untrustedErrorResult(
           `No attachment with handle "${input.attachment_handle}" on message ${input.message_id}. ` +
-            (names.length === 0 ? 'This message has no attachments.' : `Available: ${names.join(', ')}.`),
+            (names.length === 0
+              ? 'This message has no attachments.'
+              : `Its attachments are: ${names.join(', ')}${more > 0 ? `, and ${String(more)} more` : ''}.`),
         );
       }
       if (attachment.size > MAX_BYTES_PER_DOCUMENT) {
