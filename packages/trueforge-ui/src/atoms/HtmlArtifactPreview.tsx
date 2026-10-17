@@ -27,10 +27,17 @@ const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
  * - Allows inline scripts and styles from the document itself
  * - Allows images and fonts from data: URIs only; nothing here can reach the network
  * - Blocks all network connections (connect-src falls back to default-src 'none')
- * - Blocks framing
+ * - Blocks form posts and a rewritten base URL
  */
 const CSP_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'";
+
+/**
+ * The wrapper frame carries the same policy plus a frame-src that only admits srcdoc frames. The
+ * content frame inherits it, so content that sets `location` cannot load any URL, and its own CSP
+ * meta can only tighten it.
+ */
+const WRAPPER_CSP_POLICY = `${CSP_POLICY}; frame-src about:`;
 
 interface AssetToInline {
   originalUrl: string;
@@ -194,6 +201,18 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => map[char] || char);
 }
 
+// Quote-aware so a ">" inside an attribute value cannot end the tag early.
+const META_TAG_RE = /<meta(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const HTTP_EQUIV_ATTR_RE = /[\s/]http-equiv\b/i;
+
+/**
+ * Removes every `<meta http-equiv>` from the content: refresh would navigate the frame away on its
+ * own, and attribute values can be entity-encoded, so matching on "refresh" is not reliable.
+ */
+function stripHttpEquivMetas(htmlText: string): string {
+  return htmlText.replace(META_TAG_RE, tag => (HTTP_EQUIV_ATTR_RE.test(tag) ? '' : tag));
+}
+
 const LEADING_DOCTYPE_RE = /^(?:\s*<!--[\s\S]*?-->)*\s*<!doctype[^>]*>/i;
 
 /**
@@ -205,6 +224,20 @@ function insertPolicyFirst(htmlText: string): string {
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
   const doctype = LEADING_DOCTYPE_RE.exec(htmlText)?.[0] ?? '';
   return `${doctype}${cspMeta}${htmlText.slice(doctype.length)}`;
+}
+
+/**
+ * Wraps the page in a script-free frame whose CSP only admits srcdoc children, so the page cannot
+ * navigate its own frame to a URL. `running` decides whether the page may execute scripts.
+ */
+function wrapInContainmentFrame(options: { html: string; running: boolean }): string {
+  const sandbox = options.running ? 'allow-scripts' : '';
+  return [
+    '<!doctype html>',
+    `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(WRAPPER_CSP_POLICY)}">`,
+    '<style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style>',
+    `<iframe sandbox="${sandbox}" referrerpolicy="no-referrer" srcdoc="${escapeHtml(options.html)}"></iframe>`,
+  ].join('');
 }
 
 export function HtmlArtifactPreview({
@@ -220,16 +253,18 @@ export function HtmlArtifactPreview({
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [bytesInlined, setBytesInlined] = useState(0);
+  const [running, setRunning] = useState(false);
 
   // Convert blob to string and inline assets
   useEffect(() => {
     let isMounted = true;
+    setRunning(false);
 
     async function prepare() {
       try {
         let htmlText = await blobToText(content);
 
-        htmlText = insertPolicyFirst(htmlText);
+        htmlText = insertPolicyFirst(stripHttpEquivMetas(htmlText));
 
         // Inline relative assets if fetch function is provided
         if (onFetchRelatedFile) {
@@ -297,6 +332,19 @@ export function HtmlArtifactPreview({
           <span className="truncate leading-none">{filename}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {!running && (
+            <button
+              onClick={() => setRunning(true)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
+                'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
+              )}
+              title="Scripts in this page stay off until you run it"
+              aria-label={`Run ${filename}`}
+            >
+              Run this page
+            </button>
+          )}
           {!readOnly && (
             <>
               {onDownload && (
@@ -331,11 +379,12 @@ export function HtmlArtifactPreview({
       {/* Preview iframe */}
       <div className="relative min-h-96 bg-card-bg" style={{ height: previewHeight, overflow: 'auto' }}>
         <iframe
+          key={running ? 'running' : 'static'}
           ref={iframeRef}
-          srcDoc={srcdoc}
+          srcDoc={wrapInContainmentFrame({ html: srcdoc, running })}
           title={`Preview of ${filename}`}
           className="h-full w-full border-0"
-          sandbox="allow-scripts"
+          sandbox={running ? 'allow-scripts' : ''}
           referrerPolicy="no-referrer"
           data-testid="aui-html-preview-iframe"
         />

@@ -27,6 +27,7 @@ import type {
   ToolBase,
   UpdateConnectorRequest,
 } from '../../../server/types.js';
+import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
@@ -202,13 +203,18 @@ export function toHarnessAuth(auth: ConnectorAuth): TrueForgeApi.McpServerManife
   return { type: 'header', headers: { [headerName]: value } };
 }
 
-export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConnectorCatalogEntry {
+export function toUiCatalogEntry(
+  server: TrueForgeApi.CatalogMcpServer,
+  options: { baseUrl?: string } = {},
+): UiConnectorCatalogEntry {
   return {
     id: server.name,
     name: server.name,
     url: server.url,
     description: server.description,
-    ...(server.logo === undefined ? {} : { logo: server.logo }),
+    ...(server.logo === undefined
+      ? {}
+      : { logo: toSameOriginCatalogLogoUrl({ logo: server.logo, baseUrl: options.baseUrl ?? '/' }) }),
     auth: toUiAuthPublic(server.auth),
     ...(server.searchProvider === undefined ? {} : { searchProvider: server.searchProvider }),
   };
@@ -362,7 +368,7 @@ export function createConnectorCatalog(
   return {
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
-      return body.data.map(toUiCatalogEntry);
+      return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));
     },
     getConnector: async req => {
       const body = await client.settings.mcpServers.get(req.id);

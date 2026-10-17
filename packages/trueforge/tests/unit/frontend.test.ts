@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { APP_SHELL_IMAGE_CSP, mountFrontend } from '../../src/frontend';
+import { APP_SHELL_CSP, mountFrontend } from '../../src/frontend';
 
 function buildDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'trueforge-frontend-'));
@@ -85,20 +85,34 @@ describe('mountFrontend', () => {
 });
 
 describe('mountFrontend security headers', () => {
-  it('sends an image, media and font CSP and no-referrer on the app shell', async () => {
+  it('sends the app shell CSP and no-referrer on the app shell', async () => {
     const app = appWithFrontend(buildDir());
 
     for (const shellPath of ['/', '/index.html', '/sessions/abc123']) {
       const response = await app.request(shellPath, { headers: HTML_ACCEPT });
       expect(response.status).toBe(200);
-      expect(response.headers.get('content-security-policy')).toBe(APP_SHELL_IMAGE_CSP);
+      expect(response.headers.get('content-security-policy')).toBe(APP_SHELL_CSP);
       expect(response.headers.get('referrer-policy')).toBe('no-referrer');
     }
   });
 
+  it('closes every egress directive the shell can set', () => {
+    for (const directive of [
+      "img-src 'self' data: blob:",
+      "media-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "frame-src 'self' blob: data:",
+      "connect-src 'self'",
+    ]) {
+      expect(APP_SHELL_CSP.split('; ')).toContain(directive);
+    }
+    expect(APP_SHELL_CSP).not.toMatch(/https?:|\*/);
+  });
+
   it('restricts fonts to the app origin and data: URIs', () => {
-    expect(APP_SHELL_IMAGE_CSP).toContain("font-src 'self' data:");
-    expect(APP_SHELL_IMAGE_CSP).not.toMatch(/font-src[^;]*https?:/);
+    expect(APP_SHELL_CSP).toContain("font-src 'self' data:");
+    expect(APP_SHELL_CSP).not.toMatch(/font-src[^;]*https?:/);
   });
 
   it('keeps the Vite index.html meta CSP equal to the served header', () => {
@@ -108,6 +122,6 @@ describe('mountFrontend security headers', () => {
     const html = readFileSync(indexPath, 'utf-8');
     const match = html.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i);
     expect(match).not.toBeNull();
-    expect(match?.[1]).toBe(APP_SHELL_IMAGE_CSP);
+    expect(match?.[1]).toBe(APP_SHELL_CSP);
   });
 });
