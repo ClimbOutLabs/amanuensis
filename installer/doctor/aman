@@ -8,6 +8,7 @@
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
+#   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #
 # --json never loads the terminal style and is the same document as before.
@@ -80,6 +81,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
+       aman restore [NAME] [TIME | --latest]
        aman upgrade [--check] [--force]
 USAGE
 }
@@ -586,7 +588,7 @@ check_backup() {
       elif [ "$age_days" -lt 0 ] || [ "$age_days" -gt 2 ]; then
         record machine backup warn "Daily backups are scheduled, but ${newest:+the last one is ${days} old}${newest:-none has been made yet}." "Run aman doctor backup --fix"
       else
-        record machine backup ok "Daily backups are on; the last one is ${days} old." ""
+        record machine backup ok "Daily backups are on; the last one is ${days} old. To go back to one: aman restore" ""
       fi
       ;;
     off)
@@ -602,7 +604,7 @@ check_backup() {
       elif [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
         record machine backup warn "The last backup is ${days} old." "Run aman backup"
       else
-        record machine backup ok "The last backup is ${days} old." ""
+        record machine backup ok "The last backup is ${days} old. To go back to one: aman restore" ""
       fi
       ;;
   esac
@@ -712,7 +714,7 @@ check_instance_config() {
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
-      "Restore this instance from a backup in ${AMAN_HOME}/backups."
+      "Put it back from a backup with: aman restore ${name}"
     return
   fi
   # dex.env holds the login password hash; both files hold secrets.
@@ -1541,7 +1543,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman restore [...] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1581,7 +1583,7 @@ esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade) run_installer "$@" ;;
+  backup | restore | upgrade) run_installer "$@" ;;
   -h | --help)
     usage
     exit 0

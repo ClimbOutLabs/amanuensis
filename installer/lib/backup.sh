@@ -2,6 +2,8 @@
 # Backups: the CLI writes into a scratch volume and every archive is streamed over stdout, so no host bind mounts are involved.
 
 BACKUP_KEEP=7
+# The newest manifest.json version of the backup CLI that restore understands.
+BACKUP_MANIFEST_VERSION=1
 LAST_BACKUP_DIR=
 
 write_checksums() {
@@ -85,7 +87,7 @@ backup_data() {
 
 # backup_instance NAME DESTDIR IMAGE
 backup_instance() {
-  local name=$1 dest=$2/$1 image=$3
+  local name=$1 dest=$2/$1 image=$3 file
   ensure_private_dir "$dest"
   if docker_volume_exists "aman_${name}_data"; then
     backup_data "$name" "$dest" "$image" || return 1
@@ -94,9 +96,15 @@ backup_instance() {
     volume_tar "aman_${name}_dex" "$image" >"$dest/dex.tar.part" || return 1
     mv "$dest/dex.tar.part" "$dest/dex.tar"
   fi
-  cp "$(instance_dir "$name")/.env" "$dest/env"
-  cp "$(instance_dir "$name")/dex.env" "$dest/dex.env"
-  chmod 600 "$dest/env" "$dest/dex.env"
+  # A settings file that is already lost cannot be saved; that is told, not a reason to lose the rest.
+  for file in env:.env dex.env:dex.env; do
+    if [ -f "$(instance_dir "$name")/${file#*:}" ]; then
+      cp "$(instance_dir "$name")/${file#*:}" "$dest/${file%%:*}"
+      chmod 600 "$dest/${file%%:*}"
+    else
+      warn "The settings file ${file#*:} of $name is missing, so this backup does not include it."
+    fi
+  done
 }
 
 backup_prune() {
@@ -156,7 +164,8 @@ backup_run() {
   chmod 600 "$dir/release.json"
   write_checksums "$dir"
   LAST_BACKUP_DIR=$dir
-  backup_prune
+  # A restore saves the current state first and prunes only once it has finished, so the backup being restored stays.
+  [ "${BACKUP_NO_PRUNE:-0}" = 1 ] || backup_prune
   log_event "backup $dir"
   say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
 }

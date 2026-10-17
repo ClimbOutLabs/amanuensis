@@ -223,7 +223,21 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent.
+
+### Restore an instance from a backup
+
+`aman restore` puts one instance back the way a backup had it: its chats, memory and settings, and its sign-in data. With no arguments it lists the backups of the instance (date and time, size, newest first) and asks which one:
+
+```bash
+aman restore                        # list the backups and ask which number
+aman restore --latest               # the newest backup, no list
+aman restore main 20261017T031500Z  # one backup by its time stamp (the folder name in ~/.amanuensis/backups)
+```
+
+With more than one instance, give the name: `aman restore <name> --latest`. It says what it will replace and waits for you to type `yes`; `--yes` does not answer that question for you. Then it saves a fresh backup of the current state and prints where it is, stops the instance, puts back the data and the settings files with their strict permissions, starts the instance and waits until it is healthy. If anything fails it puts the saved state back and says so, so a failed restore leaves the instance as it was. Other instances are never touched. To undo a restore that worked, restore the copy it printed.
+
+A backup is refused, with the reason in plain words, when part of it is missing, when it does not match its checksums, or when a newer version of Aman made it. `aman doctor` points to `aman restore` when an instance's settings file is missing.
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)
