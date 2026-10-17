@@ -188,7 +188,7 @@ describe('Data import route', () => {
       'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
     );
     expect(body.data.summary).toContain(
-      'Not imported: model keys, connector sign-ins and keys, your own skills and registered repositories, and your safety settings',
+      'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
     );
 
     // Everything landed owned by bob with ids kept, schedules off, and the

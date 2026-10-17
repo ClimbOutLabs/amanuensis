@@ -4,13 +4,15 @@ This is a step-by-step guide for moving each person from an old docker compose s
 
 Nothing here touches the old stacks except to read from them. They keep running the whole time, so going back is always possible.
 
-Do one person at a time, from step 1 to step 7. Step 8 is only for going back. Where a command says `<person>`, use the same short name the old project uses. Every value you need is read from the old app container, so there is nothing to look up by hand.
+Do one person at a time. The short way is two commands (see "The one command" below). Steps 1 to 7 are the same move by hand, for a stack the one command cannot read. Step 8 is only for going back. Where a command says `<person>`, use the same short name the old project uses. Every value you need is read from the old app container, so there is nothing to look up by hand.
 
 ## What moves and what does not
 
 Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Approve for this chat" choices start over.
 
-Does not move: model keys, connector sign-ins and saved credentials, your own skills and registered repositories, and safety settings (Settings, Permissions: offline mode, Always allow and web search; Settings, Memory: the recall and tool-output checks). A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
+The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.
+
+Does not move: model keys, connector sign-ins and saved credentials, and your own skills and registered repositories. A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
 Good to know:
 
@@ -18,6 +20,21 @@ Good to know:
 - Only import a file you exported yourself.
 - Personas, spaces, folders and schedules show the import time as their date. Chats keep their own dates.
 - Connectors were shared by the whole old instance, so a connector list carries every connector of that stack. With one stack per person this is the person's own list.
+
+## The one command
+
+Install the new instance first (step 4), then run, on the computer that runs the old stack:
+
+```bash
+aman migrate --from-compose ~/aman-prod/$PERSON
+aman import ~/.amanuensis/exports/aman-export-<timestamp>.zip --display-name "<owner name>"
+```
+
+`aman migrate` takes the folder you run `docker compose` in for the old stack. It dumps the old Postgres into a temporary Postgres, copies the memory and knowledge volumes into temporary volumes, runs `export-data --migrate` from those copies as the app user (uid 10001) into a volume, copies the archive to `~/.amanuensis/exports/` (mode 600), and removes every temporary piece. The old stack is never changed: its database is only read with `pg_dump`, and its volumes are mounted read-only. The export also reads the old `packages/trueforge/.env`, so a key that lived only there (the model API key, the OIDC client secret) is blanked in chat text and memory too. It prints the `aman import` line to run next, with the old display name.
+
+If more than one person has chats in the stack, it lists their ids and stops: run it again with `--user <id>`. Shared memories and instance settings come along only when one person has chats there.
+
+`aman import` is described in step 5. Then check the result (step 6) and redo what does not move (step 7).
 
 ## 0. What you need
 
@@ -78,14 +95,13 @@ If someone is chatting while the copy runs, a knowledge file can be caught mid-w
 
 ```bash
 cd ~
-git clone https://github.com/ClimbOutLabs/amanuensis.git
+git clone <repository-url> amanuensis
 cd amanuensis
-git fetch origin feat/data-import-migration
-git checkout feat/data-import-migration
-git pull origin feat/data-import-migration
+git checkout main
+git pull origin main
 ```
 
-If you already have a checkout, skip the clone. Once this work is merged, use `main` instead of the branch.
+If you already have a checkout, skip the clone.
 
 Build the new app image. The installer in step 4 builds the same image and reuses these layers, so this costs nothing twice:
 
@@ -105,18 +121,25 @@ until docker exec "mig-$PERSON-pg" pg_isready -U "$PGUSER" -q; do sleep 1; done;
 docker exec -i "mig-$PERSON-pg" pg_restore -U "$PGUSER" -d "$PGDB" --no-owner < "$WORK/prod.dump"
 ```
 
-Define a short helper that runs the new image against that copy, with the copied folders mounted:
+The export runs as the app user (uid 10001), which owns the copied folders, and writes into a volume that user owns. The old settings file goes into your private work folder, readable by that user, so keys that lived only there are blanked too:
+
+```bash
+docker volume create "mig-$PERSON-out"
+docker run --rm -v "mig-$PERSON-out":/out alpine:3.21 chown 10001:10001 /out
+install -m 644 ~/aman-prod/$PERSON/packages/trueforge/.env "$WORK/old.env"
+```
+
+`$WORK` is mode 0700, so nobody else on this computer can reach the copy. Define a short helper that runs the new image against the copies:
 
 ```bash
 aman_copy() {
-  docker run --rm --network "mig-$PERSON-net" \
+  docker run --rm --network "mig-$PERSON-net" --user 10001:10001 -e HOME=/tmp \
     -e STANDALONE=false -e NODE_ENV=production -e TRUEFORGE_API_KEY=unused-export-only \
     -e POSTGRES_HOST="mig-$PERSON-pg" -e POSTGRES_PORT=5432 \
     -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB="$PGDB" \
     -e MEMORY_BACKEND=markdown -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
     -v "mig-$PERSON-memory":/data/memory -v "mig-$PERSON-knowledge":/data/persona-knowledge \
-    --user "$(id -u):$(id -g)" -e HOME=/tmp \
-    -v "$WORK/out":/out aman-migrate:new aman "$@"
+    -v "$WORK/old.env":/migrate/old.env:ro -v "mig-$PERSON-out":/out aman-migrate:new aman "$@"
 }
 ```
 
@@ -124,25 +147,28 @@ List the people who own chats in the copy, then export the owner. Use the id exa
 
 ```bash
 aman_copy export-data --migrate --list-users
-aman_copy export-data --migrate --include-uploads --user '<user-id>' --out /out/$PERSON.zip
+aman_copy export-data --migrate --include-uploads --secrets-env /migrate/old.env --user '<user-id>' --out /out/$PERSON.zip
 ```
 
 `--migrate` brings the old database forward to the new schema. It changes only the temporary copy. `--include-uploads` brings the files uploaded to chats; they are kept in the database, so nothing more needs to be mounted. The export prints one line of JSON and exits 0.
 
 Shared memories (what the assistant remembered outside any persona) are left out by default, because on a stack that more than one person used they mix everyone's memories. If `--list-users` shows only this person, export again with `--include-instance-data` added to bring them too. The export also leaves out a persona's memory when another person on the stack has a persona with the same name, and says so. Exit codes are 0 for success, 1 for a failure (one plain line says why) and 2 for a bad command line.
 
-The helper runs as you, so the file is written into your private folder as a file you own. Check it:
+Copy the file out of the volume into your private folder, then check it:
 
 ```bash
-ls -ld "$WORK/out"
+docker run --rm -v "mig-$PERSON-out":/out:ro alpine:3.21 cat "/out/$PERSON.zip" > "$WORK/out/$PERSON.zip"
+chmod 600 "$WORK/out/$PERSON.zip"
 ls -l "$WORK/out"
 ```
 
-Tidy up the temporary Postgres (keep the safety copies from step 1):
+Tidy up the temporary Postgres, the output volume and the settings copy (keep the safety copies from step 1):
 
 ```bash
 docker rm -f "mig-$PERSON-pg"
 docker network rm "mig-$PERSON-net"
+docker volume rm "mig-$PERSON-out"
+rm -f "$WORK/old.env"
 ```
 
 Write down the `--list-users` session count for this person. You will compare it in step 6.
@@ -161,25 +187,19 @@ For every further person:
 installer/install.sh instance add <person> --email <owner-email>
 ```
 
-The installer asks for the owner's password and, if you want it, a model address or key. Say "this computer only" or give the address people will use. Give each instance the email the person signs in with: the new instance recognises them by it.
+The installer asks for the instance name, whether to back up every day, `Go ahead?` after its plan, and the owner's password twice. It does not ask for a model address or key: those are set in the app afterwards (step 7). Give each instance the email the person signs in with: the new instance recognises them by it.
 
-The first start of an instance downloads the memory search model once (about 120 MB). You can follow it with:
-
-```bash
-docker logs -f aman-$PERSON-app-1
-```
-
-Look for "Downloading the memory search model once" and wait until the logs go quiet. Opening the app and signing in once is a good way to be sure it is up. Persona knowledge is searched by meaning, so the import needs this model; if it is not ready the import refuses and writes nothing (step 5 shows the message), and you simply try again a few minutes later.
+The first start of an instance downloads the memory search model once (about 120 MB). The import waits for it by itself (step 5).
 
 ## 5. Import
 
 ```bash
-installer/install.sh instance import $PERSON "$WORK/out/$PERSON.zip"
+aman import "$WORK/out/$PERSON.zip" --instance $PERSON --display-name "<owner name>"
 ```
 
-This stops the app of that instance, restores the file in a one-off container with no network, and starts the app again. It prints a summary such as "Imported 5 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off)." and exits 0.
+`aman import FILE` runs `installer/install.sh instance import <name> FILE`; `--instance` can be left out when the computer has one instance. `--display-name` is how imported chats name the owner; without it the import asks, and Enter keeps the part of the email before the `@`.
 
-If it says "The knowledge index is still downloading, retry in a few minutes", the search model is not finished. Nothing was written. Wait and run the same command again.
+Before anything is written, the import starts the instance once if it never started, waits for the search model with one line ("Waiting for instance ... to finish downloading its search model"), and takes a backup named `<timestamp>-before-import` under `~/.amanuensis/backups/`, which is never pruned. Then it stops the app of that instance, restores the file in a one-off container with no network, and starts the app again. It prints a summary such as "Imported 5 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off)." and exits 0.
 
 If it says the instance already has chats or other data, the instance is not fresh. Remove it and add it again, then import:
 
@@ -205,8 +225,8 @@ Only that person's data should be there. If the old stack held more than one per
 - Model keys and the model server address: Settings, Models. Keys are never exported.
 - Connector sign-ins: a connector that signs in through its own website arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
-- Safety settings: in Settings, open Permissions and Memory and set offline mode, web search and the recall and tool-output checks on the new instance.
-- "Always allow" choices: each tool asks again the first time and you can pick Always allow once more.
+- Permission settings: in Settings, open Permissions and set offline mode and web search again if you want them. The recall and tool-output checks came along.
+- "Always allow" choices: each tool asks again the first time, which is the safe default, and you can pick Always allow once more.
 - Schedules: they arrive switched off. Review each one and switch on the ones you want.
 
 ## 8. Roll back

@@ -89,6 +89,13 @@ case "$cmd" in
     exit 0
     ;;
   inspect)
+    # The old compose containers the migrate step reads: whether Postgres runs, its image, and the app's mounts.
+    case "$*" in
+      *State.Running*) [ -n "${STUB_OLD_PG_STOPPED:-}" ] && echo false || echo true; exit 0 ;;
+      *Config.Image*) echo postgres:17; exit 0 ;;
+      *'"/data/memory"'*) echo trueforge_memory-data; exit 0 ;;
+      *'"/data/persona-knowledge"'*) echo trueforge_persona-knowledge-data; exit 0 ;;
+    esac
     echo "stub exit 1 oom false"
     exit 0
     ;;
@@ -97,6 +104,17 @@ case "$cmd" in
     shift
     touch "$S/networks" "$S/network_links"
     case "$sub" in
+      create)
+        for n in "$@"; do :; done
+        echo "$n" >>"$S/networks"
+        exit 0
+        ;;
+      rm)
+        grep -Fxv "$1" "$S/networks" >"$S/networks.new" || true
+        mv "$S/networks.new" "$S/networks"
+        echo "$1" >>"$S/networks_removed"
+        exit 0
+        ;;
       inspect)
         # With a format: the gateway of an instance's own network.
         case "$*" in
@@ -171,6 +189,20 @@ case "$cmd" in
     esac
     ;;
   ps)
+    case "$*" in
+      *com.docker.compose.project.working_dir=*)
+        # The old compose stack exists when a test wrote its folder into $S/old_compose_dir.
+        dir="$*"
+        dir=${dir##*com.docker.compose.project.working_dir=}
+        dir=${dir%% --filter*}
+        [ -f "$S/old_compose_dir" ] && [ "$dir" = "$(cat "$S/old_compose_dir")" ] || exit 0
+        case "$*" in
+          *service=postgres*) echo old-postgres ;;
+          *service=server*) echo old-server ;;
+        esac
+        exit 0
+        ;;
+    esac
     proj=
     formatted=
     all=
@@ -202,6 +234,19 @@ case "$cmd" in
     exit 0
     ;;
   exec)
+    case "$*" in
+      *pg_isready*) exit 0 ;;
+      *pg_dump*)
+        echo "$*" >>"$S/pg_dumps"
+        [ -n "${STUB_PGDUMP_FAIL:-}" ] && { echo "pg_dump: connection refused" >&2; exit 1; }
+        echo "PGDUMP-OF-OLD"
+        exit 0
+        ;;
+      *pg_restore*)
+        cat >"$S/pg_restored"
+        exit 0
+        ;;
+    esac
     # `docker exec <container> aman doctor --text`: one tab-separated check per line.
     printf 'service\tok\tstub\t\nrun_code\tok\tstub\t\n'
     exit 0
@@ -273,6 +318,40 @@ case "$cmd" in
         printf '{"hash":"%s"}\n' "$hash"
         exit 0
         ;;
+      *"aman import-data --check-ready"*)
+        # Downloading for the first STUB_MODEL_DOWNLOADING looks, then ready; STUB_MODEL_BROKEN answers nothing.
+        [ -n "${STUB_MODEL_BROKEN:-}" ] && exit 1
+        echo x >>"$S/model_checks"
+        if [ "$(wc -l <"$S/model_checks")" -le "${STUB_MODEL_DOWNLOADING:-0}" ]; then
+          echo '{"search_model":"downloading"}'
+        else
+          echo '{"search_model":"ready"}'
+        fi
+        exit 0
+        ;;
+      *"aman export-data"*)
+        # Models the CLI on the copy: records the call and the settings file it was handed on stdin.
+        echo "$*" >>"$S/export_runs"
+        cat >"$S/export_stdin"
+        case "$*" in
+          *--list-users*)
+            printf '%s\n' "${STUB_EXPORT_USERS:-{\"sign_in\":\"off\",\"sign_in_off_user_id\":\"trueforge-default\",\"users\":[{\"user_id\":\"trueforge-default\",\"display_name\":\"Sam Example\",\"sessions\":4}]}}"
+            ;;
+          *)
+            [ -n "${STUB_EXPORT_FAIL:-}" ] && { echo "Memory export failed for a namespace: stub." >&2; exit 1; }
+            printf '{"user_id":"stub"}\n'
+            ;;
+        esac
+        exit 0
+        ;;
+      *"cp -a /from/"*)
+        echo "$*" >>"$S/volume_copies"
+        exit 0
+        ;;
+      *" cat /out/aman-export.zip"*)
+        printf 'PK-EXPORT-FROM-COPY'
+        exit 0
+        ;;
       *"aman import-data"*)
         # Models the CLI: records the call, and fails on request the way a refused import does.
         echo "$*" >>"$S/import_runs"
@@ -328,6 +407,11 @@ case "$cmd" in
         exit 0
         ;;
     esac
+    exit 0
+    ;;
+  rm)
+    for c in "$@"; do :; done
+    echo "$c" >>"$S/containers_removed"
     exit 0
     ;;
   compose)

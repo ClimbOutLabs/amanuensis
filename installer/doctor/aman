@@ -9,6 +9,8 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
+#   aman import FILE [--instance NAME] [--display-name NAME]
+#   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -81,6 +83,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
+       aman import FILE [--instance NAME] [--display-name NAME]
+       aman migrate --from-compose FOLDER [--user ID]
 USAGE
 }
 
@@ -1585,7 +1589,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1594,6 +1598,48 @@ run_installer() { # command args...
     exit 1
   fi
   exec bash "$installer" --home "$AMAN_HOME" "$@"
+}
+
+# aman import FILE: the installer's import into the one instance on this computer, or the one --instance names.
+run_import() {
+  local file="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --display-name)
+        [ $# -ge 2 ] || die_usage "--display-name needs a name."
+        rest+=("$1" "$2")
+        shift
+        ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$file" ] || die_usage "Unexpected argument: $1"
+        file=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$file" ] || die_usage "aman import needs the export file. Run aman import FILE."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one to import into. Run aman import %s --instance NAME.\n' "$count" "$file" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
 }
 
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
@@ -1620,12 +1666,16 @@ renew_tls_if_due() {
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
-  doctor | backup | upgrade) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade) run_installer "$@" ;;
+  backup | upgrade | migrate) run_installer "$@" ;;
+  import)
+    shift
+    run_import "$@"
+    ;;
   -h | --help)
     usage
     exit 0

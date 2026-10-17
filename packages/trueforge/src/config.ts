@@ -2182,7 +2182,7 @@ const configuration: ServerConfiguration = standalone
     };
 
 /** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-function urlPassword(raw: string): string | undefined {
+export function urlPassword(raw: string): string | undefined {
   try {
     const password = decodeURIComponent(new URL(raw).password);
     return password === '' ? undefined : password;

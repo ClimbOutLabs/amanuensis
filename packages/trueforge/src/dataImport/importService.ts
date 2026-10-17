@@ -18,7 +18,8 @@
  * links inside chats keep working. Schedules arrive switched off. Connectors
  * arrive unattached, without credentials, trust marks or search and memory roles;
  * the instance's untouched default web search connector stays as it is.
- * Safety settings are never taken from an archive.
+ * The recall and tool-output screen toggles come along; permission settings
+ * and Always allow choices never do, so each tool asks again.
  */
 import {
   AgentSpecSchema,
@@ -55,8 +56,10 @@ import {
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
 } from '../runtime/memory/markdownMemoryFiles';
+import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
+import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
@@ -139,10 +142,12 @@ const MAX_ENTRIES = 100_000;
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 
-/** Instance-wide settings an import may fill in. Safety settings (the injection screens) are never taken from an archive. */
+/** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
+  TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
 ]);
 
 const REQUIRED_SECTIONS = [
@@ -609,7 +614,8 @@ function buildSummary({
     connectorNames.length === 0
       ? ''
       : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
-    'Not imported: model keys, connector sign-ins and keys, your own skills and registered repositories, and your safety settings. In Settings, open Permissions to set offline mode, Always allow and web search again, and Memory to turn the recall and tool-output checks back on.',
+    'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
+    'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
   ]
     .filter(part => part !== '')
     .join(' ');

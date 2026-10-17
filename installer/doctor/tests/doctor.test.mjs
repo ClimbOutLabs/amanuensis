@@ -1546,6 +1546,41 @@ describe('aman backup and aman upgrade', () => {
   });
 });
 
+describe('aman import and aman migrate', () => {
+  it('import into the one instance through the installer, with the display name passed on', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--display-name', 'Sam Example']).code, 0);
+    assert.ok(
+      world
+        .calls()
+        .includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --display-name Sam Example`),
+    );
+  });
+
+  it('import needs --instance when this computer has more than one, and a file always', () => {
+    make({ instances: ['main', 'second'] });
+    world.installerStub(world.sandbox());
+    const several = world.shim(['import', '/x/aman-export.zip']);
+    assert.equal(several.code, 2);
+    assert.match(several.stderr, /has 2 instances, so Aman cannot tell which one to import into\. Run aman import/);
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--instance', 'second']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance import second /x/aman-export.zip`));
+    const none = world.shim(['import']);
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /aman import needs the export file\. Run aman import FILE\./);
+  });
+
+  it('migrate runs the installer with the folder and the options given', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['migrate', '--from-compose', '/x/old-aman', '--user', 'sam-id']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} migrate --from-compose /x/old-aman --user sam-id`),
+    );
+  });
+});
+
 describe('the folder Aman runs its installer from', () => {
   function checkoutWith(mode) {
     make();
