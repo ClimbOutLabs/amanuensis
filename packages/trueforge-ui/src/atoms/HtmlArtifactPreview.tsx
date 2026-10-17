@@ -16,7 +16,7 @@ export type HtmlArtifactPreviewProps = {
   maxInliningBytes?: number;
   /** Saves the file to the user's device; only ever called from the download button. */
   onDownload?: () => void;
-  /** When true, only the download link is shown (no preview). */
+  /** When true, the download and expand controls are hidden. */
   readOnly?: boolean;
 };
 
@@ -144,7 +144,7 @@ async function inlineAssets(
         const escapedUrl = escapeRegex(asset.originalUrl);
         const linkPattern = new RegExp(`<link\\s+[^>]*href=["']([^"']*/)?${escapedUrl}["'][^>]*\\s*/?>`, 'gi');
         const styleTag = `<style>${assetText}</style>`;
-        modifiedHtml = modifiedHtml.replace(linkPattern, styleTag);
+        modifiedHtml = modifiedHtml.replace(linkPattern, () => styleTag);
       } else if (asset.type === 'script') {
         // Replace <script src="..."></script> with <script>...</script>
         const escapedUrl = escapeRegex(asset.originalUrl);
@@ -153,13 +153,13 @@ async function inlineAssets(
           'gi',
         );
         const scriptTag = `<script>${assetText}</script>`;
-        modifiedHtml = modifiedHtml.replace(scriptPattern, scriptTag);
+        modifiedHtml = modifiedHtml.replace(scriptPattern, () => scriptTag);
       } else if (asset.type === 'image') {
         // Convert image to data URI
         const dataUri = await blobToDataUri(assetBlob);
         const escapedUrl = escapeRegex(asset.originalUrl);
         const imgPattern = new RegExp(`src=["']([^"']*/)?${escapedUrl}["']`, 'gi');
-        modifiedHtml = modifiedHtml.replace(imgPattern, `src="${dataUri}"`);
+        modifiedHtml = modifiedHtml.replace(imgPattern, () => `src="${dataUri}"`);
       }
     } catch (error) {
       // Skip assets that fail to load
@@ -194,17 +194,15 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => map[char] || char);
 }
 
-const LEADING_DOCTYPE_RE = /^(?:\s*<!--[\s\S]*?-->)*\s*<!doctype[^>]*>/i;
+const POLICY_PREFIX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
 
 /**
- * Puts the app's CSP meta ahead of everything the content can say, after only a leading doctype
- * (anything before it would push the page into quirks mode). Policies in later metas can only
- * tighten this one, so content cannot widen it however it spells its own tag.
+ * Puts a doctype and the app's CSP meta ahead of the content, which is appended unchanged.
+ * The content is never scanned: comment-like prefixes can hide script from any marker search.
+ * A later doctype is ignored, and later metas can only tighten this policy.
  */
 function insertPolicyFirst(htmlText: string): string {
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
-  const doctype = LEADING_DOCTYPE_RE.exec(htmlText)?.[0] ?? '';
-  return `${doctype}${cspMeta}${htmlText.slice(doctype.length)}`;
+  return `${POLICY_PREFIX}${htmlText}`;
 }
 
 export function HtmlArtifactPreview({

@@ -63,6 +63,31 @@ describe('HtmlArtifactPreview', () => {
     });
   });
 
+  it('inlines related files literally, without expanding replacement patterns', async () => {
+    const htmlBlob = new Blob(['<html><head><link rel="stylesheet" href="style.css"></head></html>'], {
+      type: 'text/html',
+    });
+    const cssBlob = new Blob(["a::after { content: '$&$`$' }"], { type: 'text/css' });
+    render(
+      <HtmlArtifactPreview
+        content={htmlBlob}
+        filename="test.html"
+        onFetchRelatedFile={vi.fn().mockResolvedValue(cssBlob)}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('aui-html-preview-iframe').getAttribute('srcdoc')).toContain(
+        "<style>a::after { content: '$&$`$' }</style>",
+      );
+    });
+  });
+
+  it('does not show a download button without onDownload', async () => {
+    render(<HtmlArtifactPreview content={new Blob(['<p>x</p>'], { type: 'text/html' })} filename="test.html" />);
+    await screen.findByTestId('aui-html-preview-iframe');
+    expect(screen.queryByLabelText(/Download test.html/)).not.toBeInTheDocument();
+  });
+
   it('does not fetch non-existent asset files', async () => {
     const htmlBlob = new Blob(['<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>'], {
       type: 'text/html',
@@ -132,8 +157,8 @@ describe('HtmlArtifactPreview', () => {
     const htmlBlob = new Blob(['<html><body>Hello World</body></html>'], { type: 'text/html' });
     const mockOpen = vi.fn();
     const createObjectURL = vi.fn();
-    window.open = mockOpen;
-    URL.createObjectURL = createObjectURL;
+    vi.stubGlobal('open', mockOpen);
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }));
 
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={false} />);
 
@@ -143,6 +168,7 @@ describe('HtmlArtifactPreview', () => {
     expect(mockOpen).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(screen.getByTestId('aui-html-preview-iframe')).toHaveAttribute('sandbox', 'allow-scripts');
+    vi.unstubAllGlobals();
   });
 
   it('calls onDownload only when the download button is clicked', async () => {
@@ -163,7 +189,7 @@ describe('HtmlArtifactPreview', () => {
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={true} />);
 
     await waitFor(() => {
-      expect(screen.queryByLabelText(/new tab/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Download test.html/)).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/Expand test.html/)).not.toBeInTheDocument();
     });
   });
@@ -245,7 +271,7 @@ describe('HtmlArtifactPreview CSP placement', () => {
     const loose = `${CSP_META} content="font-src https:">`;
     const srcdoc = await renderedSrcdoc(`${loose}<p>x</p>`);
     expect(srcdoc.indexOf(CSP_META)).toBeLessThan(srcdoc.indexOf(loose));
-    expect(srcdoc.trimStart().startsWith(CSP_META)).toBe(true);
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
   });
 
   it('matches a differently spelled CSP meta without letting it come first', async () => {
@@ -254,10 +280,26 @@ describe('HtmlArtifactPreview CSP placement', () => {
     expect(srcdoc.indexOf('default-src &#39;none&#39;')).toBeLessThan(srcdoc.indexOf(loose));
   });
 
-  it('keeps the doctype first so the page does not fall into quirks mode', async () => {
+  it('always starts with a doctype and the app CSP, before any content', async () => {
     const srcdoc = await renderedSrcdoc('<!DOCTYPE html><html><head></head><body>x</body></html>');
-    expect(srcdoc.trimStart().toLowerCase().startsWith('<!doctype html>')).toBe(true);
-    expect(srcdoc.toLowerCase().indexOf('<!doctype')).toBeLessThan(srcdoc.indexOf(CSP_META));
-    expect(srcdoc.indexOf(CSP_META)).toBeLessThan(srcdoc.indexOf('<html'));
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+    expect(srcdoc.endsWith('<!DOCTYPE html><html><head></head><body>x</body></html>')).toBe(true);
+  });
+
+  it.each([['<!-->'], ['<!--->'], ['<!-- a --!>'], ['<!----!>']])(
+    'puts the CSP before content that opens with %s',
+    async prefix => {
+      const content = `${prefix}<script>fetch('https://example.invalid')</script>--><!doctype html><html><head></head></html>`;
+      const srcdoc = await renderedSrcdoc(content);
+      expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+      expect(srcdoc.endsWith(content)).toBe(true);
+    },
+  );
+
+  it('handles many leading comments without a doctype quickly', async () => {
+    const start = performance.now();
+    const srcdoc = await renderedSrcdoc('<!---->'.repeat(5000));
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 });
