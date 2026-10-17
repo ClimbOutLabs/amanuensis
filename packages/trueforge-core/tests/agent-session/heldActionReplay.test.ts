@@ -284,6 +284,21 @@ describe('answering a held action', () => {
     expect(message?.type === EventType.MODEL_MESSAGE ? message.content : undefined).toBe(HELD_DENIED_NOTE);
   });
 
+  it.each(['allow', 'deny'] as const)(
+    'records the %s answer after the answer turn starts, so the chat history keeps it',
+    async status => {
+      const { session, run, approval } = await setup();
+      await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
+
+      const replay = await run(approval(status), { stop: true });
+
+      const events = await persistedEvents(session, replay.id);
+      const inOrder = [...events].sort((left, right) => left.id.localeCompare(right.id));
+      expect(inOrder[0]?.type).toBe(EventType.TURN_CREATED);
+      expect(inOrder.some(event => event.type === EventType.MODEL_MESSAGE)).toBe(true);
+    },
+  );
+
   it('is refused while the latest turn is still running, and cancels nothing', async () => {
     const { session, run, approval, callTool, resolver } = await setup();
     await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });

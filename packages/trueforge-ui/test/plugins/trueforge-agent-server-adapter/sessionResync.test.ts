@@ -272,6 +272,10 @@ describe('answerHeldAction', () => {
     });
   }
 
+  function replayMessage(toolCallId: string) {
+    return { type: 'model.message', id: 'm1', toolCalls: [{ id: toolCallId }] };
+  }
+
   function toolResponse(toolCallId: string, disposition: string) {
     return { type: 'tool.response.v2', toolCallId, disposition };
   }
@@ -284,9 +288,9 @@ describe('answerHeldAction', () => {
     ['policy_blocked', 'not_run'],
     ['denied', 'not_run'],
   ] as const)('reports %s on the replayed call as %s', async (disposition, outcome) => {
-    // The replay runs under a fresh call id, so the result is the one tool response in the answer turn.
+    // The replay runs under a fresh call id, announced by the answer turn's own model message.
     const { extensions } = createFakeClient({
-      createTurnStream: streamOf(toolResponse('call_replayed', disposition)),
+      createTurnStream: streamOf(replayMessage('call_replayed'), toolResponse('call_replayed', disposition)),
     });
     assert.equal(
       await extensions.answerHeldAction({
@@ -296,6 +300,21 @@ describe('answerHeldAction', () => {
         answer: 'approve',
       }),
       outcome,
+    );
+  });
+
+  it('ignores a result for a call the answer turn did not replay', async () => {
+    const { extensions } = createFakeClient({
+      createTurnStream: streamOf(replayMessage('call_replayed'), toolResponse('other_call', 'executed_ok')),
+    });
+    assert.equal(
+      await extensions.answerHeldAction({
+        sessionId: 'ses_1',
+        threadId: 'main',
+        toolCallId: 'call_held',
+        answer: 'approve',
+      }),
+      'unclear',
     );
   });
 
