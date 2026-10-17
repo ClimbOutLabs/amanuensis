@@ -25,11 +25,6 @@ demo_env_on() {
   [ "$(env_get "$(instance_dir "$1")/.env" DEMO_MODE)" = true ]
 }
 
-# The user whose world is seeded: --demo-user, else the owner.
-demo_user() {
-  printf '%s' "${OPT_DEMO_USER:-$(reg_get "$1" owner_email)}"
-}
-
 demo_plan_text() {
   printf 'Turn demo mode on for instance %s and seed the synthetic demo world for %s' "$1" "$2"
 }
@@ -73,18 +68,18 @@ demo_seed_command() {
 # After the instance is healthy: turn demo mode on and seed. A failure is reported and fails the run at its end.
 demo_install_apply() {
   local name=$1
-  { demo_enable "$name" && demo_seed_run "$name" "$(demo_user "$name")" 0; } || DEMO_FAILED=1
+  { demo_enable "$name" && demo_seed_run "$name" "$(reg_get "$name" owner_email)" 0; } || DEMO_FAILED=1
 }
 
+# The demo world is always the owner's.
 cmd_instance_demo_seed() {
-  local name user
-  [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]"
+  local name
+  [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset] [--instance NAME]"
   require_installed
-  name=$(users_target_instance)
+  name=$(instance_pick)
   demo_env_on "$name" ||
     die "instance $name is not a demo instance. Turn demo mode on and seed it with: install.sh --demo --name $name"
   docker_prepare
   lock_acquire
-  user=$(demo_user "$name")
-  demo_seed_run "$name" "$user" "$OPT_RESET" || exit 1
+  demo_seed_run "$name" "$(reg_get "$name" owner_email)" "$OPT_RESET" || exit 1
 }

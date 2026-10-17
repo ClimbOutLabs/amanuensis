@@ -22,9 +22,9 @@ volume_tar() {
   D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data -cf - .
 }
 
-# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses.
+# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses. Compose reads the last match.
 env_get() {
-  sed -n "s/^$2=//p" "$1" | head -n 1
+  sed -n "s/^$2=//p" "$1" | tail -n 1
 }
 
 BACKUP_SCRATCH_LABEL=com.amanuensis.scratch=backup
@@ -99,13 +99,18 @@ backup_instance() {
   chmod 600 "$dest/env" "$dest/dex.env"
 }
 
+# Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
+plain_backups() {
+  [ -d "$BACKUPS_DIR" ] || return 0
+  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | grep -E '/[0-9]{8}T[0-9]{6}Z(-[0-9]+)?$' | sort || true
+}
+
 backup_prune() {
   local total drop dir
-  [ -d "$BACKUPS_DIR" ] || return 0
-  total=$(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+  total=$(plain_backups | grep -c . || true)
   drop=$((total - BACKUP_KEEP))
   [ "$drop" -gt 0 ] || return 0
-  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | sort | head -n "$drop" | while IFS= read -r dir; do
+  plain_backups | head -n "$drop" | while IFS= read -r dir; do
     rm -rf "$dir"
   done
 }
@@ -120,9 +125,10 @@ backup_targets() {
   done
 }
 
-# backup_run [NAME]: one timestamped directory; removed again if any part fails. Nothing to cover means no backup.
+# backup_run [NAME [LABEL]]: one timestamped directory, kept for good when it carries a label; removed again if any
+# part fails. Nothing to cover means no backup.
 backup_run() {
-  local only=${1:-} stamp dir name image n=0
+  local only=${1:-} label=${2:-} stamp dir name image n=0
   LAST_BACKUP_DIR=
   [ -n "$(backup_targets "$only")" ] || return 0
   release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
@@ -130,7 +136,7 @@ backup_run() {
   docker_image_exists "$image" || die "image $image is missing; run install.sh to rebuild it"
   ensure_private_dir "$BACKUPS_DIR"
   backup_scratch_prune
-  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)${label:+-$label}
   dir=$BACKUPS_DIR/$stamp
   while [ -e "$dir" ]; do
     n=$((n + 1))
@@ -158,7 +164,11 @@ backup_run() {
   LAST_BACKUP_DIR=$dir
   backup_prune
   log_event "backup $dir"
-  say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
+  if [ -n "$label" ]; then
+    say "Backup written to $dir and kept until you remove it (unencrypted; it holds secrets, keep it on this machine)"
+  else
+    say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
+  fi
   if [ -f "$dir/tls/root.crt" ]; then
     say "It does not hold the private key of this computer's certificate authority. After a restore, Aman makes a new one and each device trusts it again."
   fi

@@ -33,6 +33,7 @@ docker run -d --name "$NAME" --read-only --tmpfs /tmp -v "$VOLUME:/data" \
   -e NODE_ENV=production -e STANDALONE=true -e PORT=8790 \
   -e SQLITE_PATH=/data/db/db.sqlite -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
   -e OIDC_ISSUER_URL=http://127.0.0.1:9/dex -e OIDC_CLIENT_ID=image-runtime -e OIDC_CLIENT_SECRET=image-runtime \
+  -e OIDC_ALLOWED_EMAILS=owner@image-runtime.invalid \
   "$IMAGE" >/dev/null
 
 uid=$(docker exec "$NAME" id -u) || fail "the app container is not running"

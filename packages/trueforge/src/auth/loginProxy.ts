@@ -21,7 +21,8 @@ const SECURITY_HEADERS: Record<string, string> = {
   'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
+  // Not no-referrer: a browser then posts the form with `Origin: null`, which the request guard refuses.
+  'referrer-policy': 'same-origin',
   'cache-control': 'no-store',
 };
 

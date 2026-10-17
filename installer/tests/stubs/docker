@@ -6,8 +6,39 @@ printf 'docker %s\n' "$*" >>"$STUB_LOG"
 S=$STUB_STATE
 mkdir -p "$S/up"
 touch "$S/images" "$S/volumes"
+# Fails any call whose arguments contain $STUB_FAIL_ON, to test what a command leaves behind when one step breaks.
+if [ -n "${STUB_FAIL_ON:-}" ]; then
+  case "$*" in *"$STUB_FAIL_ON"*) echo "stub: forced failure" >&2; exit 1 ;; esac
+fi
 
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$1" | head -n 1; }
+
+# The old compose stack the migrate step reads exists when a test wrote its folder into $S/old_compose_dir. Its
+# containers are "id project service kind" lines in $S/old_containers (kind app, postgres or other), by default the
+# repository's own docker-compose.yml.
+old_rows() {
+  [ -f "$S/old_compose_dir" ] || return 0
+  if [ -f "$S/old_containers" ]; then
+    cat "$S/old_containers"
+  else
+    printf 'old-postgres trueforge postgres postgres\nold-server trueforge server app\n'
+  fi
+}
+old_row() { old_rows | awk -v id="$1" '$1 == id'; }
+
+# Models Ctrl-C or a hangup: the signal reaches the installer itself, past any subshell it runs docker from.
+signal_installer() { # signal
+  local p=$PPID target=''
+  while [ "$p" -gt 1 ]; do
+    if tr '\0' '\n' <"/proc/$p/cmdline" | grep -qx '.*install\.sh'; then
+      target=$p
+    elif [ -n "$target" ]; then
+      break
+    fi
+    p=$(awk '{print $4}' "/proc/$p/stat")
+  done
+  [ -z "$target" ] || kill -s "$1" "$target"
+}
 
 cmd=${1:-}
 shift || true
@@ -52,7 +83,11 @@ case "$cmd" in
     if [ "$1" = inspect ]; then
       for ref in "$@"; do :; done
       if grep -Fxq "$ref" "$S/images"; then
-        case "$*" in *Architecture*) echo amd64 ;; esac
+        case "$*" in
+          *Architecture*) echo amd64 ;;
+          # A rebuild that changed an image changes its id; tests write the new id to $S/image_id.
+          *'{{.Id}}'*) echo "sha256:$(cat "$S/image_id" 2>/dev/null || echo first)" ;;
+        esac
         exit 0
       fi
       exit 1
@@ -89,14 +124,35 @@ case "$cmd" in
     exit 0
     ;;
   inspect)
-    # The aliases a container has on one network: --format '{{with index .NetworkSettings.Networks "NET"}}...'.
+    # The old compose containers the migrate step reads: whether Postgres runs, its image, settings and project, and
+    # the app's mounts.
+    for last in "$@"; do :; done
+    row=$(old_row "$last")
+    if [ -n "$row" ]; then
+      read -r _ project _ kind <<<"$row"
+      case "$*" in
+        *State.Running*) [ -n "${STUB_OLD_PG_STOPPED:-}" ] && echo false || echo true ;;
+        *Config.Image*) [ "$kind" = postgres ] && echo postgres:17 || echo truefoundry-server:latest ;;
+        *Config.Env*) [ "$kind" = postgres ] && echo PGDATA=/var/lib/postgresql/data; echo PATH=/usr/bin ;;
+        *com.docker.compose.project*) echo "$project" ;;
+        *'"/data/memory"'*) [ "$kind" = app ] && echo trueforge_memory-data ;;
+        *'"/data/persona-knowledge"'*) [ "$kind" = app ] && echo trueforge_persona-knowledge-data ;;
+      esac
+      exit 0
+    fi
     case "$*" in
+      # The aliases a container has on one network: --format '{{with index .NetworkSettings.Networks "NET"}}...'.
       *NetworkSettings.Networks*)
         net=$(printf '%s' "$*" | sed -n 's/.*Networks "\([^"]*\)".*/\1/p')
         for c in "$@"; do :; done
         touch "$S/network_aliases"
         awk -v n="$net" -v c="$c" '$1 == n && $2 == c { printf "%s ", $3 }' "$S/network_aliases"
         echo
+        exit 0
+        ;;
+      # A slot container: the id of the image it was started from.
+      *'{{.Image}}'*)
+        for a in "$@"; do case "$a" in c[0-9]*) echo "sha256:$(cat "$S/slots_run_image_id" 2>/dev/null || echo first)" ;; esac; done
         exit 0
         ;;
     esac
@@ -108,6 +164,17 @@ case "$cmd" in
     shift
     touch "$S/networks" "$S/network_links"
     case "$sub" in
+      create)
+        for n in "$@"; do :; done
+        echo "$n" >>"$S/networks"
+        exit 0
+        ;;
+      rm)
+        grep -Fxv "$1" "$S/networks" >"$S/networks.new" || true
+        mv "$S/networks.new" "$S/networks"
+        echo "$1" >>"$S/networks_removed"
+        exit 0
+        ;;
       inspect)
         # With a format: the gateway of an instance's own network.
         case "$*" in
@@ -206,6 +273,22 @@ case "$cmd" in
     esac
     ;;
   ps)
+    case "$*" in
+      *com.docker.compose.project.working_dir=*)
+        # Filters by folder, and by project or service when asked.
+        dir='' want_project='' want_service=''
+        for a in "$@"; do
+          case "$a" in
+            label=com.docker.compose.project.working_dir=*) dir=${a#label=com.docker.compose.project.working_dir=} ;;
+            label=com.docker.compose.project=*) want_project=${a#label=com.docker.compose.project=} ;;
+            label=com.docker.compose.service=*) want_service=${a#label=com.docker.compose.service=} ;;
+          esac
+        done
+        [ -f "$S/old_compose_dir" ] && [ "$dir" = "$(cat "$S/old_compose_dir")" ] || exit 0
+        old_rows | awk -v p="$want_project" -v s="$want_service" '(p == "" || $2 == p) && (s == "" || $3 == s) {print $1}'
+        exit 0
+        ;;
+    esac
     proj=
     formatted=
     all=
@@ -237,18 +320,33 @@ case "$cmd" in
     exit 0
     ;;
   exec)
+    case "$*" in
+      *pg_isready*) exit 0 ;;
+      *pg_dump*)
+        echo "$*" >>"$S/pg_dumps"
+        [ -n "${STUB_PGDUMP_FAIL:-}" ] && { echo "pg_dump: connection refused" >&2; exit 1; }
+        echo "PGDUMP-OF-OLD"
+        exit 0
+        ;;
+      *pg_restore*)
+        cat >"$S/pg_restored"
+        exit 0
+        ;;
+    esac
     # `docker exec <container> aman doctor --text`: one tab-separated check per line.
     printf 'service\tok\tstub\t\nrun_code\tok\tstub\t\n'
     exit 0
     ;;
   run)
     vol=
+    vol_spec=
     data_vol=
     scratch_vol=
     prev=
     for a in "$@"; do
       if [ "$prev" = -v ]; then
         vol=${a%%:*}
+        vol_spec=$a
         case "$a" in
           *:/data) data_vol=$vol ;;
           *:/backup) scratch_vol=$vol ;;
@@ -300,12 +398,85 @@ case "$cmd" in
         done
         exec "$STUB_REAL_NODE" "$qr" "$last"
         ;;
+      *"rm -f /var/dex/dex.db"*)
+        # Clearing the sign-in service's saved keys, which ends every session. The volume belongs to uid 1001 (the Dex
+        # user, mode 755), so the delete works only as that user and only in an image where it can: the app image runs
+        # as 10001. It also has to name the files under the mount, as the real rm would.
+        image=
+        user=
+        target=${vol_spec#*:}
+        prev=
+        for a in "$@"; do
+          [ "$prev" = --user ] && user=$a
+          prev=$a
+        done
+        image=$(printf '%s\n' "$*" | sed -n 's/.*--entrypoint sh \([^ ]*\) -c .*/\1/p')
+        case "$image" in
+          *dex*) uid=${user%%:*}; uid=${uid:-1001} ;;
+          *) uid=${user%%:*}; uid=${uid:-10001} ;;
+        esac
+        files=$(printf '%s\n' "$*" | sed -n 's/.* -c rm -f \(.*\)$/\1/p')
+        case "$image" in *dex*) ;; *) uid=0 ;; esac
+        if [ "$uid" != 1001 ]; then
+          echo "rm: can't remove '/var/dex/dex.db': Permission denied" >&2
+          exit 1
+        fi
+        echo "$vol_spec $(for f in $files; do printf '%s ' "${f#"$target"/}"; done)" >>"$S/dex_wipes"
+        exit 0
+        ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"
         # Derived from the password, so two different passwords never share a hash.
         hash="\$2a\$10\$$(sha256sum <"$S/hash_stdin" | cut -c1-53)"
         printf '{"hash":"%s"}\n' "$hash"
+        exit 0
+        ;;
+      *"aman import-data --check-ready"*)
+        # Downloading for the first STUB_MODEL_DOWNLOADING looks, then ready; STUB_MODEL_BROKEN answers nothing.
+        [ -n "${STUB_MODEL_BROKEN:-}" ] && exit 1
+        echo x >>"$S/model_checks"
+        if [ "$(wc -l <"$S/model_checks")" -le "${STUB_MODEL_DOWNLOADING:-0}" ]; then
+          echo '{"search_model":"downloading"}'
+        else
+          echo '{"search_model":"ready"}'
+        fi
+        exit 0
+        ;;
+      *"aman export-data"*)
+        # Models the CLI on the copy: records the call and the settings file it was handed on stdin.
+        echo "$*" >>"$S/export_runs"
+        cat >"$S/export_stdin"
+        case "$*" in
+          *--list-users*)
+            printf '%s\n' "${STUB_EXPORT_USERS:-{\"sign_in\":\"off\",\"sign_in_off_user_id\":\"trueforge-default\",\"users\":[{\"user_id\":\"trueforge-default\",\"display_name\":\"Sam Example\",\"sessions\":4}]}}"
+            ;;
+          *)
+            [ -n "${STUB_EXPORT_FAIL:-}" ] && { echo "Memory export failed for a namespace: stub." >&2; exit 1; }
+            printf '{"user_id":"stub"}\n'
+            ;;
+        esac
+        exit 0
+        ;;
+      *"cp -a /from/"*)
+        echo "$*" >>"$S/volume_copies"
+        exit 0
+        ;;
+      *" cat /out/aman-export.zip"*)
+        umask >"$S/copy_umask"
+        printf 'PK-EXPORT-FROM-COPY'
+        [ -n "${STUB_COPY_SIGNAL:-}" ] && { signal_installer "$STUB_COPY_SIGNAL"; exit 130; }
+        exit 0
+        ;;
+      *"aman import-data"*)
+        # Models the CLI: records the call, and fails on request the way a refused import does.
+        echo "$*" >>"$S/import_runs"
+        if [ -n "${STUB_IMPORT_SIGNAL:-}" ]; then
+          signal_installer "$STUB_IMPORT_SIGNAL"
+          exit 130
+        fi
+        [ -n "${STUB_IMPORT_FAIL:-}" ] && { echo "This instance already has chats, so the import was refused and nothing was changed." >&2; exit 1; }
+        printf '{"user_id":"stub","chats":1}\n'
         exit 0
         ;;
       *"aman backup"*)
@@ -347,6 +518,11 @@ case "$cmd" in
     esac
     exit 0
     ;;
+  rm)
+    for c in "$@"; do :; done
+    echo "$c" >>"$S/containers_removed"
+    exit 0
+    ;;
   compose)
     if [ "${1:-}" = version ]; then
       echo "${STUB_COMPOSE_VERSION-2.29.1}"
@@ -385,6 +561,7 @@ case "$cmd" in
           echo "container is unhealthy" >&2
           exit 1
         fi
+        case " $* " in *" dex "*) rm -f "$S/dex_stopped_$proj" ;; esac
         printf '%s\n' "$img" >"$S/up/$proj"
         awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
@@ -410,12 +587,22 @@ case "$cmd" in
         esac
         exit 0
         ;;
+      stop)
+        # The instance counts as down once its app is stopped (the stub models a project as up or not).
+        echo "$sub $*" >>"$S/compose_stops"
+        rm -f "$S/up/$proj"
+        exit 0
+        ;;
       down)
         rm -f "$S/up/$proj"
         for n in aman_${proj#aman-}_stt aman_${proj#aman-}_speech; do
           grep -Fq "name: $n" "$file" || continue
           grep -Fxv "$n" "$S/networks" >"$S/networks.new" 2>/dev/null; mv "$S/networks.new" "$S/networks" 2>/dev/null
         done
+        exit 0
+        ;;
+      stop)
+        case " $* " in *" dex "*) : >"$S/dex_stopped_$proj" ;; esac
         exit 0
         ;;
       *) exit 0 ;;

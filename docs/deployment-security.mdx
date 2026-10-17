@@ -7,25 +7,25 @@ TrueForge ships defaults tuned for a single user running it locally. This page d
 
 ## Everyone is admin without OIDC
 
-Standalone mode (`STANDALONE=true`) always requires OIDC login: without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` the server refuses to start, whatever the bind address, and `REQUIRE_AUTH=false` does not opt out. An http issuer is accepted only on a loopback host; any other issuer must be https. Standalone also rejects requests whose `Host` is not a loopback name on the instance port or the `PUBLIC_BASE_URL` host (421) and cross-origin writes (403). Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) has no login screen unless you configure OIDC: with the three variables all unset, every request is treated as one shared local admin identity. Hosted mode refuses to start when it would listen on a non-loopback address without authentication, with an error naming your options (configure OIDC, bind `HOST=localhost`, or set `REQUIRE_AUTH=false` to explicitly accept the risk). Loopback binds keep a warning ("Auth is disabled; browser login is off") and normal startup.
+Standalone mode (`STANDALONE=true`) always requires OIDC login: without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` the server refuses to start, whatever the bind address, and `REQUIRE_AUTH=false` does not opt out. Standalone also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email (`email_verified: true`), which Aman's own sign-in always gives. Every mode refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host; any other issuer must be https. Standalone also rejects requests whose `Host` is not a loopback name on the instance port or the `PUBLIC_BASE_URL` host (421) and cross-origin writes (403). Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) has no login screen unless you configure OIDC: with the three variables all unset, every request is treated as one shared local admin identity. Hosted mode refuses to start when it would listen on a non-loopback address without authentication, with an error naming your options (configure OIDC, bind `HOST=localhost`, or set `REQUIRE_AUTH=false` to explicitly accept the risk). Loopback binds keep a warning ("Auth is disabled; browser login is off") and normal startup.
 
 In practice this means anyone who can reach the app port has full admin access: they can read chat history, change settings, and use any configured model, MCP connector, or sandbox credential.
 
 ## Enabling OIDC
 
-Set all three variables together, never just one or two:
+Aman uses its own sign-in. Set all three variables together, never just one or two (standalone also needs `OIDC_ALLOWED_EMAILS`):
 
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`
 - `OIDC_CLIENT_SECRET`
 
-Once set, users sign in through your identity provider and are assigned `admin` or `user` roles from an ID token claim. See [Setup Login](/authentication/overview) for how to register an application with Okta, Microsoft Entra ID, or any standard OIDC provider, and for the remaining optional variables (`OIDC_USER_REFERENCE_CLAIM`, `OIDC_USER_ROLE_CLAIM`, `OIDC_ADMIN_ROLE_VALUE`, `OIDC_SCOPES`).
+Once set, users sign in through Aman's sign-in service and are assigned `admin` or `user` roles from an ID token claim. See [Setup Login](/authentication/overview) for the remaining optional variables (`OIDC_USER_REFERENCE_CLAIM`, `OIDC_USER_ROLE_CLAIM`, `OIDC_ADMIN_ROLE_VALUE`, `OIDC_SCOPES`).
 
 ## Do not expose the app port without OIDC
 
 Do not put the app port (`8790` in standalone mode, `8791` in the Compose topology) on a network interface reachable beyond `localhost`, or beyond hosts you trust on a private network, unless OIDC is configured. This applies to any port-forward, reverse proxy, or Tailscale/VPN exposure you add yourself. The default Compose file publishes `8791` on `127.0.0.1` only and sets `REQUIRE_AUTH=false` as an explicit, documented opt-out for that local-dev stack — do not copy that opt-out into a production deployment; configure OIDC there instead.
 
-The Compose file's `login` profile is the quickest way to have OIDC on: it runs a Dex identity provider inside the stack with one account defined in `.env`, and the server signs users in through the standard OIDC flow against it. See [Turn on login](/quickstart#turn-on-login). Dex serves `https://localhost:5556` with a self-signed certificate minted on first start, trusted by the server through `NODE_EXTRA_CA_CERTS` and accepted once in the browser; it is scoped to loopback, and a deployment reachable from other machines still needs an identity provider with a certificate those machines trust.
+The Compose file's `login` profile is the quickest way to have OIDC on: it runs Aman's sign-in service (Dex) inside the stack with one account defined in `.env`, and the server signs users in through the standard OIDC flow against it. See [Turn on login](/quickstart#turn-on-login). Dex serves `https://localhost:5556` with a self-signed certificate minted on first start, trusted by the server through `NODE_EXTRA_CA_CERTS` and accepted once in the browser; it is scoped to loopback, and a deployment reachable from other machines needs the sign-in service served with a certificate those machines trust.
 
 ## Change the Postgres password
 
@@ -45,7 +45,7 @@ Leaving both off does not remove the structural defenses described below, which 
 Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
 
 - **Sandbox network policy**: every sandbox (local or Daytona) is restricted to a fixed outbound domain allowlist covering PyPI and GitHub hosts only. Everything else is denied by default, which also denies access to private networks and cloud metadata endpoints (for example `169.254.169.254`) from inside a sandbox.
-- **HTML Spaces render without scripts**: a `format: 'html'` Space body renders in a sandboxed iframe with no `allow-scripts`, so nothing in the rendered HTML can execute. An allow-list sanitizer strips `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `javascript:` URLs, and `@import` before the HTML reaches the iframe, as a second layer behind the sandbox attribute itself.
+- **HTML Spaces render without scripts**: a `format: 'html'` Space body renders in a sandboxed iframe with no `allow-scripts`, so nothing in the rendered HTML can execute. An allow-list sanitizer strips `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `javascript:` URLs, and `@import` before the HTML reaches the iframe, as a second layer behind the sandbox attribute itself. Elements outside the allow-list lose their tag but keep their text, except scripts, frames, embedded documents and similar, which are removed with their contents.
 
 ## Supply chain: package release age
 

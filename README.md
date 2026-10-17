@@ -5,7 +5,7 @@
 <h1 align="center">Amanuensis</h1>
 
 <p align="center">
-  <em>A private, local-first AI workbench. Your models, your tools, your memory — on your machine.</em>
+  <em>Any model. Your memory, as files on your disk. Messages, deletions and installs wait for your OK.</em>
 </p>
 
 <p align="center">
@@ -28,6 +28,12 @@
 </p>
 
 Amanuensis (Aman) is a private, local-first AI workbench built on the TrueForge agent harness. It combines a browser chat interface with configurable models, MCP tools, reusable agents and skills, sandboxed execution, session persistence, and Aman-specific personalization and memory features.
+
+- Your memory is plain files you own, and your chats and personas are stored on your machine, where you can back them up.
+- Use a hosted model or a local one, and switch any time.
+- Aman reads, searches the web and saves memories on its own. Sending messages, deleting or installing anything waits for your OK, and so does changing your files unless you turn that off.
+
+If you use a hosted model, the company running it sees each chat: your messages, what Aman knows about you, the memories it recalls, and anything Aman reads for you, such as emails and files. To keep chats on your computer, use only local models. Web searches, maps and connectors still reach their own services. See [Safety story](docs/safety.md), [Privacy](docs/privacy.md), [Schedules](docs/schedules.md) and [Backups](docs/backup.md).
 
 ## ✨ Features
 
@@ -96,7 +102,7 @@ Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
 >
 > A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs a local Dex identity provider in Docker, or point it at any OIDC provider. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -108,7 +114,7 @@ pnpm dev:login   # second terminal; prints the OIDC_* lines for .env
 pnpm standalone:dev
 ```
 
-Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings → Models** before starting a chat.
+Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings, Models** before starting a chat.
 
 The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
 
@@ -118,7 +124,7 @@ The server runs without a file watcher (on some Windows machines the watcher sta
 
 When you're ready to run Aman as a shared service instead of a personal install. This is the production topology — the server containerized, Postgres replacing SQLite as durable storage, and Redis so streams and cancellations follow the client across server replicas — with no Node.js or pnpm needed on the host. Choose it when the app needs to serve more than just you, or when you want to evaluate a deployment.
 
-The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and needs no external identity provider; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
+The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and uses Aman's own sign-in service; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -136,14 +142,14 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: 
 docker compose --profile login up --build
 ```
 
-Open `http://localhost:8791` and click **Let's Get Started**. The identity provider runs at `https://localhost:5556` with a certificate the stack minted on first start, so the browser warns once: choose **Advanced**, proceed to localhost, and sign in with the email and password you chose.
+Open `http://localhost:8791` and click **Let's Get Started**. The sign-in service runs at `https://localhost:5556` with a certificate the stack minted on first start, so the browser warns once: choose **Advanced**, proceed to localhost, and sign in with the email and password you chose.
 
 <p align="center">
   <img src="./packages/frontend/public/compose-get-started.png" alt="The first screen of a Compose stack with login on: the Amanuensis logo, the heading Welcome to Amanuensis, and a Let's Get Started button" width="420">
   <img src="./packages/frontend/public/compose-login.png" alt="The Dex sign-in form the button leads to: an Email Address field, a Password field, and a Login button" width="420">
 </p>
 
-You land in **Settings → Models** as that user, with your name at the bottom of the navigation rail. Connect a model there before starting a chat; nothing is configured on a fresh stack.
+You land in **Settings, Models** as that user, with your name at the bottom of the navigation rail. Connect a model there before starting a chat; nothing is configured on a fresh stack.
 
 <p align="center">
   <img src="./packages/frontend/public/compose-signed-in.png" alt="Signed in: Settings open on the Models page, listing model providers each with a Configure button, the signed-in user shown at the bottom of the left rail, and the assistant panel on the right" width="850">
@@ -171,8 +177,8 @@ The untracked `packages/trueforge/.env` file created during setup is required by
 
 ## Security boundaries and limitations
 
-- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host.
-- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile, or your own identity provider) and appropriate network controls before any shared or internet-facing deployment.
+- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and it refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host. It also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email.
+- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile) and appropriate network controls before any shared or internet-facing deployment.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
 - Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.
@@ -208,6 +214,48 @@ Two optional Prompt Guard screens can check content around memory before it reac
 - **Tool output screen**: screens tool results before they re-enter model context. This one is environment-only, with no Settings switch, and shares the same classifier URL, token, and threshold as the recall screen.
 
 See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for the full configuration and [Memory design](ops/memory/DESIGN.md) for how recall and retention work.
+
+## How Nemotron and Token Factory are used
+
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after either variable changes, so roles, personas and agents that still point at it keep working.
+
+**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, except the helper jobs below: while a turn runs on Token Factory, they use the small model unless you pick one for that role.
+
+| Role                | What it does                                            | Where the model comes from                                      |
+| ------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing          | Main chat model                                                 |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model               |
+| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                      |
+| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the small model on Token Factory      |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the small model on Token Factory |
+| Knowledge relevance | Checks which library passages help answer a question    | The small model on Token Factory, else the persona's model      |
+| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas**     |
+
+**Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up, and a small model such as Nemotron 3 Nano does them at a fraction of the cost of Nemotron 3 Super (see the price table below). Chat answers and briefings are open-ended reasoning over memory and tools, so they stay on Nemotron 3 Super. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
+
+**What it costs.** Prices are USD per million tokens, read on 2026-10-15 from the Token Factory model catalog (`https://tokenfactory.nebius.com/model-catalog.md`) and confirmed against its models endpoint (`https://api.tokenfactory.nebius.com/v1/models?verbose=true`).
+
+| Model                                   | Input | Output |
+| --------------------------------------- | ----- | ------ |
+| `nvidia/nemotron-3-super-120b-a12b`     | 0.30  | 0.90   |
+| `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | 0.06  | 0.24   |
+| `nvidia/Nemotron-3-Ultra-550b-a55b`     | 1.00  | 3.00   |
+| `nvidia/Nemotron-3_5-Lightning`         | 0.06  | 0.24   |
+| `nvidia/Nemotron-3.5-Super-VL`          | 0.30  | 0.90   |
+| `openai/gpt-oss-120b`                   | 0.15  | 0.60   |
+
+These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRICES` to JSON keyed by model id, for example `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`. Entries add to and win over the defaults, and an entry also gives a model on another provider a cost. A model with no price shows tokens only.
+
+**Where cost shows.**
+
+- Under each answer, a quiet line names the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
+- With **Show agent details** on for the chat, each role that ran appears in the turn's details with its model, calls, tokens and cost.
+- **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
+- **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
+
+Token counts are the usage the provider reported for each call and are never estimated: if a provider reports no usage for a call, the line says `usage not reported`. Cost is an estimate from the price table above, labelled "at list price", not your bill. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
+
+**Daily cap.** Set `TOKEN_FACTORY_DAILY_TOKEN_CAP` to limit Token Factory tokens per UTC day for the whole instance. Input and output tokens from every Token Factory call count, including helper calls and the fallback in `TOKEN_FACTORY_MODE=fallback`. The cap is checked before every model call: once it is reached, a new turn on a Token Factory model is refused with a 429 (`token_factory_daily_cap_reached`) and a turn already running stops before its next model call. It resets at midnight UTC. Without the variable there is no cap, but the daily tokens are still counted per model for the Settings view.
 
 ## Deployment security
 

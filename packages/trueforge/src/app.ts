@@ -2,7 +2,7 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -16,6 +16,9 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createDataExportRouter } from './apis/dataExport';
+import { createDataImportRouter } from './apis/dataImport';
+import { createGoogleRouter } from './apis/google';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -65,6 +68,7 @@ import configuration, {
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
+import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
@@ -84,6 +88,7 @@ import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -110,7 +115,10 @@ function withAdminAuth(router: OpenAPIHono, middleware: MiddlewareHandler): Open
   return shell;
 }
 
-/** One line per request: method, path, status, duration. Skips `/healthz`. */
+/**
+ * One line per request: method, path, status, duration. Skips `/healthz`.
+ * Successful read-only requests log at debug; mutations and errors stay at info.
+ */
 export function createAccessLogMiddleware(logger: Logger): MiddlewareHandler {
   return async (c, next) => {
     const started = performance.now();
@@ -118,12 +126,17 @@ export function createAccessLogMiddleware(logger: Logger): MiddlewareHandler {
     if (c.req.path === '/healthz') {
       return;
     }
-    logger.info('request', {
+    const fields = {
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
       duration_ms: Math.round(performance.now() - started),
-    });
+    };
+    if (c.req.method === 'GET' && c.res.status < 400) {
+      logger.debug('request', fields);
+    } else {
+      logger.info('request', fields);
+    }
   };
 }
 
@@ -239,6 +252,8 @@ export interface ServerDeps<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   /** Per-user Always allow grants; the same store backs Sentinel classification. */
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
+  /** Per-user Google logins and the consent each user has in flight. */
+  googleConnectionStore: IGoogleConnectionStore;
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   /** Optional host override; the standard resolver remains the production default. */
@@ -276,6 +291,8 @@ export interface ServerDeps<TTransaction> {
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
   authorizer: Authorizer;
+  /** Exact secret values this server holds; Sentinel's outbound guard and the data export both read them. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -289,6 +306,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     managedByTrueFoundry: isTrueFoundryModeEnabled(),
   });
   const scheduleTurnDeps = {
+    mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
@@ -304,6 +322,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     repositoryStore: deps.repositoryStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
+    googleConnectionStore: deps.googleConnectionStore,
     turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
@@ -337,7 +356,13 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   if (configuration.STANDALONE && getAllowedOrigins().length > 0) {
     app.use('*', listedOriginMiddleware(getAllowedOrigins));
   }
-  app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
+  // Data import uploads an archive, so its path gets the import cap instead
+  // of the general request body cap.
+  const requestBodyLimit = createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES);
+  const importBodyLimit = createRequestBodyLimitMiddleware(configuration.DATA_IMPORT_MAX_BYTES);
+  const bodyLimitDispatcher: MiddlewareHandler = (c, next) =>
+    c.req.path === '/api/v1/data/import' ? importBodyLimit(c, next) : requestBodyLimit(c, next);
+  app.use('*', bodyLimitDispatcher);
 
   // The app serves its sign-in service itself, so password guessing is limited: under every listed address for an
   // instance opened on the network, or under the issuer's public address when LOGIN_UPSTREAM_URL says where it runs.
@@ -494,6 +519,51 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/data',
+    withAuth(
+      createDataExportRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        spaceStore: deps.spaceStore,
+        scheduleStore: deps.scheduleStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
+        turnArtifactStore: deps.turnArtifactStore,
+        tokenStore: deps.tokenStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        authorizer: deps.authorizer,
+        outboundSecrets: deps.outboundSecrets,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  // Only the import path is admin-only, so the export route next to it keeps its own answers.
+  app.use('/api/v1/data/import', adminAuthMiddleware);
+  app.route(
+    '/api/v1/data',
+    createDataImportRouter({
+      sessionStore: deps.sessionStore,
+      personaStore: deps.personaStore,
+      personalizationStore: deps.personalizationStore,
+      spaceStore: deps.spaceStore,
+      scheduleStore: deps.scheduleStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      sentinelAuditStore: deps.sentinelAuditStore,
+      turnArtifactStore: deps.turnArtifactStore,
+      tokenStore: deps.tokenStore,
+      resolveMcpServerStore: deps.resolveMcpServerStore,
+      resolveAgentStore: deps.resolveAgentStore,
+      mcpCatalog: deps.mcpCatalog,
+      withTransaction: deps.withTransaction,
+      authorizer: deps.authorizer,
+      logger: deps.logger,
+    }),
+  );
+  app.route(
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
@@ -505,6 +575,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
@@ -582,6 +653,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveRequestContext,
       }),
       authMiddleware,
+    ),
+  );
+  // Browser session only: bearer credentials (agents, sandboxes, API clients) are refused. Every route is
+  // authenticated, including the browser callback, whose redirect carries the cookie that ties it to the
+  // user who started the consent.
+  app.route(
+    GOOGLE_ROUTES_BASE_PATH,
+    withAuth(
+      createGoogleRouter({
+        fetchImpl: undefined,
+        googleConnectionStore: deps.googleConnectionStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
@@ -747,6 +833,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        mcpCatalog: deps.mcpCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,
@@ -759,6 +846,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personalizationStore: deps.personalizationStore,
         personaStore: deps.personaStore,
         spaceStore: deps.spaceStore,
+        googleConnectionStore: deps.googleConnectionStore,
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,

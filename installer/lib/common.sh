@@ -66,9 +66,10 @@ password_problem() {
 
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
 # memory: it is never put in argv, a file or the environment of a child process. Ending the input
-# (Ctrl-D) stops the run.
+# (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
+  local __label_first=${2:-"Password for ${I_EMAIL:-the owner account}, 12 to 72 characters"} __label_second=${3:-"Repeat the password"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "--password-stdin got an empty line"
@@ -79,8 +80,8 @@ ask_password() {
   fi
   while [ "$__tries" -lt "$UI_MAX_TRIES" ]; do
     if [ -t 0 ]; then
-      ui_password __first "Password for ${I_EMAIL:-the owner account}, 12 to 72 characters" || die "No password was entered, so nothing more was changed."
-      ui_password __second "Repeat the password" || die "No password was entered, so nothing more was changed."
+      ui_password __first "$__label_first" || die "No password was entered, so nothing more was changed."
+      ui_password __second "$__label_second" || die "No password was entered, so nothing more was changed."
     else
       IFS= read -r __first || die "No password was provided on stdin."
       IFS= read -r __second || die "The password was not repeated on stdin."
@@ -99,7 +100,7 @@ ask_password() {
     fi
     __tries=$((__tries + 1))
   done
-  die "No valid password after $UI_MAX_TRIES tries, so nothing was changed. Run install.sh again."
+  die "No valid password after $UI_MAX_TRIES tries, so nothing was changed. Run the command again."
 }
 
 # ---- long steps: a spinner line on screen, the tool's own output in a log file ---------------------

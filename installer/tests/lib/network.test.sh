@@ -524,6 +524,63 @@ test_a_legacy_instance_stays_local_with_local_only() {
   sandbox_drop
 }
 
+fixture_cloud_machine() {
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+}
+
+# Asserts instance main still answers at every address of the full machine, as it was installed.
+assert_open_at_every_address() { # label
+  assert_eq "$(reg_value main origins)" "$ALL_ORIGINS" "$1: origins record"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$ALL_ORIGINS" "$1: ALLOWED_ORIGINS"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8791:8790'" "$1: LAN publish"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.101.102.103:8791:8790'" "$1: Tailscale publish"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 127.0.0.1:5556" "$1: sign-in stays behind the app"
+}
+
+test_a_rerun_on_a_cloud_server_keeps_the_recorded_reach() {
+  t_begin "on a cloud server a plain re-run keeps an existing instance where it was opened; only a new or unrecorded one stays on this computer"
+  sandbox_new_plain
+  fixture_full_machine
+  fixture_cloud_machine
+  INSTALL_EXTRA=(--tls off --home-network)
+  install_machine
+  assert_open_at_every_address "installed with --home-network"
+  run_install --yes
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server" "no cloud default for an instance with a recorded reach"
+  assert_open_at_every_address "plain re-run"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_open_at_every_address "installed on a home machine"
+  fixture_cloud_machine
+  run_install --yes
+  assert_rc 0
+  assert_open_at_every_address "plain re-run once the machine looks like a cloud server"
+  run_install --yes --local-only
+  assert_eq "$(reg_value main origins)" "" "--local-only still closes it"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+
+  sandbox_new_plain
+  fixture_full_machine
+  make_legacy_instance
+  fixture_cloud_machine
+  run_install --yes
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_eq "$(reg_value main origins)" "" "an instance with no recorded reach is not opened on a cloud server"
+  assert_eq "$(grep -c '^origins=' "$AMAN_HOME/state/instances/main.conf")" 1 "the choice is recorded"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+}
+
 test_a_hosted_instance_is_never_opened_on_the_network() {
   t_begin "an instance behind its own https address is left alone by a re-run"
   sandbox_new_plain
@@ -613,6 +670,7 @@ test_tailscale_names_and_addresses
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
 test_a_legacy_instance_stays_local_with_local_only
+test_a_rerun_on_a_cloud_server_keeps_the_recorded_reach
 test_a_hosted_instance_is_never_opened_on_the_network
 test_summary_lists_the_addresses_and_the_plain_warning
 test_no_question_about_the_address
