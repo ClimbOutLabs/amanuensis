@@ -17,8 +17,21 @@ export class FakeChatImageStore implements IChatImageStore {
     if (existing !== undefined) {
       return Promise.resolve(existing);
     }
-    const { user_max_bytes: _cap, data, ...rest } = input;
-    const image: ChatImageWithData = { ...rest, data, size: data.byteLength, created_at: new Date().toISOString() };
+    const image: ChatImageWithData = {
+      tenant_id: input.tenant_id,
+      created_by: input.created_by,
+      session_id: input.session_id,
+      turn_id: input.turn_id,
+      image_id: input.image_id,
+      source_key: input.source_key,
+      origin: input.origin,
+      mime: input.mime,
+      width: input.width,
+      height: input.height,
+      data: input.data,
+      size: input.data.byteLength,
+      created_at: new Date().toISOString(),
+    };
     this.images.set(`${input.session_id} ${input.image_id}`, image);
     return Promise.resolve(image);
   }
