@@ -67,7 +67,7 @@ describe('ModelSettings removing the last model', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Remove llama-3-1-70b' }));
     expect(screen.getByRole('heading', { name: 'Remove llama-3-1-70b?' })).toBeInTheDocument();
-    expect(screen.getByText(/removing it removes the provider too/)).toBeInTheDocument();
+    expect(screen.getByText(/Removing it removes the provider too/)).toBeInTheDocument();
     expect(updateModelProvider).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove provider' }));

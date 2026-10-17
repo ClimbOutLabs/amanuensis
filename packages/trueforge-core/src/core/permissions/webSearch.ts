@@ -1,6 +1,6 @@
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
- * trips the loop breaker, and the set of URLs the provider's own results returned, which is all a
+ * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
  * silent fetch may name. Both live in host memory for one turn and never reach the model.
  */
 
@@ -26,6 +26,14 @@ export function isSearchAskReason(reason: string): boolean {
   return SEARCH_ASK_REASONS.some(known => known === reason);
 }
 
+/** What the host lets the designated search provider's connector do silently, resolved for one turn. */
+export interface SearchProviderGrant {
+  /** Tools that run without asking even when the server does not declare them read-only. */
+  tools: readonly string[];
+  /** Top-level argument names that are provider plumbing, not user text. */
+  plumbing_fields: readonly string[];
+}
+
 export interface WebSearchTurnState {
   /** Searches that ran without asking this turn. */
   silentSearches: number;
@@ -38,7 +46,12 @@ export interface WebSearchTurnState {
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
-  return { silentSearches: 0, resultUrls: new Set(), sentText: '', admission: Promise.resolve() };
+  return {
+    silentSearches: 0,
+    resultUrls: new Set(),
+    sentText: '',
+    admission: Promise.resolve(),
+  };
 }
 
 /**
