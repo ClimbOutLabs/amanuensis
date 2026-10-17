@@ -11,8 +11,9 @@
  * Matching requires argv[0] to resolve under a pinned PATH at parse time and
  * every remaining token to match the command's enumerated subcommand/flag
  * list exactly (`--flag=value` and `--flag value` are distinct spellings and
- * are listed separately). The parsed argv is executed exec-style, never
- * re-serialized through a shell.
+ * are listed separately). The executor runs the resolved absolute program
+ * under the same pinned PATH, so the binary that was classified is the one
+ * that runs.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
@@ -215,7 +216,8 @@ export function hashArgv(argv: readonly string[]): string {
 }
 
 function isWorkspaceRelativeOperand(token: string): boolean {
-  if (token === '' || token.startsWith('/') || token.startsWith('~')) {
+  // Glob and brace characters are expanded by a shell; the executor passes argv literally, so they ask instead.
+  if (token === '' || token.startsWith('/') || token.startsWith('~') || /[*?[\]{}]/u.test(token)) {
     return false;
   }
   const segments = token.split('/');
@@ -265,6 +267,8 @@ export interface AllowlistMatch {
   argv: string[];
   argv0_resolved: string;
   wrapper: 'nice' | null;
+  /** Absolute path of the wrapper program; null when there is no wrapper. */
+  wrapper_resolved: string | null;
 }
 
 /**
@@ -286,11 +290,22 @@ export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowli
   if (argv0Resolved === null) {
     return undefined;
   }
+  // The wrapper is a program too: an unresolvable one must not fall back to a shell PATH lookup.
+  const wrapperResolved = parsed.wrapper === null ? null : resolveOnPinnedPath(parsed.wrapper, config.pinned_path);
+  if (parsed.wrapper !== null && wrapperResolved === null) {
+    return undefined;
+  }
+  const matched = (): AllowlistMatch => ({
+    argv: [argv0Resolved, ...parsed.argv.slice(1)],
+    argv0_resolved: argv0Resolved,
+    wrapper: parsed.wrapper,
+    wrapper_resolved: wrapperResolved,
+  });
   if (entry.subcommands !== null) {
     if (!matchSubcommand({ tokens: parsed.argv.slice(1), subcommands: entry.subcommands })) {
       return undefined;
     }
-    return { argv: [argv0Resolved, ...parsed.argv.slice(1)], argv0_resolved: argv0Resolved, wrapper: parsed.wrapper };
+    return matched();
   }
   for (const token of parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
@@ -310,7 +325,7 @@ export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowli
     }
     return undefined;
   }
-  return { argv: [argv0Resolved, ...parsed.argv.slice(1)], argv0_resolved: argv0Resolved, wrapper: parsed.wrapper };
+  return matched();
 }
 
 /**
@@ -345,7 +360,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         // Read-only inspection only. Config, remote, network and mutating
         // subcommands, aliases, and global options are absent so they fall to
         // Tier 3. Flags that run external programs or write files are never
-        // listed; `forced_args` are added by hardenAllowlistedGit at execution.
+        // listed; `forced_args` are added by pinAllowlistedExec at execution.
         args: [],
         operands: 'none',
         offline_ok: true,
@@ -486,50 +501,51 @@ export function gitLocalConfigIsSafe(nameOnlyOutput: string): boolean {
     .every(key => SAFE_GIT_LOCAL_CONFIG_KEYS.some(pattern => pattern.test(key)));
 }
 
-export interface HardenedGitInvocation {
-  /** Argv to execute in place of the model's command. */
+export interface PinnedExecInvocation {
+  /** Argv to execute in place of the model's command; every program in it is an absolute path. */
   argv: string[];
-  /** Read-only probe listing the repository's local config key names. */
-  probe_argv: string[];
+  /** Git only: read-only probe listing the repository's local config key names. */
+  probe_argv: string[] | null;
   env: Record<string, string>;
+  /** PATH the program runs under, so anything it launches by name resolves on the same pinned path. */
+  pinned_path: string;
 }
 
 /**
- * Rewrite an allowlisted git command into what the executor must run, or
- * undefined when the command is not an allowlisted git invocation. Applied at
- * the execution site so the model's argv and the approval binding stay as
- * written. The caller must run `probe_argv` and require `gitLocalConfigIsSafe`
- * on its output before running `argv`.
+ * Rewrite an allowlisted command into exactly what the executor must run, or
+ * undefined when the command is not allowlisted. Applied at the execution site
+ * so the model's argv and the approval binding stay as written. Git gets its
+ * hardening and a config probe; the caller must run `probe_argv` and require
+ * `gitLocalConfigIsSafe` on its output before running `argv`.
  */
-export function hardenAllowlistedGit(input: {
+export function pinAllowlistedExec(input: {
   command: string;
   config: ShellAllowlistConfig;
   workspace_root: string;
-}): HardenedGitInvocation | undefined {
+}): PinnedExecInvocation | undefined {
   const parsed = parseSimpleCommand(input.command);
-  if (parsed === undefined || matchAllowlist(parsed, input.config) === undefined) {
+  const matched = parsed === undefined ? undefined : matchAllowlist(parsed, input.config);
+  if (parsed === undefined || matched === undefined) {
     return undefined;
   }
+  const wrapperArgv = matched.wrapper_resolved === null ? [] : [matched.wrapper_resolved];
   const [name, subcommand, ...rest] = parsed.argv;
-  if (name !== 'git' || subcommand === undefined) {
-    return undefined;
-  }
-  const policy = input.config.commands[name]?.subcommands?.[subcommand];
-  if (policy === undefined) {
-    return undefined;
+  const policy =
+    name === 'git' && subcommand !== undefined ? input.config.commands[name]?.subcommands?.[subcommand] : undefined;
+  if (name !== 'git' || subcommand === undefined || policy === undefined) {
+    return {
+      argv: [...wrapperArgv, ...matched.argv],
+      probe_argv: null,
+      env: {},
+      pinned_path: input.config.pinned_path,
+    };
   }
   const globalArgs = gitHardeningGlobalArgs(input.workspace_root);
   return {
-    argv: [
-      ...(parsed.wrapper === null ? [] : [parsed.wrapper]),
-      name,
-      ...globalArgs,
-      subcommand,
-      ...policy.forced_args,
-      ...rest,
-    ],
-    probe_argv: [name, ...globalArgs, 'config', '--local', '--no-includes', '--list', '--name-only'],
+    argv: [...wrapperArgv, matched.argv0_resolved, ...globalArgs, subcommand, ...policy.forced_args, ...rest],
+    probe_argv: [matched.argv0_resolved, ...globalArgs, 'config', '--local', '--no-includes', '--list', '--name-only'],
     env: { ...GIT_HARDENING_ENV },
+    pinned_path: input.config.pinned_path,
   };
 }
 

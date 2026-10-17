@@ -14,7 +14,7 @@ export const HOST_AUTHENTICATED_GIT_BINARY = '/usr/bin/git';
 const TOKEN_ENV_KEY = 'TRUEFORGE_GIT_TOKEN';
 
 /** Absolute so the env wrapper, like git, is found without any PATH lookup. */
-const ENV_BINARY = '/usr/bin/env';
+export const ENV_BINARY = '/usr/bin/env';
 
 /**
  * Inherited variables that can redirect, trace or inject code into git; the model cannot set them, the image might.

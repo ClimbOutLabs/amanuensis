@@ -46,7 +46,7 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { gitLocalConfigIsSafe, hardenAllowlistedGit } from '../permissions/shellAllowlist';
+import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -85,6 +85,7 @@ import {
   buildHostAuthenticatedGit,
   buildHostAuthenticatedGitConfigProbe,
   carriesHostAuthenticatedGitToken,
+  ENV_BINARY,
   isGitNetworkCommand,
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
@@ -4401,46 +4402,56 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Allowlisted git runs only under system/global config isolation and only
-   * when the repository's local config holds nothing but known-safe keys; any
-   * other config can make git execute a program. The config check is returned
-   * as a preflight so it runs under the same workspace lock as the command.
-   * Other commands pass through unchanged.
+   * An allowlisted command runs as the exact program that was classified: its
+   * absolute path, under the pinned PATH, with no shell lookup. The sandbox
+   * PATH can lead with model-writable directories, so the bare name could
+   * otherwise resolve to a planted program. Allowlisted git additionally runs
+   * only under system/global config isolation and only when the repository's
+   * local config holds nothing but known-safe keys; any other config can make
+   * git execute a program. The config check is returned as a preflight so it
+   * runs under the same workspace lock as the command. Other commands pass
+   * through unchanged.
    */
-  private prepareAllowlistedGit(input: { sandboxId: string; exec: SandboxRuntimeExecInput }): {
+  private prepareAllowlistedExec(input: { sandboxId: string; exec: SandboxRuntimeExecInput }): {
     exec: SandboxRuntimeExecInput;
     env: Record<string, string>;
     preflight: ExecPreflight | undefined;
   } {
     const allowlist = this.sentinelContext?.services.shell_allowlist;
     const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
-    const hardened =
+    const pinned =
       allowlist === undefined || workspaceRoot === undefined
         ? undefined
-        : hardenAllowlistedGit({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
-    if (hardened === undefined) {
+        : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
+    if (pinned === undefined) {
       return { exec: input.exec, env: {}, preflight: undefined };
     }
-    const preflight: ExecPreflight = async () => {
-      const probe = await this.provider.exec({
-        sandboxId: input.sandboxId,
-        command: hardened.probe_argv.map(shellEscape).join(' '),
-        cwd: input.exec.cwd,
-        env: { ...hardened.env, LC_ALL: 'C' },
-      });
-      if (!probe.success) {
-        return GIT_CONFIG_UNREADABLE_REFUSAL;
-      }
-      if (probe.response.exitCode !== 0) {
-        return /git repository/iu.test(probe.response.result)
-          ? 'This directory is not a git repository, so this git command cannot run.'
-          : GIT_CONFIG_UNREADABLE_REFUSAL;
-      }
-      return gitLocalConfigIsSafe(probe.response.result) ? undefined : GIT_CONFIG_UNSAFE_REFUSAL;
-    };
+    const pinnedCommand = (argv: readonly string[]): string =>
+      [ENV_BINARY, `PATH=${pinned.pinned_path}`, ...argv].map(shellEscape).join(' ');
+    const probeArgv = pinned.probe_argv;
+    const preflight: ExecPreflight | undefined =
+      probeArgv === null
+        ? undefined
+        : async () => {
+            const probe = await this.provider.exec({
+              sandboxId: input.sandboxId,
+              command: pinnedCommand(probeArgv),
+              cwd: input.exec.cwd,
+              env: { ...pinned.env, LC_ALL: 'C' },
+            });
+            if (!probe.success) {
+              return GIT_CONFIG_UNREADABLE_REFUSAL;
+            }
+            if (probe.response.exitCode !== 0) {
+              return /git repository/iu.test(probe.response.result)
+                ? 'This directory is not a git repository, so this git command cannot run.'
+                : GIT_CONFIG_UNREADABLE_REFUSAL;
+            }
+            return gitLocalConfigIsSafe(probe.response.result) ? undefined : GIT_CONFIG_UNSAFE_REFUSAL;
+          };
     return {
-      exec: { ...input.exec, command: hardened.argv.map(shellEscape).join(' ') },
-      env: hardened.env,
+      exec: { ...input.exec, command: pinnedCommand(pinned.argv) },
+      env: pinned.env,
       preflight,
     };
   }
@@ -4568,7 +4579,7 @@ export class Sandbox extends LocalToolMCP {
     });
     const gitPrep =
       this.prepareHostAuthenticatedGit({ sandboxId: rawId, exec: resolvedInput }) ??
-      this.prepareAllowlistedGit({ sandboxId: rawId, exec: resolvedInput });
+      this.prepareAllowlistedExec({ sandboxId: rawId, exec: resolvedInput });
     const env = { ...mcpClientEnv, ...gitPrep.env };
     const execInput = gitPrep.exec;
 
@@ -4627,7 +4638,7 @@ export class Sandbox extends LocalToolMCP {
       const retryCodeModeEnv = await this.ensureCodeModeStarted(recreatedRawId);
       const retryGitPrep =
         this.prepareHostAuthenticatedGit({ sandboxId: recreatedRawId, exec: resolvedInput }) ??
-        this.prepareAllowlistedGit({ sandboxId: recreatedRawId, exec: resolvedInput });
+        this.prepareAllowlistedExec({ sandboxId: recreatedRawId, exec: resolvedInput });
       const retryEnv = {
         ...injectMCPClientEnv({
           env: input.env,

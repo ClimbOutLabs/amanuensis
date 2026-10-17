@@ -151,8 +151,16 @@ export const AgentInputUserMessageSchema = z
 export type AgentInputUserMessage = z.infer<typeof AgentInputUserMessageSchema>;
 
 // persisted to redis - thread_id is stripped
+/**
+ * A recorded decision applies only to the call it was issued for: it names that call's approval token and
+ * arguments hash, and a decision whose binding does not match the call in context is ignored. Contexts
+ * saved before the binding existed parse with null and are never honoured, so they ask again.
+ */
 export const AgentApprovalDecisionMessageSchema = UserToolApprovalMessageSchema.omit({
   thread_id: true,
+}).extend({
+  approval_token_id: z.string().nullable().default(null),
+  arguments_hash: z.string().nullable().default(null),
 });
 
 export const InputTokensBreakdownSchema = z.object({

@@ -154,6 +154,7 @@ import {
 } from './contextUsage';
 import {
   ABILITY_BOUNDARIES_PROMPT,
+  approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
   createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
@@ -187,6 +188,7 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
@@ -1782,11 +1784,16 @@ export class AgentThread {
             this.toolCallMemo.clarificationAnswered = true;
           }
         }
-        const approvalContext: AgentApprovalDecisionMessage[] = approvals.map(a => ({
-          type: EventType.USER_TOOL_APPROVAL,
-          tool_call_id: a.tool_call_id,
-          approval: a.approval,
-        }));
+        const approvalContext: AgentApprovalDecisionMessage[] = approvals.map(a => {
+          const call = pendingById.get(a.tool_call_id) ?? heldById.get(a.tool_call_id);
+          return {
+            type: EventType.USER_TOOL_APPROVAL,
+            tool_call_id: a.tool_call_id,
+            approval: a.approval,
+            // A decision for a call that is not pending binds to nothing and is never honoured.
+            ...(call === undefined ? { approval_token_id: null, arguments_hash: null } : approvalDecisionBinding(call)),
+          };
+        });
         const clientToolResults = clientSideToolResponses.map(m =>
           createToolResponseV2({
             id: newEventId(),
@@ -1976,6 +1983,7 @@ export class AgentThread {
       type: EventType.USER_TOOL_APPROVAL,
       tool_call_id: call.id,
       approval: { status: 'allow', scope: 'once' },
+      ...approvalDecisionBinding(call),
     }));
     return {
       context: [copy, ...decisions],
@@ -3105,7 +3113,14 @@ export class AgentThread {
       toolMapping,
     });
     const enrichedMessage: InternalEnrichedAssistantMessage = await enrichAssistantMessage({
-      assistantMessage: result.value.output,
+      assistantMessage: {
+        ...result.value.output,
+        ...(result.value.output.tool_calls === undefined
+          ? {}
+          : {
+              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
+            }),
+      },
       toolMapping,
       // During context persistence, we have the complete message and hence the tool arguments are available.
       // Hence, we resolve the underlying tool to get the tool information.
