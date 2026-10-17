@@ -4,7 +4,8 @@
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 
-lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# ASCII only: a Turkish locale would turn I into a dotless i and break comparisons with plain words.
+lowercase() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 
 # ---- who besides the owner can sign in --------------------------------------------------------------------------
 # An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
@@ -25,7 +26,7 @@ extra_sign_in_users() { # registry file, instance folder
     {
       sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
       sed -n 's/^\(export[ \t]*\)\{0,1\}OIDC_ALLOWED_EMAILS=//p' "$dir/.env" 2>/dev/null | tr ',' '\n'
-    } | awk -v owner="$(lowercase "$owner")" '
+    } | LC_ALL=C awk -v owner="$(lowercase "$owner")" '
       { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
       e != "" && e != owner && !seen[e]++ { print e }'
   )
@@ -35,7 +36,7 @@ extra_sign_in_users() { # registry file, instance folder
     names=$(
       {
         sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
-        sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | tr '[:upper:]_' '[:lower:]-'
+        sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | LC_ALL=C tr '[:upper:]_' '[:lower:]-'
       } | awk '!seen[$0]++'
     )
   fi
@@ -51,7 +52,7 @@ sandbox_node_ok() {
   major=${v%%.*}
   minor=${v#*.}
   minor=${minor%%.*}
-  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
+  case "$major$minor" in '' | *[![:digit:]]*) return 1 ;; esac
   [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
 }
 
