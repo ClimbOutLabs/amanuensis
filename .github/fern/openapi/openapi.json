@@ -1715,12 +1715,12 @@
           "tokens_after": {
             "description": "Estimated context tokens after this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "tokens_before": {
             "description": "Estimated context tokens before this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "type": {
             "description": "A context-compaction attempt completed.",
