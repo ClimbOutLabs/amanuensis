@@ -30,7 +30,7 @@ const draftEmail: Operation<unknown, SendOrDraftOutput> = {
   name: "draft_email",
   schema: SendEmailSchema,
   outputSchema: SendOrDraftOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose"],
+  scopes: ["gmail.compose"],
   handler: async (input, ctx) => handleEmailAction("draft", input as SendArgs, ctx),
 };
 
@@ -38,7 +38,7 @@ const sendDraft: Operation<unknown, SendDraftOutput> = {
   name: "send_draft",
   schema: SendDraftSchema,
   outputSchema: SendDraftOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose", "gmail.send"],
+  scopes: ["gmail.compose", "gmail.send"],
   handler: async (input, ctx) => {
     const { draftId } = input as z.infer<typeof SendDraftSchema>;
     const response = await ctx.gmail.users.drafts.send({
@@ -67,7 +67,7 @@ const updateDraft: Operation<unknown, UpdateDraftOutput> = {
   name: "update_draft",
   schema: UpdateDraftSchema,
   outputSchema: UpdateDraftOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose"],
+  scopes: ["gmail.compose"],
   handler: async (input, ctx) => {
     const { draftId, ...messageArgs } = input as z.infer<typeof UpdateDraftSchema>;
     const message = needsRawBuilder(messageArgs)
@@ -107,7 +107,7 @@ const deleteDraft: Operation<unknown, DeleteDraftOutput> = {
   name: "delete_draft",
   schema: DeleteDraftSchema,
   outputSchema: DeleteDraftOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose"],
+  scopes: ["gmail.compose"],
   handler: async (input, ctx) => {
     const { draftId } = input as z.infer<typeof DeleteDraftSchema>;
     await ctx.gmail.users.drafts.delete({ userId: "me", id: draftId }, apiOpts(ctx));

@@ -36,7 +36,7 @@ describe('PersonalizationPanel', () => {
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Mira' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Assistant name'), { target: { value: 'Sage' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
     fireEvent.change(screen.getByLabelText('Pinned preference 1'), { target: { value: 'No em dashes.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
@@ -160,7 +160,7 @@ describe('PersonalizationPanel', () => {
 
     const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.getByText(/asks a local model to rewrite this document/)).toBeInTheDocument();
+    expect(screen.getByText(/a local model updates this document/)).toBeInTheDocument();
     expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
   });
 
@@ -265,7 +265,7 @@ describe('PersonalizationPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
 
     await waitFor(() => expect(deleteProfile).toHaveBeenCalledOnce());
-    expect(screen.getByLabelText('Assistant name')).toHaveValue('');
+    expect(screen.getByLabelText('Name')).toHaveValue('');
     expect(screen.getByRole('status')).toHaveTextContent('Personalization cleared.');
   });
 

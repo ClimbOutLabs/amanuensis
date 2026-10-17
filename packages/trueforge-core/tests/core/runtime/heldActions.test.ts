@@ -151,7 +151,7 @@ function makeHarness(
         sentinel,
         searchProvider:
           options.searchProviderAsks === true || options.searchProvider === true
-            ? { tools: ['web_search'] }
+            ? { tools: ['web_search'], plumbing_fields: [] }
             : undefined,
       });
       const threadInput: AgentThreadConstructorInput = {

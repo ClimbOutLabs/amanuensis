@@ -63,7 +63,7 @@ export function runSentinelAuditHeldSearchContractSuite(getStore: () => ISentine
       selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
       preload: true,
       sentinel: createSentinelHostContext({ ...OWNER, services }),
-      searchProvider: { tools: ['lookup'] },
+      searchProvider: { tools: ['lookup'], plumbing_fields: [] },
     });
     const info = await toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
     return { info, services };

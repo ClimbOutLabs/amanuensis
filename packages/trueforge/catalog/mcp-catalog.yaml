@@ -46,6 +46,9 @@ mcp_servers:
     search_tools:
       - web_search
       - web_fetch
+    search_plumbing_fields:
+      - session_id
+      - model_name
   - type: remote
     name: github
     logo: https://assets.production.truefoundry.com/github.svg
