@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { rename, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -218,7 +219,12 @@ async function writeArchive({
     await rename(partial, target);
     return result;
   } catch (error) {
-    file.destroy();
+    // The file may still be opening; removing it before it has closed would let it reappear.
+    if (!file.closed) {
+      const closed = once(file, 'close');
+      file.destroy();
+      await closed;
+    }
     await rm(partial, { force: true });
     // A full or failing disk surfaces as a closed destination; report the disk.
     throw fileError ?? error;
