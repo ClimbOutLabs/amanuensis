@@ -1864,7 +1864,7 @@ export class AgentThread {
     const live = [...(this.definition.toolSets ?? []), ...this.systemToolSets].find(
       toolSet => toolSet.id === server_id,
     )?.connector;
-    return live !== undefined && live.id === approved.id && live.fingerprint === approved.fingerprint;
+    return live?.id === approved.id && live.fingerprint === approved.fingerprint;
   }
 
   private throwIfContextBusy(): void {
