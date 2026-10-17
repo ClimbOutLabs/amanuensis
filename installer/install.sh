@@ -95,6 +95,8 @@ OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
+OPT_HOME_NETWORK=0
+CLOUD_DEFAULT_LOCAL=0
 OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
@@ -172,6 +174,7 @@ Options
   --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
   --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
+  --home-network        on a cloud server, still answer at its private addresses (they are shared with other customers, so the default there is this computer only)
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
   --tls local|off|caddy  https on your network with a certificate from this computer (default), plain http, or
@@ -231,6 +234,7 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
+      --home-network) OPT_HOME_NETWORK=1 ;;
       --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user | --display-name | --from-compose | --user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
@@ -315,10 +319,29 @@ check_demo_options() {
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
   fi
+  if [ "$OPT_LOCAL_ONLY" = 1 ] && [ "$OPT_HOME_NETWORK" = 1 ]; then
+    usage_die "--local-only and --home-network are opposites; pick one."
+  fi
   if [ -n "$OPT_DEMO_USER" ]; then
     [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
     valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
   fi
+}
+
+# On a cloud server a private address is shared with other customers, so an instance whose reach is not recorded yet (a
+# new one, or one from before the address list) stays on this computer unless asked. A recorded reach is kept.
+cloud_guard() {
+  local name undecided=0
+  [ "$COMMAND" = install ] || { [ "$COMMAND" = instance ] && [ "$SUBCOMMAND" = add ]; } || return 0
+  [ "$OPT_LOCAL_ONLY" != 1 ] && [ "$OPT_HOME_NETWORK" != 1 ] && [ -z "$OPT_PUBLIC_URL" ] && [ -z "$OPT_ADDRESSES" ] || return 0
+  network_cloud_vm || return 0
+  if need_new_instance; then undecided=1; fi
+  if [ "$COMMAND" = install ]; then
+    for name in $(reg_names); do reach_recorded "$name" || undecided=1; done
+  fi
+  [ "$undecided" = 1 ] || return 0
+  warn "This looks like a cloud server, where private addresses are shared with other customers, so Aman will open on this computer only. To open it at the private addresses anyway, run this again with --home-network."
+  CLOUD_DEFAULT_LOCAL=1
 }
 
 on_exit() {
@@ -343,6 +366,7 @@ main() {
   check_demo_options
   check_import_options
   check_migrate_options
+  cloud_guard
   trap 'exit 130' INT
   trap 'exit 143' TERM
   trap 'exit 129' HUP

@@ -63,4 +63,40 @@ describe('ActivityFeed', () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('caps the list at ten items, most recent first, with a more indicator', () => {
+    const segments = Array.from({ length: 12 }, (_, index) =>
+      makeSegment({ type: 'approval', startMs: index * 1_000, endMs: index * 1_000 + 100 }),
+    );
+    render(<ActivityFeed segments={segments} originMs={1_000_000} />);
+
+    expect(screen.getAllByText('Asked for your approval')).toHaveLength(10);
+    expect(screen.getByRole('button', { name: '+2 more' })).toBeInTheDocument();
+  });
+
+  it('expands to the full list and back via the more indicator', () => {
+    const segments = Array.from({ length: 12 }, (_, index) =>
+      makeSegment({ type: 'approval', startMs: index * 1_000, endMs: index * 1_000 + 100 }),
+    );
+    render(<ActivityFeed segments={segments} originMs={1_000_000} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '+2 more' }));
+    expect(screen.getAllByText('Asked for your approval')).toHaveLength(12);
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(screen.getAllByText('Asked for your approval')).toHaveLength(10);
+    expect(screen.getByRole('button', { name: '+2 more' })).toBeInTheDocument();
+  });
+
+  it('shows the most recent item first when capped', () => {
+    const segments = [
+      makeSegment({ type: 'tool_call', description: 'tavily_search', startMs: 0, endMs: 1_000 }),
+      makeSegment({ type: 'tool_call', description: 'tavily_extract', startMs: 2_000, endMs: 3_000 }),
+    ];
+    const { container } = render(<ActivityFeed segments={segments} originMs={1_000_000} />);
+
+    const firstRow = container.querySelectorAll('ul > li')[0];
+    expect(firstRow?.textContent).toContain('Read web pages');
+  });
 });

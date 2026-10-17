@@ -186,7 +186,7 @@ repo_commit_change() {
 # The environment every installer run gets: nothing from the caller except the stub switches.
 build_run_env() {
   RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO"
-    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}"
+    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
     STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
     STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
     STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}"
