@@ -71,18 +71,14 @@ env_managed_set() {
   } | write_if_changed "$env" 600 || true
 }
 
-# Removes every KEY= line of an instance .env outside the managed block, so the managed value is the one Compose reads.
+# Removes every line of an instance .env outside the managed block that Compose reads as KEY, so the managed value is
+# the one Compose reads. Needs lib/shared.sh.
 env_drop_outside_block() { # env key
-  local env=$1 key=$2 line inblock=0
+  local env=$1 key=$2
   [ -f "$env" ] || return 0
-  {
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        '# >>> managed by the installer'*) inblock=1 ;;
-        '# <<< end of managed block'*) inblock=0 ;;
-        "$key="*) [ "$inblock" = 1 ] || continue ;;
-      esac
-      printf '%s\n' "$line"
-    done <"$env"
-  } | write_if_changed "$env" 600 || true
+  LC_ALL=C awk -v re="$(env_key_line_re "$key")" '
+    /^# >>> managed by the installer/ { inblock = 1 }
+    /^# <<< end of managed block/ { inblock = 0 }
+    !inblock && $0 ~ re { next }
+    { print }' "$env" | write_if_changed "$env" 600 || true
 }

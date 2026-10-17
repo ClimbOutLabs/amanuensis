@@ -252,9 +252,9 @@ print_plan() {
     fi
   fi
   if sandbox_needed; then
-    ui_hint "Run code (Python, shell, files) runs in a sandbox."
+    ui_hint "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)."
   else
-    ui_hint "Run code stays off (installed with --no-sandbox). To turn it on later, run aman doctor sandbox --fix."
+    ui_hint "Run code and reading attachments stay off (installed with --no-sandbox). To turn it on later, run aman doctor sandbox --fix."
   fi
 }
 
@@ -322,7 +322,7 @@ report_blockers_and_exit() {
 
 # Read-only look at what exists, turned into plan lines and download entries. Runs after plan_preflight.
 plan_build() {
-  local name have_release=0 expected_app expected_stt
+  local name extra have_release=0 expected_app expected_stt
   if [ -f "$RELEASE_DIR/release.json" ]; then
     have_release=1
   fi
@@ -366,9 +366,8 @@ plan_build() {
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
-      if instance_has_extra_users "$name"; then
-        plan_add todo "Remove $(instance_extra_list "$name") from instance $name"
-      fi
+      extra=$(extra_sign_in_users "$(reg_file "$name")" "$(instance_dir "$name")")
+      if [ -n "$extra" ]; then plan_add todo "Remove $extra from instance $name"; fi
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
@@ -612,7 +611,8 @@ install_execute() {
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
-      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
+        { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi
         if instance_sandbox_wanted "$name" && [ "$name" != "$enabled" ]; then sandbox_ensure "$name"; fi
         instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"

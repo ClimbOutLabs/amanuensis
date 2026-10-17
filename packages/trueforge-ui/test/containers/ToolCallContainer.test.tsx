@@ -884,6 +884,7 @@ describe('ToolCallContainer', () => {
         outbound_text: 'text: hello',
         destination_host: host,
         outbound_truncated: false,
+        email: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,

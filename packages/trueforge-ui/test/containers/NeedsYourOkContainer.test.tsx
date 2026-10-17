@@ -46,6 +46,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     outbound_text: 'body: Lunch at noon?',
     destination_host: null,
     outbound_truncated: false,
+    email: null,
     ...overrides,
   };
 }

@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_OCR_LANGUAGES,
+  DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -31,10 +33,12 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
@@ -768,6 +772,19 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
 }
 
+/** Aman signs people in through its own sign-in service (Dex), which always serves its issuer at `/dex`. */
+export function assertOwnSignInIssuer(issuerUrl: string): void {
+  let path: string;
+  try {
+    path = new URL(issuerUrl).pathname.replace(/\/+$/, '');
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (path !== '/dex') {
+    throw new Error('Aman uses its own sign-in. Outside sign-in services are not supported.');
+  }
+}
+
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
 function parseAuthCookieSuffix(raw: string | undefined): string {
   const value = raw?.trim() ?? '';
@@ -798,6 +815,7 @@ function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig 
     );
   }
   assertOidcIssuerTransportAllowed(issuerUrl);
+  assertOwnSignInIssuer(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -823,7 +841,7 @@ function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig 
 // ============================================================================
 
 export interface OIDCConfig {
-  /** e.g. an Okta custom authorization server, or an Azure AD tenant's v2.0 endpoint. Env: `OIDC_ISSUER_URL`. */
+  /** Address of Aman's own sign-in service. Env: `OIDC_ISSUER_URL`. */
   OIDC_ISSUER_URL: string;
   /** Client ID for the OIDC client;*/
   OIDC_CLIENT_ID: string;
@@ -848,7 +866,6 @@ export interface OIDCConfig {
   OIDC_ADMIN_ROLE_VALUE: string;
   /** Comma-separated OAuth scopes for the authorization request. Env: `OIDC_SCOPES`.
    * Optional; defaults to "openid,profile,email". Whitespace around entries is stripped.
-   * Okta `groups` claims require the `groups` scope; Azure AD app roles typically omit it.
    */
   OIDC_SCOPES: string[];
   /**
@@ -1090,6 +1107,18 @@ export interface SharedServerConfiguration {
    * Max bytes for an HTTP request body. Env: `MAX_REQUEST_BODY_BYTES`. Default 36 MiB.
    */
   MAX_REQUEST_BODY_BYTES: number;
+  /**
+   * Max total bytes of a data export archive. The export aborts (and the download fails) rather
+   * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
+   * Default 1 GiB; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
+   */
+  DATA_EXPORT_MAX_BYTES: number;
+  /**
+   * Max total bytes of a data import archive, compressed and uncompressed.
+   * An upload past the cap is refused before anything is read or written.
+   * Env: `DATA_IMPORT_MAX_BYTES`. Default 1 GiB.
+   */
+  DATA_IMPORT_MAX_BYTES: number;
   /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
@@ -1421,7 +1450,7 @@ export interface SharedServerConfiguration {
   /**
    * Optional cheaper Token Factory model registered next to the default on the env-managed
    * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
    */
   TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
@@ -1446,8 +1475,16 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
-   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
-   * unless it is true, so it can never touch a real instance.
+   * Price overrides in USD per million tokens, as JSON keyed by upstream model id, for example
+   * `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`.
+   * Adds to, and wins over, the built-in Token Factory defaults; an entry also gives a model on any
+   * other provider a cost. Without a price a model shows tokens only.
+   * Env: `TOKEN_FACTORY_PRICES`. Unset means the built-in defaults only.
+   */
+  TOKEN_FACTORY_PRICES: ModelPrices;
+  /**
+   * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
+   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
@@ -1502,8 +1539,9 @@ export interface SharedServerConfiguration {
    */
   PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
-   * Space-separated Tesseract language codes for OCR operations.
-   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
+   * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
+   * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
+   * ignored. Default: English, Portuguese, Spanish, French, German, Italian and Dutch. Env: `DOCUMENT_OCR_LANGUAGES`.
    */
   DOCUMENT_OCR_LANGUAGES: string;
   /**
@@ -1754,7 +1792,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
-    defaultValue: 2048,
+    defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
@@ -1816,6 +1854,17 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAX_REQUEST_BODY_BYTES',
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
+  }),
+  DATA_EXPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_EXPORT_MAX_BYTES',
+    raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+    maxValue: ZIP_MAX_ARCHIVE_BYTES,
+  }),
+  DATA_IMPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_IMPORT_MAX_BYTES',
+    raw: getEnv('DATA_IMPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
@@ -2053,6 +2102,7 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
+  TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
@@ -2086,7 +2136,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
     defaultValue: 3_600_000,
   }),
-  DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
+  DOCUMENT_OCR_LANGUAGES:
+    getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
@@ -2162,14 +2213,40 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
+/** Settings whose whole value is a credential. */
+export const SECRET_SETTING_NAMES = [
+  'TRUEFORGE_API_KEY',
+  'NEBIUS_API_KEY',
+  'MEMORY_SCREEN_AUTH_TOKEN',
+  'OIDC_CLIENT_SECRET',
+  'TRUEFOUNDRY_API_KEY',
+  'TRUEFOUNDRY_SANDBOX_API_KEY',
+  'POSTGRES_PASSWORD',
+] as const;
+
+/** Connection URL settings: secret as a whole, and for the password inside. */
+export const SECRET_URL_SETTING_NAMES = ['DATABASE_URL', 'REDIS_URL'] as const;
+
+type SecretSettingName = (typeof SECRET_SETTING_NAMES)[number] | (typeof SECRET_URL_SETTING_NAMES)[number];
+
 /** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-function urlPassword(raw: string): string | undefined {
+export function urlPassword(raw: string): string | undefined {
   try {
     const password = decodeURIComponent(new URL(raw).password);
     return password === '' ? undefined : password;
   } catch {
     return undefined;
   }
+}
+
+/** The secret values among settings: each credential setting, and each connection URL with its password. */
+export function secretSettingValues(settings: Partial<Record<SecretSettingName, string | undefined>>): string[] {
+  const values: (string | undefined)[] = SECRET_SETTING_NAMES.map(name => settings[name]);
+  for (const name of SECRET_URL_SETTING_NAMES) {
+    const url = settings[name];
+    values.push(url, url === undefined ? undefined : urlPassword(url));
+  }
+  return values.filter((value): value is string => value !== undefined && value !== '');
 }
 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
@@ -2187,27 +2264,25 @@ export type ConfiguredSecretSettings = Pick<
 
 /**
  * Secret values this process holds from its own configuration, for the outbound secret guard:
- * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
- * place to extend when a new secret setting is added.
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. A new secret
+ * setting is added to SECRET_SETTING_NAMES and read here.
  */
 export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
-  const candidates: (string | undefined)[] = [
-    config.TRUEFORGE_API_KEY,
-    config.NEBIUS_API_KEY,
-    config.MEMORY_SCREEN_AUTH_TOKEN,
-    config.OIDC?.OIDC_CLIENT_SECRET,
-  ];
-  if (!config.STANDALONE) {
-    candidates.push(
-      config.TRUEFOUNDRY_API_KEY,
-      config.TRUEFOUNDRY_SANDBOX_API_KEY,
-      config.DATABASE_URL,
-      urlPassword(config.DATABASE_URL),
-      config.REDIS_URL,
-      urlPassword(config.REDIS_URL),
-    );
-  }
-  return candidates.filter((value): value is string => value !== undefined && value !== '');
+  // POSTGRES_PASSWORD is left out: this process holds it inside DATABASE_URL.
+  return secretSettingValues({
+    TRUEFORGE_API_KEY: config.TRUEFORGE_API_KEY,
+    NEBIUS_API_KEY: config.NEBIUS_API_KEY,
+    MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
+    OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    ...(config.STANDALONE
+      ? {}
+      : {
+          TRUEFOUNDRY_API_KEY: config.TRUEFOUNDRY_API_KEY,
+          TRUEFOUNDRY_SANDBOX_API_KEY: config.TRUEFOUNDRY_SANDBOX_API_KEY,
+          DATABASE_URL: config.DATABASE_URL,
+          REDIS_URL: config.REDIS_URL,
+        }),
+  });
 }
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
@@ -2437,7 +2512,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   if (requirement.standalone) {
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
-        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -2484,7 +2559,7 @@ export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn)
       `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses; it must hold one. ${fix}`,
     );
   }
-  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address, not a pattern. ${fix}`);
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address. ${fix}`);
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });

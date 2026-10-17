@@ -3,6 +3,8 @@
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
 #        install.sh instance demo-seed [--reset]
+#        install.sh instance import <name> <file.zip> [--display-name NAME]
+#        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
@@ -61,6 +63,10 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/instance.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
+# shellcheck source=lib/import.sh
+. "$INSTALLER_DIR/lib/import.sh"
+# shellcheck source=lib/migrate.sh
+. "$INSTALLER_DIR/lib/migrate.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -87,6 +93,8 @@ OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
+OPT_HOME_NETWORK=0
+CLOUD_DEFAULT_LOCAL=0
 OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
@@ -120,6 +128,10 @@ Amanuensis installer
   install.sh instance list
   install.sh instance remove <name> [--purge-data]
   install.sh instance demo-seed [--reset] [--instance NAME]
+  install.sh instance import <name> <file.zip> [--display-name NAME]
+                                  back up the instance, then restore a data export into it (stops its app meanwhile)
+  install.sh migrate --from-compose <folder> [--user ID]
+                                  export your data from an old docker compose Aman in that folder, which is only read
   install.sh instance refresh <name>
   install.sh instance password [<name>]   set a new owner password and sign everyone out (run it on the computer where Aman is installed)
   install.sh backup [<name>]
@@ -154,12 +166,16 @@ Options
   --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
   --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
+  --home-network        on a cloud server, still answer at its private addresses (they are shared with other customers, so the default there is this computer only)
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
   --tls local|off|caddy  https on your network with a certificate from this computer (default), plain http, or
                         --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
+  --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
+  --from-compose DIR    with migrate, the folder the old docker compose Aman runs from
+  --user ID             with migrate, the old sign-in id to move when more than one person has chats there
   --print-root-steps    print the root steps for installing Docker and stop
   --print-network       print every host the installer may contact and stop
   --print-proxy-requirements  print what a reverse proxy in front of an instance must do and stop
@@ -210,12 +226,13 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap)
+      --home-network) OPT_HOME_NETWORK=1 ;;
+      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=*)
+      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -225,12 +242,13 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
+          4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
@@ -264,6 +282,9 @@ set_option() {
       ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
+    --display-name) OPT_DISPLAY_NAME=$2 ;;
+    --from-compose) OPT_FROM_COMPOSE=$2 ;;
+    --user) OPT_MIGRATE_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -288,6 +309,25 @@ check_demo_options() {
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
   fi
+  if [ "$OPT_LOCAL_ONLY" = 1 ] && [ "$OPT_HOME_NETWORK" = 1 ]; then
+    usage_die "--local-only and --home-network are opposites; pick one."
+  fi
+}
+
+# On a cloud server a private address is shared with other customers, so an instance whose reach is not recorded yet (a
+# new one, or one from before the address list) stays on this computer unless asked. A recorded reach is kept.
+cloud_guard() {
+  local name undecided=0
+  [ "$COMMAND" = install ] || { [ "$COMMAND" = instance ] && [ "$SUBCOMMAND" = add ]; } || return 0
+  [ "$OPT_LOCAL_ONLY" != 1 ] && [ "$OPT_HOME_NETWORK" != 1 ] && [ -z "$OPT_PUBLIC_URL" ] && [ -z "$OPT_ADDRESSES" ] || return 0
+  network_cloud_vm || return 0
+  if need_new_instance; then undecided=1; fi
+  if [ "$COMMAND" = install ]; then
+    for name in $(reg_names); do reach_recorded "$name" || undecided=1; done
+  fi
+  [ "$undecided" = 1 ] || return 0
+  warn "This looks like a cloud server, where private addresses are shared with other customers, so Aman will open on this computer only. To open it at the private addresses anyway, run this again with --home-network."
+  CLOUD_DEFAULT_LOCAL=1
 }
 
 on_exit() {
@@ -297,6 +337,8 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  import_on_exit
+  migrate_on_exit
   lock_release
   exit "$rc"
 }
@@ -308,8 +350,12 @@ main() {
   set_paths
   trap on_exit EXIT
   check_demo_options
+  check_import_options
+  check_migrate_options
+  cloud_guard
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
     if [ "$OPT_TLS" = caddy ]; then
@@ -340,15 +386,17 @@ main() {
     command) cmd_command ;;
     tls) cmd_tls ;;
     upgrade) cmd_upgrade ;;
+    migrate) cmd_migrate ;;
     instance)
       case "$SUBCOMMAND" in
         add) cmd_instance_add ;;
         list) cmd_instance_list ;;
         remove) cmd_instance_remove ;;
         demo-seed) cmd_instance_demo_seed ;;
+        import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
         password) cmd_instance_password ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|refresh|password" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password" ;;
       esac
       ;;
   esac

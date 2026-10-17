@@ -259,7 +259,9 @@ describe('assertNetworkAuthRequirement', () => {
           host,
           requireAuth: true,
         }),
-      ).toThrow(/Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET/);
+      ).toThrow(
+        /Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS/,
+      );
     });
 
     it('no longer honors REQUIRE_AUTH=false', () => {

@@ -15,6 +15,7 @@ import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
+import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
 import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
 import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import { extractSentinelFromEvent } from '../../sentinel/types.js';
@@ -30,6 +31,7 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
+import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
@@ -279,7 +281,7 @@ function toUiStreamingEvent(event: TrueForgeApi.TurnStreamingEvent): TurnStreami
  * plugin stays free of any runtime dependency on the component tree — so callers of this plugin
  * do not also need to import from the component module directly.
  */
-export type { MemoryTurnContext };
+export type { MemoryTurnContext, ModelUsageTurnContext };
 
 /** The event types `listMemoryTurnContext` reads; the server filters to them so a poll stays small. */
 const MEMORY_TURN_CONTEXT_EVENT_TYPES = ['aman.memory.recall', 'aman.profile.learned'];
@@ -329,6 +331,25 @@ export async function listMemoryTurnContext(
     );
   }
   return [...byTurn.values()];
+}
+
+/**
+ * Every `aman.model.usage` event this session has recorded, grouped by turn, so the UI can show
+ * which model did the work under each answer and what it cost. Like `listMemoryTurnContext`, a
+ * direct `client.sessions.listEvents` read: the vendor chat pipeline cannot carry the event. Walks
+ * every page, so an older turn in a long session still shows its usage after a reload.
+ */
+export async function listModelUsageTurnContext(
+  client: TrueForge,
+  { sessionId }: { sessionId: string },
+): Promise<ModelUsageTurnContext[]> {
+  const byTurn = new Map<string, ModelUsageEvent[]>();
+  const page = await client.sessions.listEvents(sessionId, { limit: 100 });
+  for await (const item of page) {
+    if (item.event.type !== 'aman.model.usage') continue;
+    byTurn.set(item.turnId, [...(byTurn.get(item.turnId) ?? []), item.event]);
+  }
+  return [...byTurn.entries()].map(([turnId, events]) => ({ turnId, events }));
 }
 
 /**

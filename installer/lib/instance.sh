@@ -94,7 +94,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -124,6 +124,9 @@ instance_render() {
       done < <(network_bind_addresses "$origins")
     fi
   fi
+  # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
+  # published sign-in port directly needs the service on every address of the namespace.
+  if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
   edge_on=0
   login_host=
   if edge_wanted "$name"; then
@@ -140,7 +143,7 @@ instance_render() {
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
-    "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
+    "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
     "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" | write_if_changed "$dir/dex.yaml" 644 || true
 }
 
@@ -390,7 +393,10 @@ instance_derive() {
     # The sign-in service is only ever reached on this computer: other devices go through the app.
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
     I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
-    if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+    if reach_default_local; then
+      # Plain http is fine on this computer only; a --tls meant for the network side does not apply.
+      I_TLS=
+    else
       I_TLS=${I_TLS:-local}
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
       I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
@@ -415,16 +421,21 @@ issuer_check() {
 
 # ---- addresses of an existing instance ----------------------------------------------------------
 
-# An instance from before addresses were listed has no `origins` record at all. A plain re-run opens it on the network
-# like a new one; --local-only keeps it (or puts it back) on this computer only.
-instance_address_change() { # name; prints open, close or nothing
-  local name=$1 recorded=0
-  grep -q '^origins=' "$(reg_file "$name")" && recorded=1
+# An instance from before addresses were listed has no `origins` record at all.
+reach_recorded() { grep -q '^origins=' "$(reg_file "$1")"; }
+
+# Where an instance whose reach is not recorded yet stays on this computer: --local-only, or the cloud server default.
+reach_default_local() { [ "$OPT_LOCAL_ONLY" = 1 ] || [ "$CLOUD_DEFAULT_LOCAL" = 1 ]; }
+
+# An unrecorded instance opens on the network like a new one unless it stays on this computer by default. A recorded
+# reach changes only when --local-only puts it back on this computer.
+instance_address_change() { # name; prints open, close, refresh or nothing
+  local name=$1
   is_loopback_origin "$(reg_get "$name" public_url)" || return 0
-  if [ "$OPT_LOCAL_ONLY" = 1 ]; then
-    if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
-  elif [ "$recorded" = 0 ]; then
-    printf 'open'
+  if ! reach_recorded "$name"; then
+    if reach_default_local; then printf 'close'; else printf 'open'; fi
+  elif [ "$OPT_LOCAL_ONLY" = 1 ]; then
+    if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
   fi
@@ -573,10 +584,10 @@ print_instance_summary() {
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
       *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
-      *) ui_check_row ok "Run code" "on, in a sandbox" ;;
+      *) ui_check_row ok "Run code" "on, in a sandbox, with PDF and image reading" ;;
     esac
   else
-    ui_check_row skip "Run code" "off (installed with --no-sandbox)"
+    ui_check_row skip "Run code" "off, with no PDF or image reading (installed with --no-sandbox)"
   fi
   ui_check_row ok "Data" "saved in Docker"
   print_backups_row
@@ -708,55 +719,15 @@ instance_env_repair() {
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
-# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
-# allowed email each. The next install, upgrade or refresh removes them.
-
-# The emails other than the owner's in any OIDC_ALLOWED_EMAILS line of instance NAME's .env, or in a user record,
-# lower case, one per line. Every line counts because Compose reads the last one, wherever it sits.
-instance_extra_emails() { # name
-  local name=$1 owner env
-  owner=$(lowercase "$(reg_get "$name" owner_email)")
-  env="$(instance_dir "$name")/.env"
-  {
-    sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$(reg_file "$name")"
-    if [ -f "$env" ]; then sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "$env" | tr ',' '\n'; fi
-  } | awk -v owner="$owner" '{ e = tolower($0); gsub(/^[ \t]+|[ \t]+$/, "", e); if (e != "" && e != owner && !seen[e]++) print e }'
-}
-
-# The names of the users an earlier version added: user records and leftover hash variables (DEX_USER_PASSWORD_HASH_JUDGE_TWO
-# is judge-two), one per line.
-instance_extra_names() { # name
-  local name=$1 dex_env
-  dex_env="$(instance_dir "$name")/dex.env"
-  {
-    sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")"
-    if [ -f "$dex_env" ]; then
-      sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dex_env" | tr '[:upper:]_' '[:lower:]-'
-    fi
-  } | awk '!seen[$0]++'
-}
-
-# What to call the extra users of instance NAME: their emails, else their names, comma separated. Empty when there are none.
-instance_extra_list() { # name
-  local list
-  list=$(instance_extra_emails "$1")
-  [ -n "$list" ] || list=$(instance_extra_names "$1")
-  printf '%s\n' "$list" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }'
-}
-
-instance_has_extra_users() { # name
-  [ -n "$(instance_extra_list "$1")" ]
-}
-
 # Removes every sign-in user but the owner from instance NAME, says which and logs it. Returns 1 when there was nothing
 # to remove. The order keeps a crash safe: records, then the allowed emails, then dex.yaml with the owner only, and only
 # then the hashes dex.env still holds, so Dex never points at a hash that is gone. The caller restarts the instance.
 instance_enforce_single_owner() { # name
   local name=$1 dir list key line env
-  instance_has_extra_users "$name" || return 1
   dir=$(instance_dir "$name")
   env="$dir/.env"
-  list=$(instance_extra_list "$name")
+  list=$(extra_sign_in_users "$(reg_file "$name")" "$dir")
+  [ -n "$list" ] || return 1
   while IFS= read -r key; do
     reg_unset "$name" "$key"
   done < <(sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")

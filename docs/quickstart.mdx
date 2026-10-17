@@ -31,7 +31,7 @@ pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
 ```
 
-Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts a local [Dex](https://dexidp.io) identity provider in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Standalone needs `OIDC_ALLOWED_EMAILS` to hold exactly one address; the lines it prints do. Any other OIDC provider works too; see [Setup Login](/authentication/overview). Then start the app:
+Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts Aman's own sign-in service ([Dex](https://dexidp.io)) in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Standalone needs `OIDC_ALLOWED_EMAILS` to hold exactly one address; the lines it prints do. Then start the app:
 
 ```bash
 pnpm standalone:dev
@@ -168,15 +168,13 @@ None of these are required to chat with a model. Each is one sentence plus where
     <Warning>
       This stack has no login by default (`REQUIRE_AUTH=false` in `docker-compose.yml`): anyone who can reach port `8791` has
       full admin access. That is safe as shipped, because the port is bound to `127.0.0.1`. Do not change that port mapping,
-      put the app behind a reverse proxy, or open it on your network, without first turning on login (below) or configuring
-      your own identity provider; see [Deployment Security](/deployment-security).
+      put the app behind a reverse proxy, or open it on your network, without first turning on login (below) ; see [Deployment Security](/deployment-security).
     </Warning>
 
     ### Turn on login
 
-    The `login` profile runs [Dex](https://dexidp.io), a small OpenID Connect identity provider, next to the server, with
-    one account that you define in `.env`. Nothing external is involved: the app signs you in through the same OIDC
-    flow it uses with Okta or Entra ID, against an issuer that lives inside the stack.
+    The `login` profile runs [Dex](https://dexidp.io), Aman's own sign-in service, next to the server, with
+    one account that you define in `.env`. Nothing external is involved: the sign-in service lives inside the stack.
 
     1. Generate a client secret and a password hash. The hash, not the password, goes into `.env`:
 
@@ -281,7 +279,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | `postgresql.enabled`   | `true`  | Bundle Postgres; set `false` + `externalPostgres.*` to bring your own.   |
     | `redis.enabled`        | `true`  | Bundle Redis; set `false` + `externalRedis.url` (string or `valueFrom`). |
     | `server.publicBaseUrl` | `""`    | Public origin; required for OIDC and MCP OAuth callbacks.                |
-    | `configs.oidc.enabled` | `false` | Enable IdP login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
+    | `configs.oidc.enabled` | `false` | Enable login via `configs.oidc.*`. Default off = shared local admin; see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
 
   </Tab>
 </Tabs>

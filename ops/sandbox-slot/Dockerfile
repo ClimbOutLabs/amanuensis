@@ -64,6 +64,20 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
 
+# The document pipeline reads attachments inside the guest with pdfinfo, pdftotext and pdftoppm (poppler-utils)
+# and tesseract. poppler-data carries the character maps that PDFs in Japanese, Chinese and Korean need to give
+# back text. Tesseract needs one data package per language it reads, and osd to tell a page's script so each page
+# is read with that script's languages: English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi,
+# Marathi, Arabic, Russian, Chinese (simplified and traditional), Japanese and Korean. Its own layer, so changing
+# it does not rebuild the Python and npm layers above.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils poppler-data tesseract-ocr tesseract-ocr-osd \
+      tesseract-ocr-eng tesseract-ocr-por tesseract-ocr-spa tesseract-ocr-fra tesseract-ocr-deu tesseract-ocr-ita \
+      tesseract-ocr-nld tesseract-ocr-hin tesseract-ocr-mar tesseract-ocr-ara tesseract-ocr-rus \
+      tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-jpn tesseract-ocr-kor \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale /var/cache/* /var/log/*
+
 # Optional toolchains chosen with `pnpm sandbox:slots --add`; none by default. The archives are mounted from the
 # build context, not copied, so they add nothing to the image beyond the installed toolchain.
 ARG AMAN_PACKS=""

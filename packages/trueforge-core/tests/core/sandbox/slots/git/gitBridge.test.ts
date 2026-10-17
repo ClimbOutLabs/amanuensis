@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gitLocalImportHardeningConfigEntries } from '../../../../../src/core/permissions/gitHardening';
+import type { GitRemotePrecondition } from '../../../../../src/core/sandbox/gitRemoteObservation';
 import type { HostAuthenticatedGitPlan } from '../../../../../src/core/sandbox/hostAuthenticatedGit';
 import { GitBridge } from '../../../../../src/core/sandbox/slots/git/gitBridge';
 import { execFileRunner, type HostCommandRunner } from '../../../../../src/core/sandbox/slots/git/hostCommand';
@@ -11,6 +12,10 @@ import { LocalGuest } from './localGuest';
 
 const URL = 'https://github.com/acme/widgets';
 const TOKEN = 'fake-host-token-1234567890';
+const APPROVED_ORIGIN: GitRemotePrecondition = {
+  remotes: [{ name: 'origin', url: `${URL}.git` }],
+  summary: `This uses origin, which is ${URL}.git. Your GitHub sign-in is only offered to this repository.`,
+};
 const IDENTITY = {
   GIT_AUTHOR_NAME: 'Test',
   GIT_AUTHOR_EMAIL: 'test@example.com',
@@ -20,6 +25,14 @@ const IDENTITY = {
   GIT_CONFIG_GLOBAL: '/dev/null',
   HOME: '/nonexistent',
 };
+
+/** The GitHub addresses a host git process would offer the token to. */
+function credentialScopes(env: Readonly<Record<string, string>>): string[] {
+  return Object.values(env).flatMap(value => {
+    const scoped = /^credential\.(https:\/\/github\.com\/.+)\.helper$/u.exec(value);
+    return scoped?.[1] === undefined ? [] : [scoped[1]];
+  });
+}
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
@@ -87,11 +100,17 @@ describe('GitBridge (real git on both sides)', () => {
     return plan;
   }
 
-  function input(command: string, token: string | null = TOKEN, cwd = '/workspace') {
+  function input(
+    command: string,
+    token: string | null = TOKEN,
+    cwd = '/workspace',
+    approvedRemotes: GitRemotePrecondition | undefined = undefined,
+  ) {
     return {
       command,
       plan: planOf(command),
       token,
+      approvedRemotes,
       guest,
       sandboxId: 's1-test',
       cwd,
@@ -169,14 +188,69 @@ describe('GitBridge (real git on both sides)', () => {
     git(other, 'commit', '-m', 'third');
     git(other, 'push', 'origin', 'main');
 
-    const fetched = await bridge.run(input('git fetch origin', TOKEN, '/workspace/widgets'));
+    const fetched = await bridge.run(input('git fetch origin', TOKEN, '/workspace/widgets', APPROVED_ORIGIN));
     expect(fetched).toMatchObject({ success: true, response: { exitCode: 0 } });
     expect(git(dir, 'log', '--format=%s', 'origin/main', '-1')).toBe('third');
     expect(git(dir, 'log', '--format=%s', '-1')).toBe('second');
 
-    const pulled = await bridge.run(input('git pull --ff-only', TOKEN, '/workspace/widgets'));
+    const pulled = await bridge.run(input('git pull --ff-only', TOKEN, '/workspace/widgets', APPROVED_ORIGIN));
     expect(pulled).toMatchObject({ success: true, response: { exitCode: 0 } });
     expect(git(dir, 'log', '--format=%s', '-1')).toBe('third');
+    const scopes = calls
+      .filter(call => call.env['TRUEFORGE_GIT_TOKEN'] === TOKEN)
+      .flatMap(call => credentialScopes(call.env));
+    expect(new Set(scopes)).toEqual(new Set([`${URL}.git`, URL]));
+  });
+
+  describe('fetch and pull through a named or default remote', () => {
+    const tokenCarrying = () => calls.filter(call => call.env['TRUEFORGE_GIT_TOKEN'] !== undefined);
+
+    test.each(['git fetch origin', 'git pull --ff-only'])(
+      '%s is refused before any token-carrying call when the guest remote is not the approved one',
+      async command => {
+        const dir = await cloned();
+        git(dir, 'remote', 'set-url', 'origin', 'https://github.com/other/private');
+        calls.length = 0;
+        const result = await bridge.run(input(command, TOKEN, '/workspace/widgets', APPROVED_ORIGIN));
+        expect(result).toMatchObject({ success: true, response: { exitCode: 1 } });
+        expect(result.success && result.response.result).toContain('not the one shown for approval');
+        expect(tokenCarrying()).toEqual([]);
+      },
+    );
+
+    test.each(['git fetch origin', 'git pull --ff-only'])(
+      '%s without an approved repository is refused and offers the token to nothing',
+      async command => {
+        await cloned();
+        calls.length = 0;
+        const result = await bridge.run(input(command, TOKEN, '/workspace/widgets'));
+        expect(result).toMatchObject({ success: true, response: { exitCode: 1 } });
+        expect(result.success && result.response.result).toContain('No repository was shown for approval');
+        expect(tokenCarrying()).toEqual([]);
+      },
+    );
+
+    test('the token is only ever offered to the approved repository', async () => {
+      const dir = await cloned();
+      git(dir, 'remote', 'add', 'upstream', 'https://github.com/other/private');
+      git(dir, 'config', 'branch.main.remote', 'origin');
+      calls.length = 0;
+      const fetched = await bridge.run(input('git fetch', TOKEN, '/workspace/widgets', APPROVED_ORIGIN));
+      expect(fetched).toMatchObject({ success: true, response: { exitCode: 0 } });
+      expect(new Set(tokenCarrying().flatMap(call => credentialScopes(call.env)))).toEqual(
+        new Set([`${URL}.git`, URL]),
+      );
+    });
+
+    test('a url rewrite in the guest config does not move the token to another repository', async () => {
+      const dir = await cloned();
+      git(dir, 'config', 'url.https://github.com/other/private.insteadOf', URL);
+      calls.length = 0;
+      await bridge.run(input('git fetch origin', TOKEN, '/workspace/widgets', APPROVED_ORIGIN));
+      const scopes = tokenCarrying().flatMap(call => credentialScopes(call.env));
+      expect(scopes.length).toBeGreaterThan(0);
+      expect(scopes.every(scope => scope.startsWith(URL))).toBe(true);
+    });
   });
 
   test('ls-remote runs on the host', async () => {

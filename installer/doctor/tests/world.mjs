@@ -175,7 +175,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       }
     },
     info({
-      version = '27.1.1',
+      version = '28.0.1',
       arch = 'x86_64',
       security = '[name=seccomp,profile=builtin]',
       systime = DAEMON_TIME,
@@ -398,7 +398,7 @@ export function createWorld({ instances = ['main'] } = {}) {
   world.install('docker', FAKE_DOCKER);
   world.df(50 * GIB_KB);
   world.info();
-  world.set('cli_version', { out: 'Docker version 27.1.1, build abc\n' });
+  world.set('cli_version', { out: 'Docker version 28.0.1, build abc\n' });
   world.set('version', { out: 'Docker Engine - Community;containerd;runc;\n' });
   world.set('compose_version', { out: '2.29.1\n' });
   world.set('ps', { out: '' });
@@ -438,7 +438,7 @@ export const HEALTHY_INSTANCE_CHECKS =
     'disk\tok\t50.0 GB is free where the data lives.\t',
     'clock\tok\tThe clock is within 60 seconds of the login provider.\t',
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
-    'attachments\toff\tReading email attachments is not available.\t',
+    'attachments\toff\tReading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.\t',
     'demo\toff\tDemo mode is off.\t',
     'model\toff\tNo Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.\t',
   ].join('\n') + '\n';

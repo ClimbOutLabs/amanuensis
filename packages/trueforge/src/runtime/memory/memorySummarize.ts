@@ -17,6 +17,8 @@ import { VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { routeHelperModel } from '../helperModelRouting';
+import { modelIdentity, type TurnModelUsage } from '../modelUsage';
 import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 
@@ -146,6 +148,7 @@ export async function summarizeTurnContent(params: {
   /** Model to summarize with; when undefined the turn is not summarized. */
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   logger: Logger;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
@@ -188,8 +191,10 @@ export async function summarizeTurnContent(params: {
               signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
               streamTimeout,
             }),
-            providerType: providerConfig.provider.type,
+            identity: modelIdentity({ name, providerConfig }),
+            role: 'summarization',
             budget: params.tokenFactoryBudget,
+            usage: params.modelUsage,
             logger,
           });
         });
@@ -219,8 +224,9 @@ export async function summarizeTurnContent(params: {
 /**
  * Resolves the model FQN for memory summarization.
  *
- * Precedence: explicitly-set `summarization` role → persona override → main model.
- * An unset role always tracks the main model, including across later changes to it.
+ * Precedence: explicitly-set `summarization` role → persona override → main model. An unset role
+ * tracks the main model, except that a main model on Token Factory hands this helper job to the
+ * small model (`helperFqn`).
  * For stored agents, the agent record is fetched once and reused for both the role
  * check and the main-model fallback (single DB read).
  */
@@ -229,6 +235,7 @@ export async function resolveSummarizationModelFqn(params: {
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
   agentStore: IAgentStore;
+  helperFqn?: string | undefined;
 }): Promise<string | undefined> {
   let summarizationModelName: string | undefined;
   let storedRecord: AgentRecord | null | undefined;
@@ -246,11 +253,8 @@ export async function resolveSummarizationModelFqn(params: {
   }
   // Fall back to the main model. For stored agents, reuse the already-fetched record
   // instead of calling resolveTurnModelFqn (which would issue a second identical DB read).
-  if (params.personaModelName !== undefined) {
-    return params.personaModelName;
-  }
-  if (params.sessionAgent.type === 'inline') {
-    return params.sessionAgent.spec.model.name;
-  }
-  return storedRecord?.manifest.model.name;
+  const mainModelFqn =
+    params.personaModelName ??
+    (params.sessionAgent.type === 'inline' ? params.sessionAgent.spec.model.name : storedRecord?.manifest.model.name);
+  return routeHelperModel({ modelFqn: mainModelFqn, helperFqn: params.helperFqn });
 }

@@ -1,18 +1,21 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Response as UndiciResponse } from 'undici';
 import { createLogger } from 'winston';
 
-import { createPersonaKnowledgeRouter } from '../../../src/apis/personaKnowledge';
+import { createPersonaKnowledgeRouter, MAX_LIBRARY_BYTES_PER_USER } from '../../../src/apis/personaKnowledge';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createAppErrorHandler } from '../../../src/app';
 import type { RequestContext } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
+import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
+import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import type { KnowledgeDocumentStatus } from '../../../src/schemas/personaKnowledge';
 
 const mockModel = {
@@ -272,6 +275,71 @@ describe('persona knowledge router', () => {
     expect((await app.request('/persona-zara/knowledge/nope', { method: 'DELETE' })).status).toBe(404);
     expect((await app.request(`/persona-zara/knowledge/${data.id}`, { method: 'DELETE' })).status).toBe(200);
     expect(await listDocuments('persona-zara')).toHaveLength(0);
+  });
+
+  it('refuses a new document once the user has filled their libraries across personas', async () => {
+    const { app, knowledgeDir, listDocuments } = await setup();
+    // A pending upload on another of the same user's personas already uses the whole allowance.
+    const blobsDir = path.join(knowledgeDir, TENANT_ID, 'persona-mike.blobs');
+    mkdirSync(blobsDir, { recursive: true });
+    const pending = path.join(blobsDir, 'pending.bin');
+    writeFileSync(pending, '');
+    truncateSync(pending, MAX_LIBRARY_BYTES_PER_USER);
+
+    const response = await app.request(
+      '/persona-zara/knowledge',
+      jsonInit('POST', { kind: 'upload', filename: 'notes.txt', content_base64: toBase64('invented notes') }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(RequestErrorResponseSchema.parse(await response.json()).error.message).toMatch(/full/);
+    expect(await listDocuments('persona-zara')).toHaveLength(0);
+  });
+
+  it('accepts a new document again once documents are deleted at the cap', async () => {
+    const { app, knowledgeDir } = await setup();
+    const { dbPath } = personaKnowledgeLocation({ knowledgeDir, tenantId: TENANT_ID, personaId: 'persona-zara' });
+    const repo = openPersonaKnowledgeRepository({ dbPath, dimensions: 384 });
+    const documentIds: string[] = [];
+    try {
+      for (let index = 0; index < 4; index += 1) {
+        const document = repo.createDocument({
+          title: `Doc ${String(index)}`,
+          titleExplicit: true,
+          source_kind: 'text',
+          source_label: 'Pasted text',
+          source_url: null,
+        });
+        repo.setDocumentChunks({
+          documentId: document.id,
+          chunks: Array.from({ length: 250 }, (_, chunk) => ({
+            text: `${String(chunk)} `.padEnd(5000, 'x'),
+            embedding: new Float32Array(384).fill(0.1),
+          })),
+        });
+        repo.updateDocumentStatus({ documentId: document.id, status: 'ready' });
+        documentIds.push(document.id);
+      }
+    } finally {
+      repo.close();
+    }
+    // About 10 MB of library plus a pending upload 4 MiB short of the cap.
+    const blobsDir = path.join(knowledgeDir, TENANT_ID, 'persona-mike.blobs');
+    mkdirSync(blobsDir, { recursive: true });
+    const pending = path.join(blobsDir, 'pending.bin');
+    writeFileSync(pending, '');
+    truncateSync(pending, MAX_LIBRARY_BYTES_PER_USER - 4 * 1024 * 1024);
+    const upload = () =>
+      app.request(
+        '/persona-zara/knowledge',
+        jsonInit('POST', { kind: 'upload', filename: 'notes.txt', content_base64: toBase64('invented notes') }),
+      );
+
+    expect((await upload()).status).toBe(400);
+    for (const documentId of documentIds) {
+      expect((await app.request(`/persona-zara/knowledge/${documentId}`, { method: 'DELETE' })).status).toBe(200);
+    }
+    expect((await upload()).status).toBe(201);
   });
 
   it('rejects a traversal document id on delete before touching the filesystem', async () => {

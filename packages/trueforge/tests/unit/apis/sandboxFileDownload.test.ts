@@ -6,6 +6,7 @@ import { createLogger } from 'winston';
 import { createTurnsRouter, toContentDisposition } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -51,6 +52,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
   app.route(
     '/',
     createTurnsRouter({
+      mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
@@ -271,6 +273,8 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
 
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment;/);
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
   it('returns 413 with a clear reason for a file that was skipped for size, without calling the sandbox', async () => {
@@ -512,6 +516,7 @@ describe('run_code harvest download journey', () => {
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
     expect(response.headers.get('content-disposition')).toContain('plot.png');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });
 

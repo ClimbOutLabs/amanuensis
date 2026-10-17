@@ -9,6 +9,8 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
+#   aman import FILE [--instance NAME] [--display-name NAME]
+#   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -70,6 +72,7 @@ DOCKER_ROOT=""
 DOCKER_SYSTEM_TIME=""
 DOCKER_SECURITY=""
 DOCKER_OS=""
+DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
@@ -83,6 +86,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman upgrade [--check] [--force]
        aman password [--instance NAME] [--password-stdin]
          sets a new owner password; run it on the computer where Aman is installed
+       aman import FILE [--instance NAME] [--display-name NAME]
+       aman migrate --from-compose FOLDER [--user ID]
 USAGE
 }
 
@@ -359,6 +364,7 @@ check_docker() {
   DOCKER_SECURITY=$security
   DOCKER_OS=$os
   DOCKER_MEM=$mem
+  DOCKER_VERSION=$version
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
@@ -402,6 +408,11 @@ check_runtime() {
       return
       ;;
   esac
+  if docker_engine_leaks_loopback "$DOCKER_VERSION" "$DOCKER_OS"; then
+    record machine runtime fail "$(docker_leaks_loopback_text "$DOCKER_VERSION")" \
+      "Install a current Docker Engine (install.sh --print-root-steps shows the steps), then run aman doctor."
+    return
+  fi
   record machine runtime ok "A supported Docker runtime is in use." ""
 }
 
@@ -710,7 +721,7 @@ fix_checkout() {
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
-  local name=$1 file mode dir
+  local name=$1 file mode dir extra
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
@@ -727,31 +738,13 @@ check_instance_config() {
       return
     fi
   done
-  find_extra_users "$dir" "$name"
-  if [ -n "$EXTRA_USERS" ]; then
-    record "$name" config warn "More than the owner can sign in: ${EXTRA_USERS}." \
+  extra=$(extra_sign_in_users "${AMAN_HOME}/state/instances/${name}.conf" "$dir")
+  if [ -n "$extra" ]; then
+    record "$name" config warn "More than the owner can sign in: ${extra}." \
       "$INSTANCE_FIX"
     return
   fi
   record "$name" config ok "The settings files exist and are private to you." ""
-}
-
-# Sets EXTRA_USERS to the sign-in users beyond the owner that an earlier version let `instance add-user` add: their
-# allowed emails (anything but the owner's, a pattern included, from every line since Compose reads the last), else the
-# names behind leftover password hashes in dex.env. Hashes are never printed. Empty when only the owner can sign in.
-find_extra_users() { # instance dir, instance name
-  local owner allowed
-  owner=$(registry_value "$2" owner_email)
-  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null)
-  EXTRA_USERS=$(printf '%s\n' "$allowed" | tr ',' '\n' | awk -v owner="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" '
-    { e = tolower($0); gsub(/^[ \t]+|[ \t]+$/, "", e) }
-    NR == 1 && owner == "" { owner = e }
-    e != "" && e != owner && !seen[e]++ { list = list (list == "" ? "" : ", ") e }
-    END { print list }')
-  if [ -z "$EXTRA_USERS" ]; then
-    EXTRA_USERS=$(sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "${1}/dex.env" 2>/dev/null |
-      tr '[:upper:]_' '[:lower:]-' | awk 'NF { if (n++) printf ", "; printf "%s", $0 }')
-  fi
 }
 
 # What a container is, in words for a person: "the main app" for the app of instance main.
@@ -1467,6 +1460,7 @@ doctor_repair() { # kind
         continue
       fi
     else
+      check_instance_config "$name"
       check_instance_containers "$name"
     fi
     text_checks "$name"
@@ -1586,7 +1580,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1595,6 +1589,48 @@ run_installer() { # command args...
     exit 1
   fi
   exec bash "$installer" --home "$AMAN_HOME" "$@"
+}
+
+# aman import FILE: the installer's import into the one instance on this computer, or the one --instance names.
+run_import() {
+  local file="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --display-name)
+        [ $# -ge 2 ] || die_usage "--display-name needs a name."
+        rest+=("$1" "$2")
+        shift
+        ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$file" ] || die_usage "Unexpected argument: $1"
+        file=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$file" ] || die_usage "aman import needs the export file. Run aman import FILE."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one to import into. Run aman import %s --instance NAME.\n' "$count" "$file" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
 }
 
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
@@ -1621,12 +1657,16 @@ renew_tls_if_due() {
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
-  doctor | backup | upgrade) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade) run_installer "$@" ;;
+  backup | upgrade | migrate) run_installer "$@" ;;
+  import)
+    shift
+    run_import "$@"
+    ;;
   password)
     shift
     run_installer instance password "$@"

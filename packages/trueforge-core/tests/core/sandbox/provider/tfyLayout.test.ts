@@ -1,4 +1,5 @@
 import { absolutizeRelativeExecEnv } from '../../../../src/core/sandbox/provider/execEnv';
+import { withTrustedPath } from '../../../../src/core/sandbox/provider/Provider';
 import { TFYSandboxProvider, withMcpClientOnPath } from '../../../../src/core/sandbox/provider/TFYSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 
@@ -53,5 +54,83 @@ describe('TFYSandboxProvider layout', () => {
     expect(withMcpClientOnPath('')).toBe('mcp-client/bin');
     expect(withMcpClientOnPath('/usr/bin:/bin')).toBe('mcp-client/bin:/usr/bin:/bin');
     expect(withMcpClientOnPath('mcp-client/bin:/usr/bin')).toBe('mcp-client/bin:/usr/bin');
+  });
+
+  it('reads and writes files with programs from the trusted PATH', async () => {
+    const commands: string[] = [];
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const command =
+        typeof body === 'object' && body !== null && 'command' in body && typeof body.command === 'string'
+          ? body.command
+          : '';
+      commands.push(command);
+      const result = command.startsWith('printf')
+        ? '/root\n/usr/bin:/bin\n'
+        : command.includes('stat -L')
+          ? '{"size":2,"type":"regular file"}'
+          : command.includes('base64 -w0')
+            ? Buffer.from('hi').toString('base64')
+            : '';
+      return Promise.resolve(new Response(JSON.stringify({ success: true, response: { exitCode: 0, result } })));
+    });
+    try {
+      const provider = new TFYSandboxProvider({
+        serverUrl: 'http://sandbox.example',
+        natsBridgeUrl: 'ws://nats.example',
+        tenantName: 'acme',
+        fileMaxBytesForDownload: 1024,
+        logger: makeSilentLogger(),
+      });
+      const sandboxId = 'acme.00000000-0000-0000-0000-000000000001';
+      expect((await provider.downloadFile({ sandboxId, path: 'a.txt' })).toString()).toBe('hi');
+      await provider.uploadFile({ sandboxId, remotePath: 'b.txt', content: Buffer.from('x') });
+      const fileCommands = commands.filter(command => !command.startsWith('printf'));
+      expect(fileCommands).toHaveLength(3);
+      for (const command of fileCommands) {
+        expect(command.startsWith(withTrustedPath(''))).toBe(true);
+      }
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('returns only the status when the sandbox server rejects a command', async () => {
+    const planted = 'plantedGitToken0000000000';
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const command =
+        typeof body === 'object' && body !== null && 'command' in body && typeof body.command === 'string'
+          ? body.command
+          : '';
+      if (command.startsWith('printf')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ success: true, response: { exitCode: 0, result: '/root\n/usr/bin\n' } })),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: [{ input: { env: { GIT_TOKEN: planted } } }] }), { status: 422 }),
+      );
+    });
+    try {
+      const provider = new TFYSandboxProvider({
+        serverUrl: 'http://sandbox.example',
+        natsBridgeUrl: 'ws://nats.example',
+        tenantName: 'acme',
+        fileMaxBytesForDownload: 1024,
+        logger: makeSilentLogger(),
+      });
+      const result = await provider.exec({
+        sandboxId: 'acme.00000000-0000-0000-0000-000000000001',
+        command: 'git fetch',
+        env: { GIT_TOKEN: planted },
+        signal: undefined,
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(planted);
+      expect(JSON.stringify(result)).toContain('422');
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

@@ -395,6 +395,10 @@
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
           },
+          "can_chat_allow": {
+            "description": "Whether the user may approve this tool for the rest of the chat.",
+            "type": "boolean"
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"
@@ -626,6 +630,36 @@
         "required": [
           "thread_id",
           "title"
+        ],
+        "type": "object"
+      },
+      "BeginGoogleConsentRequest": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/GoogleClientCredentials"
+          },
+          "features": {
+            "description": "Features to ask for. Features already granted are kept.",
+            "items": {
+              "$ref": "#/components/schemas/GoogleFeature"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "features"
+        ],
+        "type": "object"
+      },
+      "BeginGoogleConsentResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleConsentStart"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -1511,6 +1545,36 @@
         ],
         "type": "object"
       },
+      "CheckGoogleClientRequest": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/GoogleClientCredentials"
+          },
+          "registered_redirect_uris": {
+            "description": "Authorized redirect URIs listed in a Web client file; empty when unknown.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "client",
+          "registered_redirect_uris"
+        ],
+        "type": "object"
+      },
+      "CheckGoogleClientResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleClientCheck"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ClientTimezoneInput": {
         "description": "IANA timezone name of the client (e.g. \"America/Los_Angeles\"), typically Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local time from get_current_datetime and in the ambient current-date context. An unrecognized name and an omitted field both fall back to UTC.",
         "minLength": 1,
@@ -1532,6 +1596,19 @@
             "$ref": "#/components/schemas/InputTokensCompactionTrigger"
           }
         },
+        "type": "object"
+      },
+      "CompleteGoogleConsentRequest": {
+        "properties": {
+          "address": {
+            "description": "The whole address copied from the browser bar after consent; its code and state are read here.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
         "type": "object"
       },
       "ConfiguredMCPServer": {
@@ -1715,12 +1792,12 @@
           "tokens_after": {
             "description": "Estimated context tokens after this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "tokens_before": {
             "description": "Estimated context tokens before this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "type": {
             "description": "A context-compaction attempt completed.",
@@ -2228,6 +2305,29 @@
         "properties": {},
         "type": "object"
       },
+      "DisconnectGoogleResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DisconnectGoogleResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DisconnectGoogleResult": {
+        "properties": {
+          "revocation_confirmed": {
+            "description": "False when Google did not confirm the revocation. The login is removed from Aman either way.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revocation_confirmed"
+        ],
+        "type": "object"
+      },
       "DocumentIngestionEvent": {
         "properties": {
           "created_at": {
@@ -2323,6 +2423,15 @@
         "required": [
           "schedule_run_id"
         ],
+        "type": "object"
+      },
+      "ExportDataRequest": {
+        "properties": {
+          "include_uploads": {
+            "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "ExportMemoryVaultResponse": {
@@ -2489,6 +2598,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetGoogleConnectionStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GoogleConnectionStatus"
           }
         },
         "required": [
@@ -2935,6 +3055,17 @@
         ],
         "type": "object"
       },
+      "GetTokenFactoryUsageResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TokenFactoryUsage"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetToolOutputScreenResponse": {
         "properties": {
           "data": {
@@ -3030,6 +3161,170 @@
         ],
         "type": "object"
       },
+      "GoogleClientCheck": {
+        "properties": {
+          "ok": {
+            "description": "True when no problem was found.",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleClientProblem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "problems"
+        ],
+        "type": "object"
+      },
+      "GoogleClientCredentials": {
+        "properties": {
+          "client_id": {
+            "description": "The user's own Google OAuth client id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "client_secret": {
+            "description": "The user's own Google OAuth client secret.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "client_type": {
+            "$ref": "#/components/schemas/GoogleClientType"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "type": "object"
+      },
+      "GoogleClientProblem": {
+        "properties": {
+          "code": {
+            "description": "Stable problem code.",
+            "enum": [
+              "invalid_client_id",
+              "invalid_client_secret",
+              "wrong_client_type",
+              "redirect_uri_not_registered",
+              "client_not_found",
+              "unverified_response"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "description": "Plain-language explanation and next step.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "GoogleClientType": {
+        "enum": [
+          "desktop",
+          "web"
+        ],
+        "type": "string"
+      },
+      "GoogleConnectionStatus": {
+        "properties": {
+          "account_email": {
+            "description": "The connected Google address; null when not connected or unknown.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "description": "False on a demo instance, where Google cannot be connected.",
+            "type": "boolean"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleFeatureStatus"
+            },
+            "type": "array"
+          },
+          "has_saved_client": {
+            "description": "Whether a Google client is already saved, so adding a feature needs no retyping.",
+            "type": "boolean"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/GoogleSetupInfo"
+          },
+          "state": {
+            "description": "needs_reconnect: Google no longer accepts the stored login; connect again.",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reconnect"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "account_email",
+          "features",
+          "has_saved_client",
+          "available",
+          "setup"
+        ],
+        "type": "object"
+      },
+      "GoogleConsentStart": {
+        "properties": {
+          "authorization_url": {
+            "description": "The Google consent address to open in the browser.",
+            "type": "string"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/GoogleSetupInfo"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "setup"
+        ],
+        "type": "object"
+      },
+      "GoogleFeature": {
+        "enum": [
+          "gmail_read",
+          "gmail_compose",
+          "calendar_read"
+        ],
+        "type": "string"
+      },
+      "GoogleFeatureStatus": {
+        "properties": {
+          "feature": {
+            "$ref": "#/components/schemas/GoogleFeature"
+          },
+          "granted": {
+            "description": "Whether Google granted the scope behind this feature.",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "Plain-language name of what the feature allows.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "label",
+          "granted"
+        ],
+        "type": "object"
+      },
       "GoogleGeminiModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -3064,6 +3359,37 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "GoogleSetupInfo": {
+        "properties": {
+          "client_type": {
+            "description": "The kind of Google client this install needs.",
+            "enum": [
+              "desktop",
+              "web"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to.",
+            "enum": [
+              "web",
+              "loopback",
+              "paste"
+            ],
+            "type": "string"
+          },
+          "redirect_uri": {
+            "description": "The exact redirect URI to register (Web client) or that the consent returns to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "client_type",
+          "redirect_uri"
         ],
         "type": "object"
       },
@@ -3292,6 +3618,82 @@
         },
         "required": [
           "results"
+        ],
+        "type": "object"
+      },
+      "ImportDataResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImportDataResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ImportDataResult": {
+        "properties": {
+          "agents": {
+            "description": "Agents imported with their original ids.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chats": {
+            "description": "Chats imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connectors": {
+            "description": "Connectors imported, without credentials.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "folders": {
+            "description": "Chat folders imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memories": {
+            "description": "Memories imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "personas": {
+            "description": "Personas imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules": {
+            "description": "Schedules imported; all arrive switched off.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules_off": {
+            "description": "True when schedules were imported; imported schedules are always off until turned on.",
+            "type": "boolean"
+          },
+          "spaces": {
+            "description": "Spaces imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "summary": {
+            "description": "Plain-words summary of what was imported and what was not.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chats",
+          "memories",
+          "personas",
+          "spaces",
+          "schedules",
+          "folders",
+          "agents",
+          "connectors",
+          "schedules_off",
+          "summary"
         ],
         "type": "object"
       },
@@ -5994,6 +6396,99 @@
         },
         "type": "object"
       },
+      "ModelUsagePersistedEvent": {
+        "properties": {
+          "calls": {
+            "description": "Model calls summed into this event.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Cost in USD over the reported calls, or null when no price is known or usage was not reported.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Readable model name.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "input_tokens": {
+            "description": "Input tokens over the reported calls.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "description": "Model id the provider was called with.",
+            "type": "string"
+          },
+          "model_name": {
+            "description": "Configured model name, as the model picker lists it.",
+            "type": "string"
+          },
+          "output_tokens": {
+            "description": "Output tokens over the reported calls.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "Provider type that served the calls, for example `tokenfactory`.",
+            "type": "string"
+          },
+          "reported_calls": {
+            "description": "Calls whose usage the provider reported. Zero means usage was not reported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ModelUsageRole"
+          },
+          "type": {
+            "enum": [
+              "aman.model.usage"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "role",
+          "model_name",
+          "model_id",
+          "display_name",
+          "provider",
+          "calls",
+          "reported_calls",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ModelUsageRole": {
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "enum": [
+          "chat",
+          "delegation",
+          "compaction",
+          "summarization",
+          "profile_learning",
+          "relevance_judge"
+        ],
+        "type": "string"
+      },
       "MoonshotModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -7916,6 +8411,9 @@
           },
           {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelUsagePersistedEvent"
           }
         ]
       },
@@ -8653,6 +9151,44 @@
         },
         "type": "object"
       },
+      "TestGoogleConnectionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TestGoogleConnectionResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "TestGoogleConnectionResult": {
+        "properties": {
+          "account_email": {
+            "description": "The connected address when the test passed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "description": "calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.",
+            "enum": [
+              "ok",
+              "not_connected",
+              "needs_reconnect",
+              "unreachable",
+              "calendar_unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "account_email"
+        ],
+        "type": "object"
+      },
       "TextContent": {
         "properties": {
           "text": {
@@ -8841,6 +9377,9 @@
               "null"
             ]
           },
+          "email": {
+            "$ref": "#/components/schemas/Tier3Email"
+          },
           "outbound_text": {
             "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
             "type": [
@@ -8899,6 +9438,86 @@
           "outbound_truncated"
         ],
         "type": "object"
+      },
+      "Tier3Email": {
+        "description": "The message an email action sends or saves, shown in full.",
+        "properties": {
+          "action": {
+            "description": "What happens to the message: sent, saved as a draft, or a saved draft changed.",
+            "enum": [
+              "send",
+              "save",
+              "change"
+            ],
+            "type": "string"
+          },
+          "bcc": {
+            "description": "Hidden copy recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "The whole message text, exactly as it will be sent.",
+            "type": "string"
+          },
+          "cc": {
+            "description": "Copied recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "replaces": {
+            "description": "The saved draft a change replaces, or null.",
+            "properties": {
+              "subject": {
+                "description": "Subject of the draft being replaced.",
+                "type": "string"
+              },
+              "to": {
+                "description": "Recipients of the draft being replaced.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "subject",
+              "to"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Subject line.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body",
+          "replaces"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Timezone": {
         "default": "UTC",
@@ -8977,6 +9596,103 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "TokenFactoryModelUsage": {
+        "properties": {
+          "calls": {
+            "description": "Model calls counted today.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Cost in USD at the configured price, or null when the model has no known price.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "display_name": {
+            "description": "Readable model name.",
+            "type": "string"
+          },
+          "input_tokens": {
+            "description": "Input tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "description": "Model id the provider was called with.",
+            "type": "string"
+          },
+          "output_tokens": {
+            "description": "Output tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id",
+          "display_name",
+          "input_tokens",
+          "output_tokens",
+          "calls",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "TokenFactoryUsage": {
+        "properties": {
+          "cap_tokens": {
+            "description": "Daily token cap, or null when there is none.",
+            "exclusiveMinimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cost_usd": {
+            "description": "Cost in USD of all models today, or null when any model has no known price.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "models": {
+            "description": "Per-model counters, most tokens first.",
+            "items": {
+              "$ref": "#/components/schemas/TokenFactoryModelUsage"
+            },
+            "type": "array"
+          },
+          "remaining_tokens": {
+            "description": "Tokens left under the cap today, or null when there is no cap.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "usage_date": {
+            "description": "UTC day these counters cover, as `YYYY-MM-DD`. They reset at midnight UTC.",
+            "type": "string"
+          },
+          "used_tokens": {
+            "description": "Input plus output tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "usage_date",
+          "cap_tokens",
+          "used_tokens",
+          "remaining_tokens",
+          "cost_usd",
+          "models"
         ],
         "type": "object"
       },
@@ -10631,6 +11347,7 @@
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
+            "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
@@ -10706,6 +11423,9 @@
           },
           {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelUsagePersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
@@ -12787,6 +13507,177 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/data/export": {
+      "post": {
+        "description": "Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The export archive (zip). A failed export drops the connection instead of ending the archive."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is missing or invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is not application/json."
+          }
+        },
+        "summary": "Export my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "export_data"
+      }
+    },
+    "/api/v1/data/import": {
+      "post": {
+        "description": "Admin only. Imports an export archive into a fresh instance. The archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.",
+        "requestBody": {
+          "content": {
+            "application/zip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDataResponse"
+                }
+              }
+            },
+            "description": "The import finished; the summary says what arrived and what did not."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is not a valid export, or was made by a newer version."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This instance already has data, or an import is already running; imports only run into a fresh instance."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is larger than the import limit."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not application/zip."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge index is still downloading; retry in a few minutes."
+          }
+        },
+        "summary": "Import my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "import_data"
       }
     },
     "/api/v1/mcp-servers": {
@@ -19481,6 +20372,52 @@
         "x-fern-sdk-method-name": "delete"
       }
     },
+    "/api/v1/settings/token-factory-usage": {
+      "get": {
+        "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTokenFactoryUsageResponse"
+                }
+              }
+            },
+            "description": "Today's Token Factory usage."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get today's Token Factory usage",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "tokenFactoryUsage"
+        ],
+        "x-fern-sdk-method-name": "get"
+      }
+    },
     "/api/v1/settings/tool-output-screens": {
       "get": {
         "description": "The persisted override for the live tool-output screen, or the `TOOL_OUTPUT_SCREEN_ENABLED` env default when none is stored.",
@@ -20154,6 +21091,387 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/user/settings/google/disconnect": {
+      "post": {
+        "description": "Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisconnectGoogleResponse"
+                }
+              }
+            },
+            "description": "The login was removed; says whether Google confirmed the revocation."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Disconnect Google",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "disconnect"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/begin": {
+      "post": {
+        "description": "Starts a consent with PKCE for the features asked for and returns the Google address to open.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BeginGoogleConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeginGoogleConsentResponse"
+                }
+              }
+            },
+            "description": "The consent address."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The client cannot be used, no saved client exists to reuse, or sending was asked for without reading."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Start connecting Google",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "begin_consent"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/callback": {
+      "get": {
+        "description": "Browser redirect target for the consent. The browser lands here and sees a short page.",
+        "parameters": [
+          {
+            "description": "Authorization code from Google.",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "description": "Authorization code from Google.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "State echoed back by Google.",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "description": "State echoed back by Google.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by Google when the user declined.",
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "description": "Set by Google when the user declined.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Result page."
+          },
+          "400": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Declined, expired or mismatched."
+          }
+        },
+        "summary": "Google consent callback",
+        "tags": [
+          "Personalization"
+        ],
+        "x-excluded": true,
+        "x-fern-ignore": true
+      }
+    },
+    "/api/v1/user/settings/google/oauth/check-client": {
+      "post": {
+        "description": "Checks the client id, secret and type, then asks Google for a dry authorization request. Nothing is stored.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckGoogleClientRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckGoogleClientResponse"
+                }
+              }
+            },
+            "description": "Problems found, if any."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Check a Google OAuth client",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "check_client"
+      }
+    },
+    "/api/v1/user/settings/google/oauth/complete": {
+      "post": {
+        "description": "For a browser that cannot reach this server: reads the code and state from the pasted address.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteGoogleConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGoogleConnectionStatusResponse"
+                }
+              }
+            },
+            "description": "Connection status after consent."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The address has no code, or the consent expired or does not match."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Finish connecting Google with a pasted address",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "complete_consent"
+      }
+    },
+    "/api/v1/user/settings/google/status": {
+      "get": {
+        "description": "Whether the caller’s Google account is connected, what it may do, and how this install is set up.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGoogleConnectionStatusResponse"
+                }
+              }
+            },
+            "description": "Connection status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          }
+        },
+        "summary": "Google connection status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
+    "/api/v1/user/settings/google/test": {
+      "post": {
+        "description": "Checks the stored login against Google and names the account.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestGoogleConnectionResponse"
+                }
+              }
+            },
+            "description": "Test outcome."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
+          }
+        },
+        "summary": "Test the Google connection",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "google"
+        ],
+        "x-fern-sdk-method-name": "test_connection"
       }
     },
     "/api/v1/user/settings/sentinel": {

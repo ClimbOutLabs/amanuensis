@@ -1,5 +1,6 @@
+import { z } from '@hono/zod-openapi';
 import {
-  GIT_HARDENING_ENV,
+  gitConfigEntriesEnv,
   gitHardeningConfigEntries,
   gitNetworkHardeningConfigEntries,
   type GitConfigEntry,
@@ -14,7 +15,7 @@ export const HOST_AUTHENTICATED_GIT_BINARY = '/usr/bin/git';
 const TOKEN_ENV_KEY = 'TRUEFORGE_GIT_TOKEN';
 
 /** Absolute so the env wrapper, like git, is found without any PATH lookup. */
-const ENV_BINARY = '/usr/bin/env';
+export const ENV_BINARY = '/usr/bin/env';
 
 /**
  * Inherited variables that can redirect, trace or inject code into git; the model cannot set them, the image might.
@@ -60,16 +61,21 @@ const PINNED_HOME_ENV: Readonly<Record<string, string>> = {
   PATH: '/usr/bin:/bin',
 };
 
-/** True when an exec env carries the token, so callers can keep it out of any PATH-resolving wrapper. */
+/** True when an exec env carries the token, so callers can keep it out of the in-sandbox lock wrapper. */
 export function carriesHostAuthenticatedGitToken(env: Readonly<Record<string, string>> | undefined): boolean {
   return env?.[TOKEN_ENV_KEY] !== undefined;
 }
 
 export type HostAuthenticatedGitSubcommand = 'clone' | 'fetch' | 'pull' | 'push' | 'ls-remote';
 
+/** Which repository a network git command contacts, as far as its own text says. */
+export type GitRemoteTarget =
+  { kind: 'url'; url: string } | { kind: 'named'; name: string } | { kind: 'default' } | { kind: 'all' };
+
 export interface HostAuthenticatedGitPlan {
   subcommand: HostAuthenticatedGitSubcommand;
   args: readonly string[];
+  remote: GitRemoteTarget;
   /** The command reads the checkout's own config, so it must be proven free of program-running keys first. */
   readsRepositoryConfig: boolean;
   /** Outside a repository the command reads no local config, so a missing one is not a refusal. */
@@ -88,7 +94,10 @@ interface SubcommandPolicy {
 
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
 export const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
-const GITHUB_REPOSITORY = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/u;
+const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/u;
+/** Underscores appear in Enterprise Managed User accounts (`jdoe_acme`). */
+const GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/u;
+const GITHUB_REPOSITORY_NAME = /^[A-Za-z0-9._-]{1,100}$/u;
 export const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
 
@@ -172,18 +181,34 @@ const POLICIES: Readonly<Record<HostAuthenticatedGitSubcommand, SubcommandPolicy
   },
 };
 
-/** The owner/name and canonical address of a plain github.com repository URL, or undefined for anything else. */
+/**
+ * The owner/name and canonical address of a plain github.com repository URL, or undefined for anything else.
+ * Dot-only names are refused: git normalizes them away, so a credential scoped to one would cover a whole owner
+ * or all of github.com.
+ */
 export function parseGithubRepository(url: string): { slug: string; canonical: string } | undefined {
-  const match = GITHUB_REPOSITORY.exec(url);
+  const match = GITHUB_REPOSITORY_URL.exec(url);
   const owner = match?.[1];
-  const name = match?.[2];
-  return owner === undefined || name === undefined
-    ? undefined
-    : { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
+  const segment = match?.[2];
+  if (owner === undefined || segment === undefined || !GITHUB_OWNER.test(owner)) {
+    return undefined;
+  }
+  const name = segment.endsWith('.git') ? segment.slice(0, -'.git'.length) : segment;
+  if (!GITHUB_REPOSITORY_NAME.test(name) || /^\.+$/u.test(name)) {
+    return undefined;
+  }
+  return { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
 }
 
 function isGithubRepositoryUrl(value: string): boolean {
   return parseGithubRepository(value) !== undefined;
+}
+
+function remoteTargetOf(input: { operand: string | undefined; all: boolean }): GitRemoteTarget {
+  if (input.operand === undefined) {
+    return input.all ? { kind: 'all' } : { kind: 'default' };
+  }
+  return REMOTE_NAME.test(input.operand) ? { kind: 'named', name: input.operand } : { kind: 'url', url: input.operand };
 }
 
 function isHostAuthenticatedSubcommand(value: string): value is HostAuthenticatedGitSubcommand {
@@ -278,6 +303,7 @@ export function planHostAuthenticatedGit(input: { command: string }): HostAuthen
   return {
     subcommand,
     args,
+    remote: remoteTargetOf({ operand: operands[0], all: args.includes('--all') }),
     readsRepositoryConfig: policy.readsRepositoryConfig,
     allowsMissingRepository: policy.allowsMissingRepository,
   };
@@ -287,20 +313,14 @@ const CREDENTIAL_HELPER = `!f() { test "$1" = get && printf 'username=x-access-t
 
 /** Config passed as env pairs so no argv carries it; system and global files are ignored. */
 function gitConfigEnv(input: { entries: readonly GitConfigEntry[] }): Record<string, string> {
-  const env: Record<string, string> = {
-    ...GIT_HARDENING_ENV,
+  return {
+    ...gitConfigEntriesEnv(input.entries),
     ...PINNED_HOME_ENV,
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '',
     GIT_EDITOR: 'true',
     GIT_MERGE_AUTOEDIT: 'no',
-    GIT_CONFIG_COUNT: String(input.entries.length),
   };
-  input.entries.forEach(([key, value], index) => {
-    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
-    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
-  });
-  return env;
 }
 
 function hardeningEntries(workspaceRoot: string | undefined): GitConfigEntry[] {
@@ -323,10 +343,28 @@ function pinnedGitCommand(gitArguments: readonly string[]): string {
   return pinnedGitArgv(gitArguments).map(shellEscape).join(' ');
 }
 
-const CREDENTIAL_ENTRIES: readonly GitConfigEntry[] = [
-  ['credential.helper', ''],
-  ['credential.https://github.com.helper', CREDENTIAL_HELPER],
-];
+/**
+ * The token is offered to the named repositories only: git matches the full path (`useHttpPath`), so a remote
+ * repointed to another repository, or a redirect to one, is asked for credentials it never receives.
+ */
+function credentialEntries(input: { repositories: readonly string[] }): GitConfigEntry[] {
+  return [
+    ['credential.helper', ''],
+    ['credential.useHttpPath', 'true'],
+    ...[...new Set(input.repositories)].flatMap((slug): GitConfigEntry[] => [
+      [`credential.https://github.com/${slug}.git.helper`, CREDENTIAL_HELPER],
+      [`credential.https://github.com/${slug}.helper`, CREDENTIAL_HELPER],
+    ]),
+  ];
+}
+
+/** The owner/name slugs of GitHub URLs; a URL that is not a plain github.com repository contributes none. */
+function githubSlugs(urls: readonly string[]): string[] {
+  return urls.flatMap(url => {
+    const repository = parseGithubRepository(url);
+    return repository === undefined ? [] : [repository.slug];
+  });
+}
 
 /**
  * The only variables of the server's own environment that reach host git, so a deployment behind a proxy or
@@ -371,6 +409,8 @@ export interface HostGitInvocation {
 export function buildHostGitInvocation(input: {
   gitArguments: readonly string[];
   token: string | undefined;
+  /** GitHub repositories (owner/name) the token may be offered to; ignored without a token. */
+  credentialRepositories: readonly string[];
   networkEntries?: readonly GitConfigEntry[] | undefined;
   extraEntries?: readonly GitConfigEntry[] | undefined;
   /** Network settings picked by pickGitNetworkEnv; applied first, so nothing here can override the pinned values. */
@@ -383,7 +423,7 @@ export function buildHostGitInvocation(input: {
       ...gitHardeningConfigEntries({ workspaceRoot: undefined }),
       ...(input.networkEntries ?? gitNetworkHardeningConfigEntries()),
       ...(input.extraEntries ?? []),
-      ...(input.token === undefined ? [] : CREDENTIAL_ENTRIES),
+      ...(input.token === undefined ? [] : credentialEntries({ repositories: input.credentialRepositories })),
     ],
   });
   const complete = {
@@ -402,26 +442,50 @@ export interface HostAuthenticatedGitExec {
   env: Record<string, string>;
 }
 
+/** A named remote and the canonical GitHub address it was observed to have. */
+export const GitRemoteSchema = z.object({ name: z.string().min(1), url: z.string().min(1) });
+
+export type GitRemote = z.infer<typeof GitRemoteSchema>;
+
 /**
  * Network git is the one place a token must reach the sandbox: providers offer
  * no stdin or secret channel. It appears only in this process env, scoped by git
  * to credential requests for https://github.com (every other helper is reset),
- * and callers must run the command without a PATH-resolving wrapper.
+ * and callers must run the command outside the in-sandbox lock wrapper.
  */
 export function buildHostAuthenticatedGit(input: {
   plan: HostAuthenticatedGitPlan;
   token: string;
   workspaceRoot: string | undefined;
+  /** The remotes observed before approval and re-checked at run time; the only repositories offered the token. */
+  remotes: readonly GitRemote[];
 }): HostAuthenticatedGitExec {
   const command = pinnedGitCommand([input.plan.subcommand, ...input.plan.args]);
-  const env = gitConfigEnv({ entries: [...hardeningEntries(input.workspaceRoot), ...CREDENTIAL_ENTRIES] });
+  const urlOperand = input.plan.remote.kind === 'url' ? [input.plan.remote.url] : [];
+  const repositories = githubSlugs([...urlOperand, ...input.remotes.map(remote => remote.url)]);
+  const env = gitConfigEnv({
+    entries: [...hardeningEntries(input.workspaceRoot), ...credentialEntries({ repositories })],
+  });
   return { command, env: { ...env, [TOKEN_ENV_KEY]: input.token } };
+}
+
+/** Token-free, offline git run in the checkout, for reading its own state before anything is authenticated. */
+export function buildHostAuthenticatedGitProbe(input: {
+  gitArguments: readonly string[];
+  workspaceRoot: string | undefined;
+}): HostAuthenticatedGitExec {
+  return {
+    command: pinnedGitCommand(input.gitArguments),
+    env: gitConfigEnv({ entries: hardeningEntries(input.workspaceRoot) }),
+  };
 }
 
 /** Token-free probe listing the checkout's local config key names, run before any command that reads that config. */
 export function buildHostAuthenticatedGitConfigProbe(input: {
   workspaceRoot: string | undefined;
 }): HostAuthenticatedGitExec {
-  const command = pinnedGitCommand(['config', '--local', '--no-includes', '--list', '--name-only']);
-  return { command, env: gitConfigEnv({ entries: hardeningEntries(input.workspaceRoot) }) };
+  return buildHostAuthenticatedGitProbe({
+    gitArguments: ['config', '--local', '--no-includes', '--list', '--name-only'],
+    workspaceRoot: input.workspaceRoot,
+  });
 }

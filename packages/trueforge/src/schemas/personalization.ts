@@ -63,7 +63,7 @@ const PersonalizationProfileContentBaseSchema = z
   })
   .strict();
 
-function validatePersonalizationContent(
+export function validatePersonalizationContent(
   value: z.infer<typeof PersonalizationProfileContentBaseSchema>,
   ctx: z.RefinementCtx,
 ) {

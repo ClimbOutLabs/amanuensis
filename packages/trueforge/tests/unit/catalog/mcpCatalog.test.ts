@@ -86,6 +86,50 @@ describe('shipped MCP catalog', () => {
     }
   });
 
+  it('declares the session id and model name as Parallel’s plumbing arguments, and none for other presets', () => {
+    const catalog = McpCatalog.load();
+    expect(catalog.presetForUrl('https://search.parallel.ai/mcp')?.search_plumbing_fields).toEqual([
+      'session_id',
+      'model_name',
+    ]);
+    expect(catalog.presetForUrl('https://mcp.tavily.com/mcp')?.search_plumbing_fields).toBeUndefined();
+  });
+
+  it('keeps the plumbing arguments out of the public catalog list', () => {
+    const parallel = McpCatalog.load()
+      .list()
+      .find(entry => entry.name === 'parallel-web');
+    expect(parallel).toBeDefined();
+    expect(Object.keys(parallel ?? {})).not.toContain('search_plumbing_fields');
+  });
+
+  it('grants the stored search tools as they are, with the preset’s plumbing arguments', () => {
+    const grant = McpCatalog.load().searchProviderGrant({
+      url: 'https://search.parallel.ai/mcp',
+      storedTools: ['stored_tool'],
+    });
+    expect(grant).toEqual({ tools: ['stored_tool'], plumbing_fields: ['session_id', 'model_name'] });
+  });
+
+  it('falls back to the preset’s search tools for a designated connector saved without any', () => {
+    const catalog = McpCatalog.load();
+    for (const url of ['https://search.parallel.ai/mcp', 'https://search.parallel.ai/mcp/?key=invented']) {
+      expect(catalog.searchProviderGrant({ url, storedTools: [] })).toEqual({
+        tools: ['web_search', 'web_fetch'],
+        plumbing_fields: ['session_id', 'model_name'],
+      });
+    }
+  });
+
+  it('grants nothing from the catalog to a designated connector that is no known preset', () => {
+    expect(
+      McpCatalog.load().searchProviderGrant({ url: 'https://search.invented.example/mcp', storedTools: [] }),
+    ).toEqual({
+      tools: [],
+      plumbing_fields: [],
+    });
+  });
+
   it('rejects a preset whose search tools are not a short list of names', () => {
     const accepts = (search_tools: unknown) =>
       McpCatalogFileSchema.safeParse({
