@@ -228,6 +228,7 @@ describe('seedDefaultSearchProviderAtBoot', () => {
     const broken: IGlobalSettingsStore = {
       getSetting: () => Promise.reject(new Error('store is down')),
       setSetting: () => Promise.reject(new Error('store is down')),
+      compareAndSetSetting: () => Promise.reject(new Error('store is down')),
       deleteSetting: () => Promise.reject(new Error('store is down')),
     };
     await expect(

@@ -1,6 +1,7 @@
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
+import { defaultSearchConnector } from '../catalog/defaultSearchConnector';
 import type { McpCatalog } from '../catalog/McpCatalog';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
@@ -34,33 +35,25 @@ export async function seedDefaultSearchProvider({
   if ((await globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY })) !== undefined) {
     return 'already_offered';
   }
-  // The catalog flags the preset to offer as the provider; one that needs a key cannot be seeded.
-  const preset = catalog.list().find(entry => entry.search_provider === true && entry.auth === undefined);
-  if (preset === undefined) {
+  const connector = defaultSearchConnector(catalog);
+  if (connector === undefined) {
     return 'no_preset';
   }
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
   const hasChosen = servers.some(
     server =>
-      server.name === preset.name ||
-      catalog.presetForUrl(server.manifest.url)?.name === preset.name ||
+      server.name === connector.name ||
+      catalog.presetForUrl(server.manifest.url)?.name === connector.name ||
       (server.manifest.type === 'remote' && server.manifest.search_provider !== undefined),
   );
   if (!hasChosen) {
     await mcpServerStore.upsertServer({
       tenant_id,
-      name: preset.name,
-      manifest: {
-        type: 'remote',
-        name: preset.name,
-        url: preset.url,
-        description: preset.description,
-        search_provider: true,
-        search_tools: [...catalog.searchToolsForUrl(preset.url)],
-      },
+      name: connector.name,
+      manifest: connector.manifest,
       first_party: false,
     });
-    logger.info('Added the keyless web search connector as the search provider', { connector: preset.name });
+    logger.info('Added the keyless web search connector as the search provider', { connector: connector.name });
   }
   await globalSettingsStore.setSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY, value: new Date().toISOString() });
   return hasChosen ? 'kept_existing' : 'added';
