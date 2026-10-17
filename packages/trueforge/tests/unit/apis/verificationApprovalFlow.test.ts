@@ -37,6 +37,18 @@ function successfulResult(result: string): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result } });
 }
 
+const PINNED_PROGRAM_PREFIX = /'\/usr\/bin\/env' 'PATH=[^']*' (?:'(?:[^']*\/)?([^'/]+)'|([\w.-]+))/gu;
+const GIT_HARDENING_ARGS = / --no-pager --no-optional-locks(?: -c (?:'[^']*'|\S+))+/gu;
+
+function bareHostCommand(command: string): string {
+  return command
+    .replace(
+      PINNED_PROGRAM_PREFIX,
+      (_prefix, resolved: string | undefined, bare: string | undefined) => resolved ?? bare ?? '',
+    )
+    .replace(GIT_HARDENING_ARGS, '');
+}
+
 class VerificationSandboxProvider implements SandboxProvider {
   readonly type = 'local';
   verifyInvocations = 0;
@@ -56,7 +68,12 @@ class VerificationSandboxProvider implements SandboxProvider {
     return Promise.resolve({ sandboxId: 'approval-continuation-checkout' });
   }
 
-  exec(params: SandboxExecParams): Promise<ExecResult> {
+  exec(pinnedParams: SandboxExecParams): Promise<ExecResult> {
+    // Host bookkeeping runs by resolved path, hardened when it is git; match it by its bare-name spelling.
+    const params = { ...pinnedParams, command: bareHostCommand(pinnedParams.command) };
+    if (params.command === 'git config --local --no-includes --list --name-only') {
+      return successfulResult('core.bare');
+    }
     if (params.command === VERIFY_COMMAND) {
       this.verifyInvocations += 1;
       return successfulResult('verification passed');
