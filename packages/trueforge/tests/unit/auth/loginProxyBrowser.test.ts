@@ -56,7 +56,7 @@ describe('signing in through the proxied page in a real browser', () => {
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    const executablePath = process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'];
     browser = await chromium.launch(executablePath === undefined ? {} : { executablePath });
     passwordPosts = [];
     upstream = signInService(passwordPosts);
@@ -98,14 +98,14 @@ describe('signing in through the proxied page in a real browser', () => {
 
   it('sends the page URL as a same-origin referrer only and accepts the correct password', async () => {
     const page = await browser.newPage();
-    const posted: Record<string, string>[] = [];
+    const postedOrigins: (string | undefined)[] = [];
     page.on('request', r => {
-      if (r.method() === 'POST') posted.push(r.headers());
+      if (r.method() === 'POST') postedOrigins.push(r.headers()['origin']);
     });
     const pageResponse = await page.goto(`${origin}/dex/auth?client_id=c`);
     const status = await submit({ page, password: PASSWORD });
     expect(pageResponse?.headers()['referrer-policy']).toBe('same-origin');
-    expect(posted[0]?.origin).toBe(origin);
+    expect(postedOrigins).toEqual([origin]);
     expect(status).toBe(303);
     await page.waitForSelector('#done');
     await page.close();
