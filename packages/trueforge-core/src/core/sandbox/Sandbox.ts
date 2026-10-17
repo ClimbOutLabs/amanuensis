@@ -356,6 +356,9 @@ export interface WorkspaceVerificationCoordinator {
   }): Promise<boolean>;
 }
 
+// Plain wording for the person; the underlying error stays in the server log.
+const SANDBOX_START_FAILED_MESSAGE = "Your code couldn't run. Please try again.";
+
 const WORKSPACE_LEASE_RENEWAL_INTERVAL_MS = 10_000;
 const WORKSPACE_LEASE_RENEWAL_TTL_MS = 90_000;
 
@@ -4541,9 +4544,8 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (e) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
-      const message = e instanceof Error ? e.message : 'Sandbox initialization failed';
       const fallback = this.existingSandboxInfo;
-      return hostRefusalResponse(`Sandbox initialization failed: ${message}`, {
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE, {
         sandboxCreated: Boolean(fallback),
         ...(fallback !== undefined ? { sandboxInfo: fallback } : {}),
       });
@@ -5059,8 +5061,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
@@ -5278,8 +5279,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);

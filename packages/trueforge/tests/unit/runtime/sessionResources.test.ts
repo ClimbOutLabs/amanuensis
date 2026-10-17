@@ -7,10 +7,12 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import { McpConnectionError, type VercelAIProviderConfig } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
+import configuration from '../../../src/config';
 import { validateGitAgentSkills } from '../../../src/db/gitSkillMounts';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { ISkillStore } from '../../../src/db/skillStore';
@@ -31,6 +33,7 @@ import {
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
+  resolveSandboxProvider,
   TFG_METADATA_PREFIX,
   validateAgentSpec,
   withGatewayMetadataHeaders,
@@ -876,5 +879,52 @@ describe('applyTokenFactoryRouting', () => {
     const routed = applyTokenFactoryRouting({ primary: tokenFactoryPrimary, mode: 'force', ...routing });
     expect(routed.providerConfig).toBe(tokenFactoryPrimary);
     expect(routed.fallbackProviderConfig).toBeUndefined();
+  });
+});
+
+describe('resolveSandboxProvider local fallback', () => {
+  afterEach(() => {
+    setCachedLocalSandboxSupport(undefined);
+  });
+
+  it('does no disk work, so a chat that never runs code still replies when the folder cannot be made', async () => {
+    const scratch = await mkdtemp(join(tmpdir(), 'aman-sandbox-root-'));
+    const sockets = await mkdtemp(join(tmpdir(), 'aman-sockets-'));
+    const blocker = join(scratch, 'not-a-folder');
+    await writeFile(blocker, 'x');
+    if (!configuration.STANDALONE) {
+      throw new Error('expected the standalone test configuration');
+    }
+    const original = {
+      root: configuration.LOCAL_SANDBOX_ROOT_PARENT,
+      sockets: configuration.CODE_MODE_SOCKET_PARENT,
+    };
+    configuration.LOCAL_SANDBOX_ROOT_PARENT = blocker;
+    configuration.CODE_MODE_SOCKET_PARENT = sockets;
+    try {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      setCachedLocalSandboxSupport({
+        supported: true,
+        platform: 'linux',
+        shell: '/bin/bash',
+        python: '/usr/bin/python3',
+      });
+
+      await expect(
+        resolveSandboxProvider({
+          tenant_id: TENANT_ID,
+          store: new SqliteSandboxProviderStore(db),
+          logger: createLogger({ silent: true }),
+          sessionId: 'sess_new_chat',
+        }),
+      ).resolves.toBeDefined();
+      await expect(readdir(scratch)).resolves.toEqual(['not-a-folder']);
+    } finally {
+      configuration.LOCAL_SANDBOX_ROOT_PARENT = original.root;
+      configuration.CODE_MODE_SOCKET_PARENT = original.sockets;
+      await rm(scratch, { recursive: true, force: true });
+      await rm(sockets, { recursive: true, force: true });
+    }
   });
 });

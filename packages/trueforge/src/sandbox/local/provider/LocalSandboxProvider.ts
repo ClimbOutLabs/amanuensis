@@ -652,6 +652,8 @@ export class LocalSandboxProvider implements SandboxProvider {
     const signal = params?.signal;
     throwIfSignalAborted(signal);
     await this.ensureSrt(signal);
+    // Sandbox root creation is non-recursive, so a new chat's folder must exist first.
+    await mkdir(this.sandboxRootPathParent, { recursive: true, mode: 0o700 });
     const sandboxRootPath = join(this.sandboxRootPathParent, newId());
     let sandboxId: string | undefined;
     try {
