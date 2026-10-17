@@ -2191,6 +2191,44 @@ function buildMessages() {
     ],
   });
 
+  // 25: bilingual GP appointment confirmation (the date matches the demo world's calendar)
+  messages['25-gp-consulta-confirmacao.eml'] = emlI18n({
+    from: 'Brightwater Family Clinic <consultas@brightwater-clinic.example.org>',
+    to: OWNER,
+    date: 'Fri, 16 Oct 2026 09:12:00 +0100',
+    subject: 'Confirmação de consulta / Appointment confirmation',
+    msgid: '<consulta-20261022@brightwater-clinic.example.org>',
+    body: [
+      'Olá, Maya,',
+      '',
+      'A sua consulta de clínica geral está confirmada:',
+      '',
+      '  Médica:  Dra. Helena Rocha',
+      '  Quando:  quinta-feira, 22 de outubro de 2026, às 09:30',
+      '  Onde:    Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
+      '',
+      'Traga o passaporte, o NIF e o cartão do seguro de saúde.',
+      'Chegue 10 minutos antes da hora marcada.',
+      'Para remarcar, responda a este email.',
+      '',
+      '---',
+      '',
+      'Hi Maya,',
+      '',
+      'Your GP appointment is confirmed:',
+      '',
+      '  Doctor: Dra. Helena Rocha',
+      '  When:   Thursday, 22 October 2026, at 09:30',
+      '  Where:  Brightwater Family Clinic, R. de São Bernardo 92, Lisboa',
+      '',
+      'Please bring your passport, your NIF and your health insurance card.',
+      'Arrive 10 minutes early.',
+      'To reschedule, reply to this email.',
+      '',
+      'Brightwater Family Clinic',
+    ].join('\n'),
+  });
+
   return messages;
 }
 

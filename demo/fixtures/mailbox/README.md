@@ -7,11 +7,12 @@ and scripts (Arabic, Hindi, Japanese, Sinhala, Spanish, Simplified Chinese,
 Russian, and a mixed English and Persian message), two of them with text
 PDF attachments in the message's language.
 
-Fixtures 03, 04 and 21 to 24 are the demo additions for Maya, who lives in
+Fixtures 03, 04 and 21 to 25 are the demo additions for Maya, who lives in
 Lisbon: a Portuguese electricity bill with a PDF, a Portuguese landlord email
 with a `.docx` repair notice, a Portuguese class homework email, a bakery
 order, a Spanish lunch invitation from a friend in Madrid, and an English
-email with a `.docx` photo walk itinerary. All Portuguese text needs a
+email with a `.docx` photo walk itinerary, and a bilingual GP appointment
+confirmation. All Portuguese text needs a
 native-speaker check.
 
 The recipient is Maya Hollis (the persona of the seeded demo world). Fixtures
@@ -44,8 +45,8 @@ tracked). Use `--dry-run` to print what would be sent.
 
 ## Demo set
 
-`demo-set.json` lists the 17 fixtures used for the hackathon demo inbox: 12
-English, 4 Portuguese and 1 Spanish. Everything else (the school newsletter,
+`demo-set.json` lists the 18 fixtures used for the hackathon demo inbox: 12
+English, 5 Portuguese and 1 Spanish. Everything else (the school newsletter,
 the Spanish internet bill and fixtures 13 to 20 in other languages) stays in
 the repo for tests but is not imported. Dates run from Monday October 12 to
 Sunday October 18, 2026; amounts are in euros.

@@ -129,6 +129,16 @@ has headings for Alfama at sunrise, Miradouro da Graça at golden hour and
 Belém at golden hour, and a schedule table (Fri Oct 23 Alfama, Sat Oct 24
 Graça, Sat Oct 31 Belém). Rui offers to join the Alfama sunrise.
 
+## 25-gp-consulta-confirmacao.eml (Portuguese, then English)
+
+Question: "What do I have on Thursday, and what should I know before I go?"
+Must contain: GP appointment with Dra. Helena Rocha on Thursday October 22
+2026 at 09:30 at Brightwater Family Clinic (R. de São Bernardo 92); bring
+passport, NIF and the health insurance card; arrive 10 minutes early. The
+morning brief mentions the appointment and reminds Maya to tell the doctor
+about her penicillin allergy (a seeded memory). A reply to reschedule goes
+through the approval card and is not sent until Maya approves.
+
 ## 05-school-newsletter.eml (not in the demo set)
 
 Question: "What school events are coming up?"

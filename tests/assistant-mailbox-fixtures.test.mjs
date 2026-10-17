@@ -33,6 +33,7 @@ const EXPECTED_DEMO_SET = [
   '22-portuguese-bakery-order.eml',
   '23-spanish-lunch-invite.eml',
   '24-english-photo-walk-itinerary.eml',
+  '25-gp-consulta-confirmacao.eml',
 ];
 
 const messages = loadDemoSet({ fixtureDir });
@@ -59,7 +60,7 @@ test('demo languages are English, Portuguese and Spanish only', () => {
   for (const { language } of messages) {
     counts[language] = (counts[language] ?? 0) + 1;
   }
-  assert.deepEqual(counts, { English: 12, Portuguese: 4, Spanish: 1 });
+  assert.deepEqual(counts, { English: 12, Portuguese: 5, Spanish: 1 });
 });
 
 test('every demo message has a unique Message-ID and is addressed to Maya', () => {

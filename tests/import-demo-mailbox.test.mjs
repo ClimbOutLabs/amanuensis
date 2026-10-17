@@ -88,7 +88,7 @@ test('imports each message unread into the inbox with the Date header as receive
     assert.deepEqual(body.labelIds, ['INBOX', 'UNREAD']);
     assert.ok(Buffer.from(body.raw, 'base64url').equals(messages[index].raw));
   });
-  assert.match(summarize({ result, total: messages.length }), /17 of 17 messages imported/);
+  assert.match(summarize({ result, total: messages.length }), /18 of 18 messages imported/);
 });
 
 test('messages already present (by Message-ID) are skipped, so a second run is safe', async () => {
