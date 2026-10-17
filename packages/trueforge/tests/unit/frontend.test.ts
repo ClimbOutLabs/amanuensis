@@ -96,6 +96,11 @@ describe('mountFrontend security headers', () => {
     }
   });
 
+  it('never lets the chat page load a remote image: img-src is the app origin, data: and blob: only', () => {
+    const imgSrc = /(?:^|;)\s*img-src ([^;]*)/.exec(APP_SHELL_IMAGE_CSP)?.[1]?.trim().split(/\s+/);
+    expect(imgSrc).toEqual(["'self'", 'data:', 'blob:']);
+  });
+
   it('restricts fonts to the app origin and data: URIs', () => {
     expect(APP_SHELL_IMAGE_CSP).toContain("font-src 'self' data:");
     expect(APP_SHELL_IMAGE_CSP).not.toMatch(/font-src[^;]*https?:/);

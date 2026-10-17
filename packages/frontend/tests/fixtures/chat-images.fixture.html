@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat images fixture</title>
+    <!-- The same image policy as index.html; the browser test checks the two stay equal. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <style>
+      html,
+      body,
+      #root {
+        box-sizing: border-box;
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+      }
+
+      body {
+        overflow-x: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./chat-images.fixture.tsx"></script>
+  </body>
+</html>
