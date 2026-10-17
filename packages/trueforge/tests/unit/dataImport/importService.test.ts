@@ -173,6 +173,11 @@ async function seededArchive(includeUploads = true): Promise<{ source: Instance;
   return { source, archive };
 }
 
+afterEach(() => {
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
+
 describe('runDataImport', () => {
   it('imports a full export into an empty instance for a new owner', async () => {
     const { source, archive } = await seededArchive();
@@ -1465,7 +1470,7 @@ describe('runDataImport failure handling', () => {
         },
         importRequest(archive),
       );
-      await driveFakeClock(reached, 40 * IMPORT_HEARTBEAT_MS);
+      await reached;
       const heartbeat = async () => {
         const record = await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
         return Date.parse(
@@ -1473,13 +1478,16 @@ describe('runDataImport failure handling', () => {
         );
       };
       const before = await heartbeat();
-      await driveFakeClock(
-        new Promise(resolve => setTimeout(resolve, 2 * IMPORT_HEARTBEAT_MS)),
-        3 * IMPORT_HEARTBEAT_MS,
-      );
-      expect(await heartbeat()).toBeGreaterThan(before);
+      await jest.advanceTimersByTimeAsync(IMPORT_HEARTBEAT_MS);
+      // The renewal write is real I/O that fake time does not wait for, so poll its outcome.
+      let renewed = await heartbeat();
+      while (renewed <= before) {
+        await new Promise(resolve => setImmediate(resolve));
+        renewed = await heartbeat();
+      }
+      expect(renewed).toBeGreaterThan(before);
       release();
-      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+      await expect(run).resolves.toMatchObject({ chats: 3 });
     } finally {
       jest.useRealTimers();
       await source.close();
