@@ -1,6 +1,5 @@
 /** In-memory IChatImageStore for unit tests; the size cap and cascade are covered by the store contract suite. */
 import type {
-  ChatImageOrigin,
   ChatImageRecord,
   ChatImageWithData,
   IChatImageStore,
@@ -9,6 +8,7 @@ import type {
 
 export class FakeChatImageStore implements IChatImageStore {
   readonly images = new Map<string, ChatImageWithData>();
+  readonly silentAttempts = new Map<string, number>();
 
   putImage(input: PutChatImageInput): Promise<ChatImageRecord> {
     const existing = [...this.images.values()].find(
@@ -56,21 +56,23 @@ export class FakeChatImageStore implements IChatImageStore {
     );
   }
 
-  countTurnImages(input: {
+  countSilentAttempts(input: { tenant_id: string; session_id: string; turn_id: string }): Promise<number> {
+    return Promise.resolve(this.silentAttempts.get(`${input.tenant_id} ${input.session_id} ${input.turn_id}`) ?? 0);
+  }
+
+  reserveSilentAttempt(input: {
     tenant_id: string;
     session_id: string;
     turn_id: string;
-    origin: ChatImageOrigin;
-  }): Promise<number> {
-    return Promise.resolve(
-      [...this.images.values()].filter(
-        image =>
-          image.tenant_id === input.tenant_id &&
-          image.session_id === input.session_id &&
-          image.turn_id === input.turn_id &&
-          image.origin === input.origin,
-      ).length,
-    );
+    limit: number;
+  }): Promise<boolean> {
+    const key = `${input.tenant_id} ${input.session_id} ${input.turn_id}`;
+    const taken = this.silentAttempts.get(key) ?? 0;
+    if (taken >= input.limit) {
+      return Promise.resolve(false);
+    }
+    this.silentAttempts.set(key, taken + 1);
+    return Promise.resolve(true);
   }
 
   deleteImagesOlderThan(input: { older_than: string }): Promise<number> {

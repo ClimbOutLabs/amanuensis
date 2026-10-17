@@ -1,12 +1,6 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
 
-import type {
-  ChatImageOrigin,
-  ChatImageRecord,
-  ChatImageWithData,
-  IChatImageStore,
-  PutChatImageInput,
-} from '../../chatImageStore';
+import type { ChatImageRecord, ChatImageWithData, IChatImageStore, PutChatImageInput } from '../../chatImageStore';
 import { nowIso } from '../sqlExpressions';
 import type { ChatImageTable, Database } from '../types';
 
@@ -128,19 +122,45 @@ export class SqliteChatImageStore implements IChatImageStore<Transaction<Databas
     return row === undefined ? undefined : toRecord(row);
   }
 
-  async countTurnImages(
-    input: { tenant_id: string; session_id: string; turn_id: string; origin: ChatImageOrigin },
+  async countSilentAttempts(
+    input: { tenant_id: string; session_id: string; turn_id: string },
     transaction?: Transaction<Database>,
   ): Promise<number> {
     const row = await (transaction ?? this.#db)
-      .selectFrom('chat_image')
-      .select(eb => eb.fn.countAll<number>().as('count'))
+      .selectFrom('chat_image_turn_allowance')
+      .select('silent_attempts')
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
       .where('turn_id', '=', input.turn_id)
-      .where('origin', '=', input.origin)
-      .executeTakeFirstOrThrow();
-    return row.count;
+      .executeTakeFirst();
+    return row?.silent_attempts ?? 0;
+  }
+
+  async reserveSilentAttempt(
+    input: { tenant_id: string; session_id: string; turn_id: string; limit: number },
+    transaction?: Transaction<Database>,
+  ): Promise<boolean> {
+    if (input.limit < 1) {
+      return false;
+    }
+    // One statement, so the row lock on conflict keeps concurrent callers from passing the limit together.
+    const row = await (transaction ?? this.#db)
+      .insertInto('chat_image_turn_allowance')
+      .values({
+        tenant_id: input.tenant_id,
+        session_id: input.session_id,
+        turn_id: input.turn_id,
+        silent_attempts: 1,
+      })
+      .onConflict(oc =>
+        oc
+          .columns(['session_id', 'turn_id'])
+          .doUpdateSet(eb => ({ silent_attempts: eb('chat_image_turn_allowance.silent_attempts', '+', 1) }))
+          .where('chat_image_turn_allowance.silent_attempts', '<', input.limit),
+      )
+      .returning('silent_attempts')
+      .executeTakeFirst();
+    return row !== undefined;
   }
 
   async deleteImagesOlderThan(input: { older_than: string }, transaction?: Transaction<Database>): Promise<number> {

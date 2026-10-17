@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
-import type { ChatImageInputType } from '../../../../src/runtime/chatImages/imageSniff';
+import type { ChatImageInputType } from '@truefoundry/trueforge-core/core/chatImages';
 import { sniffOutputType } from '../../../../src/runtime/chatImages/imageSniff';
 import { buildReencodeScript, REENCODE_INPUT_NAME } from '../../../../src/runtime/chatImages/reencodeScript';
 import {

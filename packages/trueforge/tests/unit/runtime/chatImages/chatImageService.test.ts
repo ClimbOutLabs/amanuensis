@@ -120,6 +120,7 @@ function setup(options: {
   offline?: boolean;
   searchWithoutAsking?: boolean;
   reencode?: ReencodeOutcome;
+  fetchStatus?: number;
 }) {
   const events = options.events ?? [];
   const store = new FakeChatImageStore();
@@ -147,7 +148,10 @@ function setup(options: {
     fetchDeps: {
       fetchImpl: async (url: unknown) => {
         fetched.push(String(url));
-        return new UndiciResponse(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+        // Lets parallel requests overlap while their fetches are in flight.
+        await new Promise(resolve => setTimeout(resolve, 5));
+        const status = options.fetchStatus ?? 200;
+        return new UndiciResponse(status === 200 ? PNG : 'gone', { status, headers: { 'content-type': 'image/png' } });
       },
       resolveAddresses: () => Promise.resolve([EXAMPLE_COM_ADDRESS]),
     },
@@ -387,26 +391,50 @@ describe('reply images', () => {
     expect(env.audits).toMatchObject([{ outcome: 'approved', tier: 3 }]);
   });
 
-  it('asks once the turn has shown its silent allowance', async () => {
-    const env = setup({ events: searchEvents(`![x](${returned})`) });
-    for (let i = 0; i < 20; i += 1) {
-      await env.store.putImage({
-        ...owner,
-        session_id: 's1',
-        turn_id: 't1',
-        image_id: String(i).padStart(32, '0'),
-        source_key: `reply:${String(i)}`,
-        origin: 'remote_silent',
-        mime: 'image/png',
-        width: 1,
-        height: 1,
-        data: PNG,
-        user_max_bytes: 1e9,
-      });
-    }
-    await expect(
-      env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: returned }, approved: false } }),
-    ).resolves.toMatchObject({ status: 'ask' });
+  describe('silent allowance', () => {
+    const links = Array.from({ length: 30 }, (_, i) => `https://example.com/p/${String(i)}.png`);
+    const manyEvents = [
+      modelMessage({
+        id: 'e1',
+        content: '',
+        calls: [{ id: 'search-1', name: 'web_search', silent_search_query: 'p' }],
+      }),
+      toolResponse({ id: 'e2', tool_call_id: 'search-1', result: { results: links.map(url => ({ url })) } }),
+      modelMessage({ id: 'e3', content: links.map(url => `![p](${url})`).join('\n') }),
+    ];
+    const silently = (url: string) => ({
+      ...ref,
+      request: { source: { kind: 'reply' as const, url }, approved: false },
+    });
+
+    it('fetches at most 20 of 30 links requested in parallel and asks for the rest', async () => {
+      const env = setup({ events: manyEvents });
+      const results = await Promise.all(links.map(url => env.service.showTurnImages(silently(url))));
+      expect(env.fetched).toHaveLength(20);
+      expect(results.filter(result => result.status === 'ask')).toHaveLength(10);
+      expect(env.audits).toHaveLength(20);
+    });
+
+    it('counts failed fetches, and asks for every link after a reload', async () => {
+      const env = setup({ events: manyEvents, fetchStatus: 404 });
+      for (const url of links) {
+        await env.service.showTurnImages(silently(url));
+      }
+      expect(env.fetched).toHaveLength(20);
+      const reloaded = await Promise.all(links.map(url => env.service.showTurnImages(silently(url))));
+      expect(env.fetched).toHaveLength(20);
+      expect(reloaded.every(result => result.status === 'ask')).toBe(true);
+    });
+
+    it('serves a link already shown from the cache without taking another attempt', async () => {
+      const env = setup({ events: manyEvents });
+      const first = 'https://example.com/p/0.png';
+      for (let i = 0; i < 25; i += 1) {
+        await expect(env.service.showTurnImages(silently(first))).resolves.toMatchObject({ status: 'done' });
+      }
+      expect(env.fetched).toEqual([first]);
+      expect(await env.store.countSilentAttempts({ tenant_id: 'default', session_id: 's1', turn_id: 't1' })).toBe(1);
+    });
   });
 
   it('rejects a link the turn never showed as an image', async () => {

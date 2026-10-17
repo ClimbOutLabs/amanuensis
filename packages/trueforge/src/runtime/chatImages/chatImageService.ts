@@ -8,6 +8,7 @@ import {
   extractBase64,
   recordResultUrls,
   remoteImageAskReason,
+  SILENT_SEARCH_LIMIT,
   type OutboundGuardRule,
   type OutboundGuardVerdict,
   type SentinelServices,
@@ -295,20 +296,18 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     }
     const state = createWebSearchTurnState();
     recordResultUrls({ state, texts: facts.silentSearchResults });
+    const turnKey = { tenant_id: ref.owner.tenant_id, session_id: ref.session_id, turn_id: ref.turn_id };
     const askReason = remoteImageAskReason({
       url,
       searchWithoutAsking: await deps.sentinel.searchWithoutAsking(ref.owner),
       guardPassed: guardVerdict({ url, secrets: await deps.sentinel.outboundSecrets(ref.owner) }).ok,
       privateDataRead: facts.readPrivateData || (await chatReadPrivateData(ref)),
-      silentShown: await deps.store.countTurnImages({
-        tenant_id: ref.owner.tenant_id,
-        session_id: ref.session_id,
-        turn_id: ref.turn_id,
-        origin: 'remote_silent',
-      }),
+      silentShown: await deps.store.countSilentAttempts(turnKey),
       state,
     });
-    if (askReason !== null) {
+    // Attempts, not stored images, use up the allowance, and the slot is taken before anything leaves,
+    // so parallel requests and failed fetches stay within it.
+    if (askReason !== null || !(await deps.store.reserveSilentAttempt({ ...turnKey, limit: SILENT_SEARCH_LIMIT }))) {
       return { status: 'ask', count: 1, host: hostOf(url) };
     }
     return { status: 'done', images: [await showRemote({ ref, url, source_key, origin: 'remote_silent' })] };

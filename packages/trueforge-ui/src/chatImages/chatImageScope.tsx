@@ -13,7 +13,8 @@ export interface ChatImageScopeValue {
   settled: boolean;
 }
 
-const ChatImageScopeContext = createContext<ChatImageScopeValue | null>(null);
+/** `'no_images'` marks a chat turn that has no way to re-encode images, so none of them render. */
+const ChatImageScopeContext = createContext<ChatImageScopeValue | 'no_images' | null>(null);
 
 /**
  * Marks a part of the page as one chat turn. Inside it, Markdown shows only re-encoded images and
@@ -30,8 +31,19 @@ export function ChatImageScope({
   return <ChatImageScopeContext.Provider value={value}>{children}</ChatImageScopeContext.Provider>;
 }
 
+/** A chat turn without the image port or its session and turn ids: every image in it shows as not shown. */
+export function ChatTurnWithoutImages({ children }: { children: ReactNode }) {
+  return <ChatImageScopeContext.Provider value="no_images">{children}</ChatImageScopeContext.Provider>;
+}
+
 export function useChatImageScope(): ChatImageScopeValue | null {
-  return useContext(ChatImageScopeContext);
+  const value = useContext(ChatImageScopeContext);
+  return value === 'no_images' ? null : value;
+}
+
+/** True inside any chat turn, scoped or not, where Markdown's outside-chat image rules never apply. */
+export function useInsideChatTurn(): boolean {
+  return useContext(ChatImageScopeContext) !== null;
 }
 
 function hasChatImagesPort(server: object): server is { chatImages: ChatImagesCatalog } {

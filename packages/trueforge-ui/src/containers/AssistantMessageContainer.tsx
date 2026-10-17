@@ -18,7 +18,7 @@ import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
 import { ModelUsageLine } from '../atoms/agent-chat/ModelUsageLine.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
-import { ChatImageScope, useChatImagesPort } from '../chatImages/chatImageScope.js';
+import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -334,7 +334,7 @@ export function AssistantMessageContainer() {
             {messageBody}
           </ChatImageScope>
         ) : (
-          messageBody
+          <ChatTurnWithoutImages>{messageBody}</ChatTurnWithoutImages>
         )}
         <NeedsYourOkContainer parts={parts} />
       </AssistantMessageBubble>

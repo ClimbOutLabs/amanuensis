@@ -1,6 +1,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
+import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
 import { GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
@@ -82,9 +83,6 @@ interface GmailToolSetOptions {
   /** How long a list call may spend before it returns the rows it has. */
   listDeadlineMs: number;
 }
-
-/** Attachment types the chat may show as pictures; anything else stays a file in the sandbox. */
-const CHAT_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 /** Every error is cleaned on the way out too, so no error path can carry raw mail text to the model. */
 function errorResult(error: string) {
@@ -521,7 +519,7 @@ export class GmailToolSet extends LocalToolMCP {
       );
       // A picture also goes to the host as an image block, which the chat shows after re-encoding it;
       // the model reads only the text above.
-      return CHAT_IMAGE_MIME_TYPES.has(attachment.mimeType.toLowerCase())
+      return CHAT_IMAGE_INPUT_MIME_TYPES.has(attachment.mimeType.toLowerCase())
         ? {
             ...response,
             result: {

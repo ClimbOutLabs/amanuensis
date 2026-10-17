@@ -1,4 +1,4 @@
-import type { ChatImageInputType } from './imageSniff';
+import type { ChatImageInputType } from '@truefoundry/trueforge-core/core/chatImages';
 import {
   CHAT_IMAGE_LOCAL_MAX_BYTES,
   CHAT_IMAGE_MAX_FRAME_PIXELS,

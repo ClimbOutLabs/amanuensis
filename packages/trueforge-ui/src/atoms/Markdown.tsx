@@ -11,7 +11,7 @@ import remarkMath from 'remark-math';
 import type { PluggableList } from 'unified';
 
 import { ChatImageNotShown, ReplyChatImage } from '../chatImages/ChatImages.js';
-import { isChatImageSrc, useChatImageScope } from '../chatImages/chatImageScope.js';
+import { isChatImageSrc, useChatImageScope, useInsideChatTurn } from '../chatImages/chatImageScope.js';
 import { useSlot, useThemeMode } from '../theme/SlotsProvider.js';
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { type CitationSource } from '../utils/citationMarkers.js';
@@ -133,7 +133,8 @@ export function markdownUrlTransform(value: string): string {
 /**
  * Inside a chat turn, only re-encoded images from this chat's image route render; a web link goes to
  * the server, which loads it silently where a search would and otherwise asks with a card; any other
- * source (data:, blob:, another same-origin path) is not rendered. Alt text is always plain text.
+ * source (data:, blob:, another same-origin path), and every image of a turn without image access, is
+ * not rendered. Alt text is always plain text.
  *
  * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
  * private data in an image URL. A placeholder shows the destination host instead, and clicking opens
@@ -141,11 +142,11 @@ export function markdownUrlTransform(value: string): string {
  */
 function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgProps: ComponentProps<'img'> }) {
   const scope = useChatImageScope();
-  if (scope !== null) {
-    if (isChatImageSrc(src)) {
+  if (useInsideChatTurn()) {
+    if (scope !== null && isChatImageSrc(src)) {
       return <img {...imgProps} src={src} alt={alt} />;
     }
-    if (/^https?:\/\//i.test(src.trim())) {
+    if (scope !== null && /^https?:\/\//i.test(src.trim())) {
       return <ReplyChatImage url={src.trim()} alt={alt} />;
     }
     return <ChatImageNotShown alt={alt} />;

@@ -1,9 +1,10 @@
 import type { AgentCapability, ToolCallResult, ToolResponseProcessor } from '@truefoundry/trueforge-core/core';
+import type { ChatImageInputType } from '@truefoundry/trueforge-core/core/chatImages';
 import type { Logger } from 'winston';
 
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import { PERSISTED_ARTIFACT_MIME } from '../artifacts/persistTurnArtifacts';
-import { imageTypeFromContentType, type ChatImageInputType } from './imageSniff';
+import { imageTypeFromContentType } from './imageSniff';
 import { CHAT_IMAGE_LOCAL_MAX_BYTES, CHAT_IMAGE_MAX_PER_TOOL_RESULT } from './limits';
 
 /** Path namespace for images a tool returned, next to `run_code/` harvests in the turn artifact store. */

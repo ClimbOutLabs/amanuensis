@@ -1,6 +1,4 @@
-/** Input picture types chat accepts, identified by their leading bytes, never by a name or a declared type. */
-export const CHAT_IMAGE_INPUT_TYPES = ['png', 'jpeg', 'gif', 'webp'] as const;
-export type ChatImageInputType = (typeof CHAT_IMAGE_INPUT_TYPES)[number];
+import { CHAT_IMAGE_INPUT_MIME_TYPES, type ChatImageInputType } from '@truefoundry/trueforge-core/core/chatImages';
 
 /** Types the sandbox writes. */
 export type ChatImageOutputType = 'png' | 'webp';
@@ -8,14 +6,6 @@ export type ChatImageOutputType = 'png' | 'webp';
 export const CHAT_IMAGE_OUTPUT_MIME: Record<ChatImageOutputType, string> = {
   png: 'image/png',
   webp: 'image/webp',
-};
-
-/** Content-Type values a remote server may send for an allow-listed image, mapped to the type it claims. */
-const CONTENT_TYPE_TO_INPUT: Record<string, ChatImageInputType> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpeg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
 };
 
 function startsWith(bytes: Uint8Array, prefix: readonly number[], offset = 0): boolean {
@@ -61,5 +51,5 @@ export function imageTypeFromContentType(header: string | null): ChatImageInputT
   if (header === null) {
     return null;
   }
-  return CONTENT_TYPE_TO_INPUT[header.trim().toLowerCase()] ?? null;
+  return CHAT_IMAGE_INPUT_MIME_TYPES.get(header.trim().toLowerCase()) ?? null;
 }

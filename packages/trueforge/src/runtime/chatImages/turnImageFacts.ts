@@ -1,8 +1,7 @@
 import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
+import { CHAT_IMAGE_MAX_PER_EMAIL } from '@truefoundry/trueforge-core/core/chatImages';
 import { htmlImageLinks } from '@truefoundry/trueforge-core/core/email/gmail/htmlText';
-import { GMAIL_READ_TOOL_NAMES, READ_EMAIL_TOOL_NAME } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
-
-import { CHAT_IMAGE_MAX_PER_EMAIL } from './limits';
+import { isGmailReadToolName, READ_EMAIL_TOOL_NAME } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 
 /** What a turn's stored events say about the images it may show. Nothing here comes from the client. */
 export interface TurnImageFacts {
@@ -128,7 +127,7 @@ export async function readTurnImageFacts(input: {
         if (name === READ_EMAIL_TOOL_NAME) {
           emailCalls.add(call.id);
         }
-        if (GMAIL_READ_TOOL_NAMES.some(readTool => readTool === name)) {
+        if (isGmailReadToolName(name)) {
           facts.readPrivateData = true;
         }
       }

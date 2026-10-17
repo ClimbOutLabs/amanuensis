@@ -1,4 +1,5 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
+import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
 import {
@@ -60,8 +61,6 @@ function envelope(context: ResultContext) {
 /** Most messages of one thread a result lists, and most attachments it names per message. */
 const MAX_THREAD_MESSAGES = 60;
 const MAX_ATTACHMENTS_LISTED = 20;
-/** Web images a read email lists for the chat to offer; the chat shows at most this many per email. */
-const MAX_LINKED_IMAGES = 20;
 
 /** Most labels a row names, and the longest label id kept. */
 const MAX_LABELS_LISTED = 30;
@@ -326,7 +325,7 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
   const note = attachmentsNote({ context: input.context, listed: listed.attachments.length > 0 || listed.omitted > 0 });
   budget.spend(neutralizeDeep(note));
   // Listed so the chat can offer to show them; nothing is fetched unless the person says so.
-  const linkedImages = linkedImagesOf({ message: input.message, max: MAX_LINKED_IMAGES });
+  const linkedImages = linkedImagesOf({ message: input.message, max: CHAT_IMAGE_MAX_PER_EMAIL });
   budget.spend(linkedImages);
   const read = readBody({ message: input.message, maxChars: bodyChars(budget.left) });
   const bounded = fitText({ text: read.body, left: budget.left });

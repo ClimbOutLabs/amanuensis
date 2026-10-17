@@ -1,7 +1,7 @@
 /**
  * Re-encoded images shown in chat, kept per user and per chat. Rows go with their chat (session
  * foreign key, cascade), expire after the retention period, and each user's total is capped with the
- * oldest images removed first.
+ * oldest images removed first. Each turn's silent remote fetch attempts are counted beside them.
  */
 
 /** How an image reached the page: local file, remote image loaded without asking, or after a card. */
@@ -60,11 +60,19 @@ export interface IChatImageStore<TTransaction = never> {
     input: { tenant_id: string; session_id: string; source_key: string },
     transaction?: TTransaction,
   ): Promise<ChatImageRecord | undefined>;
-  /** Images of one origin stored for a turn, for the per-turn silent limit. */
-  countTurnImages(
-    input: { tenant_id: string; session_id: string; turn_id: string; origin: ChatImageOrigin },
+  /** Silent remote fetches a turn has started, whether or not they produced an image. */
+  countSilentAttempts(
+    input: { tenant_id: string; session_id: string; turn_id: string },
     transaction?: TTransaction,
   ): Promise<number>;
+  /**
+   * Atomically takes one silent fetch from the turn's allowance. False, and nothing recorded, once
+   * `limit` were taken; concurrent callers never take more than `limit` between them.
+   */
+  reserveSilentAttempt(
+    input: { tenant_id: string; session_id: string; turn_id: string; limit: number },
+    transaction?: TTransaction,
+  ): Promise<boolean>;
   /** Retention sweep across all tenants; returns the number of images removed. */
   deleteImagesOlderThan(input: { older_than: string }, transaction?: TTransaction): Promise<number>;
 }

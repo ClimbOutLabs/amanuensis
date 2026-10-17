@@ -24,8 +24,7 @@ export const CHAT_IMAGE_REENCODE_TIMEOUT_SECONDS = 20;
 export const CHAT_IMAGE_FETCH_TIMEOUT_MS = 10_000;
 export const CHAT_IMAGE_FETCH_MAX_REDIRECTS = 3;
 
-/** Images one email card may show, and images kept from one tool result. */
-export const CHAT_IMAGE_MAX_PER_EMAIL = 20;
+/** Images kept from one tool result. */
 export const CHAT_IMAGE_MAX_PER_TOOL_RESULT = 20;
 
 /** Cache: kept this long, and at most this many bytes per user (oldest removed first). */

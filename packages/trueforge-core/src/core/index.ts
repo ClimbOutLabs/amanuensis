@@ -457,5 +457,10 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { createWebSearchTurnState, recordResultUrls, remoteImageAskReason } from './permissions/webSearch';
+export {
+  SILENT_SEARCH_LIMIT,
+  createWebSearchTurnState,
+  recordResultUrls,
+  remoteImageAskReason,
+} from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
