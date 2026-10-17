@@ -4,6 +4,7 @@
 export const GetRunCodeStatusResponseDataState = {
         Ready: "ready",
         NotConfigured: "not_configured",
+        Disabled: "disabled",
         DockerUnavailable: "docker_unavailable",
         DaemonUnavailable: "daemon_unavailable",
         ImageMissing: "image_missing",

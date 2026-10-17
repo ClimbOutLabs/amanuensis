@@ -5,7 +5,7 @@ import { InvalidFileInputError } from '../../errors';
 import { GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
-import { toolResultResponse } from '../../mcp/IMCPServer';
+import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
 import { classifyHostToolCall } from '../../permissions/classifier';
@@ -14,7 +14,7 @@ import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
-import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
+import { hashDraft, type ReviewableDraft } from './draftReview';
 import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
@@ -79,8 +79,6 @@ interface GmailToolSetOptions {
   attachmentStager: AttachmentStager | undefined;
   /** Where the host classifies each call; the same turn state the web search provider reads. */
   sentinel: SentinelHostContext;
-  /** What the user was shown before each send, shared by every turn of this process. */
-  reviews: DraftReviewLedger;
   /** How long a list call may spend before it returns the rows it has. */
   listDeadlineMs: number;
 }
@@ -138,10 +136,6 @@ export class GmailToolSet extends LocalToolMCP {
 
   get #context(): ResultContext {
     return { account: this.#options.account, attachmentsOpenable: this.#options.attachmentStager !== undefined };
-  }
-
-  get #owner() {
-    return { tenant_id: this.#options.sentinel.tenant_id, created_by: this.#options.sentinel.created_by };
   }
 
   #buildTools(): ToolDefinition[] {
@@ -225,7 +219,7 @@ export class GmailToolSet extends LocalToolMCP {
             'Send a saved draft. The only way to send. The user always sees the whole message and is asked first; a draft with attachments or formatting, or one that is very long, cannot be sent.',
           schema: DraftIdSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#sendDraft(input),
+          handler: (input, _approval, context) => this.#sendDraft({ input, context }),
         }),
       );
     }
@@ -256,7 +250,7 @@ export class GmailToolSet extends LocalToolMCP {
       workspace_cwd: null,
       action: {
         tool_name: params.name,
-        canonical_params: params.arguments ?? {},
+        canonical_params: this.#approvedParams({ call: params, draft: prepared.draft }),
         tool_type: 'truefoundry-system',
         mcp_server_name: GMAIL_SERVER_ID,
         mcp_hints: {
@@ -268,7 +262,38 @@ export class GmailToolSet extends LocalToolMCP {
         ...(prepared.replaces === undefined ? {} : { mail_replaces: prepared.replaces }),
       },
     });
-    return { ...info, ...stampSentinelDecision({ decision }) };
+    return {
+      ...info,
+      ...stampSentinelDecision({ decision }),
+      ...(params.name === SEND_DRAFT_TOOL_NAME && prepared.draft !== undefined
+        ? { mint_canonical_params: this.#approvedParams({ call: params, draft: prepared.draft }) }
+        : {}),
+    };
+  }
+
+  /** A send is approved for the exact draft shown: its hash joins the call's arguments the approval is minted over. */
+  #approvedParams(input: { call: CallToolRequest['params']; draft: ReviewableDraft | undefined }) {
+    const args = input.call.arguments ?? {};
+    return input.call.name === SEND_DRAFT_TOOL_NAME && input.draft !== undefined
+      ? { ...args, review_hash: hashDraft(input.draft) }
+      : args;
+  }
+
+  /** Re-reads the draft at dispatch, so an approval of a send ends if the draft changed after the card. */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    if (params.name !== SEND_DRAFT_TOOL_NAME) {
+      return undefined;
+    }
+    const parsed = DraftIdSchema.parse(params.arguments);
+    const assessed = assessDraft({
+      message: await this.#liveDraft(parsed.draft_id),
+      account: this.#options.account,
+      forSend: true,
+    });
+    if (!assessed.ok) {
+      throw new Error(assessed.reason);
+    }
+    return { ...parsed, review_hash: hashDraft(assessed.draft) };
   }
 
   async #liveDraft(draftId: string) {
@@ -301,11 +326,6 @@ export class GmailToolSet extends LocalToolMCP {
         if (!assessed.ok) {
           return { failure: assessed.reason };
         }
-        this.#options.reviews.record({
-          ...this.#owner,
-          draft_id: parsed.data.draft_id,
-          hash: hashDraft(assessed.draft),
-        });
         return { draft: assessed.draft, replaces: undefined };
       }
       const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
@@ -572,7 +592,6 @@ export class GmailToolSet extends LocalToolMCP {
         return errorResult(existing.failure);
       }
       const { content, reply, threadId } = await this.#resolveContent({ input, existing: existing.message });
-      this.#options.reviews.forget({ ...this.#owner, draft_id: input.draft_id });
       const updated = await this.#options.api.updateDraft({
         draftId: input.draft_id,
         raw: buildRawMessage({ content, reply }),
@@ -590,13 +609,18 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  /** Sends only the text the user was shown: the draft is read again and must still hash to the reviewed text. */
-  async #sendDraft(input: z.infer<typeof DraftIdSchema>) {
+  /**
+   * Sends only the draft the user approved: the hash of the card shown comes from the host with the approved call,
+   * and the draft read right now must still hash to it. A call that arrives without one, by any route, sends nothing.
+   */
+  async #sendDraft({
+    input,
+    context,
+  }: {
+    input: z.infer<typeof DraftIdSchema>;
+    context: ToolInvocationContext | undefined;
+  }) {
     try {
-      const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
-      if (reviewed === undefined) {
-        return errorResult('This send needs your OK again. Nothing was sent. Ask to send the draft again.');
-      }
       const assessed = assessDraft({
         message: await this.#liveDraft(input.draft_id),
         account: this.#options.account,
@@ -605,9 +629,13 @@ export class GmailToolSet extends LocalToolMCP {
       if (!assessed.ok) {
         return errorResult(assessed.reason);
       }
-      if (reviewed !== hashDraft(assessed.draft)) {
+      const approved = context?.approved_params?.['review_hash'];
+      if (typeof approved !== 'string') {
+        return errorResult('This send was not approved, so nothing was sent. Ask to send the draft again.');
+      }
+      if (approved !== hashDraft(assessed.draft)) {
         return errorResult(
-          'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
+          'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
         );
       }
       const sent = await this.#options.api.sendDraft(input.draft_id);

@@ -18,6 +18,11 @@ import {
 } from '../schemas/google';
 import { OpenApiTag } from './openapiTags';
 
+/** Where the Google routes are mounted; Google is sent back to the consent callback beneath it. */
+export const GOOGLE_ROUTES_BASE_PATH = '/api/v1/user/settings/google';
+const GOOGLE_CONSENT_CALLBACK_SUBPATH = '/oauth/callback';
+export const GOOGLE_CALLBACK_PATH = `${GOOGLE_ROUTES_BASE_PATH}${GOOGLE_CONSENT_CALLBACK_SUBPATH}`;
+
 const unauthorized = {
   401: {
     content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -95,7 +100,7 @@ export const beginGoogleConsentRoute = createRoute({
 
 export const googleConsentCallbackRoute = createRoute({
   method: 'get',
-  path: '/oauth/callback',
+  path: GOOGLE_CONSENT_CALLBACK_SUBPATH,
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'Google consent callback',
   description: 'Browser redirect target for the consent. The browser lands here and sees a short page.',

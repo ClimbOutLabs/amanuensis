@@ -22,6 +22,7 @@ const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmai
 const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
+const GOOGLE_AUDIENCE_URL = 'https://console.cloud.google.com/auth/audience';
 
 const STATUS_POLL_MS = 2000;
 /** 300 polls, two seconds apart: the ten minutes a consent in flight is good for. */
@@ -42,7 +43,8 @@ type ClientEntry = GoogleClientDraft & { registeredRedirectUris: string[] };
 
 const EMPTY_CLIENT: ClientEntry = { clientId: '', clientSecret: '', clientType: null, registeredRedirectUris: [] };
 
-function CopyField({ label, value }: { label: string; value: string }) {
+/** A value to copy; with `href` it is also a link that opens in a new tab. */
+function CopyField({ label, value, href }: { label: string; value: string; href?: string | undefined }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(
@@ -53,12 +55,24 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
   return (
     <div className="mt-1 flex items-center gap-2">
-      <code
-        aria-label={label}
-        className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs"
-      >
-        {value}
-      </code>
+      {href === undefined ? (
+        <code
+          aria-label={label}
+          className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs"
+        >
+          {value}
+        </code>
+      ) : (
+        <a
+          aria-label={label}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 flex-1 truncate rounded border border-border bg-primary-bg px-2 py-1 font-mono text-xs text-link underline"
+        >
+          {value}
+        </a>
+      )}
       <Button
         variant="secondary"
         size="small"
@@ -454,17 +468,21 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 <p className="text-text-secondary">
                   Use an existing project if you have one. It is free and takes a minute.
                 </p>
-                <CopyField label="Project link" value={GOOGLE_PROJECT_URL} />
+                <CopyField label="Project link" value={GOOGLE_PROJECT_URL} href={GOOGLE_PROJECT_URL} />
               </li>
               <li>
                 <p className="font-medium">Turn on the Gmail API</p>
                 <p className="text-text-secondary">On the page, click Enable.</p>
-                <CopyField label="Gmail API link" value={GOOGLE_GMAIL_API_URL} />
+                <CopyField label="Gmail API link" value={GOOGLE_GMAIL_API_URL} href={GOOGLE_GMAIL_API_URL} />
               </li>
               <li>
                 <p className="font-medium">Set up the consent screen</p>
                 <p className="text-text-secondary">Choose External, then fill in an app name and your email address.</p>
-                <CopyField label="Consent screen link" value={GOOGLE_CONSENT_SCREEN_URL} />
+                <CopyField
+                  label="Consent screen link"
+                  value={GOOGLE_CONSENT_SCREEN_URL}
+                  href={GOOGLE_CONSENT_SCREEN_URL}
+                />
               </li>
               <li>
                 <p className="font-medium">Add yourself as a test user</p>
@@ -472,6 +490,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   On the Audience page, under Test users, click Add users and add the Gmail address you will connect as.
                   Without it, Google shows an &quot;Access blocked&quot; page when you try to sign in.
                 </p>
+                <CopyField label="Audience page link" value={GOOGLE_AUDIENCE_URL} href={GOOGLE_AUDIENCE_URL} />
               </li>
               <li>
                 <p className="font-medium">Choose Testing or Production</p>
@@ -483,6 +502,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   screen once; click Advanced, then continue. After you publish, reconnect once, so the saved sign-in is
                   issued in production mode.
                 </p>
+                <CopyField label="Audience page link" value={GOOGLE_AUDIENCE_URL} href={GOOGLE_AUDIENCE_URL} />
               </li>
               <li>
                 <p className="font-medium">Create the client</p>
@@ -494,7 +514,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 </p>
                 {setup.clientType === 'web' ? <CopyField label="Redirect URI" value={setup.redirectUri} /> : null}
                 <p className="mt-1 text-text-secondary">Click Create, then Download JSON.</p>
-                <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} />
+                <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} href={GOOGLE_CREDENTIALS_URL} />
               </li>
               <li>
                 <p className="font-medium">Drop the downloaded JSON, or paste the client ID and secret</p>
