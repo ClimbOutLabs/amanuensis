@@ -155,7 +155,13 @@ export function runCompletedTurnEventStoreContractSuite(params: {
     const store = params.createStore();
     await seedDoneTurn(store);
     const before = (await listEvents(store)).data.length;
-    const { sent_message_id: _dropped, ...withoutId } = sendReceiptEvent('evt_bad_receipt').result;
+    const { result } = sendReceiptEvent('evt_bad_receipt');
+    const withoutId = {
+      outcome: result.outcome,
+      sent_at: result.sent_at,
+      check_code: result.check_code,
+      message: result.message,
+    };
 
     await expect(
       params.appendWidened({

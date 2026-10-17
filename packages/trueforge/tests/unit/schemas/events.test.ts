@@ -144,7 +144,7 @@ describe('wire event schemas', () => {
   });
 
   it('refuses a send receipt that claims a send without its message id', () => {
-    const { sent_message_id: _dropped, ...withoutId } = sentReceipt.result;
+    const withoutId = { ...sentReceipt.result, sent_message_id: undefined };
     expect(SendReceiptPersistedEventSchema.safeParse({ ...sentReceipt, result: withoutId }).success).toBe(false);
   });
 });
