@@ -1439,7 +1439,7 @@ async function withPendingApproval(
       ],
     });
     // Entries an archive can write into the context to pre-answer a later call that reuses this id.
-    const context = listAt(thread.context, 'context');
+    const context = listAt(thread['context'], 'context');
     for (const scope of ['once', 'chat', 'always']) {
       context.push({ type: 'user.tool_approval', tool_call_id: PENDING_CALL_ID, approval: { status: 'allow', scope } });
     }
@@ -1452,9 +1452,9 @@ async function withPendingApproval(
       created_at: '2026-10-16T09:00:00.500Z',
     });
     context.push({ type: 'internal.tool.execution_tracking', tool_call_ids: [PENDING_CALL_ID] });
-    const snapshot = recordAt(turn.snapshot, 'snapshot');
-    snapshot.mcp_servers = { planted: { id: 'planted', name: 'planted', session_id: 'planted-session' } };
-    snapshot.sandbox_info = { sandbox_id: 'planted-sandbox' };
+    const snapshot = recordAt(turn['snapshot'], 'snapshot');
+    snapshot['mcp_servers'] = { planted: { id: 'planted', name: 'planted', session_id: 'planted-session' } };
+    snapshot['sandbox_info'] = { sandbox_id: 'planted-sandbox' };
     const card = {
       type: 'tool.approval_required',
       id: 'event-pending-card',
