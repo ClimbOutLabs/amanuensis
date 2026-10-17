@@ -53,6 +53,26 @@ test_compose_v2_or_newer_passes() {
   done
 }
 
+test_engine_before_28_on_native_linux_is_refused() {
+  t_begin "Docker Engine 27 on native Linux is refused with a plain reason; 28, Docker Desktop and WSL2 pass"
+  sandbox_new
+  fixture_uname Linux x86_64
+  STUB_ENGINE_VERSION=27.5.1
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Docker Engine 27.5.1 lets other devices on your network reach ports meant for this computer only"
+  assert_flat_contains "$OUT$ERR" "Install Docker Engine 28 or newer (install.sh --print-root-steps shows the steps)"
+  STUB_ENGINE_VERSION=28.0.0
+  run_install --dry-run
+  assert_not_contains "$OUT$ERR" "lets other devices on your network"
+  STUB_ENGINE_VERSION=27.5.1
+  STUB_DOCKER_OS="Docker Desktop"
+  run_install --dry-run
+  assert_not_contains "$OUT$ERR" "lets other devices on your network"
+  unset STUB_DOCKER_OS
+  sandbox_drop
+}
+
 test_unreadable_compose_version_is_named() {
   local version
   t_begin "an empty or garbage Compose version is rejected and named"
@@ -309,6 +329,7 @@ test_rootless_is_unsupported
 test_podman_is_unsupported
 test_old_engine_and_compose_v1
 test_compose_v2_or_newer_passes
+test_engine_before_28_on_native_linux_is_refused
 test_unreadable_compose_version_is_named
 test_blocker_stops_before_any_prompt
 test_daemon_down

@@ -14,6 +14,7 @@ One instance serves one person. If two people in the same household need it, the
 - A computer with Docker: Docker Engine with Compose v2 or newer on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
 - 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox's slot disks (they are sparse and use real space only as code runs).
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
+- On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. The installer never scans your machine for models.
 - A git checkout of this repository. The installer runs from the checkout and builds the images from source.
@@ -73,6 +74,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
+- `--home-network`: on a cloud server, open Aman at its private addresses anyway. Private addresses there are shared with other customers, so by default (for the common providers, recognised by their hardware) a new instance opens on `127.0.0.1` alone and says so. An instance that already exists keeps where it opens; `--local-only` puts it back on this computer.
 
 ### Feeding the Token Factory key safely
 

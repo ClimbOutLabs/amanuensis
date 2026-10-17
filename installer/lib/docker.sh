@@ -277,6 +277,10 @@ docker_runtime_problem() {
     RUNTIME_PROBLEM="Docker Engine $engine is too old; $DOCKER_MIN_ENGINE_MAJOR or newer is required."
     return 0
   fi
+  if docker_engine_leaks_loopback "$engine" "$(D info --format '{{.OperatingSystem}}' 2>/dev/null || true)"; then
+    RUNTIME_PROBLEM=$(docker_leaks_loopback_text "$engine")
+    return 0
+  fi
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
   if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then

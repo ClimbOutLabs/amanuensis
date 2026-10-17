@@ -347,6 +347,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         ...(configuration.OIDC !== undefined && configuration.LOGIN_UPSTREAM_URL !== ''
           ? { loginGatewayUrl: configuration.OIDC.OIDC_ISSUER_URL }
           : {}),
+        ...(configuration.OIDC !== undefined && getAllowedOrigins().length > 0
+          ? { loginPath: new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '') }
+          : {}),
       }),
     );
   }
