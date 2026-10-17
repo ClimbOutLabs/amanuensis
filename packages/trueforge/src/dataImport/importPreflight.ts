@@ -18,6 +18,7 @@ import {
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { DataImportError } from './importError';
+import { emptyLedger, type ImportLedger } from './importLedger';
 
 export type MemoryImportTarget =
   { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: Pick<MemoryClient, 'listEntries' | 'retain'> };
@@ -34,6 +35,7 @@ export interface PreflightDeps<TTransaction> {
 }
 
 const MEMORY_LIST_TIMEOUT_MS = 120_000;
+const PAGE_SIZE = 100;
 const MAX_LISTED_COLLISIONS = 5;
 
 /** "a, b and c" */
@@ -63,8 +65,13 @@ function isPristineProfile(profile: {
   );
 }
 
-/** True when the target tenant's Markdown vault already holds any memory content. */
-async function markdownMemoryHasContent(markdownDir: string, tenantId: string): Promise<boolean> {
+/** True when the target tenant's Markdown vault holds memory content in any file outside `ignored`. */
+async function markdownMemoryHasContent(input: {
+  markdownDir: string;
+  tenantId: string;
+  ignored: ReadonlySet<string>;
+}): Promise<boolean> {
+  const { markdownDir, tenantId, ignored } = input;
   if (!existsSync(markdownDir)) {
     return false;
   }
@@ -76,16 +83,18 @@ async function markdownMemoryHasContent(markdownDir: string, tenantId: string): 
   for (const dirName of dirNames) {
     const dirPath = path.join(markdownDir, dirName);
     const memoryMd = path.join(dirPath, CURATED_MEMORY_FILE);
-    if (existsSync(memoryMd) && (await readFile(memoryMd, 'utf8')).trim().length > 0) {
+    if (!ignored.has(memoryMd) && existsSync(memoryMd) && (await readFile(memoryMd, 'utf8')).trim().length > 0) {
       return true;
     }
-    if (existsSync(path.join(dirPath, VAULT_TOMBSTONES_FILE))) {
+    const tombstones = path.join(dirPath, VAULT_TOMBSTONES_FILE);
+    if (!ignored.has(tombstones) && existsSync(tombstones)) {
       return true;
     }
     const dailyDir = path.join(dirPath, 'memory');
     if (existsSync(dailyDir)) {
       const dailyFiles = (await readdir(dailyDir, { withFileTypes: true })).filter(
-        entry => entry.isFile() && DAILY_LOG_FILE_PATTERN.test(entry.name),
+        entry =>
+          entry.isFile() && DAILY_LOG_FILE_PATTERN.test(entry.name) && !ignored.has(path.join(dailyDir, entry.name)),
       );
       if (dailyFiles.length > 0) {
         return true;
@@ -96,40 +105,50 @@ async function markdownMemoryHasContent(markdownDir: string, tenantId: string): 
 }
 
 /**
- * Refuses unless the instance is fresh, naming every kind of data it already
- * holds. A personalization profile the app created on first sign-in (nothing
- * filled in) does not count; the import replaces it. Global and permission
- * settings do not count either: the import only fills settings the instance
- * has not set.
+ * Every kind of data the instance already holds, leaving out the items in
+ * `ignoring`. A personalization profile the app created on first sign-in
+ * (nothing filled in) does not count; the import replaces it. Global and
+ * permission settings do not count either: the import only fills settings the
+ * instance has not set.
  */
-export async function assertInstanceEmpty<TTransaction>(
+export async function findInstanceData<TTransaction>(
   deps: PreflightDeps<TTransaction>,
   input: {
     tenantId: string;
     subjectId: string;
     scope: { created_by_subject_id: string; agent_ids: readonly string[] };
+    ignoring: ImportLedger;
   },
-): Promise<void> {
-  const { tenantId, subjectId, scope } = input;
+): Promise<string[]> {
+  const { tenantId, subjectId, scope, ignoring } = input;
   const found: string[] = [];
+  const ignoredSessions = new Set(ignoring.session_ids);
+  const ignoredFolders = new Set(ignoring.folder_ids);
+  const ignoredAgents = new Set(ignoring.agent_ids);
 
-  const sessionPage = await deps.sessionStore.listSessions({
-    tenant_id: tenantId,
-    limit: 1,
-    page_token: undefined,
-    order: 'asc',
-    start_timestamp: undefined,
-    end_timestamp: undefined,
-    agent_id: undefined,
-    created_by_or_agent_ids: scope,
-    metadata: undefined,
-    source_type: undefined,
-    source_id: undefined,
-  });
-  if (sessionPage.data.length > 0) {
-    found.push('chats');
-  }
-  if ((await deps.sessionStore.listSessionFolders({ tenant_id: tenantId, created_by: subjectId })).length > 0) {
+  let sessionToken: string | undefined;
+  do {
+    const sessionPage = await deps.sessionStore.listSessions({
+      tenant_id: tenantId,
+      limit: PAGE_SIZE,
+      page_token: sessionToken,
+      order: 'asc',
+      start_timestamp: undefined,
+      end_timestamp: undefined,
+      agent_id: undefined,
+      created_by_or_agent_ids: scope,
+      metadata: undefined,
+      source_type: undefined,
+      source_id: undefined,
+    });
+    if (sessionPage.data.some(session => !ignoredSessions.has(session.session_id))) {
+      found.push('chats');
+      break;
+    }
+    sessionToken = sessionPage.pagination.next_page_token;
+  } while (sessionToken !== undefined);
+  const folders = await deps.sessionStore.listSessionFolders({ tenant_id: tenantId, created_by: subjectId });
+  if (folders.some(folder => !ignoredFolders.has(folder.folder_id))) {
     found.push('folders');
   }
   if ((await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: subjectId })).length > 0) {
@@ -159,20 +178,26 @@ export async function assertInstanceEmpty<TTransaction>(
   if (schedulePage.data.length > 0) {
     found.push('schedules');
   }
-  const agentPage = await deps.agentStore.listAgents({
-    tenant_id: tenantId,
-    agent_name: undefined,
-    limit: 1,
-    page_token: undefined,
-  });
-  if (agentPage.data.length > 0) {
-    found.push('agents');
-  }
+  let agentToken: string | undefined;
+  do {
+    const agentPage = await deps.agentStore.listAgents({
+      tenant_id: tenantId,
+      agent_name: undefined,
+      limit: PAGE_SIZE,
+      page_token: agentToken,
+    });
+    if (agentPage.data.some(agent => !ignoredAgents.has(agent.id))) {
+      found.push('agents');
+      break;
+    }
+    agentToken = agentPage.pagination.next_page_token;
+  } while (agentToken !== undefined);
   if ((await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined })).length > 0) {
     found.push('connectors');
   }
   if (deps.memoryTarget.kind === 'markdown') {
-    if (await markdownMemoryHasContent(deps.memoryTarget.markdownDir, tenantId)) {
+    const markdownDir = deps.memoryTarget.markdownDir;
+    if (await markdownMemoryHasContent({ markdownDir, tenantId, ignored: new Set(ignoring.memory_files) })) {
       found.push('memories');
     }
   } else {
@@ -185,6 +210,19 @@ export async function assertInstanceEmpty<TTransaction>(
     }
   }
 
+  return found;
+}
+
+/** Refuses unless the instance is fresh, naming every kind of data it already holds. */
+export async function assertInstanceEmpty<TTransaction>(
+  deps: PreflightDeps<TTransaction>,
+  input: {
+    tenantId: string;
+    subjectId: string;
+    scope: { created_by_subject_id: string; agent_ids: readonly string[] };
+  },
+): Promise<void> {
+  const found = await findInstanceData(deps, { ...input, ignoring: emptyLedger() });
   if (found.length > 0) {
     throw new DataImportError(
       `This instance already has ${joinPlain(found)}, so the import was refused and nothing was changed. ` +

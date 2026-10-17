@@ -11,7 +11,7 @@
  * creation, in export order, so the next turn's predecessor is never still
  * running. A turn that was still running at export time cannot resume, so it
  * is imported as cancelled with the `abandoned` reason, and so is a turn left
- * waiting on an approval or answer. Approval grants never travel. The store stamps "now"
+ * waiting on an approval or answer that no later turn gave. Approval grants never travel. The store stamps "now"
  * on everything it creates, so each session ends with an import-only write
  * that puts the archived dates and totals back.
  */
@@ -26,7 +26,7 @@ import {
   type TerminalTurnState,
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { mechanicalAbnormalHandoff, newEventId, type ToolCallMemoSnapshot } from '@truefoundry/trueforge-core/core';
+import { mechanicalAbnormalHandoff, newEventId } from '@truefoundry/trueforge-core/core';
 import { ActionRequiredEventSchema } from '@truefoundry/trueforge-core/core/events/schema';
 
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
@@ -39,39 +39,6 @@ export const EXPIRED_APPROVAL_NOTICE =
 
 type ThreadSnapshot = ImportTurnRecord['snapshot']['threads'][string];
 type ContextMessage = ThreadSnapshot['context'][number];
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * The tool-call memo is opaque persisted JSON: the store writes it verbatim
- * and the runtime hydrates it leniently on continuation. The guard checks the
- * load-bearing collections exist as arrays when present; a memo of any other
- * shape means the archive is damaged.
- */
-function isToolCallMemoSnapshot(value: unknown): value is ToolCallMemoSnapshot {
-  if (!isPlainRecord(value)) {
-    return false;
-  }
-  for (const key of ['read_results', 'side_effect_attempts', 'call_signatures']) {
-    const entries = value[key];
-    if (entries !== undefined && !Array.isArray(entries)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function requireToolCallMemo(value: unknown, threadId: string): ToolCallMemoSnapshot | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!isToolCallMemoSnapshot(value)) {
-    throw new Error(`The archive is damaged: the tool-call memo for thread ${threadId} is malformed.`);
-  }
-  return value;
-}
 
 export interface SessionRestoreContext {
   tenantId: string;
@@ -138,9 +105,9 @@ async function restoreTurn(
   store: ISessionStore<SessionCustom, TurnCustom>,
   session: ImportSessionEntry['session'],
   entry: ImportSessionEntry['turns'][number],
-  previousThreads: ReadonlyMap<string, ThreadSnapshot>,
-  isFirstTurn: boolean,
+  previous: { threads: ReadonlyMap<string, ThreadSnapshot>; isFirstTurn: boolean; answered: boolean },
 ): Promise<void> {
+  const { threads: previousThreads, isFirstTurn, answered } = previous;
   const turn: ImportTurnRecord = entry.turn;
   const sessionId = session.session_id;
   const exportedThreads = new Map(Object.entries(turn.snapshot.threads));
@@ -202,17 +169,17 @@ async function restoreTurn(
       thread_id: thread.thread_id,
       parent: thread.parent ?? null,
       agent_info: thread.agent_info ?? null,
-      tool_call_memo: requireToolCallMemo(thread.tool_call_memo, thread.thread_id),
+      tool_call_memo: undefined,
       task_state: thread.task_state,
     })),
     new_context_appends: appends,
     capability_states: [...exportedThreads.values()].map(thread => ({
       thread_id: thread.thread_id,
-      capability_state: thread.capability_state,
+      capability_state: null,
     })),
     tool_call_memos: [...exportedThreads.values()].map(thread => ({
       thread_id: thread.thread_id,
-      tool_call_memo: requireToolCallMemo(thread.tool_call_memo, thread.thread_id),
+      tool_call_memo: undefined,
     })),
     task_states: [...exportedThreads.values()].map(thread => ({
       thread_id: thread.thread_id,
@@ -263,12 +230,12 @@ async function restoreTurn(
 
   const events = entry.events;
   const streamDone = findTurnDoneEvent(events);
-  const expiredActions = turn.state.status === 'done' ? turn.state.required_actions : [];
+  // A later turn that continues this one answered its actions; only an unanswered one expired in the move.
+  const expiredActions = turn.state.status === 'done' && !answered ? turn.state.required_actions : [];
   const holdsOutstandingAction = expiredActions.length > 0;
-  // An action the archive left waiting is never revived: its card and held marks are archive-written.
+  // Action cards and held marks are archive-written, so none is replayed whatever the turn's state.
   const replayEvents = events.filter(
-    event =>
-      event.type !== 'turn.done' && !(holdsOutstandingAction && ActionRequiredEventSchema.safeParse(event).success),
+    event => event.type !== 'turn.done' && !ActionRequiredEventSchema.safeParse(event).success,
   );
   if (holdsOutstandingAction) {
     replayEvents.push({
@@ -339,10 +306,15 @@ export async function restoreSessions(
       });
     }
 
+    const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
     let previousThreads = new Map<string, ThreadSnapshot>();
     let isFirstTurn = true;
     for (const turnEntry of entry.turns) {
-      await restoreTurn(store, session, turnEntry, previousThreads, isFirstTurn);
+      await restoreTurn(store, session, turnEntry, {
+        threads: previousThreads,
+        isFirstTurn,
+        answered: continuedTurnIds.has(turnEntry.turn.turn_id),
+      });
       previousThreads = new Map(Object.entries(turnEntry.turn.snapshot.threads));
       isFirstTurn = false;
     }

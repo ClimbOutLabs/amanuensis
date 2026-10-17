@@ -61,15 +61,18 @@ import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors } from './connectorImport';
 import { DataImportError } from './importError';
 import {
-  clearImportMarker,
   compensate,
   emptyLedger,
+  findChangedSince,
+  ImportLock,
+  importMarkerCutoff,
+  isLiveImportMarker,
+  newImportMarker,
   readImportMarker,
   UnreadableImportMarkerError,
-  writeImportMarker,
   type ImportLedger,
 } from './importLedger';
-import { assertInstanceEmpty, assertNoIdCollisions, type PreflightDeps } from './importPreflight';
+import { assertInstanceEmpty, assertNoIdCollisions, findInstanceData, type PreflightDeps } from './importPreflight';
 import {
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
@@ -700,11 +703,13 @@ async function writeMarkdownMemory(files: readonly PlannedMemoryFile[]): Promise
   }
 }
 
-/** Runs an interrupted earlier import's cleanup, so the emptiness check sees an instance the crash did not dirty. */
-async function recoverInterruptedImport<TTransaction>(deps: DataImportDeps<TTransaction>): Promise<void> {
-  let marker: Awaited<ReturnType<typeof readImportMarker>>;
+const IMPORT_BUSY_MESSAGE = 'Another import is already running on this instance. Nothing was changed.';
+
+async function readMarkerForRecovery<TTransaction>(
+  deps: DataImportDeps<TTransaction>,
+): Promise<Awaited<ReturnType<typeof readImportMarker>>> {
   try {
-    marker = await readImportMarker(deps.globalSettingsStore);
+    return await readImportMarker(deps.globalSettingsStore);
   } catch (cause) {
     if (cause instanceof UnreadableImportMarkerError) {
       throw new DataImportError(
@@ -715,41 +720,104 @@ async function recoverInterruptedImport<TTransaction>(deps: DataImportDeps<TTran
     }
     throw cause;
   }
-  if (marker === undefined) {
-    return;
-  }
-  const failures = await compensate(deps, {
-    tenantId: marker.tenant_id,
-    subjectId: marker.subject_id,
-    ledger: marker.planned,
-  });
-  if (failures.length > 0) {
-    throw new DataImportError(
-      `An earlier import was interrupted and some of what it wrote could not be removed (${failures.slice(0, 5).join(', ')}). Nothing was changed; run the import again to retry the cleanup.`,
-      500,
-    );
-  }
-  await clearImportMarker(deps.globalSettingsStore);
-  deps.logger.info('Removed the leftovers of an interrupted data import', { started_at: marker.started_at });
 }
 
-/** Imports for one tenant never overlap: a second run would read the first run's marker as a crash. */
+/**
+ * Takes the instance-wide import lock. When an earlier run was interrupted,
+ * its leftovers are removed first, but only while nothing has been added or
+ * changed since it stopped; otherwise nothing is removed and the run refuses.
+ */
+async function acquireImportLock<TTransaction>(
+  deps: DataImportDeps<TTransaction>,
+  input: {
+    tenantId: string;
+    subjectId: string;
+    scope: { created_by_subject_id: string; agent_ids: readonly string[] };
+  },
+): Promise<ImportLock<TTransaction>> {
+  const { tenantId, subjectId, scope } = input;
+  const store = deps.globalSettingsStore;
+  const fresh = newImportMarker({ tenantId, subjectId });
+  const claimed = await ImportLock.claim(store, { marker: fresh, replacing: null });
+  if (claimed !== undefined) {
+    return claimed;
+  }
+  const existing = await readMarkerForRecovery(deps);
+  if (existing === undefined || isLiveImportMarker(existing.marker, Date.now())) {
+    throw new DataImportError(IMPORT_BUSY_MESSAGE, 409);
+  }
+
+  const { marker, raw } = existing;
+  const leftovers = { tenantId: marker.tenant_id, subjectId: marker.subject_id, ledger: marker.planned };
+  const found = await findInstanceData(deps, { tenantId, subjectId, scope, ignoring: marker.planned });
+  const changed = await findChangedSince(deps, { ...leftovers, cutoff: importMarkerCutoff(marker) });
+  if (found.length > 0 || changed.length > 0) {
+    deps.logger.warn('Kept the leftovers of an interrupted data import because the instance was used since', {
+      started_at: marker.started_at,
+      found,
+      changed: changed.slice(0, 5),
+    });
+    throw new DataImportError(
+      'An earlier import was interrupted, and this instance has been used since then, so nothing was removed and nothing was imported. ' +
+        'To bring this export in, remove this instance, create it again, then import.',
+      409,
+    );
+  }
+
+  const lock = await ImportLock.claim(store, {
+    marker: {
+      started_at: marker.started_at,
+      heartbeat_at: new Date().toISOString(),
+      tenant_id: marker.tenant_id,
+      subject_id: marker.subject_id,
+      planned: marker.planned,
+    },
+    replacing: raw,
+  });
+  if (lock === undefined) {
+    throw new DataImportError(IMPORT_BUSY_MESSAGE, 409);
+  }
+  try {
+    const failures = await compensate(deps, leftovers);
+    if (failures.length > 0) {
+      lock.keepForCleanup();
+      throw new DataImportError(
+        `An earlier import was interrupted and some of what it wrote could not be removed (${failures.slice(0, 5).join(', ')}). Nothing else was changed; run the import again to retry the cleanup.`,
+        500,
+      );
+    }
+    await lock.replace(fresh);
+  } catch (cause) {
+    await lock.end();
+    throw cause;
+  }
+  deps.logger.info('Removed the leftovers of an interrupted data import', { started_at: marker.started_at });
+  return lock;
+}
+
+/** Imports for one tenant in this process never overlap; the marker keeps other processes out. */
 const importsInFlight = new Set<string>();
 
 export async function runDataImport<TTransaction>(
   deps: DataImportDeps<TTransaction>,
   request: DataImportRequest,
 ): Promise<ImportDataResult> {
-  const { tenantId } = request.subject;
+  const { tenantId, subjectId } = request.subject;
   if (request.archive.byteLength > request.maxBytes) {
     throw new DataImportError('The file is larger than the import limit, so nothing was imported.', 400);
   }
   if (importsInFlight.has(tenantId)) {
-    throw new DataImportError('Another import is already running on this instance. Nothing was changed.', 409);
+    throw new DataImportError(IMPORT_BUSY_MESSAGE, 409);
   }
   importsInFlight.add(tenantId);
   try {
-    return await importArchive(deps, request);
+    const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
+    const lock = await acquireImportLock(deps, { tenantId, subjectId, scope });
+    try {
+      return await importArchive(deps, { request, lock });
+    } finally {
+      await lock.end();
+    }
   } finally {
     importsInFlight.delete(tenantId);
   }
@@ -757,7 +825,7 @@ export async function runDataImport<TTransaction>(
 
 async function importArchive<TTransaction>(
   deps: DataImportDeps<TTransaction>,
-  request: DataImportRequest,
+  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> },
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
@@ -772,7 +840,6 @@ async function importArchive<TTransaction>(
   const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
 
   // --- Reads only: nothing is written until every check below has passed. ---
-  await recoverInterruptedImport(deps);
   await assertInstanceEmpty(deps, { tenantId, subjectId, scope });
 
   const agentPlan = planAgents(contents);
@@ -904,12 +971,7 @@ async function importArchive<TTransaction>(
     knowledge_db_paths: knowledgePlan.map(library => library.dbPath),
     memory_files: plannedMemoryFiles.map(file => file.targetPath),
   };
-  await writeImportMarker(deps.globalSettingsStore, {
-    started_at: new Date().toISOString(),
-    tenant_id: tenantId,
-    subject_id: subjectId,
-    planned,
-  });
+  await lock.replace({ ...newImportMarker({ tenantId, subjectId }), planned });
   const created = emptyLedger();
 
   try {
@@ -1167,8 +1229,9 @@ async function importArchive<TTransaction>(
         }
       }
 
-      await clearImportMarker(deps.globalSettingsStore, tx);
+      await lock.removeIn(tx);
     });
+    lock.committed();
 
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.length,
@@ -1198,13 +1261,13 @@ async function importArchive<TTransaction>(
       ledger: { ...created, knowledge_db_paths: planned.knowledge_db_paths, memory_files: planned.memory_files },
     });
     if (failures.length > 0) {
+      lock.keepForCleanup();
       throw new DataImportError(
         `The import failed and some of what it wrote could not be removed (${failures.slice(0, 5).join(', ')}). Run the import again to retry the cleanup.`,
         500,
         { cause },
       );
     }
-    await clearImportMarker(deps.globalSettingsStore).catch(() => undefined);
     if (cause instanceof DataImportError) {
       throw cause;
     }

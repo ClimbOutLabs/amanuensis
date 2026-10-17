@@ -17,7 +17,7 @@ import {
   TurnInputItemSchema,
   TurnStateSchema,
 } from '@truefoundry/trueforge-core/agent-session';
-import { EventType, ModelMessageEventSchema, TaskStateSchema, type JsonValue } from '@truefoundry/trueforge-core/core';
+import { ModelMessageEventSchema, TaskStateSchema } from '@truefoundry/trueforge-core/core';
 import {
   AgentInfoSchema,
   AgentParentSchema,
@@ -56,17 +56,6 @@ export type ImportEvent = z.infer<typeof ImportEventSchema>;
 /** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
 const ArchivedInstantSchema = z.iso.datetime({ offset: true });
 
-const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(JsonValueSchema),
-    z.record(z.string(), JsonValueSchema),
-  ]),
-);
-
 /** A finished subagent's marker, composed from the message schemas that own its parts. */
 const ImportCompletionMarkerSchema = z.object({
   type: z.enum(['done', 'error']),
@@ -86,8 +75,6 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
   mcp_server_name: true,
   original_tool_name: true,
   is_deferred: true,
-  is_client_side: true,
-  is_thread_creation: true,
   description: true,
   read_only_hint: true,
   destructive_hint: true,
@@ -114,18 +101,14 @@ const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx)
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
 
-/** Context entries that record an admission or a dispatch; they are matched by call id, so an archive must not carry any. */
-const ARCHIVED_ADMISSION_TYPES: ReadonlySet<string> = new Set([
-  EventType.USER_TOOL_APPROVAL,
-  EventType.TOOL_EXECUTION_STARTED,
-  'internal.tool.execution_tracking',
-]);
-
 type ImportContextMessage = z.infer<typeof ImportContextMessageSchema>;
 
-/** Drops archived decisions and markers, then answers every call still open so the chat can take a new message. */
+/**
+ * Keeps only conversation messages; decisions and dispatch markers are matched by call id, so an
+ * archive carries none of them. Every call still open is then answered so the chat can take a new message.
+ */
 function withoutArchivedAdmissions(context: ImportContextMessage[]): ImportContextMessage[] {
-  const kept = context.filter(message => !('type' in message && ARCHIVED_ADMISSION_TYPES.has(message.type)));
+  const kept = context.filter(message => 'role' in message);
   const answered = new Set<string>();
   for (const message of kept) {
     if ('role' in message && message.role === 'tool') {
@@ -147,15 +130,20 @@ function withoutArchivedAdmissions(context: ImportContextMessage[]): ImportConte
   return out;
 }
 
-const ImportThreadSnapshotSchema = z.looseObject({
+/** A subagent's checkout path belongs to the source machine. */
+const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
+
+/**
+ * What a thread may bring back. Capability state and the tool-call memo are runtime bookkeeping
+ * the host rebuilds as the chat continues, so an archive's copies are left out.
+ */
+const ImportThreadSnapshotSchema = z.object({
   thread_id: z.string().min(1),
   context: z.array(ImportContextMessageSchema).transform(withoutArchivedAdmissions),
   current_context_usage: CurrentContextUsageSchema,
   parent: AgentParentSchema.nullable().optional(),
-  agent_info: AgentInfoSchema.nullable().optional(),
+  agent_info: ImportAgentInfoSchema.nullable().optional(),
   completion: ImportCompletionMarkerSchema.nullable().optional(),
-  capability_state: z.record(z.string(), JsonValueSchema).nullable(),
-  tool_call_memo: z.looseObject({}).optional(),
   task_state: TaskStateSchema.optional(),
 });
 export type ImportThreadSnapshot = z.infer<typeof ImportThreadSnapshotSchema>;

@@ -14,6 +14,7 @@ import { beginTurnExecution } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -58,6 +59,10 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
 
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
+  }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
   }
 }
 

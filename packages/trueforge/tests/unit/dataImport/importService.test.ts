@@ -46,7 +46,7 @@ import {
   seedRichInstance,
   type DataTransferSeedStores,
 } from '../../fixtures/dataTransferSeed';
-import { listAt, parseJson, recordAt, recordsAt } from '../../fixtures/jsonGuards';
+import { listAt, parseJson, recordAt, recordsAt, type JsonRecord } from '../../fixtures/jsonGuards';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(120_000);
@@ -541,6 +541,58 @@ async function importError(instance: Instance, archive: Buffer, deps = importDep
   return runDataImport(deps, importRequest(archive)).catch((caught: unknown) => caught);
 }
 
+/** An import that failed and could not remove what it wrote, as an interrupted process leaves it. */
+async function leaveInterruptedImport(target: Instance, archive: Buffer): Promise<void> {
+  await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
+    target.db,
+  );
+  const stuckStore = new Proxy(target.stores.sessionStore, {
+    get: (store, property, receiver) =>
+      property === 'deleteSession' ? () => Promise.reject(new Error('stuck')) : Reflect.get(store, property, receiver),
+  });
+  const error = await importError(target, archive, { ...importDeps(target), sessionStore: stuckStore });
+  expect(error).toMatchObject({ status: 500 });
+  await sql`DROP TRIGGER import_fail_space_update`.execute(target.db);
+  expect(await chatsOf(target, 'bob')).toHaveLength(3);
+}
+
+/** A fresh copy of the import module, as another process would load it, so no in-process state is shared. */
+async function separateRunDataImport(): Promise<typeof runDataImport> {
+  let separate: typeof runDataImport = runDataImport;
+  await jest.isolateModulesAsync(async () => {
+    separate = (await import('../../../src/dataImport/importService')).runDataImport;
+  });
+  expect(separate).not.toBe(runDataImport);
+  return separate;
+}
+
+function outcomeOf(run: Promise<unknown>): Promise<{ ok: true } | { ok: false; error: unknown }> {
+  return run.then(
+    () => ({ ok: true }),
+    (error: unknown) => ({ ok: false, error }),
+  );
+}
+
+/** Starts an import elsewhere that stalls in the knowledge step, after every chat is written, and never finishes. */
+async function startHungImportElsewhere(target: Instance, archive: Buffer): Promise<void> {
+  let reachedKnowledge: () => void = () => undefined;
+  const reached = new Promise<void>(resolve => {
+    reachedKnowledge = resolve;
+  });
+  const deps: DataImportDeps<Tx> = {
+    ...importDeps(target),
+    knowledgeEmbedder: {
+      ensureReady: () => Promise.resolve(true),
+      embedPassages: () => {
+        reachedKnowledge();
+        return new Promise<number[][]>(() => undefined);
+      },
+    },
+  };
+  void outcomeOf((await separateRunDataImport())(deps, importRequest(archive)));
+  await reached;
+}
+
 describe('runDataImport keeps what the archive recorded', () => {
   it('restores chat and turn dates, totals and last activity instead of stamping now', async () => {
     const { source, archive } = await seededArchive();
@@ -645,6 +697,39 @@ describe('runDataImport keeps what the archive recorded', () => {
         'false',
       );
       expect(await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' })).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reads what compaction writes', () => {
+  it('imports a compacted chat, whose token estimates are fractional', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-compacted');
+    try {
+      // Context estimates are text length over four, so compaction records them with fractions.
+      const compacted = await editScheduledTurn(archive, ({ turnEntry, thread }) => {
+        thread['current_context_usage'] = { prompt_tokens: 1234.75, completion_tokens: 0 };
+        listAt(turnEntry['events'], 'events').push({
+          type: 'agent.context.compaction',
+          id: 'event-compaction',
+          created_at: '2026-09-10T06:00:30.000Z',
+          thread_id: 'main',
+          mode: 'conversation',
+          tokens_before: 5000.5,
+          tokens_after: 1234.75,
+          summary_chars: 120,
+          outcome: 'applied',
+        });
+      });
+      await runDataImport(importDeps(target), importRequest(compacted));
+      const { turn, events } = await importedScheduledChat(target);
+      expect(turn?.snapshot.threads['main']?.current_context_usage.prompt_tokens).toBe(1234.75);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'agent.context.compaction', tokens_after: 1234.75 }),
+      );
     } finally {
       await source.close();
       await target.close();
@@ -1039,6 +1124,117 @@ describe('runDataImport failure handling', () => {
       expect(refusals[0]).toMatchObject({ status: 409 });
       expect(await chatsOf(target, 'bob')).toHaveLength(3);
     } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('retrying after an interrupted import keeps a chat the owner changed in the meantime', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-crash-kept');
+    try {
+      await leaveInterruptedImport(target, archive);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      // The app came back up with the partial data and the owner kept using a chat.
+      await target.stores.sessionStore.updateSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+        agent: undefined,
+        title: 'Kept using after the crash',
+        metadata: undefined,
+      });
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('has been used since then, so nothing was removed');
+      const kept = await target.stores.sessionStore.getSession({ tenant_id: TENANT, session_id: SEED_IDS.sessionMain });
+      expect(kept?.title).toBe('Kept using after the crash');
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeDefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('retrying after an interrupted import keeps everything when the owner added a chat in the meantime', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-crash-new');
+    try {
+      await leaveInterruptedImport(target, archive);
+      await target.stores.sessionStore.createSession({
+        tenant_id: TENANT,
+        session_id: 'owner-new-chat',
+        created_by_subject: { subject_id: 'bob', subject_type: 'user', subject_display_name: 'bob' },
+        agent: { type: 'inline', spec: await sourceAgentManifest(source) },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const error = await importError(target, archive);
+      expect(error).toMatchObject({ status: 409 });
+      expect(await chatsOf(target, 'bob')).toHaveLength(4);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('does not mistake an import still running in another process for an interrupted one', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-live-elsewhere');
+    try {
+      await startHungImportElsewhere(target, archive);
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      const error = await importError(target, archive);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error).toMatchObject({ status: 409 });
+      expect(error instanceof Error && error.message).toContain('Another import is already running');
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('lets exactly one of two imports started together in separate processes take the instance', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-two-processes');
+    try {
+      const first = await separateRunDataImport();
+      const second = await separateRunDataImport();
+      const outcomes = await Promise.all([
+        outcomeOf(first(importDeps(target), importRequest(archive))),
+        outcomeOf(second(importDeps(target), importRequest(archive))),
+      ]);
+      // A separate module copy cannot finish the write (its database classes differ), so only the lock is compared.
+      const busy = outcomes.filter(
+        outcome =>
+          !outcome.ok &&
+          outcome.error instanceof Error &&
+          outcome.error.message.startsWith('Another import is already running'),
+      );
+      expect(busy).toHaveLength(1);
+      expect(busy[0]).toMatchObject({ error: { status: 409 } });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('cleans up after an import whose process stopped renewing its marker', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-stale');
+    const now = Date.now();
+    try {
+      await startHungImportElsewhere(target, archive);
+      jest.spyOn(Date, 'now').mockReturnValue(now + 2 * 60_000);
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.chats).toBe(3);
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
+    } finally {
+      jest.restoreAllMocks();
       await source.close();
       await target.close();
     }
@@ -1473,6 +1669,30 @@ async function withPendingApproval(
   });
 }
 
+/** Rewrites the scheduled chat's first turn inside sessions.json. */
+async function editScheduledTurn(
+  archive: Buffer,
+  mutate: (edit: { entry: JsonRecord; turnEntry: JsonRecord; turn: JsonRecord; thread: JsonRecord }) => void,
+): Promise<Buffer> {
+  return repack(archive, entries => {
+    const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+    const entry = recordAt(
+      sessions.find(
+        item => recordAt(recordAt(item, 'entry')['session'], 'session')['session_id'] === SEED_IDS.sessionScheduled,
+      ),
+      'scheduled chat',
+    );
+    const turnEntry = recordAt(listAt(entry['turns'], 'turns')[0], 'turn entry');
+    const turn = recordAt(turnEntry['turn'], 'turn');
+    const thread = recordAt(
+      recordAt(recordAt(turn['snapshot'], 'snapshot')['threads'], 'threads')['main'],
+      'main thread',
+    );
+    mutate({ entry, turnEntry, turn, thread });
+    entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+  });
+}
+
 function pendingToolInfo(extra: Record<string, unknown>): Record<string, unknown> {
   return {
     type: 'mcp',
@@ -1743,6 +1963,129 @@ describe('runDataImport never restores a live approval', () => {
       const { turn } = await importedScheduledChat(target);
       expect(turn?.snapshot.mcp_servers).toBeNull();
       expect(turn?.snapshot.sandbox_info).toBeNull();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('leaves out thread runtime state: capability state, the tool-call memo and a subagent checkout path', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-runtime-state');
+    try {
+      const planted = await editScheduledTurn(archive, ({ thread }) => {
+        thread['capability_state'] = { planted: { grant: 'all' } };
+        // An empty memo used to reach the runtime and fail the chat's next turn.
+        thread['tool_call_memo'] = {};
+        thread['agent_info'] = { type: 'dynamic', name: 'Sub', input: 'go', workspace_cwd: '/home/alice/secret-repo' };
+      });
+      await runDataImport(importDeps(target), importRequest(planted));
+      const { turn } = await importedScheduledChat(target);
+      const main = turn?.snapshot.threads['main'];
+      expect(main?.capability_state ?? null).toBeNull();
+      expect(main?.tool_call_memo).toBeUndefined();
+      expect(main?.agent_info).toEqual({ type: 'dynamic', name: 'Sub', input: 'go' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('clears the client-side and subagent marks of archived calls', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-call-marks');
+    try {
+      const planted = await withPendingApproval(
+        archive,
+        pendingToolInfo({ is_client_side: true, is_thread_creation: true }),
+        '{}',
+      );
+      await runDataImport(importDeps(target), importRequest(planted));
+      const { call } = await importedScheduledChat(target);
+      expect(call?.tool_info).toBeDefined();
+      expect(call?.tool_info).not.toHaveProperty('is_client_side');
+      expect(call?.tool_info).not.toHaveProperty('is_thread_creation');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it.each(['error', 'cancelled'] as const)(
+    'never brings back an approval card from a turn that ended as %s',
+    async status => {
+      const { source, archive } = await seededArchive();
+      const target = await makeInstance(`target-card-${status}`);
+      try {
+        const paused = await withPendingApproval(archive, pendingToolInfo({ tier: 1 }), '{}');
+        const rewritten = await editScheduledTurn(paused, ({ turn }) => {
+          turn['state'] =
+            status === 'error'
+              ? { status: 'error', message: 'stopped', completed_at: '2026-10-16T09:00:01.000Z' }
+              : { status: 'cancelled', reason: 'client-cancelled', completed_at: '2026-10-16T09:00:01.000Z' };
+        });
+        await runDataImport(importDeps(target), importRequest(rewritten));
+        const { turn, events } = await importedScheduledChat(target);
+        expect(turn?.state.status).toBe(status);
+        expect(events.some(event => event.type === 'tool.approval_required')).toBe(false);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    },
+  );
+
+  it('does not report an approval the owner answered in a later turn as expired', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-answered');
+    try {
+      const paused = await withPendingApproval(archive, pendingToolInfo({ tier: 1 }), '{}');
+      const answered = await editScheduledTurn(paused, ({ entry, turn, thread }) => {
+        const nextContext = [
+          ...listAt(thread['context'], 'context'),
+          { role: 'tool', tool_call_id: PENDING_CALL_ID, content: 'Sent.' },
+          { role: 'assistant', content: 'The report is sent.' },
+        ];
+        const nextTurn = {
+          ...turn,
+          turn_id: 'session-2-turn-2',
+          previous_turn_id: 'session-2-turn-1',
+          ancestor_ids: ['session-2-turn-1'],
+          input: [
+            {
+              type: 'user.tool_approval',
+              thread_id: 'main',
+              tool_call_id: PENDING_CALL_ID,
+              approval: { status: 'allow' },
+            },
+          ],
+          state: { status: 'done', output: null, required_actions: [], completed_at: '2026-10-16T09:05:01.000Z' },
+          snapshot: {
+            threads: { main: { ...thread, context: nextContext } },
+            mcp_servers: null,
+          },
+          created_at: '2026-10-16T09:05:00.000Z',
+          updated_at: '2026-10-16T09:05:01.000Z',
+        };
+        listAt(entry['turns'], 'turns').push({ turn: nextTurn, events: [] });
+        recordAt(entry['session'], 'session')['last_turn_id'] = 'session-2-turn-2';
+      });
+      await runDataImport(importDeps(target), importRequest(answered));
+      const { turn, events } = await importedScheduledChat(target);
+      expect(turn?.state.status).toBe('done');
+      expect(events.some(event => event.type === 'model.message' && event.content === EXPIRED_APPROVAL_NOTICE)).toBe(
+        false,
+      );
+      const next = await target.stores.sessionStore.getTurn({
+        session_id: SEED_IDS.sessionScheduled,
+        turn_id: 'session-2-turn-2',
+      });
+      expect(next?.state.status).toBe('done');
+      expect(next?.snapshot.threads['main']?.context).toContainEqual({
+        role: 'tool',
+        tool_call_id: PENDING_CALL_ID,
+        content: 'Sent.',
+      });
     } finally {
       await source.close();
       await target.close();
