@@ -7,6 +7,7 @@
 #        install.sh instance refresh <name>
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
+#        install.sh restore [<name>] [<time> | --latest]
 #        install.sh upgrade [--check] [--force]
 #        install.sh docker
 #        install.sh command
@@ -65,6 +66,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/demo.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
+# shellcheck source=lib/restore.sh
+. "$INSTALLER_DIR/lib/restore.sh"
 # shellcheck source=lib/upgrade.sh
 . "$INSTALLER_DIR/lib/upgrade.sh"
 # shellcheck source=lib/plan.sh
@@ -130,6 +133,8 @@ Amanuensis installer
   install.sh instance refresh <name>
   install.sh backup [<name>]
   install.sh backups daily|off
+  install.sh restore [<name>] [<time> | --latest]
+                                  put an instance back from a backup; with no time it lists them and asks which
   install.sh upgrade [--check] [--force]
   install.sh docker               install or start Docker, or update its Compose plugin, asking before sudo
   install.sh command              put the aman command and its files back
@@ -215,6 +220,7 @@ parse_args() {
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
+      --latest) OPT_LATEST=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
@@ -233,13 +239,14 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls) COMMAND=$arg ;;
+              instance | backup | backups | restore | upgrade | docker | command | tls) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
+          2:restore | 3:restore) restore_take_arg "$arg" ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
         ;;
@@ -298,6 +305,9 @@ check_demo_options() {
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
   fi
+  if [ "$OPT_LATEST" = 1 ] && [ "$COMMAND" != restore ]; then
+    usage_die "--latest applies to restore"
+  fi
   if [ -n "$OPT_DEMO_USER" ]; then
     [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
     valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
@@ -311,6 +321,7 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  restore_on_exit
   lock_release
   exit "$rc"
 }
@@ -350,6 +361,7 @@ main() {
     install) cmd_install ;;
     backup) cmd_backup ;;
     backups) cmd_backups ;;
+    restore) cmd_restore ;;
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;

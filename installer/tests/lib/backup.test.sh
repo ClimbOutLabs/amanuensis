@@ -23,7 +23,7 @@ test_backup_layout_and_modes() {
   assert_contains "$(cat "$dir/main/db.sqlite")" "SQLITE-OF-aman_main_data"
   assert_file "$dir/main/manifest.json"
   assert_eq "$([ -d "$dir/main/memory" ] && [ -d "$dir/main/persona-knowledge" ] && echo yes)" yes "memory and persona directories"
-  assert_contains "$(cat "$dir/main/dex.tar")" "TAR-OF-aman_main_dex"
+  assert_contains "$(tr -d '\0' <"$dir/main/dex.tar")" "TAR-OF-aman_main_dex"
   assert_contains "$(cat "$dir/SHA256SUMS")" "main/db.sqlite"
   if (cd "$dir" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then t_pass; else t_fail "checksums do not verify"; fi
   assert_not_contains "$(cat "$STUB_LOG")" "bind" "no bind mounts"
@@ -114,7 +114,24 @@ test_unknown_instance_and_empty_machine() {
   sandbox_drop
 }
 
+test_backup_with_a_lost_settings_file() {
+  t_begin "a settings file that is already lost is told, and the rest of the backup is still made"
+  sandbox_new
+  install_machine
+  rm "$AMAN_HOME/instances/main/dex.env"
+  run_install backup
+  assert_rc 0
+  assert_contains "$ERR" "The settings file dex.env of main is missing, so this backup does not include it."
+  local dir
+  dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  assert_file "$dir/main/env"
+  assert_file "$dir/main/db.sqlite"
+  assert_no_path "$dir/main/dex.env"
+  sandbox_drop
+}
+
 test_backup_layout_and_modes
+test_backup_with_a_lost_settings_file
 test_backup_runs_the_cli_with_a_target
 test_backup_of_stopped_instance
 test_leftover_scratch_volume_is_pruned

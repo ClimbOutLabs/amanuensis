@@ -619,6 +619,12 @@ describe('backup age check', () => {
     assert.equal(check.fix, 'Run aman backup');
   });
 
+  it('tells a person with a backup that aman restore goes back to it', () => {
+    make();
+    world.backup('20261008T120000Z', 2);
+    assert.match(machine(world.json(), 'backup').detail, /To go back to one: aman restore$/);
+  });
+
   it('judges by the newest backup', () => {
     make();
     world.backup('old', 30);
@@ -628,6 +634,14 @@ describe('backup age check', () => {
 });
 
 describe('instance settings file', () => {
+  it('names the restore command when the settings file is missing', () => {
+    make();
+    rmSync(path.join(world.instanceDir('main'), '.env'));
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.fix, 'Put it back from a backup with: aman restore main');
+  });
+
   it('fails with a chmod fix when the file is readable by others', () => {
     make();
     world.writeEnv('main', 0o644);
@@ -1526,6 +1540,14 @@ describe('aman backup and aman upgrade', () => {
     assert.equal(world.shim(['upgrade', '--check']).code, 0);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup main`));
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  it('run aman restore through the installer with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['restore', 'main', '--latest']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} restore main --latest`));
   });
 
   it('say plainly when the folder Aman was installed from is gone', () => {

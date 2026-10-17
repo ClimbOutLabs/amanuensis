@@ -281,7 +281,10 @@ case "$cmd" in
         [ -n "$scratch_vol" ] || exit 2
         out=$S/scratchfs/$scratch_vol
         mkdir -p "$out/memory" "$out/persona-knowledge"
-        printf 'SQLITE-OF-%s\n' "$data_vol" >"$out/db.sqlite"
+        # $S/db_gen stands for what the instance holds now, so a test can change it between two backups.
+        gen=$(cat "$S/db_gen" 2>/dev/null || true)
+        printf 'SQLITE-OF-%s%s\n' "$data_vol" "${gen:+-$gen}" >"$out/db.sqlite"
+        printf 'memory-%s\n' "${gen:-none}" >"$out/memory/note.md"
         printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
         exit 0
@@ -296,11 +299,25 @@ case "$cmd" in
         [ -f "$S/unreadable/$vol" ] && exit 1
         exit 0
         ;;
+      *"tar -x"*)
+        # A restore into a volume: the folder named by the second to last argument is emptied, then the stream is unpacked.
+        args=("$@")
+        path=${args[${#args[@]} - 2]}
+        echo "restore-tar $vol $path $*" >>"$S/restore_runs"
+        case " ${STUB_RESTORE_FAIL:-} " in *" $vol "*) cat >/dev/null; echo "restore failed" >&2; exit 1 ;; esac
+        rm -rf "${S:?}/volfs/$vol$path"
+        mkdir -p "$S/volfs/$vol$path"
+        tar -x -C "$S/volfs/$vol$path" -f -
+        exit $?
+        ;;
       *" tar "*)
         if [ -d "$S/scratchfs/$vol" ]; then
           tar -C "$S/scratchfs/$vol" -cf - .
         else
-          printf 'TAR-OF-%s\n' "$vol"
+          # A real archive of one file, so a restore can unpack it.
+          mkdir -p "$S/tarsrc"
+          printf 'dex-%s\n' "$(cat "$S/db_gen" 2>/dev/null || true)" >"$S/tarsrc/TAR-OF-$vol"
+          tar -C "$S/tarsrc" -cf - "TAR-OF-$vol"
         fi
         exit 0
         ;;
@@ -343,6 +360,11 @@ case "$cmd" in
         if [ -n "${STUB_UP_FAIL_LOG:-}" ] && [ "$proj" != aman-machine ]; then
           mkdir -p "$S/failed"
           : >"$S/failed/$proj"
+          echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
+          exit 1
+        fi
+        if [ -n "${STUB_UP_FAIL_ONCE:-}" ] && [ "$proj" != aman-machine ] && [ ! -f "$S/up_failed_once" ]; then
+          : >"$S/up_failed_once"
           echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
           exit 1
         fi
