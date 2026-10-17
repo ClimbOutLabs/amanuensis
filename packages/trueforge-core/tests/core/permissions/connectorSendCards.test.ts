@@ -188,3 +188,31 @@ describe('attachments and refusal wording', () => {
     expect(decision.reason_detail).toContain(step);
   });
 });
+
+describe('hidden sends passed as arguments', () => {
+  test.each([
+    ['send_message', { draftId: 'd1', to: ['shown@example.com'] }],
+    ['send_message', { draft_id: 'd1', to: ['shown@example.com'], body: 'hi' }],
+    ['reply', { messageId: 'm1', replyAll: true, to: ['a@example.com'], body: 'ok' }],
+    ['reply', { messageId: 'm1', reply_all: true, to: ['a@example.com'], body: 'ok' }],
+    ['reply', { messageId: 'm1', replyAll: 'true', to: ['a@example.com'], body: 'ok' }],
+    ['reply', { messageId: 'm1', reply_all: 'True', to: ['a@example.com'], body: 'ok' }],
+    ['reply', { messageId: 'm1', options: { replyAll: '1' }, to: ['a@example.com'] }],
+  ])('%s is refused for %j', async (name, params) => {
+    expectRefused(await classify(mailCall(name, params)));
+  });
+
+  test('a plain reply with replyAll switched off is still carded', async () => {
+    const decision = await classify(
+      mailCall('reply', { messageId: 'm1', replyAll: false, to: ['a@example.com'], body: 'ok' }),
+    );
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  test('a send_message with only a draft id stays refused', async () => {
+    const decision = await classify(mailCall('send_message', { draftId: 'd1' }));
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('destination_unverifiable');
+  });
+});

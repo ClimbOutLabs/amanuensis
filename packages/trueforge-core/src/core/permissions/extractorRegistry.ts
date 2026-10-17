@@ -556,14 +556,59 @@ export interface ExtractionResult {
 /** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
 const HIDDEN_SEND_PHRASES = ['reply_all', 'send_draft'];
 
+const DRAFT_KEY_SET = new Set(['draftid']);
+const REPLY_ALL_KEY_SET = new Set(['replyall']);
+
+function isTruthyFlag(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
+  }
+  return value === true || value === 1;
+}
+
+function isPresent(value: unknown): boolean {
+  return value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === '');
+}
+
+/** True when any argument, at any depth, has a key in `keys` whose value passes `test`. */
+function hasArgument(input: {
+  value: unknown;
+  keys: Set<string>;
+  test: (v: unknown) => boolean;
+  depth?: number;
+}): boolean {
+  const { value, keys, test, depth = 0 } = input;
+  if (Array.isArray(value)) {
+    return (
+      depth <= NESTED_RECIPIENT_MAX_DEPTH &&
+      value.some(item => hasArgument({ value: item, keys, test, depth: depth + 1 }))
+    );
+  }
+  if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
+    return false;
+  }
+  return Object.entries(value).some(([key, field]) =>
+    keys.has(normalizeKey(key)) && test(field) ? true : hasArgument({ value: field, keys, test, depth: depth + 1 }),
+  );
+}
+
+/** A send that names a stored draft or asks to reply to everyone fills in its audience or text after approval. */
+function hasHiddenSendArgument(params: Record<string, unknown>): boolean {
+  return (
+    hasArgument({ value: params, keys: DRAFT_KEY_SET, test: isPresent }) ||
+    hasArgument({ value: params, keys: REPLY_ALL_KEY_SET, test: isTruthyFlag })
+  );
+}
+
 function incompleteSend(input: {
   sends: boolean;
+  params: Record<string, unknown>;
   words: string;
   needs_recipient: boolean;
   fields: ExtractedCardFields;
   truncated: boolean;
 }): string | null {
-  if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES)) {
+  if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES) || (input.sends && hasHiddenSendArgument(input.params))) {
     return 'This tool sends to recipients or content that are filled in after approval, so the card cannot show them. Send a new message that names every recipient and includes its full text.';
   }
   if (input.sends && input.truncated) {
@@ -633,6 +678,7 @@ export function extractCardFields(input: {
     sends,
     incomplete_send: incompleteSend({
       sends,
+      params: input.canonical_params,
       words,
       needs_recipient: family?.sends === 'recipient',
       fields,
