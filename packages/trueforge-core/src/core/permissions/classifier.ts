@@ -76,6 +76,7 @@ import {
   sha256FileContent,
   splitCompoundSegments,
   splitWordsLenient,
+  writeTargetTouchesCommandSearchPath,
   writeTargetTouchesGitControl,
   type FileDigest,
   type PathResolution,
@@ -1045,6 +1046,32 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       },
       reason: 'git_control_write',
       reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
+  // A program written to a command search directory is found by name ahead of the system programs.
+  if (writeTargetTouchesCommandSearchPath({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
+    return tier3Decision({
+      card: {
+        plain_what: `Write \`${target}\`, a folder the sandbox looks in to find programs.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'A program saved there can run in place of a trusted one.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: 'command_path_write',
+      reason_detail: 'Writes into folders on the sandbox command path always require approval.',
       sensitive_read: false,
       approval_token_id: await mintPlainToken({
         ctx,

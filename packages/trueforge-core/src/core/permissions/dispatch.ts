@@ -32,6 +32,7 @@ import {
   isUnderRoot,
   lexicalPath,
   splitWordsLenient,
+  writeTargetTouchesCommandSearchPath,
   writeTargetTouchesGitControl,
   type FileDigest,
   type PathResolution,
@@ -150,6 +151,9 @@ function verifyTier2Containment(input: {
       }
       if (writeTargetTouchesGitControl({ p: target, cwd, resolution })) {
         return 'Tier 2 write target is Git control state at dispatch; request approval again.';
+      }
+      if (writeTargetTouchesCommandSearchPath({ p: target, cwd, resolution })) {
+        return 'Tier 2 write target is a command search folder at dispatch; request approval again.';
       }
     }
     return undefined;

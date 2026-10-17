@@ -190,6 +190,41 @@ export function isGitControlPath(p: string): boolean {
   });
 }
 
+const COMMAND_SEARCH_DIRS: readonly (readonly [string, string])[] = [
+  ['.venv', 'bin'],
+  ['mcp-client', 'bin'],
+];
+
+/**
+ * True when a path lies in a directory the sandbox puts on its command search path (`.venv/bin`,
+ * `mcp-client/bin`). A file written there is found by name ahead of the system programs.
+ */
+export function isCommandSearchPath(p: string): boolean {
+  const names = p.split(/[\\/]+/u).map(component => component.replace(/[. ]+$/u, '').toLowerCase());
+  return names.some(
+    (name, index) =>
+      COMMAND_SEARCH_DIRS.some(([dir, child]) => name === dir.replace(/[. ]+$/u, '') && names[index + 1] === child) &&
+      index + 2 < names.length,
+  );
+}
+
+function writeTargetMatches(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+  matches: (p: string) => boolean;
+}): boolean {
+  if (input.matches(input.p)) {
+    return true;
+  }
+  if (input.resolution === 'remote') {
+    const identity = lexicalPath(input);
+    return identity === null || input.matches(identity);
+  }
+  const identities = [canonicalWriteTarget(input), canonicalFileIdentity(input)];
+  return identities.some(identity => identity !== null && input.matches(identity)) || isDanglingSymlink(input);
+}
+
 /**
  * True when a write target is, or resolves through symlinks to, git control
  * state. Checks the path as written and its resolved identities (parent
@@ -200,15 +235,16 @@ export function writeTargetTouchesGitControl(input: {
   cwd: string;
   resolution?: PathResolution | undefined;
 }): boolean {
-  if (isGitControlPath(input.p)) {
-    return true;
-  }
-  if (input.resolution === 'remote') {
-    const identity = lexicalPath(input);
-    return identity === null || isGitControlPath(identity);
-  }
-  const identities = [canonicalWriteTarget(input), canonicalFileIdentity(input)];
-  return identities.some(identity => identity !== null && isGitControlPath(identity)) || isDanglingSymlink(input);
+  return writeTargetMatches({ ...input, matches: isGitControlPath });
+}
+
+/** True when a write target is, or resolves through symlinks to, a command search directory. */
+export function writeTargetTouchesCommandSearchPath(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): boolean {
+  return writeTargetMatches({ ...input, matches: isCommandSearchPath });
 }
 
 /** A dangling symlink cannot be resolved, so its destination is unknown: fail closed. */

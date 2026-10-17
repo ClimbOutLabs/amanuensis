@@ -90,6 +90,16 @@ export type VerifiedWorkspaceCommitResult =
   | { status: 'blocked'; reason: string }
   | { status: 'indeterminate'; result: ExecResult };
 
+/**
+ * The sandbox PATH leads with workspace directories the model can write to, so the wrapper's own helpers
+ * (flock, sh, mkdir, git, ...) run on this fixed system PATH. The caller's PATH is restored only for the command.
+ */
+const WRAPPER_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+
+const WRAPPER_PATH_SETUP = ['tf_user_path="$PATH"', `PATH=${shellEscape(WRAPPER_PATH)}`, 'export tf_user_path PATH'];
+
+const RESTORE_USER_PATH = 'PATH="$tf_user_path"; export PATH; ';
+
 function gitPathCommand(workspaceRoot: string, path: string): string {
   return `git -C ${shellEscape(workspaceRoot)} rev-parse --path-format=absolute --git-path ${shellEscape(path)}`;
 }
@@ -125,8 +135,10 @@ function buildWorkspaceLockCommand(input: { workspaceRoot: string; command: stri
     'state_after="$(cat "$state_file" 2>/dev/null || true)"; ' +
     'case "$state_after" in \'\'|*:idle) ;; *) exit 125 ;; esac; ' +
     'if test "$state_before" != "$state_after" || test -e "$barrier"; then exit 125; fi; ' +
+    RESTORE_USER_PATH +
     input.command;
   return [
+    ...WRAPPER_PATH_SETUP,
     `lock_path="${lockPath}"`,
     `control_dir="${controlPath}"`,
     'barrier="$control_dir/trueforge-workspace-termination"',
@@ -167,12 +179,13 @@ function buildTimedEvidenceCaptureCommand(input: {
     'if test -e "$cancellation"; then rm -f "$marker"; exit 125; fi',
     // Keep the provider command in a child shell so it cannot replace the
     // marker-owning process-group leader's signal disposition with a trap.
-    `sh -c ${shellEscape(input.command)}`,
+    `sh -c ${shellEscape(RESTORE_USER_PATH + input.command)}`,
     'status=$?',
     'rm -f "$marker"',
     'exit "$status"',
   ].join('; ');
   return [
+    ...WRAPPER_PATH_SETUP,
     `lock_path="${lockPath}"`,
     `control_dir="${controlPath}"`,
     'barrier="$control_dir/trueforge-workspace-termination"',
@@ -236,6 +249,7 @@ export function workspaceTerminationCommand(input: { workspaceRoot: string; oper
     `flock -x "$lock_path" sh -c ${shellEscape(finalizeCommand)}`,
   ].join(' && ');
   return [
+    ...WRAPPER_PATH_SETUP,
     `control_dir="${controlPath}"`,
     `lock_path="${lockPath}"`,
     'mkdir -p "$control_dir" "$(dirname "$lock_path")"',

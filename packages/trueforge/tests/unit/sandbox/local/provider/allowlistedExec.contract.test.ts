@@ -92,6 +92,7 @@ describe('allowlisted commands run the program that was classified (real LocalSa
     ['cat hello.txt', '.venv/bin/cat', 'hello'],
     ['nice ls hello.txt', '.venv/bin/nice', 'hello.txt'],
     ['ls hello.txt', '.venv/bin/flock', 'hello.txt'],
+    ['ls hello.txt', 'mcp-client/bin/sh', 'hello.txt'],
   ])('a planted program cannot stand in for the safe `%s`', async (command, plantedAt, realOutput) => {
     const marker = join(sandboxId, 'planted-ran');
     await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');

@@ -487,6 +487,26 @@ describe('Suite B - workspace containment escapes', () => {
     }
   });
 
+  test('writes into folders on the sandbox command path are Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      for (const dir of ['.venv/bin', 'mcp-client/bin', 'sub/.venv/bin', '.venv/lib']) {
+        mkdirSync(join(ws, dir), { recursive: true });
+      }
+      const ctx = makeCtx({ workspace_cwd: ws });
+      for (const tool of ['write_file', 'replace_text']) {
+        for (const path of ['.venv/bin/flock', 'mcp-client/bin/sh', 'sub/.venv/bin/cat']) {
+          const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
+          expect(decision.tier).toBe(3);
+          expect(decision.reason).toBe('command_path_write');
+        }
+        expect((await classifyTier(action(tool, { path: '.venv/lib/x.py', content: 'x' }), ctx)).tier).toBe(2);
+      }
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('B8 GAP: writes to git control files and symlinks into .git are Tier 3', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     try {

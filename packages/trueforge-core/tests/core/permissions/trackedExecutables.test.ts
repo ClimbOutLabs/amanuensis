@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
+  isCommandSearchPath,
   isGitControlPath,
   observeShellCreatedFiles,
   skipWrapperPrefix,
@@ -109,6 +110,15 @@ describe('isGitControlPath', () => {
 
   test.each(['src/index.ts', '.gitignore', 'git/notes.md', 'a.git/x', '.github/workflows/ci.yml'])('allows %s', p => {
     expect(isGitControlPath(p)).toBe(false);
+  });
+});
+
+describe('isCommandSearchPath', () => {
+  test.each(['.venv/bin/flock', 'mcp-client/bin/x', 'a/.VENV/bin/sh', '/ws/.venv/bin/cat'])('flags %s', p => {
+    expect(isCommandSearchPath(p)).toBe(true);
+  });
+  test.each(['.venv/lib/x.py', 'bin/ls', 'mcp-client/readme.md', '.venv/bin', 'src/venv/bin/x'])('allows %s', p => {
+    expect(isCommandSearchPath(p)).toBe(false);
   });
 });
 
