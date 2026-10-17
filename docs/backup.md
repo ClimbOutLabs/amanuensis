@@ -1,13 +1,13 @@
 ---
 title: 'Backups'
-description: 'How aman backup works and how to copy backups off your computer.'
+description: 'How Aman backs up your data and how to copy a backup off your computer.'
 ---
 
-## How `aman backup` works
+## How backups work
 
-Run `aman backup` to back up every Aman instance on this computer, or `aman backup <name>` for one. `installer/install.sh backup` does the same.
+When you install Aman, it asks "Back up automatically every day?". If you keep the answer yes, Aman backs up every instance on this computer by itself, every night at 03:30. You do not need to do anything.
 
-Each backup is a new folder named with the date and time, under `~/.amanuensis/backups/` (or `<home>/backups/` if you installed with `--home`). For each instance it holds:
+Each backup is a new folder inside the hidden `.amanuensis` folder in your home folder, in a folder called `backups`. A backup's name starts with its date, year first, so 17 October 2026 reads `20261017`. For each instance it holds:
 
 - the database with your chats, personas and settings, checked after copying;
 - your memory files and persona knowledge files;
@@ -17,16 +17,24 @@ Each backup is a new folder named with the date and time, under `~/.amanuensis/b
 
 If any part fails, the half-written folder is removed. The last 7 backups are kept and older ones are deleted.
 
-The installer turns on a daily backup at 03:30. Turn it off or on again with `installer/install.sh backups off` or `installer/install.sh backups daily`. `aman doctor backup` checks that backups are recent and scheduled.
-
 Backups are not encrypted, and they contain secrets such as your model key. Treat them like a password file.
 
-## Copy backups off this computer
+## Copy a backup off this computer
 
-A backup on the same disk does not help if that disk dies. Copy it to another disk, a network drive or a folder your cloud drive syncs.
+A backup on the same disk does not help if that disk dies. Copy the newest backup to another disk, a network drive or a folder your cloud drive syncs.
 
-1. Make a fresh backup: `aman backup`.
-2. Copy the backups folder to the other drive, for example: `rsync -a ~/.amanuensis/backups/ /path/to/drive/aman-backups/`
-3. Check the copy: `cd /path/to/drive/aman-backups/<newest folder> && sha256sum -c SHA256SUMS` (on a Mac, use `shasum -a 256 -c SHA256SUMS`).
+On a Mac:
+
+1. Open Finder and choose **Go**, then **Home**.
+2. Press Command+Shift+full stop to show hidden folders.
+3. Open `.amanuensis`, then `backups`.
+4. Drag the backup with the newest date onto the other drive.
+
+On Linux:
+
+1. Open **Files**. It starts in your home folder.
+2. Press Ctrl+H to show hidden folders.
+3. Open `.amanuensis`, then `backups`.
+4. Copy the backup with the newest date and paste it onto the other drive.
 
 Because backups hold secrets, pick a drive only you can read, or use one that encrypts what it stores.
