@@ -13,16 +13,34 @@
 
 export const REDACTED = '[redacted]';
 
-/**
- * Stored values shorter than this are not matched in content. A short value (a compose default
- * database password such as `trueforge`) is also an ordinary word, and redacting it rewrites the
- * owner's names and chat text; issued keys and tokens are longer.
- */
+/** Stored values at least this long are matched anywhere in content. */
 export const MIN_SECRET_LENGTH = 16;
+
+/**
+ * Shorter stored values, down to this length, are matched only as a whole token and only when
+ * they hold a digit or symbol. A letters-only value (the compose default database password
+ * `trueforge`) is also an ordinary word, and matching it would rewrite the owner's chat text.
+ */
+export const MIN_TOKEN_SECRET_LENGTH = 8;
+
+function isMatchableSecret(candidate: string): boolean {
+  return (
+    candidate.length >= MIN_SECRET_LENGTH ||
+    (candidate.length >= MIN_TOKEN_SECRET_LENGTH && /[^A-Za-z]/.test(candidate))
+  );
+}
+
+/** Long values match anywhere; short ones only where no letter or digit touches either end. */
+function secretMatcher(secret: string): RegExp {
+  const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return secret.length >= MIN_SECRET_LENGTH
+    ? new RegExp(escaped, 'g')
+    : new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'g');
+}
 
 const STRUCTURAL_KEYS: ReadonlySet<string> = new Set(['key', 'path', 'digest', 'archive_entry']);
 
-/** Identity fields an import keys on; they are never rewritten, or the restored data no longer fits together. */
+/** Identity fields an import keys on; their string values are never rewritten, or the restored data no longer fits together. */
 function isStructuralKey(key: string): boolean {
   return key === 'id' || key.endsWith('_id') || key === 'name' || key.endsWith('_name') || STRUCTURAL_KEYS.has(key);
 }
@@ -79,7 +97,7 @@ export function normalizeSecrets(values: Iterable<string | null | undefined>): s
     // A header value is often `Bearer <token>`: the bare token is what a user
     // pastes into a chat or a memory note, so each whitespace part counts too.
     for (const candidate of [value, ...value.split(/\s+/)]) {
-      if (candidate.length >= MIN_SECRET_LENGTH) {
+      if (isMatchableSecret(candidate)) {
         seen.add(candidate);
       }
     }
@@ -105,17 +123,11 @@ export interface ExportScrubber {
 /** `secrets` is the normalized exact-match set (see {@link normalizeSecrets}). */
 export function createExportScrubber(secrets: readonly string[]): ExportScrubber {
   let redactions = 0;
+  const secretMatchers = secrets.map(secretMatcher);
 
   function scrubText(input: string): string {
     let out = input;
-    for (const secret of secrets) {
-      const parts = out.split(secret);
-      if (parts.length > 1) {
-        redactions += parts.length - 1;
-        out = parts.join(REDACTED);
-      }
-    }
-    for (const pattern of SECRET_VALUE_PATTERNS) {
+    for (const pattern of [...secretMatchers, ...SECRET_VALUE_PATTERNS]) {
       out = out.replace(pattern, () => {
         redactions += 1;
         return REDACTED;
@@ -125,7 +137,7 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
   }
 
   function holdsSecret(input: string): boolean {
-    return secrets.some(secret => input.includes(secret)) || SECRET_VALUE_PATTERNS.some(p => input.search(p) !== -1);
+    return [...secretMatchers, ...SECRET_VALUE_PATTERNS].some(pattern => input.search(pattern) !== -1);
   }
 
   function scrubUrl(input: string): string {
@@ -175,7 +187,7 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
         if (SECRET_KEYS.has(key.toLowerCase()) && entry !== null && entry !== '') {
           redactions += 1;
           out[key] = REDACTED;
-        } else if (isStructuralKey(key)) {
+        } else if (isStructuralKey(key) && typeof entry === 'string') {
           out[key] = entry;
         } else {
           out[key] = scrubJson(entry);

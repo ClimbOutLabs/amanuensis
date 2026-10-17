@@ -13,11 +13,37 @@ const sample = {
 };
 
 describe('export secret scrubbing', () => {
-  it('normalizeSecrets drops short values, adds the parts of a header value, and sorts longest first', () => {
+  it('normalizeSecrets keeps long values and short ones with a digit or symbol, and sorts longest first', () => {
     expect(
-      normalizeSecrets(['short', 'a-much-longer-secret', 'sixteen-chars-ok', 'mid-length-1', null, undefined]),
-    ).toEqual(['a-much-longer-secret', 'sixteen-chars-ok']);
+      normalizeSecrets([
+        'short',
+        'a-much-longer-secret',
+        'sixteen-chars-ok',
+        'mid-length-1',
+        'trueforge',
+        null,
+        undefined,
+      ]),
+    ).toEqual(['a-much-longer-secret', 'sixteen-chars-ok', 'mid-length-1']);
     expect(normalizeSecrets(['Bearer abcdefgh12345678'])).toEqual(['Bearer abcdefgh12345678', 'abcdefgh12345678']);
+  });
+
+  it('redacts a short stored value only where it stands as a whole token', () => {
+    const scrubber = createExportScrubber(normalizeSecrets(['hdr-4471', 'Bearer tf12key9']));
+    expect(scrubber.text('header hdr-4471, and "tf12key9" pasted')).toBe('header [redacted], and "[redacted]" pasted');
+    expect(scrubber.text('xhdr-4471 and tf12key9z stay')).toBe('xhdr-4471 and tf12key9z stay');
+    expect(scrubber.redactionCount()).toBe(2);
+  });
+
+  it('scrubs objects and arrays under an identity key; only string values there are exempt', () => {
+    const secret = 'stored-secret-value-1234';
+    const scrubber = createExportScrubber([secret]);
+    expect(scrubber.json({ key: { token: 'abc', note: `use ${secret}` }, name: [`x ${secret}`], id: secret })).toEqual({
+      key: { token: REDACTED, note: 'use [redacted]' },
+      name: ['x [redacted]'],
+      id: secret,
+    });
+    expect(scrubber.redactionCount()).toBe(3);
   });
 
   it('removes stored secrets from nested JSON values, leaving the text around them', () => {
