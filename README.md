@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.14-brightgreen.svg" alt="Node.js >= 22.14">
   <img src="https://img.shields.io/badge/pnpm-11.16_via_Corepack-orange.svg" alt="pnpm 11.16 via Corepack">
   <img src="https://img.shields.io/badge/local--first-blue.svg" alt="local-first">
@@ -92,12 +92,14 @@ Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
 
 ## Development quick start
 
-> **Install from a release, not from main.** The commands below pin the latest stable release. For the newest stable release, see [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The `main` branch is active development and may be unstable.
+> **`main` is active development and may be unstable.** To build a tagged release instead, add `--branch <tag>` to the `git clone` below; tags are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
+>
+> A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
 
 The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs a local Dex identity provider in Docker, or point it at any OIDC provider. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
 
 ```bash
-git clone --branch v0.1.0 https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
@@ -119,7 +121,7 @@ When you're ready to run Aman as a shared service instead of a personal install.
 The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and needs no external identity provider; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
 
 ```bash
-git clone --branch v0.1.0 https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 cp packages/trueforge/.env.example packages/trueforge/.env
 docker compose up --build
 ```
@@ -240,4 +242,4 @@ Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforg
 
 Amanuensis is derived from [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness by [TrueFoundry](https://truefoundry.com). Upstream package names, copyright notices, source lineage, and attribution are retained; see [the attribution note](docs/AMANUENSIS_ATTRIBUTION.md).
 
-Licensed under the [MIT License](LICENSE), Copyright 2024–2026 TrueFoundry.
+Licensed under the Mozilla Public License 2.0. Portions derived from TrueForge are MIT licensed, Copyright 2024-2026 TrueFoundry; see NOTICE. Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
