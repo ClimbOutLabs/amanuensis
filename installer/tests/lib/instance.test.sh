@@ -229,6 +229,7 @@ test_public_url_rules() {
   assert_eq "$(env_value pub OIDC_ISSUER_URL)" "https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "issuer: https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "https://aman.example.invalid/api/v1/auth/callback"
+  assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "http: 127.0.0.1:"
   assert_contains "$OUT" "Requirements for your reverse proxy"
   assert_eq "$(env_value pub TRUSTED_PROXY_ADDRESSES)" "172.30.0.1" "the app believes the proxy that reaches it through the network's gateway"
   assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"

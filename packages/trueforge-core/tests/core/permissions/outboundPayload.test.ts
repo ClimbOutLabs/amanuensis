@@ -190,18 +190,23 @@ describe('recipients on the card', () => {
     expect(card.recipient).toBe('a@x.example, deep@x.example');
   });
 
-  test('spoofing characters in a recipient or destination are escaped on the card', async () => {
+  test('spoofing characters in a destination are escaped on the card of a non-mail send', async () => {
     const card = cardOf(
       await classifyTier(
         connectorCall({
-          tool_name: 'send_email',
-          params: { to: 'a@x.example‮gnp.exe', url: 'https://x.example/​path' },
+          tool_name: 'post_message',
+          params: { to: 'a@x.example', url: 'https://x.example/\u200Bpath' },
         }),
         makeCtx(),
       ),
     );
-    expect(card.recipient).toBe('a@x.example\\u{202E}gnp.exe');
     expect(card.destination).toBe('https://x.example/\\u{200B}path');
+  });
+
+  test('a recipient with spoofing characters is refused instead of carded', async () => {
+    const decision = await send({ to: 'a@x.example\u202Egnp.exe' });
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('incomplete_send_card');
   });
 });
 

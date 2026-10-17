@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveCatalogLogoSrc, toDarkCatalogLogoUrl, toLightCatalogLogoUrl } from '@/utils/catalogLogo.js';
+import {
+  resolveCatalogLogoSrc,
+  toDarkCatalogLogoUrl,
+  toLightCatalogLogoUrl,
+  toSameOriginCatalogLogoUrl,
+} from '@/utils/catalogLogo.js';
 
 describe('toDarkCatalogLogoUrl', () => {
   it('inserts -dark before the file extension', () => {
@@ -69,5 +74,28 @@ describe('resolveCatalogLogoSrc', () => {
     expect(resolveCatalogLogoSrc({ src: 'https://assets.example/icon-dark.png', mode: 'dark' })).toBe(
       'https://assets.example/icon-dark.png',
     );
+  });
+});
+
+describe('toSameOriginCatalogLogoUrl', () => {
+  it('moves a logo onto an app path under the base, keeping host and file name', () => {
+    expect(
+      toSameOriginCatalogLogoUrl({ logo: 'https://assets.production.truefoundry.com/openai.svg', baseUrl: '/' }),
+    ).toBe('/catalog-logos/https/assets.production.truefoundry.com/openai.svg');
+    expect(toSameOriginCatalogLogoUrl({ logo: 'https://h.example:8443/a/b.png', baseUrl: '/prefix' })).toBe(
+      '/prefix/catalog-logos/https/h.example:8443/a/b.png',
+    );
+  });
+
+  it('keeps the file name last so the dark sibling lookup still works', () => {
+    const local = toSameOriginCatalogLogoUrl({ logo: 'https://h.example/x.svg', baseUrl: '/' });
+    expect(toDarkCatalogLogoUrl(local)).toBe('/catalog-logos/https/h.example/x-dark.svg');
+  });
+
+  it('leaves non-http values alone', () => {
+    expect(toSameOriginCatalogLogoUrl({ logo: 'data:image/png;base64,AAAA', baseUrl: '/' })).toBe(
+      'data:image/png;base64,AAAA',
+    );
+    expect(toSameOriginCatalogLogoUrl({ logo: 'not a url', baseUrl: '/' })).toBe('not a url');
   });
 });

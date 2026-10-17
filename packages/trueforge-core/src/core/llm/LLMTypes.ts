@@ -176,6 +176,10 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  audit_description: z
+    .string()
+    .optional()
+    .describe('Audit-row text used instead of the approval card sentence. Never model-authored, never wire-visible.'),
   held_for_owner: z
     .object({ expires_at: z.string(), duplicate: z.literal(true).optional() })
     .optional()

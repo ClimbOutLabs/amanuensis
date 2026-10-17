@@ -5,6 +5,8 @@ import path from 'node:path';
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import { z } from 'zod';
 
+import { makeCreateTurnInput } from '../../../../trueforge-core/tests/agent-session/testHelpers';
+
 import { createExportData, type ExportDataDeps } from '../../../src/cli/exportData';
 import { openExportDataSession } from '../../../src/cli/exportData/runtime';
 import type { ExportDataSession } from '../../../src/cli/exportData/session';
@@ -218,6 +220,34 @@ describe('aman export-data --user', () => {
     expect(await readdir(scratch)).toEqual(['there.zip']);
   });
 
+  it('passes the settings file given with --secrets-env to the export, and refuses one it cannot read', async () => {
+    const settings = path.join(scratch, 'old.env');
+    await writeFile(settings, 'NEBIUS_API_KEY=invented-model-key-0000aaaa1111\n');
+    const seen: (string | undefined)[] = [];
+    const session = fakeSession({
+      exportUser: ({ secretsEnvText }) => {
+        seen.push(secretsEnvText);
+        return Promise.resolve({ bytesWritten: 0, entries: 0, redactions: 0, personaVaultsLeftOut: 0 });
+      },
+    });
+    await command(session)({
+      args: ['--user', 'alice', '--out', path.join(scratch, 'a.zip'), '--secrets-env', settings],
+      io: fakeIo(),
+    });
+    await command(session)({ args: ['--user', 'alice', '--out', path.join(scratch, 'b.zip')], io: fakeIo() });
+    expect(seen).toEqual(['NEBIUS_API_KEY=invented-model-key-0000aaaa1111\n', undefined]);
+
+    await expect(
+      command(session)({
+        args: ['--user', 'alice', '--out', path.join(scratch, 'c.zip'), '--secrets-env', path.join(scratch, 'none')],
+        io: fakeIo(),
+      }),
+    ).rejects.toThrow(/could not be read\. Pass --secrets-env a readable \.env file\./);
+    await expect(command(session)({ args: ['--list-users', '--secrets-env', settings], io: fakeIo() })).rejects.toThrow(
+      '--list-users takes no other options except --migrate.',
+    );
+  });
+
   it('names the user ids that exist when the one asked for owns nothing', async () => {
     await expect(
       command(fakeSession())({ args: ['--user', 'mallory', '--out', path.join(scratch, 'x.zip')], io: fakeIo() }),
@@ -412,6 +442,74 @@ describe('aman export-data against a real database', () => {
     expect(archive.includes(Buffer.from('locker code'))).toBe(false);
     expect(archive.includes(Buffer.from('bank pin'))).toBe(false);
     expect(archive.includes(Buffer.from('Alice runs on Sundays'))).toBe(true);
+  });
+
+  it("blanks the credentials of the old stack's settings file in memory and chat text", async () => {
+    const modelKey = 'invented-model-key-0000aaaa1111';
+    const clientSecret = 'invented-client-secret-2222bbbb';
+    const model = 'tokenfactory/nvidia/nemotron-3-super-120b-a12b';
+    await database(async db => {
+      await seedSession(db, 'alice', 'a1');
+      await new SqliteSessionStore(db).createTurn(
+        makeCreateTurnInput({
+          sessionId: 'a1',
+          turnId: 'a1-turn-1',
+          new_context_appends: [
+            {
+              thread_id: 'main',
+              context: [
+                { role: 'user', content: `my key is ${modelKey}` },
+                { role: 'assistant', content: 'The daily cap is 20000000 tokens.' },
+              ],
+              current_context_usage: null,
+            },
+          ],
+        }),
+      );
+      await new SqliteAgentStore(db).createAgent({
+        tenant_id: 'default',
+        created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'Alice' },
+        name: 'writer',
+        description: 'Writes.',
+        manifest: AgentSpecSchema.parse({ model: { name: model }, instructions: 'Write.' }),
+        external_id: null,
+      });
+    });
+    const settings = path.join(scratch, 'old.env');
+    await writeFile(
+      settings,
+      [
+        '# old stack settings',
+        `NEBIUS_API_KEY=${modelKey}`,
+        `export OIDC_CLIENT_SECRET="${clientSecret}"`,
+        'PUBLIC_BASE_URL=http://localhost:8791/a-long-public-address',
+        'TOKEN_FACTORY_MODEL=nvidia/nemotron-3-super-120b-a12b',
+        'TOKEN_FACTORY_DAILY_TOKEN_CAP=20000000',
+      ].join('\n'),
+    );
+    await mkdir(path.join(scratch, 'memory', 'default'), { recursive: true });
+    await writeFile(
+      path.join(scratch, 'memory', 'default', 'MEMORY.md'),
+      `# Notes\n\nkey ${modelKey} and secret ${clientSecret} at http://localhost:8791/a-long-public-address\n`,
+    );
+
+    const out = path.join(scratch, 'alice.zip');
+    const io = fakeIo();
+    expect(
+      await real({ args: ['--user', 'alice', '--out', out, '--include-instance-data', '--secrets-env', settings], io }),
+    ).toBe(0);
+    const { readFile } = await import('node:fs/promises');
+    const entries = readZipEntries(await readFile(out));
+    const chats = zipEntryText(entries, 'chats.json');
+    expect(chats).toContain('my key is [redacted]');
+    expect(chats).toContain('The daily cap is 20000000 tokens.');
+    expect(zipEntryText(entries, 'sessions.json')).not.toContain(modelKey);
+    expect(zipEntryText(entries, 'agents.json')).toContain(`"${model}"`);
+    const memory = zipEntryText(entries, 'memory/default/MEMORY.md');
+    expect(memory).not.toContain(modelKey);
+    expect(memory).not.toContain(clientSecret);
+    expect(memory).toContain('[redacted]');
+    expect(memory).toContain('http://localhost:8791/a-long-public-address');
   });
 
   it('fails with one plain line, and writes nothing, when the database does not exist', async () => {
