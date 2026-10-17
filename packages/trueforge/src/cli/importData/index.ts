@@ -9,6 +9,7 @@ import { UsageError } from '../io';
 import type { ImportDataSession } from './session';
 
 const USAGE = `Usage: aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]
+       aman import-data --check-ready
 
 Restores a data export (made by aman export-data) into this instance. Each person gets a new
 instance. Everything imported belongs to this instance's owner. Only import a file you exported
@@ -19,6 +20,7 @@ machine that runs it; there is no button in the app.
   --in <file.zip>         The export archive
   --user <owner>          The owner's user id (default: the owner); any other id is refused
   --display-name <name>   How the owner is named on imported chats (default: the user id)
+  --check-ready           Print whether the search model the import needs is on disk yet, and change nothing
 
 Prints the result as JSON on stdout and a summary on stderr. Exit codes: 0 ok, 1 failure, 2 usage.
 `;
@@ -26,11 +28,14 @@ Prints the result as JSON on stdout and a summary on stderr. Exit codes: 0 ok, 1
 export interface ImportDataDeps {
   /** Opens the instance's stores; only called once the command line has been accepted. */
   open(): Promise<ImportDataSession>;
+  /** Whether the search model persona knowledge is indexed with is on disk; reads no database. */
+  searchModelReady(): Promise<boolean>;
 }
 
 /** Server config validates the environment on import, so the real wiring loads it only when asked. */
 const lazyDeps: ImportDataDeps = {
   open: async () => (await import('./runtime')).openImportDataSession(),
+  searchModelReady: async () => (await import('./runtime')).isSearchModelReady(),
 };
 
 /** `parseArgs` errors are not `instanceof Error` everywhere (separate realms), so the message is read structurally. */
@@ -47,6 +52,7 @@ function parseOptions(args: readonly string[]) {
         in: { type: 'string' },
         user: { type: 'string' },
         'display-name': { type: 'string' },
+        'check-ready': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
       allowPositionals: false,
@@ -93,6 +99,14 @@ export function createImportData(deps: ImportDataDeps): Command {
     const options = parseOptions(args);
     if (options.help) {
       await io.stderr(USAGE);
+      return 0;
+    }
+    if (options['check-ready']) {
+      if (options.in !== undefined || options.user !== undefined || options['display-name'] !== undefined) {
+        throw new UsageError('--check-ready takes no other options.');
+      }
+      const ready = await deps.searchModelReady();
+      await io.stdout(`${JSON.stringify({ search_model: ready ? 'ready' : 'downloading' })}\n`);
       return 0;
     }
     if (options.in === undefined || options.in.trim() === '') {

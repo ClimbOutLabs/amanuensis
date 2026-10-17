@@ -94,4 +94,43 @@ describe('TFYSandboxProvider layout', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it('returns only the status when the sandbox server rejects a command', async () => {
+    const planted = 'plantedGitToken0000000000';
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const command =
+        typeof body === 'object' && body !== null && 'command' in body && typeof body.command === 'string'
+          ? body.command
+          : '';
+      if (command.startsWith('printf')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ success: true, response: { exitCode: 0, result: '/root\n/usr/bin\n' } })),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: [{ input: { env: { GIT_TOKEN: planted } } }] }), { status: 422 }),
+      );
+    });
+    try {
+      const provider = new TFYSandboxProvider({
+        serverUrl: 'http://sandbox.example',
+        natsBridgeUrl: 'ws://nats.example',
+        tenantName: 'acme',
+        fileMaxBytesForDownload: 1024,
+        logger: makeSilentLogger(),
+      });
+      const result = await provider.exec({
+        sandboxId: 'acme.00000000-0000-0000-0000-000000000001',
+        command: 'git fetch',
+        env: { GIT_TOKEN: planted },
+        signal: undefined,
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(planted);
+      expect(JSON.stringify(result)).toContain('422');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });

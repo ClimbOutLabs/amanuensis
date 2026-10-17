@@ -1,5 +1,5 @@
 import type { SandboxInfo } from '@truefoundry/trueforge-core/core';
-import { sandboxAttachmentStager } from '../../../src/runtime/gmailCapability';
+import { sandboxAttachmentStager } from '../../../src/runtime/googleCapability';
 
 const PDF_BYTES = Buffer.from('%PDF-1.4 synthetic');
 const CREATED: SandboxInfo = { sandbox_id: 'sb-1' };
