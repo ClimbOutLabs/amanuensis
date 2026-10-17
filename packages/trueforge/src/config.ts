@@ -983,6 +983,8 @@ export interface SharedServerConfiguration {
    * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
    */
   SANDBOX_BACKEND: SandboxBackend;
+  /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
+  INSTALLER_INSTANCE: string;
   /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
   SANDBOX_SLOTS: number;
   /**
@@ -1747,6 +1749,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: 'docker',
   }),
   SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  INSTALLER_INSTANCE: getEnv('INSTALLER_INSTANCE', { defaultValue: '' })?.trim() ?? '',
   SANDBOX_SLOTS: parsePositiveInt({
     envKey: 'SANDBOX_SLOTS',
     raw: getEnv('SANDBOX_SLOTS'),
