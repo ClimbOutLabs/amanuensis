@@ -1055,14 +1055,14 @@ describe('runDataImport failure handling', () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-client-memory');
     try {
-      const retained: { content: string; context?: string }[] = [];
-      const fakeClient = {
-        listEntries: () => Promise.resolve({ ok: true as const, entries: [] }),
-        retain: ({ items }: { items: { content: string; context?: string }[] }) => {
+      const retained: { content: string; context?: string | undefined }[] = [];
+      const fakeClient: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
           retained.push(...items);
-          return Promise.resolve({ ok: true as const });
+          return Promise.resolve({ ok: true });
         },
-      } as unknown as MemoryClient;
+      };
       const result = await runDataImport(
         importDeps(target, { kind: 'client', client: fakeClient }),
         importRequest(archive),
@@ -1076,6 +1076,46 @@ describe('runDataImport failure handling', () => {
       expect(contents.join('\n')).not.toContain('train book project');
       const personaItem = retained.find(item => item.content === SEED_MEMORY.personaEntryText);
       expect(personaItem?.context).toBe('persona:Researcher');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport reads memory markers the way the vault does', () => {
+  it('keeps an edit with its edit time and ignores a marker with an action the vault does not know', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-markers');
+    try {
+      const markers = [
+        '## 2026-10-02T00:00:00.000Z',
+        '',
+        `> vault-entry md:${TENANT}:2026-10-01.md#1 deleted`,
+        '',
+        '## 2026-10-05T07:00:00.000Z',
+        '',
+        `> vault-entry md:${TENANT}:2026-10-01.md#0 updated {"text":"Likes coffee now."}`,
+        '',
+        '## 2026-10-06T07:00:00.000Z',
+        '',
+        `> vault-entry md:${TENANT}:2026-10-01.md#0 mystery`,
+        '',
+      ].join('\n');
+      const edited = await repack(archive, entries => {
+        entries.set(`memory/${TENANT}/.vault-tombstones.md`, Buffer.from(markers, 'utf8'));
+      });
+      const retained: { content: string; timestamp: string }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items.map(item => ({ content: item.content, timestamp: item.timestamp })));
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(edited));
+      expect(retained.find(item => item.content === 'Likes coffee now.')?.timestamp).toBe('2026-10-05T07:00:00.000Z');
+      expect(retained.map(item => item.content)).not.toContain(SEED_MEMORY.keptEntryText);
     } finally {
       await source.close();
       await target.close();

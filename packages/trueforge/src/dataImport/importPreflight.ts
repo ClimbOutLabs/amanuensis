@@ -10,11 +10,17 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
-import { vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
+import {
+  CURATED_MEMORY_FILE,
+  DAILY_LOG_FILE_PATTERN,
+  VAULT_TOMBSTONES_FILE,
+  vaultFilesystemNamespace,
+} from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { DataImportError } from './importError';
 
-export type MemoryImportTarget = { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: MemoryClient };
+export type MemoryImportTarget =
+  { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: Pick<MemoryClient, 'listEntries' | 'retain'> };
 
 export interface PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -69,17 +75,17 @@ async function markdownMemoryHasContent(markdownDir: string, tenantId: string): 
     .filter(name => name === tenantSeg || name.startsWith(`${tenantSeg}__`));
   for (const dirName of dirNames) {
     const dirPath = path.join(markdownDir, dirName);
-    const memoryMd = path.join(dirPath, 'MEMORY.md');
+    const memoryMd = path.join(dirPath, CURATED_MEMORY_FILE);
     if (existsSync(memoryMd) && (await readFile(memoryMd, 'utf8')).trim().length > 0) {
       return true;
     }
-    if (existsSync(path.join(dirPath, '.vault-tombstones.md'))) {
+    if (existsSync(path.join(dirPath, VAULT_TOMBSTONES_FILE))) {
       return true;
     }
     const dailyDir = path.join(dirPath, 'memory');
     if (existsSync(dailyDir)) {
       const dailyFiles = (await readdir(dailyDir, { withFileTypes: true })).filter(
-        entry => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name),
+        entry => entry.isFile() && DAILY_LOG_FILE_PATTERN.test(entry.name),
       );
       if (dailyFiles.length > 0) {
         return true;

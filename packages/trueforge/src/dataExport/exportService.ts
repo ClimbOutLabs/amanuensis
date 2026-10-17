@@ -40,6 +40,9 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
 import {
+  CURATED_MEMORY_FILE,
+  DAILY_LOG_FILE_PATTERN,
+  VAULT_TOMBSTONES_FILE,
   personaForVaultFilesystemNamespace,
   personaVaultNamespace,
   sanitizeNamespace,
@@ -521,7 +524,7 @@ async function writeUploadedFile<TTransaction>(
   }
 }
 
-const MARKDOWN_MEMORY_FILES = ['MEMORY.md', '.vault-tombstones.md'] as const;
+const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE] as const;
 
 async function writeMemoryEntries<TTransaction>(
   context: ExportContext<TTransaction>,
@@ -631,7 +634,7 @@ async function writeMarkdownMemoryFiles<TTransaction>(
       continue;
     }
     const dailyFiles = (await readdir(dailyDir, { withFileTypes: true }))
-      .filter(entry => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name))
+      .filter(entry => entry.isFile() && DAILY_LOG_FILE_PATTERN.test(entry.name))
       .map(entry => entry.name)
       .sort();
     for (const fileName of dailyFiles) {

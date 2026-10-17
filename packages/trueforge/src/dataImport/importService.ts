@@ -43,7 +43,17 @@ import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
-import { splitEntries, vaultEntryTimestamp, vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
+import {
+  applyVaultTombstones,
+  CURATED_MEMORY_FILE,
+  dailyLogEntries,
+  dailyLogFileAt,
+  latestTombstonesByEntry,
+  parseVaultTombstones,
+  VAULT_TOMBSTONES_FILE,
+  vaultEntryTimestamp,
+  vaultFilesystemNamespace,
+} from '../runtime/memory/markdownMemoryFiles';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import type { ImportDataResult } from '../schemas/dataImport';
@@ -414,47 +424,13 @@ function validateCrossReferences(contents: ArchiveContents): void {
   }
 }
 
-interface Tombstone {
-  action: string;
-  text: string | undefined;
-}
-
-/** Parses `.vault-tombstones.md` marker blocks: later markers win per entry id. */
-function parseVaultTombstones(content: string): Map<string, Tombstone> {
-  const tombstones = new Map<string, Tombstone>();
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('> vault-entry ')) {
-      continue;
-    }
-    const rest = line.slice('> vault-entry '.length).trim();
-    const [entryId, action, ...payloadParts] = rest.split(/\s+/);
-    if (entryId === undefined || action === undefined) {
-      continue;
-    }
-    let text: string | undefined;
-    if (payloadParts.length > 0) {
-      try {
-        const payload: unknown = JSON.parse(payloadParts.join(' '));
-        if (typeof payload === 'object' && payload !== null && 'text' in payload) {
-          const value = payload.text;
-          text = typeof value === 'string' ? value : undefined;
-        }
-      } catch {
-        text = undefined;
-      }
-    }
-    tombstones.set(entryId, { action, text });
-  }
-  return tombstones;
-}
-
 interface ParsedMemoryNamespace {
   seg: string;
   curated: string | undefined;
-  entries: { id: string; file: string; text: string }[];
+  entries: { id: string; file: string; text: string; timestamp: string }[];
 }
 
-/** Groups the archive's memory/ files by namespace segment and applies tombstones, mirroring the vault scanner. */
+/** Groups the archive's memory/ files by namespace segment and resolves them the way the vault reads them. */
 function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemoryNamespace[] {
   const bySeg = new Map<string, { curated?: string; tombstones?: string; daily: Map<string, string> }>();
   for (const [name, data] of files) {
@@ -473,40 +449,32 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
       bucket = { daily: new Map() };
       bySeg.set(seg, bucket);
     }
-    if (inner === 'MEMORY.md') {
+    const dailyFile = dailyLogFileAt(inner);
+    if (inner === CURATED_MEMORY_FILE) {
       bucket.curated = data.toString('utf8');
-    } else if (inner === '.vault-tombstones.md') {
+    } else if (inner === VAULT_TOMBSTONES_FILE) {
       bucket.tombstones = data.toString('utf8');
-    } else if (/^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(inner)) {
-      bucket.daily.set(inner.slice('memory/'.length), data.toString('utf8'));
+    } else if (dailyFile !== undefined) {
+      bucket.daily.set(dailyFile, data.toString('utf8'));
     }
   }
 
   const namespaces: ParsedMemoryNamespace[] = [];
   for (const [seg, bucket] of bySeg) {
-    const tombstones =
-      bucket.tombstones === undefined ? new Map<string, Tombstone>() : parseVaultTombstones(bucket.tombstones);
-    const entries: ParsedMemoryNamespace['entries'] = [];
-    for (const file of [...bucket.daily.keys()].sort()) {
-      const content = bucket.daily.get(file);
-      if (content === undefined) {
-        continue;
-      }
-      const parts = splitEntries(content);
-      for (let index = 0; index < parts.length; index += 1) {
-        const text = parts[index];
-        if (text === undefined) {
-          continue;
-        }
-        const id = `md:${seg}:${file}#${String(index)}`;
-        const tombstone = tombstones.get(id);
-        if (tombstone === undefined) {
-          entries.push({ id, file, text });
-        } else if (tombstone.action === 'updated' && tombstone.text !== undefined) {
-          entries.push({ id, file, text: tombstone.text });
-        }
-      }
-    }
+    const tombstones = bucket.tombstones === undefined ? [] : parseVaultTombstones(bucket.tombstones);
+    const latest = latestTombstonesByEntry(tombstones);
+    const scanned = [...bucket.daily.keys()]
+      .sort()
+      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '' }));
+    const entries = applyVaultTombstones(scanned, tombstones).map(entry => {
+      const tombstone = latest.get(entry.id);
+      return {
+        id: entry.id,
+        file: entry.file,
+        text: entry.text,
+        timestamp: tombstone?.action === 'updated' ? tombstone.timestamp : vaultEntryTimestamp(entry),
+      };
+    });
     const curated = bucket.curated?.trim();
     namespaces.push({ seg, curated: curated === undefined || curated.length === 0 ? undefined : curated, entries });
   }
@@ -580,7 +548,7 @@ function buildRetainItems(
       const itemContext = vaultContext ?? entryContext;
       items.push({
         content: body,
-        timestamp: vaultEntryTimestamp({ file: entry.file, text: entry.text }),
+        timestamp: entry.timestamp,
         document_id: documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
       });
@@ -688,7 +656,7 @@ function planMarkdownMemory(
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
 ): PlannedMemoryFile[] {
   const planned: PlannedMemoryFile[] = [];
-  const knownFiles = new Set(['MEMORY.md', '.vault-tombstones.md']);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
   for (const [name, data] of contents.files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -700,8 +668,7 @@ function planMarkdownMemory(
     }
     const sourceSeg = rest.slice(0, slash);
     const inner = rest.slice(slash + 1);
-    const isDaily = /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(inner);
-    if (!knownFiles.has(inner) && !isDaily) {
+    if (!knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
       continue;
     }
     const targetSeg = targetMemorySegment({
