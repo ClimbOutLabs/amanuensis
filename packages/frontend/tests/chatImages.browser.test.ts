@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -89,9 +90,12 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
   assert.equal(fixtureCsp, indexCsp, 'the fixture must run under the app shell image policy');
   assert.doesNotMatch(indexCsp, /img-src[^;]*(https?:|\*)/, 'img-src must not allow any remote host');
 
+  // Its own dependency cache: a shared one lets a parallel browser test re-optimize and reload this page.
+  const cacheDir = mkdtempSync(join(tmpdir(), 'chat-images-vite-'));
   const server = await createServer({
     configFile: false,
     root: frontendRoot,
+    cacheDir,
     logLevel: 'silent',
     server: { host: '127.0.0.1', port: 0 },
     // Same resolution as the app: workspace packages load from source, one React instance.
@@ -157,6 +161,7 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
 
       // A silent reply image and a stored sandbox image show at once, re-encoded and same-origin.
       await waitForImages(page, 2);
+      await page.waitForLoadState('networkidle', { timeout: RENDER_TIMEOUT_MS });
       await page.getByText('Show this image from example.org?').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.getByText('Show 3 images from this email?').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.getByText("The sender's servers will see that the email was opened.").waitFor();
@@ -193,5 +198,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
   } finally {
     await browser?.close();
     await server.close();
+    rmSync(cacheDir, { recursive: true, force: true });
   }
 });
