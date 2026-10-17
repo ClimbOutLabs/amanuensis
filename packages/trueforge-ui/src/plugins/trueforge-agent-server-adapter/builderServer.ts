@@ -4,6 +4,7 @@
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { AgentBuilderServer, AgentLibraryEntry, ModelSelection, SearchAgentsParams } from '../../server/types.js';
+import { toSameOriginCatalogLogoUrl } from '../../utils/catalogLogo.js';
 import { AGENTS_PAGE_DEFAULT, clampAgentsPageSize, drainAgentsList, listAgentsPage } from './agentsList.js';
 import { toUiConnectorFromReadEntry, toUiTool } from './catalogs/connectorCatalog.js';
 import { toHarnessAgentSpec, toUiAgentSpec } from './chatServer.js';
@@ -81,8 +82,11 @@ export function createHarnessBuilderServer(
       ]);
       const logosByName = modelProviderLogosByName(catalogEntries);
       return modelsBody.data.map(model => {
-        const logo = logosByName.get(model.provider.name);
-        return toModelSelection(logo === undefined ? { model } : { model, logo });
+        const catalogLogo = logosByName.get(model.provider.name);
+        if (catalogLogo === undefined) return toModelSelection({ model });
+        // The app shell only allows same-origin images, so the picker cannot load the asset host directly.
+        const logo = toSameOriginCatalogLogoUrl({ logo: catalogLogo, baseUrl: options.baseUrl ?? '/' });
+        return toModelSelection({ model, logo });
       });
     },
     // Skills require a configured sandbox provider; keep the picker empty when skill capability is off.
