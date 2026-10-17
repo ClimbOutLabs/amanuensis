@@ -1,3 +1,4 @@
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { McpCatalog } from '../catalog/McpCatalog';
@@ -7,10 +8,7 @@ import type { IMcpServerStore } from '../db/mcpServerStore';
 /** Global-settings key whose presence means the default search provider was already offered once. */
 export const DEFAULT_SEARCH_PROVIDER_SEEDED_KEY = 'default_search_provider_seeded';
 
-/** Catalog preset offered as the default web search provider: free and needs no API key. */
-export const DEFAULT_SEARCH_PROVIDER_PRESET = 'parallel-web';
-
-export type DefaultSearchProviderOutcome = 'already_offered' | 'added' | 'kept_existing' | 'no_preset';
+type DefaultSearchProviderOutcome = 'already_offered' | 'added' | 'kept_existing' | 'no_preset';
 
 /**
  * Adds the keyless search preset as the web search provider, once per instance. The marker is
@@ -36,8 +34,9 @@ export async function seedDefaultSearchProvider({
   if ((await globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY })) !== undefined) {
     return 'already_offered';
   }
-  const preset = catalog.list().find(entry => entry.name === DEFAULT_SEARCH_PROVIDER_PRESET);
-  if (preset === undefined || preset.auth !== undefined) {
+  // The catalog flags the preset to offer as the provider; one that needs a key cannot be seeded.
+  const preset = catalog.list().find(entry => entry.search_provider === true && entry.auth === undefined);
+  if (preset === undefined) {
     return 'no_preset';
   }
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
@@ -65,4 +64,27 @@ export async function seedDefaultSearchProvider({
   }
   await globalSettingsStore.setSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY, value: new Date().toISOString() });
   return hasChosen ? 'kept_existing' : 'added';
+}
+
+/** Boot step: seeds once, never in TrueFoundry mode, and never lets a failure keep the server from starting. */
+export async function seedDefaultSearchProviderAtBoot({
+  trueFoundryMode,
+  logger,
+  ...seed
+}: {
+  trueFoundryMode: boolean;
+  logger: Logger;
+  globalSettingsStore: IGlobalSettingsStore;
+  mcpServerStore: IMcpServerStore;
+  catalog: McpCatalog;
+  tenant_id: string;
+}): Promise<void> {
+  if (trueFoundryMode) {
+    return;
+  }
+  try {
+    await seedDefaultSearchProvider({ ...seed, logger });
+  } catch (error) {
+    logger.warn('Default web search connector could not be added', extractErrorLogFields(error));
+  }
 }

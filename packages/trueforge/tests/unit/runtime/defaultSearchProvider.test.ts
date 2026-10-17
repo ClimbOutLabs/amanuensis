@@ -2,6 +2,7 @@ import winston from 'winston';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
+import type { IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { DEFAULT_SENTINEL_USER_SETTINGS } from '../../../src/db/sentinelSettingsStore';
@@ -12,6 +13,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import {
   DEFAULT_SEARCH_PROVIDER_SEEDED_KEY,
   seedDefaultSearchProvider,
+  seedDefaultSearchProviderAtBoot,
 } from '../../../src/runtime/defaultSearchProvider';
 import { getMcpConnection } from '../../../src/runtime/sessionResources';
 
@@ -166,5 +168,70 @@ describe('seedDefaultSearchProvider', () => {
       f.globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY }),
     ).resolves.toBeUndefined();
     await expect(f.seed()).resolves.toBe('added');
+  });
+});
+
+describe('seedDefaultSearchProvider catalog flag', () => {
+  const entry = { type: 'remote' as const, logo: undefined, description: 'Invented search service.' };
+
+  it('offers the preset the catalog flags, whatever its name', async () => {
+    const f = await createFixture();
+    const catalog = new McpCatalog([
+      { ...entry, name: 'invented-search', url: 'https://search.example.invalid/mcp', search_provider: true },
+    ]);
+
+    await expect(f.seed({ catalog })).resolves.toBe('added');
+    expect(await f.names()).toEqual(['invented-search']);
+  });
+
+  it('does not seed a preset the catalog does not flag, even one named parallel-web', async () => {
+    const f = await createFixture();
+    const catalog = new McpCatalog([{ ...entry, name: 'parallel-web', url: PARALLEL_URL }]);
+
+    await expect(f.seed({ catalog })).resolves.toBe('no_preset');
+    expect(await f.names()).toEqual([]);
+  });
+});
+
+describe('seedDefaultSearchProviderAtBoot', () => {
+  it('writes nothing in TrueFoundry mode', async () => {
+    const f = await createFixture();
+
+    await seedDefaultSearchProviderAtBoot({
+      trueFoundryMode: true,
+      globalSettingsStore: f.globalSettingsStore,
+      mcpServerStore: f.mcpServerStore,
+      catalog: f.catalog,
+      tenant_id: TENANT,
+      logger,
+    });
+
+    expect(await f.names()).toEqual([]);
+    await expect(
+      f.globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('seeds outside TrueFoundry mode and swallows a failure so the server still starts', async () => {
+    const f = await createFixture();
+    const input = {
+      globalSettingsStore: f.globalSettingsStore,
+      mcpServerStore: f.mcpServerStore,
+      catalog: f.catalog,
+      tenant_id: TENANT,
+      logger,
+    };
+
+    await seedDefaultSearchProviderAtBoot({ ...input, trueFoundryMode: false });
+    expect(await f.names()).toEqual(['parallel-web']);
+
+    const broken: IGlobalSettingsStore = {
+      getSetting: () => Promise.reject(new Error('store is down')),
+      setSetting: () => Promise.reject(new Error('store is down')),
+      deleteSetting: () => Promise.reject(new Error('store is down')),
+    };
+    await expect(
+      seedDefaultSearchProviderAtBoot({ ...input, globalSettingsStore: broken, trueFoundryMode: false }),
+    ).resolves.toBeUndefined();
   });
 });

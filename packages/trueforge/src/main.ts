@@ -105,7 +105,7 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
-import { seedDefaultSearchProvider } from './runtime/defaultSearchProvider';
+import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -626,20 +626,15 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     }
   }
   const mcpCatalog = McpCatalog.load();
-  // Offered once so the first search needs no setup; a failure must not keep the server from starting.
-  if (!isTrueFoundryModeEnabled(configuration)) {
-    try {
-      await seedDefaultSearchProvider({
-        globalSettingsStore,
-        mcpServerStore: mcpOAuthStore,
-        catalog: mcpCatalog,
-        tenant_id: TENANT_ID,
-        logger,
-      });
-    } catch (error) {
-      logger.warn('Default web search connector could not be added', extractErrorLogFields(error));
-    }
-  }
+  // Offered once so the first search needs no setup.
+  await seedDefaultSearchProviderAtBoot({
+    trueFoundryMode: isTrueFoundryModeEnabled(configuration),
+    globalSettingsStore,
+    mcpServerStore: mcpOAuthStore,
+    catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,

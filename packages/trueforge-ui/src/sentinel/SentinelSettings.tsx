@@ -108,7 +108,9 @@ export const SentinelSettings: FC = () => {
               : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
           </p>
           <p className="mt-1 text-sm text-text-secondary">
-            {"The search service sees the search words and this computer's internet address."}
+            {
+              "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode."
+            }
           </p>
           {searchError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

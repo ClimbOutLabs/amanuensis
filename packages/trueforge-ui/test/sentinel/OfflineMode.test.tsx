@@ -104,7 +104,9 @@ describe('SentinelSettings', () => {
         </SentinelApiProvider>,
       );
       expect(
-        await screen.findByText("The search service sees the search words and this computer's internet address."),
+        await screen.findByText(
+          "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.",
+        ),
       ).toBeInTheDocument();
     },
   );
