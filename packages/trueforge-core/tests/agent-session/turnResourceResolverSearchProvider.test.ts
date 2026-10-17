@@ -40,7 +40,9 @@ function makeResolver(searchProviders: Readonly<Record<string, readonly string[]
       sessionId: null,
       listTools: () => Promise.resolve({ tools: [searchTool, unannotatedTool] }),
       callTool: () =>
-        Promise.resolve({ content: [{ type: 'text', text: 'see https://results.example.org/oslo for details' }] }),
+        Promise.resolve({
+          content: [{ type: 'text', text: JSON.stringify({ results: [{ url: 'https://results.example.org/oslo' }] }) }],
+        }),
       close: () => Promise.resolve(),
     }),
   );
