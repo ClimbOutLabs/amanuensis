@@ -220,7 +220,7 @@ describe('SaveAgentButton', () => {
     expect(within(dialog).getByRole('button', { name: 'Edit Model' })).toHaveClass('bg-ghost-button-bg');
     expect(within(dialog).getByRole('button', { name: 'Edit Connectors' })).toHaveClass('bg-ghost-button-bg');
     expect(within(dialog).getByRole('button', { name: 'Edit Skills' })).toHaveClass('bg-ghost-button-bg');
-    expect(within(dialog).queryByRole('button', { name: 'Edit Runtime Config' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Edit Run settings' })).not.toBeInTheDocument();
   });
 
   it('preserves configuration without exposing unsupported fields', async () => {
@@ -377,6 +377,8 @@ describe('SaveAgentButton', () => {
         updatedAt: '2026-08-12T08:00:00.000Z',
       }),
     );
+    expect(screen.getByRole('button', { name: 'Update Agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Agent' })).not.toBeInTheDocument();
   });
 
   it('preserves opaque mount fields without exposing resource editors', async () => {

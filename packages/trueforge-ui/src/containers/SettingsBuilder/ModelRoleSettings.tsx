@@ -24,11 +24,11 @@ const ModelRoleSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Roles and Personas</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Choose which model does which job. Connections and model inventory live under Models.
+        Choose which model does which job. Connect models under Models.
       </p>
       {specError == null ? null : (
         <p role="alert" className="text-failure-bg mt-2 text-sm">
-          Unable to save agent settings: {getErrorMessage(specError, 'The server rejected this settings change.')}
+          Unable to save agent settings: {getErrorMessage(specError, 'Could not save these settings. Try again.')}
         </p>
       )}
 
@@ -54,8 +54,8 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Coding / subagent model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Runs sub-agent threads, the delegated work the assistant hands off. A sub-agent that asks for a
-                  specific model still gets it.
+                  Runs sub-agent threads, the delegated work Aman hands off. A sub-agent that asks for a specific model
+                  still gets it.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">
@@ -67,8 +67,8 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Compaction model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Summarizes older context so long conversations stay within limits. A cheaper model is tempting, since
-                  summarizing is easier than reasoning. A poor summary degrades every later turn in the conversation.
+                  Summarizes older context so long conversations stay within limits. A poor summary hurts every later
+                  turn.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">
@@ -80,9 +80,8 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Summarization model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Condenses each turn before it is written to memory, when memory summarization is enabled — one extra
-                  model call per turn. A cheaper model works well here; a poor summary means less useful memories later,
-                  since only the summary (not the turn's exact words) is stored.
+                  Condenses each message before it is saved to memory, when memory summarization is on. Only the summary
+                  is kept, and each one costs an extra model call. A poor summary means less useful memories later.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">
@@ -91,9 +90,8 @@ const ModelRoleSettings = () => {
             </article>
           </div>
           <p className="mt-2 text-sm text-text-secondary">
-            Short control-plane checks, such as understanding a natural request to change personas, reuse the main chat
-            model. They do not need a separate model role. Session titles remain deterministic, images ride the ordinary
-            chat message, and approvals are decided without a model.
+            Short background checks, like understanding a request to change personas, reuse the main chat model. They do
+            not need their own role.
           </p>
         </section>
 

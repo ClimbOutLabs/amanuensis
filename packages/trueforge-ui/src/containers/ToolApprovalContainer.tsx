@@ -29,16 +29,16 @@ type ToolApprovalContainerProps = {
 
 function approvalGuidance(toolName: string): string | undefined {
   if (toolName === 'submit_implementation_plan') {
-    return 'Allow in this chat activates this exact plan until revoked. Allow once approves only this submission.';
+    return 'Approve for this chat turns this exact plan on until you revoke it. Approve covers only this submission.';
   }
   if (toolName === 'apply_patch' || toolName === 'replace_text') {
-    return 'Allow once approves this edit even when it is outside an active plan. The host rechecks the target before dispatch; if an earlier attempt was blocked as stale, it was not dispatched, so read the target again before approving this retry. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
+    return 'Approve covers this edit even when it is outside an active plan. The host rechecks the target before dispatch; if an earlier attempt was blocked as stale, it was not dispatched, so read the target again before approving this retry. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
   }
   if (toolName === 'write_file') {
-    return 'Allow once approves this edit even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
+    return 'Approve covers this edit even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
   }
   if (toolName === 'run_registered_command') {
-    return 'Allow once approves this check even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
+    return 'Approve covers this check even when it is outside an active plan. For a bounded set of edits and checks, ask the agent to submit an implementation plan.';
   }
   return undefined;
 }

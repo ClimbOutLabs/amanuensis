@@ -106,7 +106,7 @@ release_load() {
 build_app_image() {
   [ -f "$REPO_ROOT/Dockerfile.dev" ] || die "Dockerfile.dev not found in $REPO_ROOT; run the installer from a checkout of the repository"
   local rc=0
-  step_begin build-app "Building the Aman app (the long step)"
+  step_begin build-app "Building the Aman app (this might take a while)"
   D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     # The log tells an out-of-memory kill (exit 137) from other failures.

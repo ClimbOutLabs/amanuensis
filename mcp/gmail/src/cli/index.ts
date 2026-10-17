@@ -119,8 +119,8 @@ Credentials sources (first match wins):
   3. GMAIL_CREDENTIALS_PATH   explicit file path override
 
 Scopes (space=toggle, a=all, i=invert in interactive mode):
-  gmail.readonly, gmail.modify, gmail.compose, gmail.send,
-  gmail.labels, gmail.settings.basic, gmail.settings.sharing
+  gmail.readonly (default), gmail.modify (also allows sending), gmail.compose,
+  gmail.send, gmail.labels, gmail.full, gmail.settings.basic, gmail.settings.sharing
 `,
     );
 

@@ -480,7 +480,7 @@ const sendEmail: Operation<unknown, SendOrDraftOutput> = {
   name: "send_email",
   schema: SendEmailSchema,
   outputSchema: SendOrDraftOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose", "gmail.send"],
+  scopes: ["gmail.compose", "gmail.send"],
   handler: async (input, ctx: OperationContext) =>
     handleEmailAction("send", input as SendArgs, ctx),
 };
@@ -489,7 +489,7 @@ const replyAll: Operation<unknown, ReplyAllOutput> = {
   name: "reply_all",
   schema: ReplyAllSchema,
   outputSchema: ReplyAllOutputSchema,
-  scopes: ["gmail.modify", "gmail.compose", "gmail.send"],
+  scopes: ["gmail.compose", "gmail.send"],
   handler: async (input, ctx: OperationContext) => {
     const args = input as any;
     // Fetch the original email to get headers

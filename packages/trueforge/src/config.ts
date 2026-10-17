@@ -526,7 +526,7 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
 }
 
 /**
- * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * Parse a maps upstream URL: must be https (http only for loopback), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
 function parseMapsUrl({
@@ -549,6 +549,9 @@ function parseMapsUrl({
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+    throw new Error(`${envKey} must use https: plain http is only allowed for localhost, 127.0.0.0/8 or [::1]`);
   }
   if (parsed.search !== '' || parsed.hash !== '') {
     throw new Error(`${envKey} must not include a query or hash`);
@@ -987,6 +990,8 @@ export interface SharedServerConfiguration {
    * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
    */
   SANDBOX_BACKEND: SandboxBackend;
+  /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
+  INSTALLER_INSTANCE: string;
   /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
   SANDBOX_SLOTS: number;
   /**
@@ -1739,6 +1744,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: 'docker',
   }),
   SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  INSTALLER_INSTANCE: getEnv('INSTALLER_INSTANCE', { defaultValue: '' })?.trim() ?? '',
   SANDBOX_SLOTS: parsePositiveInt({
     envKey: 'SANDBOX_SLOTS',
     raw: getEnv('SANDBOX_SLOTS'),

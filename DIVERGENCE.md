@@ -188,6 +188,7 @@ winning side per file before resolving:
 | packages/trueforge-ui Button `size` prop, repo-wide                                           | upstream. The shared `Button`/`auiButtonClass` size union changed to `'small' \| 'large' \| 'icon'`. Swept `size="sm"`/`size="lg"` (JSX prop form) and `size: 'sm'` (object-literal `auiButtonClass(...)` call form) across `packages/trueforge-ui/src` and `test` and changed every Button-primitive call site to `'small'`/`'large'`; left `Avatar` and `SideDrawer` alone since their own `size` unions still use `'sm'`/`'lg'`/`'md'`/`'xl'` and were not touched by the upstream `Button` change. |
 | packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx ("Replace Key")    | upstream. Removed our "Replace Key" control; upstream's Edit flow (open the same form pre-seeded, leave the key field blank to keep the stored credential) already covers the same case.                                                                                                                                                                                                                                                                                                               |
 | packages/trueforge-ui/src/atoms/ComposerSections.tsx, atoms/draft/DraftComposerSections.tsx   | ours. Voice input is fork-only: `ComposerRightSection` hosts `VoiceInputButton`, and `DraftComposerRightSection` renders that section after its selectors so the mic shows in both composer modes. Keep both on a sync; taking upstream's draft section alone drops the mic from the draft composer, which is the one the app always uses.                                                                                                                                                             |
+| packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx (`PRESET_META` labels) | ours. The theme picker labels are fork-only copy (upstream defines the `trueforge`/`claude`/`chatgpt`/`gemini` preset ids in `theme/presets/index.ts` but has no `ThemeSettings.tsx`). Renamed the labels to plain names: TrueForge to "Paper", Claude to "Clay", ChatGPT to "Mint", Gemini to "Denim". Preset ids, CSS classes and token names are unchanged. On a sync, keep upstream's ids and re-apply these labels.                                                                               |
 
 `packages/trueforge-ui/src/containers/AssistantMessageContainer.tsx` and `utils/computeAgentStepsSplit.ts` (ours): substantive text before a tool call stays in the main flow, and each contiguous run of tool calls, reasoning and short narration is its own `AgentInternalsDisclosure` in part order, so a full answer written before a verifying search is not hidden in the collapsed details. `computeAgentStepsSplit` returns `runs` instead of a single `cutIndex`. On a sync conflict keep upstream's body and re-apply this.
 
@@ -445,7 +446,7 @@ passed once its `pretest` build ran. Fixed at the root rather than per test:
   failure. Fixed the mock payload's field names; no source change needed.
 - **`ToolCallContainer` and `DraftCompositeSelector` (stale test expectations).**
   `ToolCallContainer.test.tsx`'s two "shows the approval bar" tests still queried
-  `getByRole('button', { name: 'Allow' })`; the approval bar is a `radiogroup` of `Allow once` /
+  `getByRole('button', { name: 'Allow' })`; the approval bar is a `radiogroup` of `Approve` /
   `Deny` radios elsewhere in the same file, so aligned these two the same way.
   `DraftCompositeSelector.test.tsx` inherited an upstream assertion that the Capabilities tab is
   hidden for an invalid model; upstream's `AttachTab` union has no `'capabilities'` variant at all
@@ -462,15 +463,15 @@ default mark, no custom icon or logo image).
 
 Approval tokens persist in an `approval_token` table (SQLite and Postgres) so a pending approval survives a restart and is redeemable on any replica. The Sentinel modules themselves are fork-only; these are the upstream-owned files that carry the wiring. Each edit is additive, so on a sync conflict keep upstream's side and re-apply the listed lines.
 
-| Path                                                         | What we added                                                                                                                          |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| packages/trueforge/src/main.ts                               | `approvalTokenStore` on `ServerPersistence` (SQLite and Postgres), and `createSentinelServices` replacing the inline services          |
-| packages/trueforge/src/db/sqlite/types.ts, postgres/types.ts | `ApprovalTokenTable` and its `Database` entry                                                                                          |
-| packages/trueforge/src/db/sqlite/client.ts                   | `shell_binding` in `JSON_RESULT_COLUMNS`                                                                                               |
-| packages/trueforge/src/db/postgres/schema.ts                 | `approval_token` in `TABLES_TO_MOVE`                                                                                                   |
-| packages/trueforge-core/src/core/index.ts                    | Exports for the approval token store contract and helpers                                                                              |
-| packages/trueforge-core/src/core/mcp/executeToolCalls.ts     | Awaits `verifyPreDispatch`, which is async now that redeem hits the database                                                           |
-| packages/trueforge/tests/fixtures/approvalTestServer.ts      | Builds the Sentinel services with `createSentinelServices` over the SQLite token store, so tokens are shared across turns and restarts |
+| Path                                                         | What we added                                                                                                                              |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| packages/trueforge/src/main.ts                               | `approvalTokenStore` on `ServerPersistence` (SQLite and Postgres), and `createSentinelServices` replacing the inline services              |
+| packages/trueforge/src/db/sqlite/types.ts, postgres/types.ts | `ApprovalTokenTable` and its `Database` entry                                                                                              |
+| packages/trueforge/src/db/sqlite/client.ts                   | `shell_binding` in `JSON_RESULT_COLUMNS`; also carries the `wal_autocheckpoint` and `journal_size_limit` pragmas ported from upstream #775 |
+| packages/trueforge/src/db/postgres/schema.ts                 | `approval_token` in `TABLES_TO_MOVE`                                                                                                       |
+| packages/trueforge-core/src/core/index.ts                    | Exports for the approval token store contract and helpers                                                                                  |
+| packages/trueforge-core/src/core/mcp/executeToolCalls.ts     | Awaits `verifyPreDispatch`, which is async now that redeem hits the database                                                               |
+| packages/trueforge/tests/fixtures/approvalTestServer.ts      | Builds the Sentinel services with `createSentinelServices` over the SQLite token store, so tokens are shared across turns and restarts     |
 
 ## Embedded maps (resolution: ours)
 
@@ -543,3 +544,12 @@ bring back in upstream's shape. Keep ours in each, and re-apply the listed behav
 | packages/trueforge/src/auth/middleware.ts, src/auth/safeReturnTo.ts, src/controller-main.ts                                    | Constant-time API key comparison (`apiKeysEqual`); `safeReturnTo` refuses backslashes, control characters and their encodings; a warning for the well-known placeholder API key |
 | scripts/npx-smoke.mjs                                                                                                          | Starts a stand-in sign-in provider on loopback, because standalone refuses to start without login                                                                               |
 | CONTRIBUTING.md, docs/introduction.mdx, docs/api/quickstart.mdx, docs/authentication/overview.mdx, packages/frontend/README.md | Wording for the fork: standalone always signs in (no-login applies to hosted mode only), `pnpm dev:login`, and `PUBLIC_BASE_URL` and `ALLOWED_ORIGINS`                          |
+
+## Upstream fix ports (resolution: upstream)
+
+Fixes ported from open upstream PRs ahead of a sync. Take upstream's side once the same fix lands there, except where a row says otherwise.
+
+| Path                                                       | What differs from the upstream PR                                                                                                           |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge/src/apis/turns.ts                       | Grapheme-safe session title truncation (#981); our comment on `truncateSessionTitle` drops upstream's `{@link}` (repo comment rule)         |
+| packages/trueforge-ui/src/atoms/draft/AgentConfigPanel.tsx | Model settings summary (#999) uses `<span>` inside the button instead of upstream's `<dl>`, which is invalid inside a `<button>`; keep ours |

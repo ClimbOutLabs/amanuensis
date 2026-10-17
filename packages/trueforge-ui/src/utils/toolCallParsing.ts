@@ -3,11 +3,13 @@ import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
 import type { MapCardData, MapPin } from '../components/MapCard.js';
+import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 
 export type ApprovalOptionView = {
   id: string;
   label: string;
   isAllow: boolean;
+  hint?: string;
   grants?: readonly string[];
   confirm?: {
     title?: string;
@@ -46,11 +48,10 @@ export const SANDBOX_TOOL_NAMES = new Set([
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 
-const APPROVAL_OPTION_DEFAULT_LABELS: Record<string, string> = {
-  'allow-once': 'Allow once',
-  'allow-always': 'Allow in this chat',
-  'reject-once': 'Deny',
-  'reject-always': 'Always deny',
+const APPROVAL_OPTION_CHOICES: Record<string, { label: string; hint: string }> = {
+  'allow-once': APPROVAL_CHOICES.approve,
+  'allow-always': APPROVAL_CHOICES.approveForChat,
+  'reject-once': APPROVAL_CHOICES.deny,
 };
 
 const isAllowKind = (kind: string) => kind === 'allow-once' || kind === 'allow-always';
@@ -356,26 +357,34 @@ export function allowOnceOptionId(options: readonly AuiToolApprovalOption[] | un
   return options?.find(option => option.kind === 'allow-once')?.id;
 }
 
+/** The id of the chat-scoped allow the server declared, if any. */
+export function allowChatOptionId(options: readonly AuiToolApprovalOption[] | undefined): string | undefined {
+  return options?.find(option => option.kind === 'allow-always')?.id;
+}
+
 export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] | undefined): ApprovalOptionView[] {
-  const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_DEFAULT_LABELS, o.kind));
+  const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_CHOICES, o.kind));
   if (declared && declared.length > 0) {
-    const allow = declared.filter(o => isAllowKind(o.kind));
+    const allow = declared
+      .filter(o => isAllowKind(o.kind))
+      .sort((x, y) => Number(y.kind === 'allow-once') - Number(x.kind === 'allow-once'));
     const reject = declared.filter(o => !isAllowKind(o.kind));
     const mapped: ApprovalOptionView[] = [...allow, ...reject].map(o => ({
       id: o.id,
-      label: o.label ?? APPROVAL_OPTION_DEFAULT_LABELS[o.kind] ?? o.id,
+      label: APPROVAL_OPTION_CHOICES[o.kind]?.label ?? o.id,
+      hint: APPROVAL_OPTION_CHOICES[o.kind]?.hint,
       isAllow: isAllowKind(o.kind),
       grants: o.grants,
       confirm: o.confirm != null ? (typeof o.confirm === 'object' ? o.confirm : {}) : undefined,
     }));
     if (reject.length === 0) {
-      mapped.push({ id: '__deny', label: 'Deny', isAllow: false, confirm: {} });
+      mapped.push({ id: '__deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} });
     }
     return mapped;
   }
   return [
-    { id: 'allow-once', label: 'Allow once', isAllow: true },
-    { id: 'deny', label: 'Deny', isAllow: false, confirm: {} },
+    { id: 'allow-once', ...APPROVAL_CHOICES.approve, isAllow: true },
+    { id: 'deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} },
   ];
 }
 

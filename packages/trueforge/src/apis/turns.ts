@@ -27,6 +27,7 @@ import {
   rawSandboxId,
   redisKey,
   SandboxError,
+  SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
@@ -136,6 +137,10 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   new Uint8Array(buffer).set(content);
   return buffer;
 }
+
+/** What a person is told when a file was never copied out of a workspace that has since been cleared. */
+const CLEARED_WORKSPACE_MESSAGE =
+  'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.';
 
 /**
  * Builds the Content-Disposition telling the browser to save the file under its sandbox name.
@@ -624,6 +629,27 @@ function createTurnResolver(deps: {
 
 const MAX_SESSION_TITLE_LENGTH = 50;
 
+/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
+const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
+ * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
+ * ZWJ sequences, which read as one unit but span several) are dropped whole.
+ */
+function truncateSessionTitle(title: string): string {
+  let truncated = '';
+  let length = 0;
+  for (const { segment } of titleSegmenter.segment(title)) {
+    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
+      break;
+    }
+    truncated += segment;
+    length += segment.length;
+  }
+  return truncated;
+}
+
 /**
  * Derives a session title from the first user message of the first turn. Returns the
  * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
@@ -647,7 +673,13 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   if (!trimmed) {
     return undefined;
   }
-  return trimmed.slice(0, MAX_SESSION_TITLE_LENGTH);
+  const title = truncateSessionTitle(trimmed);
+  // A single cluster longer than the cap truncates to nothing; treat it as no usable title
+  // so the store keeps the title unset instead of persisting a blank first-write-wins value.
+  if (!title) {
+    return undefined;
+  }
+  return title;
 }
 
 /**
@@ -1426,7 +1458,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
       sandboxId = turn.record.snapshot.sandbox_info?.sandbox_id;
       if (sandboxId === undefined) {
-        return c.json({ error: { message: `Turn has no sandbox: ${turnId}` } }, 412);
+        return c.json({ error: { message: CLEARED_WORKSPACE_MESSAGE } }, 412);
       }
 
       const provider = await (deps.sandboxProviderResolver ?? resolveSandboxProvider)({
@@ -1449,14 +1481,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           'Cache-Control': 'private, no-store',
         });
       } catch (error) {
-        // No persisted copy and the live sandbox is gone: say what happened instead of the raw
-        // provider error, which reads as if the whole session vanished rather than this one file.
-        if (error instanceof SandboxNotAvailableError) {
+        // No persisted copy and the temporary workspace is gone: say what happened to this one file
+        // instead of the raw provider error, which reads as if the whole chat had vanished.
+        if (error instanceof SandboxNotAvailableError || error instanceof SandboxFileNotFoundError) {
           const reason =
             persisted?.status === 'skipped_missing'
-              ? (persisted.skip_reason ?? 'it was not found in the sandbox when this turn finished.')
-              : 'the sandbox was stopped after this turn finished, and no persisted copy was found for this file.';
-          return c.json({ error: { message: `This file was not kept: ${reason}` } }, 410);
+              ? `This file was not kept: ${persisted.skip_reason ?? 'it was not found when this turn finished.'}`
+              : CLEARED_WORKSPACE_MESSAGE;
+          return c.json({ error: { message: reason } }, 410);
         }
         throw error;
       }

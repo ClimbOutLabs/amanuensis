@@ -90,7 +90,7 @@ describe('AgentConfigPanel', () => {
     expect(screen.getByText('generative UI:')).toBeInTheDocument();
     expect(screen.getByText('ask user questions:')).toBeInTheDocument();
     expect(screen.getByText('1 tools')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit Runtime Config' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Run settings' })).toBeInTheDocument();
     expect(screen.queryByText('Structured Output')).not.toBeInTheDocument();
     expect(screen.queryByText('Metadata')).not.toBeInTheDocument();
     expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
@@ -126,11 +126,39 @@ describe('AgentConfigPanel', () => {
     expect(screen.getByRole('heading', { name: 'Parameters' })).toBeInTheDocument();
     expect(onOpenEditor).not.toHaveBeenCalledWith('model-settings');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Runtime Config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Run settings' }));
     expect(onOpenEditor).toHaveBeenCalledWith('runtime');
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Instructions' }));
     expect(onOpenEditor).toHaveBeenCalledWith('instructions');
+  });
+
+  it('toggles model settings dropdown when clicking the model params summary', () => {
+    const onOpenEditor = vi.fn();
+    render(
+      <SlotsProvider>
+        <AgentConfigPanel
+          spec={spec}
+          model={model}
+          {...catalogProps}
+          skillsAvailable
+          instructions={spec.instructions ?? ''}
+          onOpenEditor={onOpenEditor}
+        />
+      </SlotsProvider>,
+    );
+
+    const summaryButton = screen.getByRole('button', { name: 'Edit model settings' });
+    // Real clicks fire mousedown then click; DropdownMenu dismisses on document mousedown.
+    fireEvent.mouseDown(summaryButton);
+    fireEvent.click(summaryButton);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Parameters' })).toBeInTheDocument();
+    expect(onOpenEditor).not.toHaveBeenCalledWith('model-settings');
+
+    fireEvent.mouseDown(summaryButton);
+    fireEvent.click(summaryButton);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('opens the model catalog as a dropdown and selects a model', () => {

@@ -1,5 +1,6 @@
-import { SUPPORTED_REASONING_EFFORTS } from '@truefoundry/trueforge-core/core';
+import { SUPPORTED_REASONING_EFFORTS, getModelOutputExceedsContextError } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
+import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { ModelProperties, ReasoningEffort } from '../schemas/modelProvider';
 
@@ -66,17 +67,33 @@ export interface TrueFoundryEnabledModel {
   properties: ModelProperties;
 }
 
-export function mapEnabledModels(input: { integrations: readonly unknown[] }): TrueFoundryEnabledModel[] {
+export function mapEnabledModels(input: {
+  integrations: readonly unknown[];
+  logger: Logger;
+}): TrueFoundryEnabledModel[] {
   const models: TrueFoundryEnabledModel[] = [];
   for (const row of input.integrations) {
     const integration = IntegrationSchema.parse(row);
     if (!integration.manifest.model_types?.includes('chat')) {
       continue;
     }
+    const properties = toProperties(integration.metadata);
+    // Provider-reported limits skip the manifest schema; a model that would fail
+    // every turn is dropped here rather than offered to users.
+    const limitsError = getModelOutputExceedsContextError(properties);
+    if (limitsError != null) {
+      input.logger.warn('Skipping TrueFoundry model with unusable token limits', {
+        provider_account: integration.providerAccount.name,
+        model: integration.name,
+        context_length: properties.context_length,
+        max_output_tokens: properties.max_output_tokens,
+      });
+      continue;
+    }
     models.push({
       accountName: integration.providerAccount.name,
       modelName: integration.name,
-      properties: toProperties(integration.metadata),
+      properties,
     });
   }
   return models;

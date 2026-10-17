@@ -1250,6 +1250,36 @@ sandbox_instances() {
   done
 }
 
+# The instances whose record says they were installed without the sandbox and whose app is not wired to it.
+sandbox_off_instances() {
+  local name
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    if [ "$(registry_value "$name" sandbox)" = off ] &&
+      ! grep -q 'SANDBOX_BACKEND: slots' "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null; then
+      printf '%s\n' "$name"
+    fi
+  done
+}
+
+# --fix for instances without the sandbox: the installer turns it on and keeps the data. Returns 1 if any failed.
+turn_on_sandbox() { # names...
+  local name installer rc=0 yes_flag=()
+  if [ "$UI_ASSUME_YES" = 1 ]; then yes_flag=(--yes); fi
+  if ! installer=$(checkout_installer); then
+    fail_no_installer
+    return 1
+  fi
+  for name in "$@"; do
+    if ui_confirm "Turn on the sandbox for instance $name and restart it? Its data is kept." y; then
+      # Without --yes the installer shows its own plan, which includes any update, and asks.
+      bash "$installer" --home "$AMAN_HOME" ${yes_flag[@]+"${yes_flag[@]}"} --name "$name" || rc=1
+    else
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 # True when the settings that connect the app to its sandboxes are all there.
 sandbox_settings_complete() { # name
   local compose
@@ -1261,7 +1291,7 @@ sandbox_settings_complete() { # name
 }
 
 doctor_sandbox() {
-  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin installer
+  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin installer off=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --fix) fix=1 ;;
@@ -1292,6 +1322,20 @@ doctor_sandbox() {
   UI_ASSUME_YES=$yes
   bundle="${AMAN_HOME}/bin/aman-sandbox.mjs"
   source="${AMAN_HOME}/state/source"
+  while IFS= read -r name; do
+    [ -n "$name" ] && off+=("$name")
+  done < <(sandbox_off_instances)
+  if [ "${#off[@]}" -gt 0 ]; then
+    for name in "${off[@]}"; do
+      ui_warn "Instance $name was installed without the sandbox, so running code and reading PDFs are off." "Run aman doctor sandbox --fix"
+    done
+    if [ "$fix" = 1 ]; then
+      turn_on_sandbox "${off[@]}" || failed=1
+    else
+      failed=1
+    fi
+    if [ "${#off[@]}" -eq "${#INSTANCES[@]}" ]; then exit "$failed"; fi
+  fi
   if [ ! -f "$bundle" ] || [ ! -r "$source" ]; then
     UI_FD=2 ui_fail "The sandbox tools are not installed under $(ui_path "$AMAN_HOME")." "Run install.sh again from the folder Aman was installed from."
     exit 1

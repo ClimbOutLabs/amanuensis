@@ -77,9 +77,13 @@ export function CompactionStatusLine({ className }: { className?: string }) {
   if (lastCompaction != null) {
     const when = formatRelativeTime(lastCompaction.createdAt);
     if (lastCompaction.outcome === 'applied') {
-      const saved = Math.max(0, lastCompaction.tokensBefore - lastCompaction.tokensAfter);
-      parts.push(`Compacted ${when}, saved ${formatTokenCount(saved)} tokens`);
-    } else {
+      // The saved-tokens number is dropped: tokensBefore is a provider count
+      // and tokensAfter is a text estimate, so their difference overstates.
+      parts.push(`Compacted ${when}`);
+    } else if (lastCompaction.outcome === 'truncated_fallback') {
+      parts.push(`Shortened history ${when} to fit`);
+    } else if (lastCompaction.outcome !== 'skipped_blocked') {
+      // skipped_blocked means the user cancelled the turn, which is not a failure.
       parts.push(`Compaction failed ${when}`);
     }
   }

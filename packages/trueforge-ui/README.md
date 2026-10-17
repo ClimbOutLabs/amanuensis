@@ -407,7 +407,7 @@ show the title text (see [Custom layouts](#custom-layouts)).
 
 In library modes, picking an agent from Agents switches to a named chat for that agent **and remounts the runtime** so the new agent starts from a clean conversation. Draft chats can be promoted via **Save agent** (`server.saveAgent` on the resolved `AgentUIServer`). **Clear Chat** (thread header) resets the current named or draft session.
 
-Mutable composers expose **Agent Config** for live model parameters, instructions, runtime behavior, per-connector MCP tools, and skills. Runtime Config opens in a second right-side drawer. The compact Tools picker contains only Connectors and Skills. The Save Agent drawer only edits the agent name while preserving the active draft configuration; cancelling it discards that local edit. Model context and output limits render when the server supplies that optional catalog metadata.
+Mutable composers expose **Agent Config** for live model parameters, instructions, runtime behavior, per-connector MCP tools, and skills. Run settings opens in a second right-side drawer. The compact Tools picker contains only Connectors and Skills. The Save Agent drawer only edits the agent name while preserving the active draft configuration; cancelling it discards that local edit. Model context and output limits render when the server supplies that optional catalog metadata.
 
 ```tsx
 {
@@ -681,6 +681,6 @@ pnpm --filter @truefoundry/trueforge-ui build
 
 ## License
 
-MIT. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+MPL-2.0; see [LICENSE-MPL-2.0](./LICENSE-MPL-2.0). Portions derived from TrueForge are MIT licensed; see [LICENSE](./LICENSE) and the [NOTICE](https://github.com/ClimbOutLabs/amanuensis/blob/main/NOTICE) at the repository root.
 
 Security: [SECURITY.md](./SECURITY.md) · Conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) · Changes: [CHANGELOG.md](./CHANGELOG.md)

@@ -9,7 +9,7 @@ export function AgentDetailsUnavailable({ onBack, reason }: AgentDetailsUnavaila
         <Icon name="circle-exclamation" />
       </span>
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Agent details unavailable</h2>
+        <h2 className="text-base font-semibold text-text-primary">Could not load this agent.</h2>
         <p className="mt-1 max-w-md text-sm text-text-secondary">
           {reason ?? 'The agent details could not be loaded. Please try again later.'}
         </p>

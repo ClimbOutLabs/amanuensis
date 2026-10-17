@@ -75,8 +75,7 @@ function McpServerChip({
                 </span>
               </span>
               <span className="text-text-secondary text-xs leading-snug">
-                Load MCP tool definitions in the agent context upfront. When off, the agent discovers tools dynamically
-                (uses less context upfront).
+                Load tool details up front. When off, the agent fetches them as needed (uses less context upfront).
               </span>
             </span>
           }
@@ -155,7 +154,7 @@ function SkillChip({
                 </span>
               </span>
               <span className="text-text-secondary text-xs leading-snug">
-                Inline SKILL.md in the agent context upfront. When off, the agent loads the skill dynamically.
+                Load the full skill up front. When off, the agent loads it as needed.
               </span>
             </span>
           }
@@ -414,18 +413,28 @@ export function AgentConfigPanel({
               <AgentModelSettingsContent spec={spec} model={model} onChange={next => onChange?.(next)} />
             </ResponsiveDropdownMenu>
           </div>
-          <dl className="text-text-secondary mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
-            {modelParams.length ? (
-              modelParams.map(entry => (
-                <div key={entry.label} className="flex gap-1">
-                  <dt>{entry.label}:</dt>
-                  <dd className="text-text-primary font-medium">{entry.value}</dd>
-                </div>
-              ))
-            ) : (
-              <div>model settings: defaults</div>
-            )}
-          </dl>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label="Edit model settings"
+            // DropdownMenu dismisses on document mousedown; stop it so click can toggle closed without reopen.
+            onMouseDown={event => event.stopPropagation()}
+            onClick={() => setModelSettingsMenuOpen(open => !open)}
+            className="mt-2 flex w-full cursor-pointer flex-col text-left disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="text-text-secondary flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
+              {modelParams.length ? (
+                modelParams.map(entry => (
+                  <span key={entry.label} className="flex gap-1">
+                    <span>{entry.label}:</span>
+                    <span className="text-text-primary font-medium">{entry.value}</span>
+                  </span>
+                ))
+              ) : (
+                <span>model settings: defaults</span>
+              )}
+            </span>
+          </button>
         </Section>
 
         <Section title="Instructions" description="Define the agent's role, goals, and behavior.">
@@ -456,8 +465,8 @@ export function AgentConfigPanel({
         </Section>
 
         <Section
-          title="Runtime Config"
-          description="Control execution and context behavior."
+          title="Run settings"
+          description="Control how the agent runs and uses context."
           actionIcon="sliders"
           onEdit={disabled ? undefined : () => onOpenEditor('runtime')}
         >
