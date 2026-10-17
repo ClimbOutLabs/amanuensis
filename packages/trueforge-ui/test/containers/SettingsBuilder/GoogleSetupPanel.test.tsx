@@ -67,7 +67,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
       { feature: 'calendar_write', label: 'Add and change events you approve', granted: false },
     ],
     hasSavedClient: false,
-    available: true,
+    locked: false,
     setup: PASTE_SETUP,
     ...overrides,
   };

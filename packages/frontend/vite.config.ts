@@ -74,7 +74,7 @@ export default defineConfig(({ command }) => ({
     strictPort: true,
     // Allow forcing IPv4 bind via VITE_HOST (buildbox needs 127.0.0.1).
     host: process.env.VITE_HOST ?? 'localhost',
-    // Proxy API routes (including /api/internal) to the Harness.
-    proxy: { '/api': apiProxy },
+    // Proxy API routes (including /api/internal) and the same-origin catalog logos to the Harness.
+    proxy: { '/api': apiProxy, '/catalog-logos': apiProxy },
   },
 }));

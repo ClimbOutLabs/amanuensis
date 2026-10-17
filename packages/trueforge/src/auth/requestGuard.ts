@@ -30,9 +30,11 @@ export function createRequestGuardMiddleware(options: {
   allowedOrigins?: readonly string[];
   /**
    * The sign-in service's public address, when the app passes its pages through: that address is served only under the
-   * service's own path, and writes there are checked by the sign-in service, not by an Origin signal.
+   * service's own path, and writes there need the Origin of the sign-in page itself.
    */
   loginGatewayUrl?: string;
+  /** Path of the sign-in pages the app passes through when they are not on a separate address. */
+  loginPath?: string;
 }): MiddlewareHandler {
   const allowedOrigins = options.allowedOrigins ?? [];
   const publicUrl = new URL(options.publicBaseUrl);
@@ -42,6 +44,7 @@ export function createRequestGuardMiddleware(options: {
   const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
   const allowedOriginSet = new Set([
     publicUrl.origin,
+    ...(gatewayUrl === undefined ? [] : [gatewayUrl.origin]),
     ...allowedOrigins,
     ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
     ...(publicIsLoopback
@@ -50,6 +53,14 @@ export function createRequestGuardMiddleware(options: {
         )
       : []),
   ]);
+
+  const loginPrefix = options.loginPath ?? gatewayPrefix;
+  // The sign-in service accepts a post from anywhere, so the app insists on the sign-in page's own Origin.
+  const requireLoginPageOrigin = (method: string, origin: string | undefined): void => {
+    if (STATE_CHANGING_METHODS.has(method) && !allowedOriginSet.has((origin ?? '').toLowerCase())) {
+      throw new HTTPException(403, { message: 'Cross-origin request rejected' });
+    }
+  };
 
   return async (c, next) => {
     const path = c.req.path;
@@ -63,6 +74,7 @@ export function createRequestGuardMiddleware(options: {
       if (host !== undefined && gatewayUrl !== undefined && !hostMatchesUrl({ host, url: publicUrl })) {
         if (hostMatchesUrl({ host, url: gatewayUrl })) {
           if (path.startsWith(`${gatewayPrefix}/`)) {
+            requireLoginPageOrigin(c.req.method, c.req.header('origin'));
             return next();
           }
           throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
@@ -84,6 +96,10 @@ export function createRequestGuardMiddleware(options: {
       }
     }
 
+    if (loginPrefix !== '' && path.startsWith(`${loginPrefix}/`)) {
+      requireLoginPageOrigin(c.req.method, c.req.header('origin'));
+      return next();
+    }
     if (!STATE_CHANGING_METHODS.has(c.req.method) || isPathExempt(path)) {
       return next();
     }

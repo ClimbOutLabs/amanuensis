@@ -451,6 +451,40 @@ export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
   return addresses;
 }
 
+const PLAIN_EMAIL_ADDRESS = /^[^\s@,<>*]+@[^\s@,<>*]+\.[^\s@,<>*]+$/;
+
+/**
+ * The addresses a demo instance may send mail to: comma-separated plain emails, lower-cased. Unset or
+ * blank is an empty list, which allows no send. A malformed entry fails the boot, since a dropped typo
+ * would quietly narrow the list.
+ */
+export function parseDemoSendAllowlist(raw: string | undefined): string[] {
+  const addresses = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim().toLowerCase();
+    if (text === '') {
+      continue;
+    }
+    if (!PLAIN_EMAIL_ADDRESS.test(text)) {
+      throw new Error(`DEMO_SEND_ALLOWLIST has an entry that is not an email address: ${entry.trim()}`);
+    }
+    addresses.add(text);
+  }
+  return [...addresses];
+}
+
+/**
+ * The one Google account a demo instance may connect, lower-cased, or empty when none is named (then no
+ * Google account can be connected). A malformed value fails the boot rather than silently pinning nothing.
+ */
+export function parseDemoGoogleAccount(raw: string | undefined): string {
+  const text = (raw ?? '').trim().toLowerCase();
+  if (text !== '' && !PLAIN_EMAIL_ADDRESS.test(text)) {
+    throw new Error(`DEMO_GOOGLE_ACCOUNT is not an email address: ${text}`);
+  }
+  return text;
+}
+
 /** The loopback address of the sign-in service, or empty. */
 export function parseLoginUpstreamUrl(raw: string | undefined): string {
   const text = (raw ?? '').trim();
@@ -1466,10 +1500,20 @@ export interface SharedServerConfiguration {
   TOKEN_FACTORY_PRICES: ModelPrices;
   /**
    * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
-   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
+   * instance. Google works, but the connection is locked once made and mail goes only to DEMO_SEND_ALLOWLIST.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
+  /**
+   * The only addresses a demo instance may send mail to (To, Cc and Bcc alike), comma-separated, lower-cased.
+   * Empty means no send at all. Ignored outside demo mode. Env: `DEMO_SEND_ALLOWLIST`. Default empty.
+   */
+  DEMO_SEND_ALLOWLIST: string[];
+  /**
+   * The only Google account a demo instance accepts, lower-cased. Empty means none can be connected.
+   * Ignored outside demo mode. Env: `DEMO_GOOGLE_ACCOUNT`. Default empty.
+   */
+  DEMO_GOOGLE_ACCOUNT: string;
   /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
@@ -2086,6 +2130,8 @@ const shared: SharedServerConfiguration = {
   }),
   TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
+  DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
+  DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),

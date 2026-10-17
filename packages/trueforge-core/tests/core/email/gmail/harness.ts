@@ -58,6 +58,7 @@ export async function build(input: {
   features?: ('gmail_read' | 'gmail_compose')[];
   stager?: AttachmentStager | undefined;
   unattended?: boolean;
+  demoSendAllowlist?: string[] | null;
   listDeadlineMs?: number;
 }) {
   const connections = new FakeConnections();
@@ -72,7 +73,10 @@ export async function build(input: {
       return Promise.resolve();
     },
   });
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    demoSendAllowlist: input.demoSendAllowlist ?? null,
+  };
   const sentinel = createSentinelHostContext({
     ...OWNER,
     conversation_id: 'c1',

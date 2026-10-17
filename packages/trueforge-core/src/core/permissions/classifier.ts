@@ -64,6 +64,7 @@ import {
   searchHoldCardText,
   SERVER_SECRET_REASON,
 } from './searchHoldText';
+import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
@@ -104,7 +105,9 @@ import {
 import {
   hasReadPrivateData,
   markPrivateDataRead,
+  namesHostAtFetchLimit,
   SEARCH_SILENT_REASON,
+  SILENT_FETCHES_PER_HOST,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
   type SearchAskReason,
@@ -183,7 +186,7 @@ function mapsCardLabel(value: unknown): string {
   const chars = Array.from(value);
   const shown =
     chars.length > MAPS_CARD_PLACE_MAX_CHARS ? `${chars.slice(0, MAPS_CARD_PLACE_MAX_CHARS - 1).join('')}…` : value;
-  return JSON.stringify(shown);
+  return escapeDisplayText(JSON.stringify(shown));
 }
 
 /**
@@ -705,7 +708,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   if (env !== null && Object.keys(env).length > 0) {
     return tier3Decision({
       card: {
-        plain_what: `Run \`${command}\` with custom environment variables.`,
+        plain_what: `Run \`${escapeDisplayText(command)}\` with custom environment variables.`,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
@@ -761,7 +764,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     if (identity === null) {
       return tier3Decision({
         card: {
-          plain_what: `Execute \`${basenameOf(executedOperand)}\`, which the server cannot resolve to a workspace file.`,
+          plain_what: `Execute \`${escapeDisplayText(basenameOf(executedOperand))}\`, which the server cannot resolve to a workspace file.`,
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
@@ -810,7 +813,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             : await mintPlainToken({ ctx, tool_name: action.tool_name, params: grantParams });
         return tier3Decision({
           card: {
-            plain_what: `Execute \`${basenameOf(identity)}\`, a script the agent wrote earlier.`,
+            plain_what: `Execute \`${escapeDisplayText(basenameOf(identity))}\`, a script the agent wrote earlier.`,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
@@ -845,7 +848,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         // Without a workspace there is nothing to contain the command in, so it must ask.
         return tier3Decision({
           card: {
-            plain_what: `Run \`${command}\` where no workspace is set.`,
+            plain_what: `Run \`${escapeDisplayText(command)}\` where no workspace is set.`,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
             why_asked_again: null,
@@ -872,7 +875,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       if (!cwdInside) {
         return tier3Decision({
           card: {
-            plain_what: `Run \`${command}\` from outside the workspace.`,
+            plain_what: `Run \`${escapeDisplayText(command)}\` from outside the workspace.`,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This runs outside your workspace and can reach system files.',
             why_asked_again: null,
@@ -900,7 +903,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       ) {
         return tier3Decision({
           card: {
-            plain_what: `Access a file outside the workspace with \`${command}\`.`,
+            plain_what: `Access a file outside the workspace with \`${escapeDisplayText(command)}\`.`,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This file is outside your workspace.',
             why_asked_again: null,
@@ -944,7 +947,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       plain_what:
         form.kind === 'compound'
           ? 'Run a compound shell command (pipes, chaining, or redirects).'
-          : `Run \`${form.argv[0] ?? command}\` with arguments the safe list does not allow.`,
+          : `Run \`${escapeDisplayText(form.argv[0] ?? command)}\` with arguments the safe list does not allow.`,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
@@ -1032,7 +1035,7 @@ function sandboxWriteTargets(input: {
 const MAX_NAMED_WRITE_TARGETS = 5;
 
 function namedWriteTargets(paths: readonly string[]): string {
-  const shown = paths.slice(0, MAX_NAMED_WRITE_TARGETS).map(target => `\`${target}\``);
+  const shown = paths.slice(0, MAX_NAMED_WRITE_TARGETS).map(target => `\`${escapeDisplayText(target)}\``);
   const hidden = paths.length - shown.length;
   return hidden > 0 ? `${shown.join(', ')} and ${String(hidden)} more` : shown.join(', ');
 }
@@ -1268,7 +1271,7 @@ function externalServiceWhat(input: {
   ) {
     return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}.`;
   }
-  return `Perform an external action (${input.tool_name}) affecting ${where}.`;
+  return `Perform an external action (${escapeDisplayText(input.tool_name)}) affecting ${where}.`;
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -1307,7 +1310,11 @@ async function holdSearchCall(input: {
   const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
   const decision = tier3Decision({
     card: {
-      plain_what: searchHoldCardText({ server, query: shown, why: input.why }),
+      plain_what: searchHoldCardText({
+        server: escapeDisplayText(server),
+        query: escapeDisplayText(shown),
+        why: input.why,
+      }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -1410,6 +1417,13 @@ async function classifySearchProviderTool(input: {
       'this chat read your email or calendar, and a search could carry it out',
     );
   }
+  // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
+  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read something private, like a key or a secrets file, and a search could carry it out',
+    );
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
@@ -1418,6 +1432,12 @@ async function classifySearchProviderTool(input: {
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
     return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+  }
+  if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
+    return held(
+      'mcp_search_host_limit',
+      `this turn already fetched ${String(SILENT_FETCHES_PER_HOST)} pages from that site without asking`,
+    );
   }
   return tier1Decision({
     reason: SEARCH_SILENT_REASON,
@@ -1513,6 +1533,22 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   };
 }
 
+function demoRefusal(reason_detail: string): TierDecision {
+  return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
+}
+
+/**
+ * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance
+ * refuses every connector call that is not declared read-only. Only Aman's own Gmail tools check recipients.
+ */
+function demoRefusesConnector(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+  return (
+    input.ctx.services.demoSendAllowlist !== null &&
+    input.action.tool_type === 'mcp' &&
+    input.action.mcp_hints.read_only_hint !== true
+  );
+}
+
 /**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
@@ -1542,6 +1578,18 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
       reason_detail: 'Scheduled runs can read your email but never draft or send it.',
       sensitive_read: false,
     });
+  }
+  const draft = action.mail_draft;
+  if (
+    action.tool_name === SEND_DRAFT_TOOL_NAME &&
+    ctx.services.demoSendAllowlist !== null &&
+    (draft === undefined ||
+      !recipientsAllowed({
+        allowlist: ctx.services.demoSendAllowlist,
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+      }))
+  ) {
+    return demoRefusal(DEMO_SEND_REFUSAL);
   }
   const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
   if (card === null) {
@@ -1721,8 +1769,12 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // A send whose card would hide a recipient or cut its content is refused: approval must cover all of it.
+  // A send whose card would hide a recipient, hidden characters or cut content is refused: approval must cover all of it.
   if (extraction.incomplete_send !== null) {
+    // A demo refuses the call whatever the message holds, so it says so rather than ask for a fuller one.
+    if (demoRefusesConnector({ action, ctx })) {
+      return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+    }
     return autoDenyDecision({
       reason: 'incomplete_send_card',
       reason_detail: extraction.incomplete_send.model_message,
@@ -1737,6 +1789,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     if (searchDecision !== undefined) {
       return searchDecision;
     }
+  }
+
+  if (demoRefusesConnector({ action, ctx })) {
+    return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
@@ -1756,7 +1812,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               amount: fields.amount,
             })
           : destructiveHint || extraction.connector_what === null
-            ? `Run ${action.tool_name}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            ? `Run ${escapeDisplayText(action.tool_name)}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: destructiveHint
@@ -2074,6 +2130,9 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
+  if (decision.sensitive_read && decision.auto_deny === null) {
+    ctx.services.private_reads.markPrivateDataRead(ctx);
+  }
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createRequestGuardMiddleware } from '../../../src/auth/requestGuard';
 
-function appFor(options: { port: number; publicBaseUrl: string; allowedOrigins?: readonly string[] }) {
+function appFor(options: Parameters<typeof createRequestGuardMiddleware>[0]) {
   const app = new Hono();
   app.onError((error, c) =>
     error instanceof HTTPException ? c.json({ error: error.message }, error.status) : c.text('boom', 500),
@@ -289,14 +289,45 @@ describe('request guard: sign-in address passed through by the app', () => {
     loginGatewayUrl: 'https://login.example.com/dex',
   };
 
-  it('serves the sign-in address only under the sign-in path, and lets its form post without an Origin signal', async () => {
+  it('serves the sign-in address only under the sign-in path, and lets its form post from the sign-in page itself', async () => {
     const app = appFor(options);
     const host = { host: 'login.example.com' };
+    const own = { ...host, origin: 'https://login.example.com' };
     expect(await status({ app, path: '/dex/auth', headers: host })).toBe(200);
-    expect(await status({ app, path: '/dex/auth/local/login', method: 'POST', headers: host })).toBe(200);
+    expect(await status({ app, path: '/dex/auth/local/login', method: 'POST', headers: own })).toBe(200);
     expect(await status({ app, path: '/api/v1/sessions', headers: host })).toBe(421);
     expect(await status({ app, path: '/dexterity', headers: host })).toBe(421);
     expect(await status({ app, path: '/api/v1/sessions', method: 'POST', headers: host })).toBe(421);
+  });
+
+  it('refuses a sign-in post with no Origin, a foreign Origin, or only a same-origin hint', async () => {
+    const app = appFor(options);
+    const host = { host: 'login.example.com' };
+    const post = (headers: Record<string, string>) =>
+      status({ app, path: '/dex/auth/local/login', method: 'POST', headers: { ...host, ...headers } });
+    expect(await post({})).toBe(403);
+    expect(await post({ 'sec-fetch-site': 'same-origin' })).toBe(403);
+    expect(await post({ origin: 'https://evil.example.net' })).toBe(403);
+    expect(await post({ origin: 'null' })).toBe(403);
+    expect(await post({ origin: 'https://login.example.com' })).toBe(200);
+  });
+
+  it('also requires the Origin for sign-in posts under a listed home-network address', async () => {
+    const app = appFor({
+      port: 8790,
+      publicBaseUrl: 'http://127.0.0.1:8790',
+      allowedOrigins: ['http://192.168.1.20:8790'],
+      loginPath: '/dex',
+    });
+    const post = (headers: Record<string, string>) =>
+      status({
+        app,
+        path: '/dex/auth/local/login',
+        method: 'POST',
+        headers: { host: '192.168.1.20:8790', ...headers },
+      });
+    expect(await post({ 'sec-fetch-site': 'same-origin' })).toBe(403);
+    expect(await post({ origin: 'http://192.168.1.20:8790' })).toBe(200);
   });
 
   it('keeps checking the app address as before', async () => {
