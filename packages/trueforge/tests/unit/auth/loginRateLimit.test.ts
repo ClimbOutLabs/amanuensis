@@ -135,7 +135,7 @@ describe('login attempt limiter', () => {
   });
 
   it('remembers a bounded number of addresses', () => {
-    const l = limiter({ maxKeys: 3 });
+    const l = limiter({ maxKeys: 3, maxFailuresPerAccount: 1000 });
     for (let i = 0; i < 5; i += 1) {
       for (let k = 0; k < 5; k += 1) {
         attempt(l, `ip${String(i)}`, 'failure', `person${String(i)}`);
@@ -217,7 +217,25 @@ describe('login attempt limiter', () => {
         retryAfterSeconds: 300,
         scope: 'account',
       });
-      expect(l.begin('ip-new', 'someone-else@example.com').allowed).toBe(true);
+      expect(l.begin('ip-new', 'someone-else@example.com').allowed).toBe(false);
+    });
+
+    it('shares one budget across spellings of the name the sign-in service may treat as the same account', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      spread(l, 'mia@x', 0, 4);
+      spread(l, 'm\u0130a@x', 10, 3);
+      spread(l, 'MIA@x', 20, 3);
+      expect(l.begin('ip-new', 'mia@x')).toMatchObject({ allowed: false, scope: 'account' });
+    });
+
+    it('is not reset by attempts with fresh names that tested no password', () => {
+      const l = limiter({ maxGlobalFailures: 1000 });
+      spread(l, 'owner@example.com', 0, 9);
+      for (let j = 0; j < 10_001; j += 1) {
+        attempt(l, 'junk', 'abandon', `junk${String(j)}@example.com`);
+      }
+      spread(l, 'owner@example.com', 20, 1);
+      expect(l.begin('ip-new', 'owner@example.com')).toMatchObject({ allowed: false, scope: 'account' });
     });
 
     it('does not let a burst of guesses at one account through beyond the budget', () => {

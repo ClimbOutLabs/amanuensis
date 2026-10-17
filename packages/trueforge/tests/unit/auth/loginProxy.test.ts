@@ -657,7 +657,7 @@ describe('login proxy in front of a public sign-in address', () => {
     globalThis.fetch = realFetch;
   });
 
-  function gateway(clientKey?: () => string): Hono {
+  function gateway({ clientKey, limiter }: { clientKey?: () => string; limiter?: LoginAttemptLimiter } = {}): Hono {
     const hono = new Hono();
     hono.all(
       '*',
@@ -666,6 +666,7 @@ describe('login proxy in front of a public sign-in address', () => {
         upstreamUrl: 'http://127.0.0.1:5556/dex',
         allowedOrigins: ['https://login.example.com'],
         ...(clientKey === undefined ? {} : { clientKey }),
+        ...(limiter === undefined ? {} : { limiter }),
       }),
     );
     return hono;
@@ -683,7 +684,8 @@ describe('login proxy in front of a public sign-in address', () => {
 
   it('limits each visitor behind a reverse proxy on this computer by the address it recorded, and ignores that header elsewhere', async () => {
     globalThis.fetch = () => Promise.resolve(wrongPassword());
-    const app = gateway();
+    // Checks the per-address limit only, so the account's shared budget is set out of reach.
+    const app = gateway({ limiter: new LoginAttemptLimiter({ maxFailuresPerAccount: 1000 }) });
     const post = (remoteAddress: string, forwardedFor: string) =>
       app.fetch(
         new Request('https://login.example.com/dex/auth/local/login', {
@@ -718,6 +720,7 @@ describe('login proxy in front of a public sign-in address', () => {
         upstreamUrl: 'http://127.0.0.1:5556/dex',
         allowedOrigins: ['https://login.example.com'],
         trustedProxies: ['172.17.0.1'],
+        limiter: new LoginAttemptLimiter({ maxFailuresPerAccount: 1000 }),
       }),
     );
     const post = (remoteAddress: string, forwardedFor: string) =>

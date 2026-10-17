@@ -43,7 +43,7 @@ services:
       link:
         aliases:
           - aman-stt
-      stt: {}
+      speech: {}
     cap_drop:
       - ALL
     security_opt:
@@ -184,6 +184,6 @@ networks:
   link:
     internal: true
   # Between the relay and the shared speech service only; the installer joins the service to it.
-  stt:
+  speech:
     internal: true
-    name: aman_@@NAME@@_stt
+    name: @@STT_NETWORK@@

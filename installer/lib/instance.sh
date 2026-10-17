@@ -64,7 +64,7 @@ machine_up() {
   step_ok "The speech-to-text service is running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
   for name in $(reg_names); do
-    if D network inspect "aman_${name}_stt" >/dev/null 2>&1; then
+    if D network inspect "$(stt_network "$name")" >/dev/null 2>&1; then
       stt_attach "$name" || true
     fi
   done
@@ -73,20 +73,56 @@ machine_up() {
 # Each instance has its own internal network with only its speech relay on it besides the speech service. The shared
 # service is connected to every one of those networks, so no instance has a route to another, and the service has no
 # route into any instance except that relay.
+stt_network() { printf 'aman_%s_speech' "$1"; }
+
 stt_attach() {
-  local out
-  if out=$(D network connect --alias aman-stt-engine "aman_${1}_stt" aman-stt 2>&1); then
+  local net out
+  net=$(stt_network "$1")
+  if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then
     return 0
   fi
   case "$out" in
-    *"already exists"*) return 0 ;;
+    *"already exists"*)
+      # Joined before, perhaps without the name the relay dials; then join again with it.
+      if stt_has_alias "$net"; then return 0; fi
+      D network disconnect -f "$net" aman-stt >/dev/null 2>&1 || true
+      if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then return 0; fi
+      ;;
   esac
   warn "could not connect the speech-to-text service to instance $1: $out"
   return 1
 }
 
+stt_has_alias() { # network
+  local alias
+  for alias in $(D inspect --format "{{with index .NetworkSettings.Networks \"$1\"}}{{join .Aliases \" \"}}{{end}}" aman-stt 2>/dev/null); do
+    if [ "$alias" = aman-stt-engine ]; then return 0; fi
+  done
+  return 1
+}
+
+# Earlier releases put an instance on this network with other settings, which Compose cannot change while the speech
+# service is joined to it, so the network has a new name.
+stt_old_network() { printf 'aman_%s_stt' "$1"; }
+
 stt_detach() {
-  D network disconnect -f "aman_${1}_stt" aman-stt >/dev/null 2>&1 || true
+  D network disconnect -f "$(stt_network "$1")" aman-stt >/dev/null 2>&1 || true
+  D network disconnect -f "$(stt_old_network "$1")" aman-stt >/dev/null 2>&1 || true
+  stt_forget_old_network "$1"
+}
+
+# Removes the old network once nothing but the speech service is left on it.
+stt_forget_old_network() {
+  local old members member out
+  old=$(stt_old_network "$1")
+  members=$(D network inspect "$old" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null) || return 0
+  for member in $members; do
+    [ "$member" = aman-stt ] || return 0
+  done
+  D network disconnect -f "$old" aman-stt >/dev/null 2>&1 || true
+  if out=$(D network rm "$old" 2>&1); then return 0; fi
+  case "$out" in *"not found"* | *"No such network"*) return 0 ;; esac
+  warn "could not remove the old speech network $old: $out"
 }
 
 machine_running() {
@@ -136,7 +172,7 @@ instance_render() {
   fi
   ensure_private_dir "$dir"
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -177,6 +213,7 @@ instance_up() {
   if machine_running; then
     stt_attach "$name" || true
   fi
+  stt_forget_old_network "$name"
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and healthy"

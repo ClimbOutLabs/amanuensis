@@ -10,14 +10,12 @@ export interface LoginAttemptLimiterOptions {
   maxLockoutMs?: number;
   /** Most account names one address is tracked for; the rest share one entry. */
   maxAccountsPerKey?: number;
-  /** Wrong passwords one account may have in `accountWindowMs`, from all addresses together, before unknown addresses are locked out of it. */
+  /** Wrong passwords the account may have in `accountWindowMs`, from all addresses together, before unknown addresses are locked out of it. */
   maxFailuresPerAccount?: number;
   accountWindowMs?: number;
-  /** First lockout of an account; each later one doubles up to `maxAccountLockoutMs`. */
+  /** First lockout of the account; each later one doubles up to `maxAccountLockoutMs`. */
   baseAccountLockoutMs?: number;
   maxAccountLockoutMs?: number;
-  /** Most account names remembered at once; the oldest are forgotten first. */
-  maxAccounts?: number;
   /** Sign-in page requests one address may make per minute. */
   maxPageStartsPerMinute?: number;
   /** Most addresses remembered at once; the oldest are forgotten first. */
@@ -58,9 +56,11 @@ export type LoginAttemptPermit = Permit;
 /**
  * Slows password guessing against the sign-in form. An attempt takes a slot before it is passed on and counts toward
  * the limit while it is in flight, so a burst cannot get more than the limit through. One address that keeps failing
- * is locked out for longer each time; a flood from many addresses makes unknown addresses wait briefly. Each account also
- * has its own budget across all addresses, so spreading guesses over many addresses does not help. An address that
- * signed in during the last day is held by neither. State is in memory and lost on restart.
+ * is locked out for longer each time; a flood from many addresses makes unknown addresses wait briefly. Wrong passwords
+ * from all addresses also share one budget whatever name was typed, so spreading guesses over many addresses or
+ * spellings does not help; the cost is that a flood holds back new devices of every account on the instance alike.
+ * An address that signed in during the last day is held by neither.
+ * State is in memory and lost on restart.
  */
 export class LoginAttemptLimiter {
   readonly #maxFailuresPerKey: number;
@@ -75,10 +75,17 @@ export class LoginAttemptLimiter {
   readonly #accountWindowMs: number;
   readonly #baseAccountLockoutMs: number;
   readonly #maxAccountLockoutMs: number;
-  readonly #maxAccounts: number;
   readonly #now: () => number;
   readonly #keys = new Map<string, KeyState>();
-  readonly #accounts = new Map<string, AccountState>();
+  /** Not keyed by the typed name: the sign-in service decides which spellings are the account, so none gets a budget of its own. */
+  readonly #account: AccountState = {
+    failures: 0,
+    inflight: 0,
+    windowStart: 0,
+    lockedUntil: 0,
+    lockouts: 0,
+    lastFailure: 0,
+  };
   readonly #pageStarts = new Map<string, { count: number; windowStart: number }>();
   #globalFailures = 0;
   #globalInflight = 0;
@@ -98,7 +105,6 @@ export class LoginAttemptLimiter {
     this.#accountWindowMs = options.accountWindowMs ?? 60 * 60_000;
     this.#baseAccountLockoutMs = options.baseAccountLockoutMs ?? 5 * 60_000;
     this.#maxAccountLockoutMs = options.maxAccountLockoutMs ?? 60 * 60_000;
-    this.#maxAccounts = options.maxAccounts ?? 10_000;
     this.#now = options.now ?? Date.now;
   }
 
@@ -122,7 +128,7 @@ export class LoginAttemptLimiter {
     if (!known && this.#globalFailures + this.#globalInflight >= this.#maxGlobalFailures) {
       return { allowed: false, retryAfterSeconds: Math.ceil(this.#baseLockoutMs / 1000), scope: 'address' };
     }
-    const owner = this.#account(account, now);
+    const owner = this.#account;
     this.#expireAccount(owner, now);
     if (!known) {
       if (owner.lockedUntil > now) {
@@ -199,22 +205,6 @@ export class LoginAttemptLimiter {
     return state;
   }
 
-  #account(account: string, now: number): AccountState {
-    const name = account.trim().toLowerCase().slice(0, 200);
-    const state = this.#accounts.get(name) ?? {
-      failures: 0,
-      inflight: 0,
-      windowStart: now,
-      lockedUntil: 0,
-      lockouts: 0,
-      lastFailure: 0,
-    };
-    this.#accounts.delete(name);
-    this.#accounts.set(name, state);
-    this.#forgetOldest(this.#accounts, entry => entry.inflight === 0 && entry.lockedUntil <= now, this.#maxAccounts);
-    return state;
-  }
-
   #expireAccount(state: AccountState, now: number): void {
     if (now - state.windowStart > this.#accountWindowMs) {
       state.failures = 0;
@@ -245,8 +235,8 @@ export class LoginAttemptLimiter {
     return state.accounts.has(name) || state.accounts.size < this.#maxAccountsPerKey ? name : '\u0000other';
   }
 
-  #forgetOldest<T>(map: Map<string, T>, removable: (value: T) => boolean, limit = this.#maxKeys): void {
-    if (map.size <= limit) {
+  #forgetOldest<T>(map: Map<string, T>, removable: (value: T) => boolean): void {
+    if (map.size <= this.#maxKeys) {
       return;
     }
     for (const [key, value] of map) {
