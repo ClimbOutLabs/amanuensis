@@ -6,6 +6,7 @@ import type { CatalogServer, PermissionsServer } from '../../server/types.js';
 import { createHarnessAgentMetricsServer } from './agentMetricsServer.js';
 import { createHarnessAgentSessionsServer } from './agentSessionsServer.js';
 import { createHarnessBuilderServer } from './builderServer.js';
+import { createChatImagesCatalog } from './catalogs/chatImagesCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
 import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
@@ -134,6 +135,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   return {
     ...server,
     toolOutputScreen: createToolOutputScreenCatalog(clientOptions),
+    chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
     memoryVault: createMemoryVaultCatalog(clientOptions),

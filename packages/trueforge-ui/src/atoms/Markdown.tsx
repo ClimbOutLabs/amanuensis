@@ -1,6 +1,6 @@
 'use client';
 
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import { useMemo, useRef } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
@@ -10,6 +10,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { PluggableList } from 'unified';
 
+import { ChatImageNotShown, ReplyChatImage } from '../chatImages/ChatImages.js';
+import { isChatImageSrc, useChatImageScope } from '../chatImages/chatImageScope.js';
 import { useSlot, useThemeMode } from '../theme/SlotsProvider.js';
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { type CitationSource } from '../utils/citationMarkers.js';
@@ -128,6 +130,47 @@ export function markdownUrlTransform(value: string): string {
   return '';
 }
 
+/**
+ * Inside a chat turn, only re-encoded images from this chat's image route render; a web link goes to
+ * the server, which loads it silently where a search would and otherwise asks with a card; any other
+ * source (data:, blob:, another same-origin path) is not rendered. Alt text is always plain text.
+ *
+ * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
+ * private data in an image URL. A placeholder shows the destination host instead, and clicking opens
+ * the image in a new tab; same-origin, data: and blob: images still render inline.
+ */
+function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgProps: ComponentProps<'img'> }) {
+  const scope = useChatImageScope();
+  if (scope !== null) {
+    if (isChatImageSrc(src)) {
+      return <img {...imgProps} src={src} alt={alt} />;
+    }
+    if (/^https?:\/\//i.test(src.trim())) {
+      return <ReplyChatImage url={src.trim()} alt={alt} />;
+    }
+    return <ChatImageNotShown alt={alt} />;
+  }
+  if (isSafeInlineImageSrc(src)) {
+    return <img {...imgProps} src={src} alt={alt} />;
+  }
+  const host = remoteImageHost(src);
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        'aui-remote-image my-2 inline-flex max-w-full items-center gap-2 rounded border border-border bg-card-bg px-2 py-1 text-xs text-text-secondary',
+      )}
+      data-testid="aui-remote-image-placeholder"
+      title={src}
+    >
+      <span className="truncate">{alt !== '' ? alt : 'External image'}</span>
+      <span className="truncate opacity-70">{host}</span>
+    </a>
+  );
+}
+
 function makeComponents(opts: {
   isStreaming?: boolean;
   /** Latest unmatched fence body; read via ref so `components` identity stays stable across growth. */
@@ -170,36 +213,13 @@ function makeComponents(opts: {
         </a>
       );
     },
-    // Remote images never auto-load: a prompt injection can hide private data in an
-    // image URL, which the browser would send to that host on render. Show a
-    // placeholder with the destination host instead; clicking opens the image in
-    // a new tab. Same-origin, data: and blob: images still render inline.
     // An empty src renders nothing at all, not a placeholder.
     img({ src, alt, node: _node, ...props }) {
       const srcValue = typeof src === 'string' ? src : '';
       if (srcValue.trim() === '') {
         return null;
       }
-      if (isSafeInlineImageSrc(srcValue)) {
-        return <img {...props} src={src} alt={alt} />;
-      }
-      const host = remoteImageHost(srcValue);
-      const label = alt != null && alt !== '' ? alt : 'External image';
-      return (
-        <a
-          href={srcValue}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            'aui-remote-image my-2 inline-flex max-w-full items-center gap-2 rounded border border-border bg-card-bg px-2 py-1 text-xs text-text-secondary',
-          )}
-          data-testid="aui-remote-image-placeholder"
-          title={srcValue}
-        >
-          <span className="truncate">{label}</span>
-          <span className="truncate opacity-70">{host}</span>
-        </a>
-      );
+      return <MarkdownImage src={srcValue} alt={typeof alt === 'string' ? alt : ''} imgProps={props} />;
     },
     // Strip default <pre> wrapper; each block renderer provides its own container.
     pre({ children }: { children?: ReactNode }) {

@@ -22,7 +22,7 @@ describe('UserMessageContainer', () => {
     });
   });
 
-  it('renders an image attachment preview above the text bubble', () => {
+  it('renders an image attachment as a named chip until its re-encoded copy exists', () => {
     renderUserMessage([
       {
         role: 'user',
@@ -46,9 +46,8 @@ describe('UserMessageContainer', () => {
       },
     ]);
     expect(screen.getByText('What is this?')).toBeInTheDocument();
-    const preview = screen.getByAltText('logo.png');
-    expect(preview).toBeInTheDocument();
-    expect(preview.parentElement).toHaveStyle({ width: '12rem', height: '12rem' });
+    expect(screen.getByText('logo.png')).toBeInTheDocument();
+    expect(document.querySelector('img[src^="data:"]')).toBeNull();
   });
 
   it('renders a file attachment chip above the text bubble', () => {

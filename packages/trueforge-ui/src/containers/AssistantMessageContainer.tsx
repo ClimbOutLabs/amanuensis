@@ -17,6 +17,8 @@ import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisc
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
 import { ModelUsageLine } from '../atoms/agent-chat/ModelUsageLine.js';
+import { TurnImages } from '../chatImages/ChatImages.js';
+import { ChatImageScope, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -161,6 +163,7 @@ export function AssistantMessageContainer() {
   const modelUsage = modelUsageVisible && !isMessageRunning ? recordedUsage : undefined;
 
   const parts = useAuiState(s => s.message.parts);
+  const chatImagesPort = useChatImagesPort();
 
   const { runs, hasFinal } = computeAgentStepsSplit(parts);
 
@@ -270,6 +273,52 @@ export function AssistantMessageContainer() {
       : [agentStepsGroupKey(runIndex)];
   };
 
+  // Inside a chat image scope, the turn's images render re-encoded and web images ask first.
+  const messageBody = (
+    <>
+      {runs.length === 0 && renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
+      <RunCodeSetupNoticesContainer parts={parts} />
+      {ingestionStatusLine !== undefined && (
+        <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
+          {ingestionStatusLine}
+        </p>
+      )}
+      {/* The wait queue lives in the `indicator` slot below: it must stay
+          mounted for the whole turn, including while text streams.
+          assistant-ui's default `indicator="no-text"` unmounts the indicator
+          the moment the first tokens land (and remounts it when tools run),
+          which would flicker the queue and reset its elapsed clock across
+          the phases of a normal agentic turn. */}
+      <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="always">
+        {({ part, children }) => {
+          switch (part.type) {
+            case 'group-reasoning':
+              return isMessageRunning ? <ReasoningContainer group={part} /> : null;
+            case 'text':
+              return <AssistantTextContainer />;
+            case 'reasoning':
+              return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
+            case 'tool-call':
+            case 'image':
+            case 'data':
+              return <AssistantLeafPartContainer part={part} />;
+            case 'indicator':
+              return resumeUnavailable ? null : <MessageIndicator />;
+            default: {
+              if (!('indices' in part)) return null;
+              const firstIndex = part.indices[0];
+              const runIndex = firstIndex === undefined ? -1 : runIndexOfPart(firstIndex);
+              const run = runs[runIndex];
+              return run ? renderInternals({ run, runIndex, children }) : null;
+            }
+          }
+        }}
+      </MessagePrimitive.GroupedParts>
+      <TurnImages />
+      {modelUsage !== undefined && <ModelUsageLine summary={modelUsage} />}
+    </>
+  );
+
   return (
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
@@ -278,46 +327,13 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {runs.length === 0 &&
-          renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
-        <RunCodeSetupNoticesContainer parts={parts} />
-        {ingestionStatusLine !== undefined && (
-          <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
-            {ingestionStatusLine}
-          </p>
+        {chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
+          <ChatImageScope port={chatImagesPort} sessionId={sessionId} turnId={turnId} settled={!isMessageRunning}>
+            {messageBody}
+          </ChatImageScope>
+        ) : (
+          messageBody
         )}
-        {/* The wait queue lives in the `indicator` slot below: it must stay
-            mounted for the whole turn, including while text streams.
-            assistant-ui's default `indicator="no-text"` unmounts the indicator
-            the moment the first tokens land (and remounts it when tools run),
-            which would flicker the queue and reset its elapsed clock across
-            the phases of a normal agentic turn. */}
-        <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="always">
-          {({ part, children }) => {
-            switch (part.type) {
-              case 'group-reasoning':
-                return isMessageRunning ? <ReasoningContainer group={part} /> : null;
-              case 'text':
-                return <AssistantTextContainer />;
-              case 'reasoning':
-                return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
-              case 'tool-call':
-              case 'image':
-              case 'data':
-                return <AssistantLeafPartContainer part={part} />;
-              case 'indicator':
-                return resumeUnavailable ? null : <MessageIndicator />;
-              default: {
-                if (!('indices' in part)) return null;
-                const firstIndex = part.indices[0];
-                const runIndex = firstIndex === undefined ? -1 : runIndexOfPart(firstIndex);
-                const run = runs[runIndex];
-                return run ? renderInternals({ run, runIndex, children }) : null;
-              }
-            }
-          }}
-        </MessagePrimitive.GroupedParts>
-        {modelUsage !== undefined && <ModelUsageLine summary={modelUsage} />}
         <NeedsYourOkContainer parts={parts} />
       </AssistantMessageBubble>
     </MessagePrimitive.Root>
