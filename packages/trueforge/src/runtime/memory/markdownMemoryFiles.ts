@@ -58,16 +58,26 @@ export function splitEntries(content: string): string[] {
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
-  const body = `## ${item.timestamp}\n\n${item.content}`;
-  const withContext = context !== undefined && context.length > 0 ? `${body}\n\n> ${context}` : body;
+  const text = context !== undefined && context.length > 0 ? `${item.content}\n\n> ${context}` : item.content;
+  const entry = `## ${item.timestamp}\n\n${escapeEntryStructure(text)}`;
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  return origin === undefined || origin === USER_STATED_ORIGIN
-    ? withContext
-    : `${withContext}\n\n${READ_CONTENT_SOURCE_LINE}`;
+  return origin === undefined || origin === USER_STATED_ORIGIN ? entry : `${entry}\n\n${READ_CONTENT_SOURCE_LINE}`;
 }
 
 /** Closing line marking an entry written after Aman read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+
+/**
+ * Backslash-escapes body lines `splitEntries` or `entryMetadata` would read as structure (an
+ * entry heading or the source marker), so retained text can neither split its entry, which drops
+ * the marker from the earlier fragments, nor forge the marker. The escape stays readable Markdown.
+ */
+function escapeEntryStructure(text: string): string {
+  return text
+    .split('\n')
+    .map(line => (line.startsWith('## ') || line.trimEnd() === READ_CONTENT_SOURCE_LINE ? `\\${line}` : line))
+    .join('\n');
+}
 
 /** Metadata recall hands back for an entry, read from the marker line `formatRetainEntry` wrote. */
 export function entryMetadata(text: string): Record<string, string> | undefined {
