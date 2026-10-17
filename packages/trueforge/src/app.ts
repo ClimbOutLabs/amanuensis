@@ -18,6 +18,7 @@ import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createGoogleRouter } from './apis/google';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -67,6 +68,7 @@ import configuration, {
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
+import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
@@ -86,6 +88,7 @@ import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -249,6 +252,8 @@ export interface ServerDeps<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   /** Per-user Always allow grants; the same store backs Sentinel classification. */
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
+  /** Per-user Google logins and the consent each user has in flight. */
+  googleConnectionStore: IGoogleConnectionStore;
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   /** Optional host override; the standard resolver remains the production default. */
@@ -317,6 +322,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     repositoryStore: deps.repositoryStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
+    googleConnectionStore: deps.googleConnectionStore,
     turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
@@ -339,6 +345,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         allowedOrigins: getAllowedOrigins(),
         ...(configuration.OIDC !== undefined && configuration.LOGIN_UPSTREAM_URL !== ''
           ? { loginGatewayUrl: configuration.OIDC.OIDC_ISSUER_URL }
+          : {}),
+        ...(configuration.OIDC !== undefined && getAllowedOrigins().length > 0
+          ? { loginPath: new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '') }
           : {}),
       }),
     );
@@ -646,6 +655,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
+  // Browser session only: bearer credentials (agents, sandboxes, API clients) are refused. Every route is
+  // authenticated, including the browser callback, whose redirect carries the cookie that ties it to the
+  // user who started the consent.
+  app.route(
+    GOOGLE_ROUTES_BASE_PATH,
+    withAuth(
+      createGoogleRouter({
+        fetchImpl: undefined,
+        googleConnectionStore: deps.googleConnectionStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
   // credentials (agents, sandboxes, API clients) are refused.
   app.route(
@@ -822,6 +846,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personalizationStore: deps.personalizationStore,
         personaStore: deps.personaStore,
         spaceStore: deps.spaceStore,
+        googleConnectionStore: deps.googleConnectionStore,
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,

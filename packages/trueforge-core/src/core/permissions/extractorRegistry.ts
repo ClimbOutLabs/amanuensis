@@ -1,3 +1,5 @@
+import { replaceHiddenCharacters } from '../email/gmail/mimeText';
+
 /**
  * Server-side extractor registry for Tier 3 approval cards.
  *
@@ -107,19 +109,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** True for code points that can hide or fake text: controls, bidi controls, zero-width and line separators. */
-function needsEscape(codePoint: number): boolean {
-  return (
-    codePoint <= 0x1f ||
-    (codePoint >= 0x7f && codePoint <= 0x9f) ||
-    codePoint === 0x061c ||
-    (codePoint >= 0x200b && codePoint <= 0x200f) ||
-    (codePoint >= 0x2028 && codePoint <= 0x202e) ||
-    (codePoint >= 0x2060 && codePoint <= 0x2069) ||
-    codePoint === 0xfeff ||
-    (codePoint >= 0xd800 && codePoint <= 0xdfff)
-  );
+function escapeToken(char: string): string {
+  return `\\u{${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}}`;
 }
+
+/** Tab and carriage return, which a card never shows raw, and lone surrogates; newlines too unless they are kept. */
+const REMAINING_ESCAPES = /\p{Cc}|\p{Surrogate}/gu;
+const REMAINING_ESCAPES_KEEPING_NEWLINES = /(?!\n)\p{Cc}|\p{Surrogate}/gu;
 
 /**
  * Makes model-controlled text safe to show: characters that can hide or fake text become visible
@@ -128,18 +124,9 @@ function needsEscape(codePoint: number): boolean {
  */
 export function escapeDisplayText(text: string, options?: { keepNewlines?: boolean }): string {
   const keepNewlines = options?.keepNewlines === true;
-  let out = '';
-  for (const char of keepNewlines ? text.replace(/\r\n/g, '\n') : text) {
-    const codePoint = char.codePointAt(0) ?? 0;
-    if (keepNewlines && codePoint === 0x0a) {
-      out += char;
-    } else if (needsEscape(codePoint)) {
-      out += `\\u{${codePoint.toString(16).toUpperCase().padStart(4, '0')}}`;
-    } else {
-      out += char;
-    }
-  }
-  return out;
+  // The one definition of "does not show" decides first; the pass below adds what a card never shows raw.
+  const visible = replaceHiddenCharacters(keepNewlines ? text.replace(/\r\n/g, '\n') : text, escapeToken);
+  return visible.replace(keepNewlines ? REMAINING_ESCAPES_KEEPING_NEWLINES : REMAINING_ESCAPES, escapeToken);
 }
 
 function clean(text: string): string {

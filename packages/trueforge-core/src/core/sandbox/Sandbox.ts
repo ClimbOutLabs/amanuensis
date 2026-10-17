@@ -7,6 +7,7 @@ import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
 } from '../../documents/documentExtraction';
+import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -46,6 +47,7 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { gitHardeningEnv } from '../permissions/gitHardening';
 import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
@@ -109,6 +111,12 @@ import {
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
+import {
+  GIT_INDEX_ENTRIES_COMMAND,
+  parseTrackedWorktreeListing,
+  pathLostBytes,
+  TRACKED_WORKTREE_COMMAND,
+} from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
@@ -152,6 +160,8 @@ export interface SandboxInfo {
 
 // Downloader/setup scripts can run longer than a normal exec.
 export const SKILL_DOWNLOAD_TIMEOUT_SECONDS = 180;
+/** One scanned page: render and read. A page that takes longer is not worth holding the sandbox for. */
+const OCR_PAGE_TIMEOUT_SECONDS = 60;
 
 function validateDocumentPageLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_PAGES_PER_DOCUMENT) {
@@ -774,6 +784,26 @@ function normalizedRepositoryPath(value: string): string {
   return /^[A-Za-z]:\//u.test(withoutTrailingSlash) ? withoutTrailingSlash.toLowerCase() : withoutTrailingSlash;
 }
 
+/**
+ * `git apply` against a throwaway empty repository, so the workspace's own config is never read: a
+ * `.gitattributes` may still name a filter driver, but no driver program is defined to run. Paths
+ * resolve as before, against the toplevel discovered from the cwd when there is one.
+ */
+function buildIsolatedGitApplyCommand(input: { patchPath: string; scratchDir: string; check: boolean }): string {
+  return [
+    '(',
+    'top=$(git rev-parse --show-toplevel 2>/dev/null) || top=',
+    `git_dir=$(mktemp -d ${shellEscape(`${input.scratchDir}/git-apply.XXXXXX`)}) || exit 1`,
+    'git init -q --bare --template= "$git_dir" >/dev/null || { rm -rf "$git_dir"; exit 1; }',
+    'if [ -n "$top" ]; then GIT_WORK_TREE=$top; export GIT_WORK_TREE; else unset GIT_WORK_TREE; fi',
+    `GIT_DIR=$git_dir git apply --recount --unidiff-zero${input.check ? ' --check' : ''} -- ${shellEscape(input.patchPath)}`,
+    'status=$?',
+    'rm -rf "$git_dir"',
+    'exit $status',
+    ')',
+  ].join('\n');
+}
+
 function buildAbnormalHandoffCaptureCommand(input: { artifactPath: string; expectedWorkspaceRoot: string }): string {
   return [
     'env -i PATH="$PATH" HOME=/nonexistent python3 -I -S -E -c',
@@ -955,6 +985,8 @@ export const sandboxApplyPatchSchema = z
         `The diff as line array, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} patch, not both. Preferred: single strings with escaped newlines can mangle hunk headers.`,
       ),
   })
+  // The targets are the patch's own; a path or target argument would only mislead the approval card.
+  .strict()
   .transform((value, ctx) => {
     const { patch_lines: patchLines, ...rest } = value;
     const patch = resolveOrFailLineArrayField({
@@ -2028,27 +2060,41 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * The arguments a call is classified and approved over: structured-edit calls pass through the same
+   * normalisation the dispatch handlers apply, here at proposal time, so the approval card and the
+   * path extraction see exactly the arguments `handleApplyPatch`/`handleReplaceText`/`handleWriteFile`
+   * will act on.
+   */
+  private proposedCall(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): {
+    requestedCwd: string | undefined;
+    cwd: string | undefined;
+    effectiveArguments: Record<string, unknown> | undefined;
+  } {
+    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
+    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    const structuredEditToolName = structuredEditToolNameFor(params.name);
+    if (structuredEditToolName === undefined || params.arguments === undefined) {
+      return { requestedCwd, cwd, effectiveArguments: params.arguments };
+    }
+    const normalization = normalizeStructuredEditArguments({
+      toolName: structuredEditToolName,
+      args: params.arguments,
+      cwd: cwd ?? '',
+      repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
+    });
+    return { requestedCwd, cwd, effectiveArguments: normalization.args };
+  }
+
+  mintCanonicalParams(params: Parameters<LocalToolMCP['toolCallInfo']>[0]): Record<string, unknown> {
+    return toJsonSafeParams(this.proposedCall(params).effectiveArguments ?? {});
+  }
+
   override async toolCallInfo(
     params: Parameters<LocalToolMCP['toolCallInfo']>[0],
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
-    const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
-    const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
-    // Every structured-edit tool call's arguments pass through the same normalisation the
-    // dispatch handlers apply, here at proposal time, so the approval card (built from `info`
-    // below) and the structured-edit path extraction further down see exactly the arguments
-    // `handleApplyPatch`/`handleReplaceText`/`handleWriteFile` will act on.
-    const structuredEditToolName = structuredEditToolNameFor(params.name);
-    let effectiveArguments = params.arguments;
-    if (structuredEditToolName !== undefined && params.arguments !== undefined) {
-      const normalization = normalizeStructuredEditArguments({
-        toolName: structuredEditToolName,
-        args: params.arguments,
-        cwd: cwd ?? '',
-        repositoryRoot: this.boundRepository?.workspace_cwd ?? cwd ?? '',
-      });
-      effectiveArguments = normalization.args;
-    }
+    const { requestedCwd, cwd, effectiveArguments } = this.proposedCall(params);
     const effectiveParams = { ...params, arguments: effectiveArguments };
     const info = await super.toolCallInfo(effectiveParams, resolveUnderlyingTool);
     const command = commandFromToolArguments(effectiveArguments);
@@ -3560,11 +3606,17 @@ export class Sandbox extends LocalToolMCP {
     sandboxId: string,
     cwd: string | undefined,
   ): Promise<WorkspaceVerificationIdentity | undefined> {
+    const hardeningRoot = this.boundRepository?.workspace_cwd ?? cwd;
+    if (hardeningRoot === undefined) {
+      return undefined;
+    }
+    const env = gitHardeningEnv({ workspaceRoot: hardeningRoot });
     const read = async (input: { command: string; commandCwd: string | undefined }): Promise<string | undefined> => {
       const result = await this.hostExec({
         sandboxId,
         command: input.command,
         cwd: input.commandCwd,
+        env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
       return successfulExec(result) ? result.response.result : undefined;
@@ -3579,14 +3631,8 @@ export class Sandbox extends LocalToolMCP {
       const head = (await read({ command: 'git rev-parse HEAD', commandCwd: workspaceRoot }))?.trim();
       const refs = await read({ command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
       const taggedTrackedPaths = await read({ command: 'git ls-files -v -z', commandCwd: workspaceRoot });
-      const indexDiff = await read({
-        command: 'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --',
-        commandCwd: workspaceRoot,
-      });
-      const trackedWorktreeDiff = await read({
-        command: 'git diff --binary --no-ext-diff --no-textconv --no-color --',
-        commandCwd: workspaceRoot,
-      });
+      const indexEntries = await read({ command: GIT_INDEX_ENTRIES_COMMAND, commandCwd: workspaceRoot });
+      const trackedWorktreeListing = await read({ command: TRACKED_WORKTREE_COMMAND, commandCwd: workspaceRoot });
       const untrackedPathList = await read({
         command: 'git ls-files --others --exclude-standard -z',
         commandCwd: workspaceRoot,
@@ -3597,16 +3643,23 @@ export class Sandbox extends LocalToolMCP {
         refs === undefined ||
         taggedTrackedPaths === undefined ||
         gitIndexHidesTrackedPaths(taggedTrackedPaths) ||
-        indexDiff === undefined ||
-        trackedWorktreeDiff === undefined ||
+        indexEntries === undefined ||
+        trackedWorktreeListing === undefined ||
         untrackedPathList === undefined
       ) {
+        return undefined;
+      }
+      const trackedWorktree = parseTrackedWorktreeListing({ listing: trackedWorktreeListing, indexEntries });
+      if (trackedWorktree === undefined) {
         return undefined;
       }
       const untrackedPaths = untrackedPathList
         .split('\0')
         .filter(path => path.length > 0)
         .sort((left, right) => left.localeCompare(right));
+      if (untrackedPaths.some(pathLostBytes) || new Set(untrackedPaths).size !== untrackedPaths.length) {
+        return undefined;
+      }
       const untrackedFiles: { path: string; objectSha: string }[] = [];
       for (const path of untrackedPaths) {
         const objectSha = (
@@ -3621,8 +3674,8 @@ export class Sandbox extends LocalToolMCP {
         untrackedFiles.push({ path, objectSha });
       }
       const refsSha256 = createHash('sha256').update(refs).digest('hex');
-      const indexSha256 = createHash('sha256').update(indexDiff).digest('hex');
-      const trackedWorktreeSha256 = createHash('sha256').update(trackedWorktreeDiff).digest('hex');
+      const indexSha256 = createHash('sha256').update(indexEntries).digest('hex');
+      const trackedWorktreeSha256 = createHash('sha256').update(JSON.stringify(trackedWorktree)).digest('hex');
       const untrackedSha256 = createHash('sha256').update(JSON.stringify(untrackedFiles)).digest('hex');
       const stateSha256 = createHash('sha256')
         .update(JSON.stringify({ branch, head, refsSha256, indexSha256, trackedWorktreeSha256, untrackedSha256 }))
@@ -3962,6 +4015,11 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Durable workspace coordinator disappeared while a lease was held');
     }
     try {
+      // A refused command must not consume a receipt or record a state observation.
+      const earlyRefusal = await preflight?.();
+      if (earlyRefusal !== undefined) {
+        return { status: 'blocked', reason: earlyRefusal };
+      }
       const before = await this.captureWorkspaceVerificationIdentity(sandboxId, input.cwd);
       if (before === undefined) {
         return {
@@ -5231,7 +5289,8 @@ export class Sandbox extends LocalToolMCP {
     }
     const normalizedPatch = finalNormalizedPatch;
     const normalizedPatchDigest = createHash('sha256').update(normalizedPatch).digest('hex');
-    const patchPath = `${this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '')}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
+    const patchDir = this.provider.getToolResultDumpDir(rawId).replace(/\/+$/, '');
+    const patchPath = `${patchDir}/apply-patch-${normalizedPatchDigest.slice(0, 16)}.diff`;
     await this.provider.uploadFile({
       sandboxId: rawId,
       remotePath: patchPath,
@@ -5264,7 +5323,8 @@ export class Sandbox extends LocalToolMCP {
           // OpenAI-format apply_patch hunk with no removed/context lines) declares a zero-length
           // old side. Without this flag `git apply` silently mis-locates such a hunk — it applies
           // without error, but at the wrong offset — instead of honoring the declared position.
-          command: `git apply --recount --unidiff-zero --check -- ${shellEscape(patchPath)}`,
+          command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: true }),
+          env: gitHardeningEnv({ workspaceRoot }),
           cwd: input.cwd,
         });
         if (!successfulExec(check)) {
@@ -5292,7 +5352,8 @@ export class Sandbox extends LocalToolMCP {
             hostAuthored: true,
             sandboxId: rawId,
             workspaceRoot,
-            command: `git apply --recount --unidiff-zero -- ${shellEscape(patchPath)}`,
+            command: buildIsolatedGitApplyCommand({ patchPath, scratchDir: patchDir, check: false }),
+            env: gitHardeningEnv({ workspaceRoot }),
             cwd: input.cwd,
           }),
         );
@@ -5804,10 +5865,10 @@ export class Sandbox extends LocalToolMCP {
       );
     }
     const { sandboxId, canonicalFilePath, canonicalUploadDir } = await this.canonicalStagedFilePath(input.filePath);
-    const uploadDir = this.provider.getFileUploadsDir(sandboxId).replace(/\/+$/g, '');
-    const snapshotPath = `${uploadDir}/.amanuensis-document-${randomUUID().replace(/-/g, '')}`;
+    const snapshotDir = this.documentSnapshotDir(sandboxId);
+    const snapshotPath = `${snapshotDir}/.amanuensis-document-${randomUUID().replace(/-/g, '')}`;
     const marker = `AMAN_DOCUMENT_SNAPSHOT_${randomUUID().replace(/-/g, '')}`;
-    const command = `set -eu; exec 3<${shellEscape(canonicalFilePath)}; opened_path=$(realpath -e -- /proc/self/fd/3); case "$opened_path" in ${shellEscape(`${canonicalUploadDir}/`)}*) ;; *) printf '%sUNSAFE_PATH\\n' ${shellEscape(`${marker}:`)}; exit 0 ;; esac; if [ ! -f /proc/self/fd/3 ]; then printf '%sUNSAFE_TYPE\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; before=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); original_size=$(stat -Lc %s /proc/self/fd/3); if [ "$original_size" -gt ${String(maxBytes)} ]; then printf '%sTOO_LARGE:%s\\n' ${shellEscape(`${marker}:`)} "$original_size"; exit 0; fi; source_hash_before=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); head -c ${String(maxBytes)} <&3 > ${shellEscape(snapshotPath)}; source_hash_after=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); snapshot_hash=$(sha256sum ${shellEscape(snapshotPath)} | awk '{print $1}'); after=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); snapshot_size=$(stat -Lc %s -- ${shellEscape(snapshotPath)}); if [ "$before" != "$after" ] || [ "$snapshot_size" -ne "$original_size" ] || [ "$source_hash_before" != "$source_hash_after" ] || [ "$source_hash_after" != "$snapshot_hash" ]; then rm -f -- ${shellEscape(snapshotPath)}; printf '%sCHANGED\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; chmod 400 -- ${shellEscape(snapshotPath)}; printf '%sOK:%s:%s\\n' ${shellEscape(`${marker}:`)} "$snapshot_size" "$snapshot_hash"`;
+    const command = `set -eu; mkdir -p -- ${shellEscape(snapshotDir)}; exec 3<${shellEscape(canonicalFilePath)}; opened_path=$(realpath -e -- /proc/self/fd/3); case "$opened_path" in ${shellEscape(`${canonicalUploadDir}/`)}*) ;; *) printf '%sUNSAFE_PATH\\n' ${shellEscape(`${marker}:`)}; exit 0 ;; esac; if [ ! -f /proc/self/fd/3 ]; then printf '%sUNSAFE_TYPE\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; before=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); original_size=$(stat -Lc %s /proc/self/fd/3); if [ "$original_size" -gt ${String(maxBytes)} ]; then printf '%sTOO_LARGE:%s\\n' ${shellEscape(`${marker}:`)} "$original_size"; exit 0; fi; source_hash_before=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); head -c ${String(maxBytes)} <&3 > ${shellEscape(snapshotPath)}; source_hash_after=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); snapshot_hash=$(sha256sum ${shellEscape(snapshotPath)} | awk '{print $1}'); after=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); snapshot_size=$(stat -Lc %s -- ${shellEscape(snapshotPath)}); if [ "$before" != "$after" ] || [ "$snapshot_size" -ne "$original_size" ] || [ "$source_hash_before" != "$source_hash_after" ] || [ "$source_hash_after" != "$snapshot_hash" ]; then rm -f -- ${shellEscape(snapshotPath)}; printf '%sCHANGED\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; chmod 400 -- ${shellEscape(snapshotPath)}; printf '%sOK:%s:%s\\n' ${shellEscape(`${marker}:`)} "$snapshot_size" "$snapshot_hash"`;
     const cleanup = async (): Promise<void> => {
       await this.removeSandboxFile({ sandboxId, filePath: snapshotPath });
     };
@@ -5873,17 +5934,33 @@ export class Sandbox extends LocalToolMCP {
     ensureExecSuccess(result);
   }
 
+  private documentSnapshotDir(sandboxId: string): string {
+    return (this.provider.getDocumentSnapshotDir?.(sandboxId) ?? this.provider.getFileUploadsDir(sandboxId)).replace(
+      /\/+$/g,
+      '',
+    );
+  }
+
+  /**
+   * Resolves a staged upload to its real path. With `allowSnapshots` a private snapshot of an upload
+   * (made by createDocumentSnapshot) is accepted too, which is what the text and OCR tools are given.
+   */
   private async canonicalStagedFilePath(
     filePath: string,
+    options: { allowSnapshots: boolean } = { allowSnapshots: false },
   ): Promise<{ sandboxId: string; canonicalFilePath: string; canonicalUploadDir: string }> {
     validateNoPathTraversal(filePath);
     const { sandboxInfo } = await this.ensureReadySandbox();
     const sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
     const uploadDir = this.provider.getFileUploadsDir(sandboxId).replace(/\\+$/g, '').replace(/\\/g, '/');
+    const snapshotDir = this.documentSnapshotDir(sandboxId).replace(/\\/g, '/');
     const normalizedPath = filePath.replace(/\\/g, '/');
-    if (normalizedPath !== uploadDir && !normalizedPath.startsWith(`${uploadDir}/`)) {
+    const under = (dir: string): boolean => normalizedPath !== dir && normalizedPath.startsWith(`${dir}/`);
+    const allowedDir = [uploadDir, ...(options.allowSnapshots ? [snapshotDir] : [])].find(dir => under(dir));
+    if (allowedDir === undefined && normalizedPath !== uploadDir) {
       throw new Error(`Document path must refer to a staged upload: ${filePath}`);
     }
+    const containingDir = allowedDir ?? uploadDir;
     const canonicalize = async (path: string): Promise<string> => {
       const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
       ensureExecSuccess(result);
@@ -5896,7 +5973,7 @@ export class Sandbox extends LocalToolMCP {
       }
       return canonical;
     };
-    const canonicalUploadDir = await canonicalize(uploadDir);
+    const canonicalUploadDir = await canonicalize(containingDir);
     const canonicalFilePath = await canonicalize(filePath);
     const canonicalPrefix = canonicalUploadDir.replace(/\\/g, '/').replace(/\/+$/g, '');
     const normalizedCanonicalFilePath = canonicalFilePath.replace(/\\/g, '/');
@@ -5925,7 +6002,9 @@ export class Sandbox extends LocalToolMCP {
     if (!Number.isSafeInteger(firstPage) || firstPage < 1) {
       throw new Error('Document first page must be a positive integer');
     }
-    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath);
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
     const operationId = randomUUID().replace(/-/g, '');
     const marker = `AMAN_PDF_TEXT_${operationId}`;
     // Efficiency: single pdftotext invocation for the whole range. pdftotext
@@ -5975,7 +6054,10 @@ export class Sandbox extends LocalToolMCP {
     return { total_pages, pages };
   }
 
-  /** Run the pinned local OCR tools inside the selected sandbox, never in the server process. */
+  /**
+   * Runs the local OCR tools inside the selected sandbox, never in the server process. A PDF is read one
+   * page per call, so a failure or timeout on a later page keeps the pages already read.
+   */
   async runDocumentOcr(input: {
     filePath: string;
     kind: 'pdf' | 'image';
@@ -5997,51 +6079,88 @@ export class Sandbox extends LocalToolMCP {
         }
       }
     }
-    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath);
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
+    const requestedPages =
+      input.kind === 'image'
+        ? [1]
+        : [...new Set(input.pages ?? Array.from({ length: maxPages }, (_, index) => index + 1))].sort(
+            (left, right) => left - right,
+          );
+    const pages: { page_number: number; text: string }[] = [];
+    let remaining = MAX_CHARS_PER_DOCUMENT;
+    for (const pageNumber of requestedPages) {
+      if (remaining <= 0) {
+        break;
+      }
+      throwIfSignalAborted(input.signal);
+      try {
+        const text = await this.ocrOnePage({
+          sandboxId,
+          canonicalFilePath,
+          kind: input.kind,
+          pageNumber,
+          remainingChars: remaining,
+          fallbackLanguages: this.ocrLanguages,
+          signal: input.signal,
+        });
+        pages.push({ page_number: pageNumber, text });
+        remaining -= text.length;
+      } catch (error) {
+        // Pages already read are kept; an abort or a failure on the first page is the caller's to handle.
+        if (pages.length === 0 || input.signal?.aborted === true) {
+          throw error;
+        }
+        this.logger.warn('OCR stopped after some pages', { page: pageNumber, ...extractErrorLogFields(error) });
+        break;
+      }
+    }
+    if (pages.length === 0) {
+      throw new Error('OCR completed without producing a page result');
+    }
+    return pages;
+  }
+
+  private async ocrOnePage(input: {
+    sandboxId: string;
+    canonicalFilePath: string;
+    kind: 'pdf' | 'image';
+    pageNumber: number;
+    remainingChars: number;
+    fallbackLanguages: string;
+    signal: AbortSignal | undefined;
+  }): Promise<string> {
     const operationId = randomUUID().replace(/-/g, '');
-    const directory = this.provider.getToolResultDumpDir(sandboxId).replace(/\/+$/g, '');
+    const directory = this.provider.getToolResultDumpDir(input.sandboxId).replace(/\/+$/g, '');
     const outputPrefix = `${directory}/document-ocr-${operationId}`;
     const marker = `AMAN_OCR_PAGE_${operationId}`;
-    const cleanup =
-      input.kind === 'pdf'
-        ? `rm -f -- ${shellEscape(outputPrefix)}-*.png ${shellEscape(outputPrefix)}-*.txt`
-        : `rm -f -- ${shellEscape(`${outputPrefix}.ocr.txt`)} ${shellEscape(`${outputPrefix}.txt`)}`;
-    const cleanupTrap = `trap ${shellEscape(cleanup)} EXIT;`;
-    const requestedPages = [...new Set(input.pages ?? [])].sort((left, right) => left - right);
-    const tesseractLangFlags = this.ocrLanguages ? ` -l ${this.ocrLanguages.split(/\s+/).join('+')}` : '';
+    const cleanup = `rm -f -- ${shellEscape(`${outputPrefix}.png`)} ${shellEscape(`${outputPrefix}.ocr.txt`)} ${shellEscape(`${outputPrefix}.txt`)}`;
+    // One OCR thread: OpenMP otherwise starts a thread per core and a single page can starve the whole slot.
+    const prelude = `trap ${shellEscape(cleanup)} EXIT; set -eu; ulimit -v 2097152; export OMP_THREAD_LIMIT=1;`;
+    const imageInput = input.kind === 'pdf' ? '"$page_prefix.png"' : shellEscape(input.canonicalFilePath);
+    const languages = ocrLanguageSelectionScript({ imagePath: imageInput, fallback: input.fallbackLanguages });
+    const read = `${languages}; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${imageInput} stdout -l "$ocr_languages" --psm 6 > "$raw_text_file"; head -c ${String(input.remainingChars)} < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} ${shellEscape(String(input.pageNumber))}; cat "$text_file"`;
     const command =
       input.kind === 'pdf'
-        ? requestedPages.length > 0
-          ? `${cleanupTrap} set -eu; ulimit -v 2097152; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; for page_number in ${requestedPages.map(page => shellEscape(String(page))).join(' ')}; do [ "$remaining" -gt 0 ] || break; page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); done`
-          : `${cleanupTrap} set -eu; ulimit -v 2097152; total=$(pdfinfo ${shellEscape(canonicalFilePath)} | awk '/^Pages:/ {print $2}'); limit=$total; if [ "$limit" -gt ${String(maxPages)} ]; then limit=${String(maxPages)}; fi; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; page_number=1; while [ "$page_number" -le "$limit" ] && [ "$remaining" -gt 0 ]; do page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); page_number=$((page_number + 1)); done`
-        : `${cleanupTrap} set -eu; ulimit -v 2097152; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${shellEscape(canonicalFilePath)} stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c ${String(MAX_CHARS_PER_DOCUMENT)} < "$raw_text_file" > "$text_file"; printf '%s1\\n' ${shellEscape(`${marker}:`)}; cat "$text_file"`;
+        ? `${prelude} page_prefix=${shellEscape(outputPrefix)}; pdftoppm -f ${shellEscape(String(input.pageNumber))} -l ${shellEscape(String(input.pageNumber))} -png -r 150 -scale-to 4096 -singlefile ${shellEscape(input.canonicalFilePath)} "$page_prefix"; ${read}`
+        : `${prelude} ${read}`;
     const result = await this.hostExec({
-      sandboxId,
+      sandboxId: input.sandboxId,
       command,
-      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      timeoutSeconds: OCR_PAGE_TIMEOUT_SECONDS,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     ensureExecSuccess(result);
     if (!result.success) {
       throw new Error('Unreachable: OCR result was not successful');
     }
-    const pages = result.response.result
-      .split(`${marker}:`)
-      .slice(1)
-      .flatMap(chunk => {
-        const newline = chunk.indexOf('\n');
-        if (newline < 0) {
-          return [];
-        }
-        const page_number = Number(chunk.slice(0, newline).trim());
-        return Number.isInteger(page_number) && page_number > 0
-          ? [{ page_number, text: chunk.slice(newline + 1).trim() }]
-          : [];
-      });
-    if (pages.length === 0) {
+    const chunk = result.response.result.split(`${marker}:`)[1];
+    const newline = chunk?.indexOf('\n') ?? -1;
+    if (chunk === undefined || newline < 0) {
       throw new Error('OCR completed without producing a page result');
     }
-    return pages;
+    return chunk.slice(newline + 1).trim();
   }
 
   async writeArtifact(input: {

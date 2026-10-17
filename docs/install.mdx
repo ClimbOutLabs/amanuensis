@@ -14,8 +14,9 @@ One instance serves one person. If two people in the same household need it, the
 - A computer with Docker: Docker Engine with Compose v2 or newer on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
 - 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox's slot disks (they are sparse and use real space only as code runs).
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
+- On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
-- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. API keys are entered in the app afterwards, not in the installer. The installer never scans your machine for models; you type the endpoint yourself.
+- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. The installer never scans your machine for models.
 - A git checkout of this repository. The installer runs from the checkout and builds the images from source.
 
 ## The one command
@@ -38,15 +39,15 @@ The installer works in phases and shows you a printed plan before changing anyth
 
 ### What it asks
 
-For the first instance it prompts, with defaults in brackets:
+For the first instance it asks, with defaults in brackets:
 
 - Instance name `[main]`
-- Owner email
-- Address you will use from other devices (press Enter to use this computer only)
-- If you give a public address: address for the sign-in service (its own https address, never a path of the first one)
-- Token Factory key (optional; typed hidden, never echoed). Giving one makes Nebius Token Factory the default model and skips the next question
-- Model server address (optional; skipped when you gave a Token Factory key)
+- Your email, used to sign in (skipped when you pass `--email`)
+- Whether to back up automatically every day `[Y/n]` (skipped when you pass `--backups`)
+- `Go ahead?` `[Y/n]`, after it prints the plan
 - Password (typed twice, never echoed; at least 8 characters, at most 72 bytes)
+
+When a step needs root (installing Docker, adding you to the docker group, the sandbox setup), it asks before each one. It never asks for a model key or a model server address: a Token Factory key only arrives through `--token-factory-key-stdin`, and other models are set up in the app afterwards. The addresses Aman answers at come from this computer and from `--address`, `--public-url` and `--login-url`.
 
 Everything else is generated: ports, secrets, and the login setup.
 
@@ -73,6 +74,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
+- `--home-network`: on a cloud server, open Aman at its private addresses anyway. Private addresses there are shared with other customers, so by default (for the common providers, recognised by their hardware) a new instance opens on `127.0.0.1` alone and says so. An instance that already exists keeps where it opens; `--local-only` puts it back on this computer.
 
 ### Feeding the Token Factory key safely
 
@@ -209,7 +211,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)
@@ -229,34 +231,54 @@ aman export-data --user <id> --out /backup/alice.zip   # one person's archive
 
 An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. The archive is written whole or not at all and is never overwritten; any failure prints one line and exits non-zero. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds the files people uploaded to their chats, `--include-instance-data` adds the shared memories and instance settings, and `--migrate` first updates an older database to this version's schema (back it up first, since it changes the database). Shared memories can hold what other people told the assistant, so they are left out unless you add `--include-instance-data`; add it only when nobody else used the instance. A persona's memory is left out too when another person has a persona with the same name, because the two share that memory. Keys and passwords are removed from the text before anything is written, and the printed result says how many were removed. Names, ids and uploaded files are never changed. Without `--include-instance-data` the archive holds one person's data only, apart from the connector list, which the whole instance shares (without its keys). Treat it as private anyway.
 
-### Importing it into a fresh instance
+### Moving from the old docker compose setup
 
-This is a one-time move run by whoever operates the instance, from a terminal on the machine that runs it. There is no button in the app for it yet, so a person who only uses the app cannot do it alone. An export (made by `aman export-data` on the old Aman) can be restored into a fresh instance. Each person gets a new instance. Everything imported belongs to that instance's owner. Only import a file you exported yourself.
+If your Aman runs from the older `docker compose` setup (Postgres), install the new instance first, then run one command on the same computer:
 
 ```bash
-installer/install.sh instance import main ~/aman-export.zip
+aman migrate --from-compose <old-aman-folder>
 ```
 
-The installer stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.
+`<old-aman-folder>` is the folder you run `docker compose` in for the old Aman. The command copies the old database into a temporary Postgres, copies the memory and persona knowledge volumes, exports your data from those copies as the app's own user, and removes every temporary piece again. The old Aman keeps running and is never changed: its database is only read with `pg_dump` and its volumes are mounted read-only. The export also reads the old `packages/trueforge/.env`, so a key that lived only there, such as a model key or the sign-in client secret, is blanked if it was ever pasted into a chat or a memory. The file lands in `~/.amanuensis/exports/` (mode 600), and the command prints the `aman import` line to run next.
 
-What moves: chats with their dates and totals, the files uploaded to them when the export included them (the summary counts any that were left behind), folders, agents (with their ids), personas and their knowledge, each chat's chosen persona, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the owner's personalization, the owner's permission history, and the default model and memory summary switch if the new instance has not set them. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer is imported with that request expired and a line saying so, and "Approve for this chat" choices start over. The permission history (what ran, what was approved or denied, and when) is kept and never expires. Dates on personas, spaces, folders, schedules and persona choices show the import time.
+If more than one person has chats in the old Aman, the command lists their ids and stops; run it again with `--user <id>`. Shared memories and instance settings come along only when one person used the old Aman. `docs/migrate-from-compose.md` in the repository has the details and the manual steps.
 
-What does not move, and what to set up again: model keys, connector sign-ins and Always allow choices; your own skills and registered repositories; and your safety settings. Imported connectors arrive with no agent attached. In Settings, open Permissions to set offline mode, Always allow and web search again, Memory to turn the recall and tool-output checks back on, and Connectors to sign in; attach connectors to agents on the Agents page. An agent the export only names (a chat or schedule refers to it, but its definition is missing) is created as a stand-in with no working model; the import summary names it.
+### Importing it into a fresh instance
+
+This is a one-time move run by whoever operates the instance, from a terminal on the machine that runs it. There is no button in the app for it yet, so a person who only uses the app cannot do it alone. An export (made by `aman migrate` or `aman export-data` on the old Aman) can be restored into a fresh instance. Each person gets a new instance. Everything imported belongs to that instance's owner. Only import a file you exported yourself.
+
+```bash
+aman import ~/.amanuensis/exports/aman-export-<timestamp>.zip --display-name "Your Name"
+```
+
+`aman import FILE` runs `installer/install.sh instance import <name> FILE`; with more than one instance, add `--instance <name>`. Imported chats show the name given with `--display-name`; without it, the import asks, and Enter keeps the part of your email before the `@`.
+
+Before anything is written, the import:
+
+1. Starts the instance once if it never started, so there is something to back up.
+2. Waits for the search model to finish downloading (about 120 MB, once), with one line saying so. Persona knowledge is searched by meaning, so the import needs it.
+3. Takes a backup named `<timestamp>-before-import`, which is never pruned. To start over, put it back.
+
+Then it stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.
+
+What moves: chats with their dates and totals, the files uploaded to them when the export included them (the summary counts any that were left behind), folders, agents (with their ids), personas and their knowledge, each chat's chosen persona, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the owner's personalization, the owner's permission history, the recall and tool-output checks of Settings, Memory, and the default model and memory summary switch, each only if the new instance has not set it. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer is imported with that request expired and a line saying so, and "Approve for this chat" choices start over. The permission history (what ran, what was approved or denied, and when) is kept and never expires. Dates on personas, spaces, folders, schedules and persona choices show the import time.
+
+What does not move, and what to set up again: model keys, connector sign-ins, and your own skills and registered repositories. Permission settings (offline mode, web search without asking) and Always allow choices start fresh, so each tool asks again; re-asking is the safe default. Imported connectors arrive with no agent attached. In Settings, open Connectors to sign in; attach connectors to agents on the Agents page. An agent the export only names (a chat or schedule refers to it, but its definition is missing) is created as a stand-in with no working model; the import summary names it.
 
 An export made before permission history and persona choices were included still imports; those two parts are simply empty. To bring them across, export again from the old instance with a version that includes them.
 
-Before it writes anything the import checks the whole file, then checks that none of its ids already exist here. A failure undoes what the import wrote, and if the process is killed the next import cleans up first. Knowledge is searched by meaning, so the search model must have finished downloading (open the app once and wait a few minutes). If it has not, the import stops with "the knowledge index is still downloading, retry in a few minutes" and writes nothing.
+Before it writes anything the import checks the whole file, then checks that none of its ids already exist here. A failure undoes what the import wrote, and if the process is killed the next import cleans up first.
 
 An import only runs into a fresh instance. If it says the instance already has chats, agents or other data, remove the instance and add it again, then import:
 
 ```bash
 installer/install.sh instance remove main --purge-data
-installer/install.sh instance add main --email you@example.com
+installer/install.sh instance add main --email <your-email>
 ```
 
 ## What is off in this version
 
-Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.
+After a normal install the assistant can run code (Python and shell, in a sandbox with no network) and read PDFs and images you attach in a chat, including scanned pages and text in many languages (English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi, Marathi, Arabic, Russian, Chinese, Japanese and Korean). Settings → Sandbox shows whether the sandbox is ready, `aman doctor` reports code and attachments separately, and new chats have the sandbox enabled. Gmail attachments are read the same way: ask Aman to open a PDF or image from an email and it is read in the sandbox. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` can do neither. An install from before this release gets PDF and image reading with `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger) and starts it again.
 
 ## Troubleshooting
 

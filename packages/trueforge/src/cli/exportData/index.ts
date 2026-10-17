@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
-import { rename, rm } from 'node:fs/promises';
+import { readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
@@ -12,6 +12,7 @@ import { looksLikeOldSchema } from './stores';
 
 const USAGE = `Usage: aman export-data --list-users
        aman export-data --user <id> --out <file.zip> [--include-uploads] [--include-instance-data] [--migrate]
+                        [--secrets-env <file>]
 
 Exports one person's data (chats, sessions, agents, personas, spaces, schedules, connectors without
 their keys, settings and memory) from this instance's database and memory files. This is run by
@@ -24,6 +25,7 @@ whoever operates the instance, from a terminal on the machine that runs it; ther
   --include-instance-data   Also include the shared memories and instance settings; they can hold other
                             people's data, so use it only when nobody else used this instance
   --migrate                 First update an older database to this version's schema (changes the database; back it up)
+  --secrets-env <file>      Also blank the keys and passwords in this settings file, such as an old stack's .env
 
 Without sign-in, all data belongs to one user id, which --list-users always shows.
 `;
@@ -55,6 +57,7 @@ function parseOptions(args: readonly string[]) {
         'include-uploads': { type: 'boolean', default: false },
         'include-instance-data': { type: 'boolean', default: false },
         migrate: { type: 'boolean', default: false },
+        'secrets-env': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
       allowPositionals: false,
@@ -96,7 +99,13 @@ export function createExportData(deps: ExportDataDeps): Command {
     if (listing === (options.user !== undefined)) {
       throw new UsageError('Use either --list-users, or --user <id> with --out <file.zip>.');
     }
-    if (listing && (options.out !== undefined || options['include-uploads'] || options['include-instance-data'])) {
+    if (
+      listing &&
+      (options.out !== undefined ||
+        options['include-uploads'] ||
+        options['include-instance-data'] ||
+        options['secrets-env'] !== undefined)
+    ) {
       throw new UsageError('--list-users takes no other options except --migrate.');
     }
     const userId = options.user?.trim();
@@ -119,7 +128,9 @@ export function createExportData(deps: ExportDataDeps): Command {
       }
     }
 
-    const plan = userId !== undefined && target !== undefined ? { userId, target } : undefined;
+    const secretsEnvText =
+      options['secrets-env'] === undefined ? undefined : await readSecretsEnv(path.resolve(options['secrets-env']));
+    const plan = userId !== undefined && target !== undefined ? { userId, target, secretsEnvText } : undefined;
 
     let session: ExportDataSession;
     try {
@@ -143,15 +154,13 @@ export function createExportData(deps: ExportDataDeps): Command {
       if (!owners.some(owner => owner.user_id === plan.userId)) {
         throw new Error(`No sessions belong to the user "${plan.userId}". Run --list-users for the ids that do.`);
       }
-      const result = await writeArchive({ session, userId: plan.userId, target: plan.target, options }).catch(
-        async (error: unknown) => {
-          // Best effort: the database that failed the export may be the one that cannot take the row.
-          await session
-            .recordAudit({ description: `Data export of user ${plan.userId} from the command line failed.` })
-            .catch(() => undefined);
-          throw error;
-        },
-      );
+      const result = await writeArchive({ session, plan, options }).catch(async (error: unknown) => {
+        // Best effort: the database that failed the export may be the one that cannot take the row.
+        await session
+          .recordAudit({ description: `Data export of user ${plan.userId} from the command line failed.` })
+          .catch(() => undefined);
+        throw error;
+      });
       await session
         .recordAudit({
           description: `Exported data of user ${plan.userId} from the command line (${String(result.bytesWritten)} bytes).`,
@@ -194,16 +203,24 @@ export function createExportData(deps: ExportDataDeps): Command {
   };
 }
 
+async function readSecretsEnv(file: string): Promise<string> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    throw new Error(`The settings file ${file} could not be read. Pass --secrets-env a readable .env file.`, {
+      cause: error,
+    });
+  }
+}
+
 /** Writes beside the target and renames when whole, so a failure never leaves a partial archive. */
 async function writeArchive({
   session,
-  userId,
-  target,
+  plan: { userId, target, secretsEnvText },
   options,
 }: {
   session: ExportDataSession;
-  userId: string;
-  target: string;
+  plan: { userId: string; target: string; secretsEnvText: string | undefined };
   options: { 'include-uploads': boolean; 'include-instance-data': boolean };
 }) {
   const partial = path.join(
@@ -220,6 +237,7 @@ async function writeArchive({
       userId,
       includeUploads: options['include-uploads'],
       includeInstanceData: options['include-instance-data'],
+      secretsEnvText,
       out: file,
     });
     file.end();

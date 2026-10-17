@@ -43,6 +43,7 @@ const SCHEMA_STATEMENTS = [
 // better-sqlite3 returns `unknown` for row reads; the zod schemas are the
 // contract that turns a row into a typed record instead of an assertion.
 const CountRowSchema = z.object({ count: z.number() });
+const UsedBytesRowSchema = z.object({ bytes: z.number() });
 
 const ChunkRowSchema = z.object({ chunk_index: z.number(), text: z.string() });
 
@@ -287,6 +288,16 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
       )
       .get();
     return CountRowSchema.parse(row).count;
+  }
+
+  usedBytes(): number {
+    const row = this.#db
+      .prepare(
+        `SELECT (page_count - freelist_count) * page_size AS bytes
+         FROM pragma_page_count(), pragma_freelist_count(), pragma_page_size()`,
+      )
+      .get();
+    return UsedBytesRowSchema.parse(row).bytes;
   }
 
   searchNearest(input: { embedding: Float32Array; limit: number }): KnowledgeSearchHit[] {

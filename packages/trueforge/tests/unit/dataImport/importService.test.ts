@@ -193,7 +193,8 @@ describe('runDataImport', () => {
           'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time. ' +
           '3 permission history entries came along. ' +
           'Connectors arrive unused, with no agent attached to them: dcr-connector, header-connector, plain-connector. Attach each one to an agent on the Agents page when you want it. ' +
-          'Not imported: model keys, connector sign-ins and keys, your own skills and registered repositories, and your safety settings. In Settings, open Permissions to set offline mode, Always allow and web search again, and Memory to turn the recall and tool-output checks back on.',
+          'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories. ' +
+          'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
       );
 
       const sessions = await target.stores.sessionStore.listSessions({
@@ -573,6 +574,43 @@ describe('export and import round trip', () => {
     }
   });
 
+  it('stores every imported upload as a plain download, whatever type the archive claims', async () => {
+    const source = await makeInstance('source-upload-type');
+    const target = await makeInstance('target-upload-type');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await source.stores.turnArtifactStore.recordStoredArtifact({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+        path: 'page.html',
+        name: 'page.html',
+        data: Buffer.from('<p>invented page</p>'),
+        mime: 'text/html',
+      });
+      const archive = await exportArchive(source);
+      await runDataImport(importDeps(target), importRequest(archive));
+      const restored = (
+        await target.stores.turnArtifactStore.listArtifacts({
+          tenant_id: TENANT,
+          session_id: SEED_IDS.sessionMain,
+          turn_id: 'session-1-turn-1',
+        })
+      ).find(artifact => artifact.path === 'page.html');
+      expect(restored?.status).toBe('stored');
+      expect(restored?.mime).toBe('application/octet-stream');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('keeps an agent and chat text that contain the compose default database password', async () => {
     const source = await makeInstance('source-dbpass');
     const target = await makeInstance('target-dbpass');
@@ -849,7 +887,7 @@ describe('runDataImport keeps what the archive recorded', () => {
     }
   });
 
-  it('keeps the model default the target has and never takes the injection screens from the archive', async () => {
+  it('keeps a screen setting the target already has and fills in the one it does not', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-settings');
     try {
@@ -858,7 +896,9 @@ describe('runDataImport keeps what the archive recorded', () => {
       expect((await target.stores.globalSettingsStore.getSetting({ key: 'tool_output_screen_enabled' }))?.value).toBe(
         'false',
       );
-      expect(await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' })).toBeUndefined();
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
+        'false',
+      );
     } finally {
       await source.close();
       await target.close();
@@ -1809,7 +1849,7 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
     }
   });
 
-  it('skips security settings and says so', async () => {
+  it('applies the screen toggles, leaves permission settings fresh and says so', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-security');
     try {
@@ -1821,12 +1861,15 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       });
       expect(permissions).toEqual(defaults);
       expect(permissions.tier2_auto_allow).not.toContain('file_write');
-      expect(await target.stores.globalSettingsStore.getSetting({ key: 'tool_output_screen_enabled' })).toBeUndefined();
-      expect(await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' })).toBeUndefined();
-      expect(result.summary).toContain('safety settings');
-      expect(result.summary).toContain('open Permissions');
-      expect(result.summary).toContain('Memory to turn the recall and tool-output checks back on');
-      expect(result.summary).toContain('Always allow');
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'tool_output_screen_enabled' }))?.value).toBe(
+        'true',
+      );
+      expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
+        'false',
+      );
+      expect(result.summary).toContain(
+        'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
+      );
     } finally {
       await source.close();
       await target.close();
