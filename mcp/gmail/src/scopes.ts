@@ -51,6 +51,9 @@ export const SCOPE_LABELS: Record<string, string> = {
 };
 
 // Scopes that let Google accept a send even though the user only asked to read.
+// Scopes this app accepts for drafting and sending.
+const SEND_TOOL_SCOPES = ["gmail.compose", "gmail.send"];
+
 const WIDER_THAN_READ_SCOPES = ["gmail.modify", "gmail.full"];
 
 /**
@@ -67,9 +70,13 @@ export function wideScopeNotice({
   const held = scopes.map(scopeUrlToName).filter((s) => WIDER_THAN_READ_SCOPES.includes(s));
   if (held.length === 0) return null;
   const account = accountId ?? "default";
+  const base = `This Gmail connection (${held.join(", ")}) can send email as you, not only read it.`;
+  const readOnly = `To switch to read-only, reconnect with: gmail account auth ${account} --scopes=gmail.readonly`;
+  if (hasScope(scopes, SEND_TOOL_SCOPES)) return `${base} ${readOnly}`;
   return (
-    `This Gmail connection (${held.join(", ")}) can send email as you, not only read it. ` +
-    `To switch to read-only, reconnect with: gmail account auth ${account} --scopes=gmail.readonly`
+    `${base} Drafting and sending are switched off in this app because compose permission was never granted. ` +
+    `${readOnly}. To turn drafting and sending on and keep labels and archive, reconnect with: ` +
+    `gmail account auth ${account} --scopes=gmail.readonly,gmail.modify,gmail.compose`
   );
 }
 

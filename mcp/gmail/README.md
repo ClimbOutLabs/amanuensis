@@ -186,7 +186,7 @@ gmail account auth sender --scopes=gmail.readonly,gmail.compose
 gmail account auth full --scopes=gmail.full,gmail.settings.basic
 ```
 
-A connection created earlier with `gmail.modify` or `gmail.full` keeps working, but on every start the server logs a notice that it can send mail and how to reconnect read-only (`gmail account auth <id> --scopes=gmail.readonly`). `health_check` repeats the notice. Nothing narrows the stored token silently.
+A connection created earlier with `gmail.modify` or `gmail.full` is not narrowed silently, but two things differ. It can send mail as you through Google, and the server logs a notice saying so, with the command to reconnect read-only (`gmail account auth <id> --scopes=gmail.readonly`). `health_check` and `switch_account` repeat the notice for the active account. If the stored scopes include `gmail.modify` but neither `gmail.compose` nor `gmail.send`, drafting and sending are now off in this app (the six draft and send tools are hidden, and a call is rejected naming the permission it needs). To get them back, reconnect with `gmail account auth <id> --scopes=gmail.readonly,gmail.modify,gmail.compose` (drop `gmail.modify` if you do not need labels and archive). New connections no longer get `gmail.settings.basic`; add it explicitly if you want filters.
 
 Tools outside the active account's granted scopes are hidden from `tools/list` and rejected at call time.
 

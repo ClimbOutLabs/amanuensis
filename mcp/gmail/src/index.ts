@@ -257,7 +257,6 @@ export async function bootstrapSession(opts: BootstrapOptions = {}): Promise<Ses
     gmail,
     authorizedScopes,
     accountId: accountId ?? null,
-    scopeNotice,
   });
 
   const { server, dispatch } = buildMcpServer({

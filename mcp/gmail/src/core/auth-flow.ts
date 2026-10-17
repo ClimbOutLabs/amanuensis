@@ -187,6 +187,7 @@ export function loadOAuthKeys(opts: LoadKeysOptions): OAuthKeys {
         fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
       }
       fs.copyFileSync(localPath, oauthPath);
+      fs.chmodSync(oauthPath, 0o600);
     }
   }
 
@@ -375,6 +376,8 @@ export function saveCredentialsToFile(opts: SaveCredentialsOptions): void {
   }
   const payload = JSON.stringify({ tokens: opts.tokens, scopes: opts.scopes }, null, 2);
   fs.writeFileSync(opts.path, payload, { mode: 0o600 });
+  // writeFileSync applies the mode only when it creates the file; re-auth over an older file must tighten it.
+  fs.chmodSync(opts.path, 0o600);
 }
 
 /**

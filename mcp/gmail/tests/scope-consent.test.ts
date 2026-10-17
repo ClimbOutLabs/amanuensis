@@ -94,3 +94,29 @@ describe("wideScopeNotice", () => {
     expect(wideScopeNotice({ scopes: ["gmail.full"], accountId: null })).toContain("gmail.full");
   });
 });
+
+describe("legacy connection (gmail.modify + gmail.settings.basic)", () => {
+  const legacy = ["gmail.modify", "gmail.settings.basic"];
+
+  it("says drafting and sending are off and how to get them back", () => {
+    const notice = wideScopeNotice({ scopes: legacy, accountId: "work" });
+    expect(notice).toMatch(/drafting and sending are switched off/i);
+    expect(notice).toContain("--scopes=gmail.readonly,gmail.modify,gmail.compose");
+  });
+
+  it("does not claim drafting is off once compose is granted", () => {
+    const notice = wideScopeNotice({ scopes: [...legacy, "gmail.compose"], accountId: "work" });
+    expect(notice).not.toMatch(/switched off/i);
+  });
+});
+
+describe("send and draft tools never rely on a wider scope", () => {
+  it("no tool that needs compose or send also lists modify, readonly or labels", () => {
+    const wider = ["gmail.modify", "gmail.readonly", "gmail.labels", "gmail.full"];
+    for (const tool of toolDefinitions) {
+      if (tool.scopes.some((s) => s === "gmail.compose" || s === "gmail.send")) {
+        expect(tool.scopes.filter((s) => wider.includes(s)), tool.name).toEqual([]);
+      }
+    }
+  });
+});

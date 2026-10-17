@@ -5,7 +5,13 @@ import { formatHealthText, readWatchdogState, snapshotHealth } from "@george43g/
 import type { z } from "zod";
 import { HealthCheckOutputSchema, HealthCheckSchema } from "../../tools.js";
 import { type Operation, registry } from "../registry.js";
-import { getRecentErrorCount, getScopeNotice, getToolCallCount } from "../session.js";
+import { wideScopeNotice } from "../../scopes.js";
+import {
+  getAuthorizedScopes,
+  getCurrentAccountId,
+  getRecentErrorCount,
+  getToolCallCount,
+} from "../session.js";
 
 type HealthOutput = z.infer<typeof HealthCheckOutputSchema>;
 
@@ -22,7 +28,10 @@ const op: Operation<unknown, HealthOutput> = {
       },
       readWatchdogState(),
     );
-    const notice = getScopeNotice();
+    const notice = wideScopeNotice({
+      scopes: getAuthorizedScopes(),
+      accountId: getCurrentAccountId(),
+    });
     const text = notice ? `${formatHealthText(snap)}\n\nNotice: ${notice}` : formatHealthText(snap);
     return {
       content: [{ type: "text", text }],
