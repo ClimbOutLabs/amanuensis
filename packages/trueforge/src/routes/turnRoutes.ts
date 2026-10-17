@@ -4,6 +4,7 @@
  * Handlers are registered in apis/turns.ts.
  */
 import { createRoute, z } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { TurnStreamingEventSchema } from '../schemas/events';
 import { SessionIdParamsSchema } from '../schemas/session';
@@ -82,8 +83,15 @@ export const getTurnRoute = createRoute({
   },
 });
 
+/** Downloads carry user and model content: the browser must save them, never sniff them into a page. */
+const noSniff: MiddlewareHandler = async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+};
+
 export const downloadSandboxFileRoute = createRoute({
   method: 'get',
+  middleware: [noSniff] as const,
   path: '/{session_id}/turns/{turn_id}/download-sandbox-file',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Download a file from the turn sandbox',

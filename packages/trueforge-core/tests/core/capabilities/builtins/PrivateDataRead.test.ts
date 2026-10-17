@@ -78,6 +78,14 @@ describe('privateDataReadCapability', () => {
       expect(hasReadPrivateData(turn)).toBe(true);
     });
 
+    it('also counts a calendar read, bare or qualified by its server', async () => {
+      for (const name of ['list_events', 'google_calendar__get_event']) {
+        const { turn, run } = preLLM([assistantCalling(name)]);
+        expect(await run()).toEqual(SAVED);
+        expect(hasReadPrivateData(turn)).toBe(true);
+      }
+    });
+
     it('does nothing for a context with no mail call', async () => {
       const { turn, run } = preLLM([assistantCalling('web_search')]);
       expect(await run()).toEqual([]);

@@ -574,6 +574,43 @@ describe('export and import round trip', () => {
     }
   });
 
+  it('stores every imported upload as a plain download, whatever type the archive claims', async () => {
+    const source = await makeInstance('source-upload-type');
+    const target = await makeInstance('target-upload-type');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await source.stores.turnArtifactStore.recordStoredArtifact({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+        path: 'page.html',
+        name: 'page.html',
+        data: Buffer.from('<p>invented page</p>'),
+        mime: 'text/html',
+      });
+      const archive = await exportArchive(source);
+      await runDataImport(importDeps(target), importRequest(archive));
+      const restored = (
+        await target.stores.turnArtifactStore.listArtifacts({
+          tenant_id: TENANT,
+          session_id: SEED_IDS.sessionMain,
+          turn_id: 'session-1-turn-1',
+        })
+      ).find(artifact => artifact.path === 'page.html');
+      expect(restored?.status).toBe('stored');
+      expect(restored?.mime).toBe('application/octet-stream');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('keeps an agent and chat text that contain the compose default database password', async () => {
     const source = await makeInstance('source-dbpass');
     const target = await makeInstance('target-dbpass');
