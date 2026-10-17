@@ -267,12 +267,26 @@ describe('the outbound guard on the designated provider', () => {
     expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
   });
 
-  it('keeps the key out of the audit log, for an approved search and for a held scheduled one', async () => {
-    const approved = harness({ searchProvider: true, secrets: [secret] });
-    await approved.toolSet.callTool({ name: 'lookup', arguments: { query: `debug ${secret}` } }, { status: 'allow' });
-    const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
-    await runSearch(scheduled, `debug ${secret}`);
-    expect(JSON.stringify([...approved.audit, ...scheduled.audit])).not.toContain(secret);
+  it('masks the key on the card when searches are set to ask', async () => {
+    const h = harness({ searchProvider: true, searchWithoutAsking: false, secrets: [secret] });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret}` } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).not.toContain(secret);
+    expect(info.tier3_card?.outbound_text).not.toContain(secret);
+    expect(info.audit_description).not.toContain(secret);
+  });
+
+  it.each([
+    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.')],
+    ['a card number', 'refund to 4111 1111 1111 1111'],
+    ['a password label', 'password: hunter2hunter2'],
+  ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query) => {
+    const h = harness({ searchProvider: true });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.plain_what).toContain(query);
+    expect(info.audit_description).toContain('Held because');
+    expect(info.audit_description).not.toContain(query);
   });
 
   it('does not word a first-time hold as something the user has seen before', async () => {

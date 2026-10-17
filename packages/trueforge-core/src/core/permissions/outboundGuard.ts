@@ -8,6 +8,8 @@
  * encodes some other way past every rule below is outside what a deterministic scan can see.
  */
 
+import { SERVER_SECRET_REASON } from './searchHoldText';
+
 /** Most characters of text, summed over every string in the arguments, a silent call may carry. */
 export const OUTBOUND_MAX_CHARS = 200;
 
@@ -452,7 +454,7 @@ export function checkOutboundStrings(input: {
 export function describeOutboundRule(rule: OutboundGuardRule): string {
   switch (rule) {
     case 'server_secret':
-      return "it contains one of this computer's keys";
+      return SERVER_SECRET_REASON;
     case 'private_key':
       return 'it contains a private key';
     case 'jwt':

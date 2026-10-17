@@ -47,6 +47,7 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
+import { searchHoldAuditText, searchHoldCardText, SERVER_SECRET_REASON } from './searchHoldText';
 import {
   hashArgv,
   matchAllowlist,
@@ -1216,9 +1217,9 @@ async function holdSearchCall(input: {
       ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
       : input.queryText;
   const server = action.mcp_server_name ?? 'the search provider';
-  return tier3Decision({
+  const decision = tier3Decision({
     card: {
-      plain_what: `Search the web through ${server} for: ${shown}${input.why === '' ? '' : `. Held because ${input.why}.`}`,
+      plain_what: searchHoldCardText({ server, query: shown, why: input.why }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -1240,6 +1241,7 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
+  return { ...decision, audit_description: searchHoldAuditText({ server, why: input.why }) };
 }
 
 /**
@@ -1287,7 +1289,7 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      why: describeOutboundRule('server_secret'),
+      why: SERVER_SECRET_REASON,
       queryText: maskedStrings === undefined ? HIDDEN_QUERY : searchQueryText(maskedStrings),
       fields: {
         ...extraction.fields,
@@ -1297,9 +1299,7 @@ async function classifySearchProviderTool(input: {
     });
   };
 
-  if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', '');
-  }
+  // A held key is masked whether or not searches are set to ask.
   const secrets = await ctx.services.outboundSecrets(owner);
   const verdict =
     strings === undefined
@@ -1307,6 +1307,9 @@ async function classifySearchProviderTool(input: {
       : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
   if (!verdict.ok && verdict.rule === 'server_secret') {
     return heldWithoutKey(secrets);
+  }
+  if (!(await ctx.services.searchWithoutAsking(owner))) {
+    return held('mcp_search_setting_ask', '');
   }
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));

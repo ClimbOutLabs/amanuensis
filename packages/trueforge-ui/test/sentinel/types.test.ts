@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+import {
+  heldBecause,
+  searchHoldCardText,
+  SERVER_SECRET_REASON,
+} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -88,9 +93,7 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: debug synthetic-key-000111',
         why_asked_again: 'Held for approval: it contains a secret this server holds.',
       });
-      expect(card?.plain_what).toBe(
-        "Search the web through finder. Held because it contains one of this computer's keys.",
-      );
+      expect(card?.plain_what).toBe(`Search the web through finder${heldBecause(SERVER_SECRET_REASON)}`);
       expect(card?.outbound_text).toBeNull();
       expect(card?.why_asked_again).toBeNull();
     });
@@ -102,7 +105,11 @@ describe('extractSentinelFromEvent', () => {
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
       expect(card?.plain_what).toBe(
-        'Search the web through finder for: oslo weather. Held because this turn already ran 8 searches without asking.',
+        searchHoldCardText({
+          server: 'finder',
+          query: 'oslo weather',
+          why: 'this turn already ran 8 searches without asking',
+        }),
       );
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();

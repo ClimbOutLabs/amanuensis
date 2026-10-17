@@ -116,7 +116,7 @@ export async function recordHeldActionAudit(input: {
     conversation_id: input.identity.conversation_id,
     tier: input.info.tier ?? 3,
     tool_name: input.info.original_tool_name,
-    description: `${input.note}: ${input.info.tier3_card?.plain_what ?? input.info.original_tool_name}`,
+    description: `${input.note}: ${input.info.audit_description ?? input.info.tier3_card?.plain_what ?? input.info.original_tool_name}`,
     outcome: input.outcome,
     auto_deny_reason: null,
   });

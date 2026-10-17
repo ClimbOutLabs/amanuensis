@@ -114,7 +114,7 @@ interface Harness {
 
 function makeHarness(
   script: (() => ReturnType<typeof textReplyStream>)[],
-  options: { searchProviderAsks?: boolean } = {},
+  options: { searchProviderAsks?: boolean; searchProvider?: boolean; secrets?: readonly string[] } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
   const base: SentinelServices = {
@@ -126,6 +126,7 @@ function makeHarness(
       },
     },
     searchWithoutAsking: () => Promise.resolve(options.searchProviderAsks !== true),
+    outboundSecrets: () => Promise.resolve(options.secrets ?? []),
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -148,7 +149,10 @@ function makeHarness(
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
-        searchProvider: options.searchProviderAsks === true ? { tools: ['web_search'] } : undefined,
+        searchProvider:
+          options.searchProviderAsks === true || options.searchProvider === true
+            ? { tools: ['web_search'] }
+            : undefined,
       });
       const threadInput: AgentThreadConstructorInput = {
         definition: {
@@ -517,5 +521,82 @@ describe('approving a held action later', () => {
     await expect(
       runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send', 'chat')] }),
     ).rejects.toThrow('chat-scoped approval is not available');
+  });
+});
+
+describe('audit rows for a held web search', () => {
+  const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.');
+  const caught = [
+    ['a signed token', jwt],
+    ['a card number', 'refund to 4111 1111 1111 1111'],
+    ['a password label', 'password: hunter2hunter2'],
+  ] as const;
+
+  function searchCall(query: string): CallSpec {
+    return { id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) };
+  }
+
+  function answer(status: 'allow' | 'deny') {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: ROOT_ID,
+      tool_call_id: 'call-search',
+      approval: { status },
+    };
+  }
+
+  function descriptions(h: Harness): string[] {
+    return h.audit.map(record => record.description);
+  }
+
+  it.each(caught)('names the rule, not the text, for %s held in a scheduled run', async (_label, query) => {
+    for (const status of ['allow', 'deny'] as const) {
+      const h = makeHarness([() => toolCallsStream([searchCall(query)])], { searchProvider: true });
+      const { thread } = await runBrief(h);
+      const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+      await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+      expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
+      expect(JSON.stringify(descriptions(h))).not.toContain(query);
+      expect(descriptions(h)[0]).toContain('Held because');
+    }
+  });
+
+  it.each(caught)('names the rule, not the text, for %s held in an attended chat', async (_label, query) => {
+    for (const status of ['allow', 'deny'] as const) {
+      const h = makeHarness([() => toolCallsStream([searchCall(query)])], { searchProvider: true });
+      const { orchestrator, thread } = h.build({ unattended: false });
+      await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Look it up' }] });
+      const replay = h.build({
+        unattended: false,
+        context: heldContext(thread),
+        stopAfterToolResponse: true,
+      });
+      await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+      expect(descriptions(h).length).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(descriptions(h))).not.toContain(query);
+    }
+  });
+
+  it.each([false, true])('keeps a held key out of the row and the card when searches ask: %s', async asks => {
+    const key = 'synthetic-provider-key-000111';
+    const h = makeHarness([() => toolCallsStream([searchCall(`debug ${key}`)])], {
+      searchProvider: true,
+      searchProviderAsks: asks,
+      secrets: [key],
+    });
+    const { thread, brief } = await runBrief(h);
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('allow')] });
+    const listed = brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
+    expect(JSON.stringify([descriptions(h), listed])).not.toContain(key);
+  });
+
+  it('keeps the query out of the row when searches are set to ask', async () => {
+    const h = makeHarness([() => toolCallsStream([searchCall('oslo weather in march')])], { searchProviderAsks: true });
+    const { thread } = await runBrief(h);
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('deny')] });
+    expect(JSON.stringify(descriptions(h))).not.toContain('oslo weather');
+    expect(descriptions(h).at(-1)).toContain('searches are set to ask');
   });
 });

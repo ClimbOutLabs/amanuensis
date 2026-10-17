@@ -1815,7 +1815,7 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        description: info.audit_description ?? info.tier3_card?.plain_what ?? info.original_tool_name,
         outcome,
         auto_deny_reason: null,
       });

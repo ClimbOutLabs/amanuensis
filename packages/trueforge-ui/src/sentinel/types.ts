@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -220,13 +221,13 @@ function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: `${heading}. Held because it contains one of this computer's keys.`,
+      plain_what: `${heading}${heldBecause(SERVER_SECRET_REASON)}`,
       why_asked_again: null,
       outbound_text: null,
     };
   }
   const because = reason.slice(LEGACY_HOLD_PREFIX.length).replace(/\.$/, '');
-  return { ...card, plain_what: `${card.plain_what}. Held because ${because}.`, why_asked_again: null };
+  return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
