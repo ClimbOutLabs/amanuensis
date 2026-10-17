@@ -136,7 +136,7 @@ describe.each([
   });
 });
 
-it('applies the same credential name rule as the data export', () => {
+it('shares the credential word list with the data export', () => {
   const fields = { cookie: PLANTED.cookie, code_verifier: PLANTED.verifier, client_secret: PLANTED.urlPass };
   expect(createExportScrubber([]).json(fields)).toEqual({
     cookie: REDACTED,
@@ -159,4 +159,43 @@ it('redacts credential fields written into free text by any credential name', ()
   expectNoPlantedSecret(text);
   expect(text).toContain('"max_tokens":1024');
   expect(text).toContain('limit=5');
+});
+
+describe.each([
+  ['json', false],
+  ['standalone', true],
+])('credential words anywhere in a field name (%s)', (_name, standalone) => {
+  const names = [
+    'secret_key',
+    'aws_secret_access_key',
+    'token_value',
+    'password_hash',
+    'clientSecretValue',
+    'encryption_key',
+  ];
+  const planted = (name: string): string => `planted-${name.length}-value-${name.slice(0, 3)}x`;
+  const fields = Object.fromEntries(names.map(name => [name, planted(name)]));
+
+  function expectHidden(text: string): void {
+    for (const name of names) {
+      expect(text).not.toContain(planted(name));
+    }
+  }
+
+  it('redacts them nested, at the top level and in JSON free text', () => {
+    const { logger, output } = captureLogger(standalone);
+    logger.info('nested', { cfg: fields });
+    logger.info('top level', fields);
+    logger.warn(`upstream said ${JSON.stringify(fields)}`);
+    expectHidden(output());
+  });
+
+  it('keeps counts and flags under such names', () => {
+    const { logger, output } = captureLogger(standalone);
+    logger.info('usage', { max_tokens: 4096, hasToken: true, cfg: { apiKeyCount: 7 } });
+    const text = output();
+    expect(text).toContain('4096');
+    expect(text).toContain('"hasToken":true');
+    expect(text).toContain('"apiKeyCount":7');
+  });
 });

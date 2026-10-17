@@ -45,17 +45,33 @@ function isStructuralKey(key: string): boolean {
   return key === 'id' || key.endsWith('_id') || key === 'name' || key.endsWith('_name') || STRUCTURAL_KEYS.has(key);
 }
 
-/**
- * Field names whose values are credentials, matched at the end of the name after dropping case and separators.
- * Anchoring keeps counts and descriptors (`max_tokens`, `input_tokens_breakdown`, `credential_type`) readable.
- */
-const CREDENTIAL_NAME =
-  /(authorization|cookies?|password|passwd|secret|token|apikey|privatekey|credentials?|verifier|oauthcode|authcode)$/;
+/** Words that mark a field name as a credential, matched after dropping case and separators. */
+const CREDENTIAL_WORDS =
+  'authorization|cookies?|password|passwd|secret|token|apikey|privatekey|secretkey|accesskey|encryptionkey|signingkey|credentials?|verifier|oauthcode|authcode';
 
-/** True when a field holds a credential by its name alone, wherever it appears; an empty value holds nothing. */
-export function isCredentialField(key: string, value: unknown): boolean {
+const CREDENTIAL_SUFFIX = new RegExp(`(?:${CREDENTIAL_WORDS})$`);
+const CREDENTIAL_WORD = new RegExp(CREDENTIAL_WORDS);
+
+function normalizeFieldName(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Export rule: a name ending in a credential word hides any value, numbers and flags included.
+ * Anchoring keeps counts and descriptors (`input_tokens_breakdown`, `credential_type`) intact for import.
+ */
+export function isExportCredentialField(key: string, value: unknown): boolean {
   const present = value !== null && value !== undefined && value !== '';
-  return present && CREDENTIAL_NAME.test(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return present && CREDENTIAL_SUFFIX.test(normalizeFieldName(key));
+}
+
+/**
+ * Log rule: a credential word anywhere in the name hides text and structures.
+ * Numbers and flags stay, so counts and switches such as `max_tokens` and `hasToken` remain readable.
+ */
+export function isLogCredentialField(key: string, value: unknown): boolean {
+  const holdsText = typeof value === 'string' || (typeof value === 'object' && value !== null);
+  return holdsText && CREDENTIAL_WORD.test(normalizeFieldName(key));
 }
 
 /** Credential-shaped values, wherever they appear. Each matches the whole credential, or only its secret part. */
@@ -179,7 +195,7 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
     if (typeof value === 'object' && value !== null) {
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(value)) {
-        if (isCredentialField(key, entry)) {
+        if (isExportCredentialField(key, entry)) {
           redactions += 1;
           out[key] = REDACTED;
         } else if (isStructuralKey(key) && typeof entry === 'string') {

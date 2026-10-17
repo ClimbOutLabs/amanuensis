@@ -5,7 +5,7 @@
  * human-readable standalone format to keep local logs terse.
  */
 import winston, { type Logger } from 'winston';
-import { isCredentialField, REDACTED, redactSecretShapes } from './dataExport/secretScrub';
+import { isLogCredentialField, REDACTED, redactSecretShapes } from './dataExport/secretScrub';
 
 const STANDALONE_META_SKIP = new Set(['level', 'message', 'timestamp', 'version', 'component', 'stack', 'splat']);
 
@@ -59,12 +59,20 @@ function isContentField(key: string, value: unknown): boolean {
 
 /** The one name rule for a log field, applied at every depth. */
 function redactField(key: string, value: unknown, seen: WeakSet<object>): unknown {
-  return isCredentialField(key, value) || isContentField(key, value) ? REDACTED : redactValue(value, seen);
+  return isLogCredentialField(key, value) || isContentField(key, value) ? REDACTED : redactValue(value, seen);
 }
 
 // Quotes are optional on the value: a JSON parse error may quote only part of a value, or a bare one.
 const QUOTED_JSON_FIELD = /("([^"\\]*)"\s*:\s*)("(?:[^"\\]|\\.)*"?|[^\s,}"\]]+)/g;
 const QUERY_PARAMETER = /([?&;]|\b)([A-Za-z0-9_.-]+)=([^&\s"'#]+)/g;
+
+/** A bare number or flag in free text is judged like the value it spells, so `"max_tokens":1024` stays. */
+function bareValue(raw: string): unknown {
+  if (raw === 'true' || raw === 'false') {
+    return raw === 'true';
+  }
+  return /^-?\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : raw;
+}
 
 function redactText(text: string): string {
   let out = redactSecretShapes(text);
@@ -72,11 +80,13 @@ function redactText(text: string): string {
     out = out.replace(pattern, replacement);
   }
   out = out.replace(QUOTED_JSON_FIELD, (field: string, prefix: string, name: string, value: string) =>
-    isCredentialField(name, value) ? `${prefix}"${REDACTED}"` : field,
+    isLogCredentialField(name, bareValue(value)) ? `${prefix}"${REDACTED}"` : field,
   );
   // A bare `key` parameter is an API key in a query string, though not as a JSON field name.
   return out.replace(QUERY_PARAMETER, (parameter: string, lead: string, name: string, value: string) =>
-    name.toLowerCase() === 'key' || isCredentialField(name, value) ? `${lead}${name}=${REDACTED}` : parameter,
+    name.toLowerCase() === 'key' || isLogCredentialField(name, bareValue(value))
+      ? `${lead}${name}=${REDACTED}`
+      : parameter,
   );
 }
 
