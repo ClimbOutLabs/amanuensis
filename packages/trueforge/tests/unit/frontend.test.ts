@@ -85,7 +85,7 @@ describe('mountFrontend', () => {
 });
 
 describe('mountFrontend security headers', () => {
-  it('sends an image-and-media-only CSP and no-referrer on the app shell', async () => {
+  it('sends an image, media and font CSP and no-referrer on the app shell', async () => {
     const app = appWithFrontend(buildDir());
 
     for (const shellPath of ['/', '/index.html', '/sessions/abc123']) {
@@ -94,6 +94,11 @@ describe('mountFrontend security headers', () => {
       expect(response.headers.get('content-security-policy')).toBe(APP_SHELL_IMAGE_CSP);
       expect(response.headers.get('referrer-policy')).toBe('no-referrer');
     }
+  });
+
+  it('restricts fonts to the app origin and data: URIs', () => {
+    expect(APP_SHELL_IMAGE_CSP).toContain("font-src 'self' data:");
+    expect(APP_SHELL_IMAGE_CSP).not.toMatch(/font-src[^;]*https?:/);
   });
 
   it('keeps the Vite index.html meta CSP equal to the served header', () => {
