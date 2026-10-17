@@ -1,6 +1,12 @@
+import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
+import { SEND_DRAFT_TOOL_NAME } from '../../../src/core/email/gmail/toolContract';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../../src/core/permissions/sendAllowlist';
+import {
+  DEMO_CONNECTOR_REFUSAL,
+  DEMO_SEND_REFUSAL,
+  recipientsAllowed,
+} from '../../../src/core/permissions/sendAllowlist';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function ctx(demoSendAllowlist: readonly string[] | null): ClassifyContext {
@@ -16,19 +22,50 @@ function ctx(demoSendAllowlist: readonly string[] | null): ClassifyContext {
   };
 }
 
-function connectorSend(params: Record<string, unknown>): SentinelAction {
+function connectorCall(input: {
+  tool_name: string;
+  params: Record<string, unknown>;
+  read_only_hint?: boolean;
+}): SentinelAction {
   return {
-    tool_name: 'send_email',
-    canonical_params: params,
+    tool_name: input.tool_name,
+    canonical_params: input.params,
     tool_type: 'mcp',
     mcp_server_name: 'mail',
-    mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: true },
+    mcp_hints: { read_only_hint: input.read_only_hint ?? false, destructive_hint: false, open_world_hint: true },
   };
 }
+
+function hostGmailSend(draft: ReviewableDraft | undefined): SentinelAction {
+  return {
+    tool_name: SEND_DRAFT_TOOL_NAME,
+    canonical_params: { draft_id: 'd1' },
+    tool_type: 'truefoundry-system',
+    mcp_server_name: 'gmail',
+    mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: true },
+    mail_draft: draft,
+  };
+}
+
+const DRAFT: ReviewableDraft = {
+  to: ['a@demo.example'],
+  cc: [],
+  bcc: [],
+  subject: 'Hi',
+  body: 'Hi',
+  threadId: 't1',
+  inReplyTo: '',
+  references: '',
+  fromName: '',
+};
 
 describe('recipientsAllowed', () => {
   it('allows anyone when there is no list', () => {
     expect(recipientsAllowed({ allowlist: null, recipients: ['anyone@example.com'] })).toBe(true);
+  });
+
+  it('refuses a message with no recipients, since nothing was checked', () => {
+    expect(recipientsAllowed({ allowlist: ['a@demo.example'], recipients: [] })).toBe(false);
   });
 
   it('allows no one when the list is empty', () => {
@@ -50,36 +87,67 @@ describe('recipientsAllowed', () => {
   });
 });
 
-describe('demo send allowlist on connector sends', () => {
+describe('demo instance and connector calls', () => {
   it.each([
-    ['To', { to: ['x@outside.example'] }],
-    ['Cc', { to: 'a@demo.example', cc: ['x@outside.example'] }],
-    ['Bcc', { to: 'a@demo.example', bcc: 'x@outside.example' }],
-    ['a nested recipient', { to: 'a@demo.example', message: { recipients: [{ email: 'x@outside.example' }] } }],
-  ])('refuses a stray %s with no card', async (_name, params) => {
-    const decision = await classifyTier(
-      connectorSend({ subject: 'Hi', body: 'Hi', ...params }),
-      ctx(['a@demo.example']),
-    );
-    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null, reason_detail: DEMO_SEND_REFUSAL });
+    ['send_draft with only a draft id', 'send_draft', { draft_id: 'd1' }],
+    ['forward to an outside address', 'forward', { message_id: 'm1', to: 'x@outside.example' }],
+    ['reply to all', 'reply', { message_id: 'm1', reply_all: true }],
+    ['send_email to a stray address', 'send_email', { to: ['x@outside.example'], body: 'Hi' }],
+    ['send_email to a listed address', 'send_email', { to: 'a@demo.example', body: 'Hi' }],
+  ])('refuses %s with no card, however the list reads', async (_name, tool_name, params) => {
+    for (const allowlist of [['a@demo.example'], []]) {
+      const decision = await classifyTier(connectorCall({ tool_name, params }), ctx(allowlist));
+      expect(decision).toMatchObject({
+        auto_deny: 'outbound_guard',
+        card: null,
+        reason_detail: DEMO_CONNECTOR_REFUSAL,
+      });
+    }
   });
 
-  it('refuses everything when the list is empty', async () => {
-    const decision = await classifyTier(connectorSend({ to: 'a@demo.example', body: 'Hi' }), ctx([]));
-    expect(decision).toMatchObject({ auto_deny: 'outbound_guard' });
-  });
-
-  it('asks as usual when every recipient is listed, however it is written', async () => {
+  it('still lets a connector call declared read-only through', async () => {
     const decision = await classifyTier(
-      connectorSend({ to: ' A@Demo.example ', cc: ['a@demo.example'], body: 'Hi' }),
+      connectorCall({ tool_name: 'search_threads', params: { query: 'lease' }, read_only_hint: true }),
       ctx(['a@demo.example']),
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
-    expect(decision.card).not.toBeNull();
+    expect(decision.auto_deny).toBeNull();
   });
 
   it('is unchanged outside demo mode', async () => {
-    const decision = await classifyTier(connectorSend({ to: 'x@outside.example', body: 'Hi' }), ctx(null));
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'send_email', params: { to: 'x@outside.example', body: 'Hi' } }),
+      ctx(null),
+    );
     expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+  });
+});
+
+describe("demo instance and Aman's own Gmail send", () => {
+  it('asks as usual when every recipient is listed, however it is written', async () => {
+    const decision = await classifyTier(
+      hostGmailSend({ ...DRAFT, to: [' A@Demo.example '], cc: ['a@demo.example'] }),
+      ctx(['a@demo.example']),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+  });
+
+  it.each([
+    ['a stray To', { to: ['x@outside.example'] }],
+    ['a stray Cc', { cc: ['x@outside.example'] }],
+    ['a stray Bcc', { bcc: ['x@outside.example'] }],
+    ['no recipients at all', { to: [] }],
+  ])('refuses %s with no card', async (_name, change) => {
+    const decision = await classifyTier(hostGmailSend({ ...DRAFT, ...change }), ctx(['a@demo.example']));
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null, reason_detail: DEMO_SEND_REFUSAL });
+  });
+
+  it('refuses when the draft could not be loaded to check', async () => {
+    const decision = await classifyTier(hostGmailSend(undefined), ctx(['a@demo.example']));
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null });
+  });
+
+  it('refuses everything when the list is empty', async () => {
+    const decision = await classifyTier(hostGmailSend(DRAFT), ctx([]));
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard' });
   });
 });

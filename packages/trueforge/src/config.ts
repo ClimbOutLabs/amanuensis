@@ -471,6 +471,18 @@ export function parseDemoSendAllowlist(raw: string | undefined): string[] {
   return [...addresses];
 }
 
+/**
+ * The one Google account a demo instance may connect, lower-cased, or empty when none is named (then no
+ * Google account can be connected). A malformed value fails the boot rather than silently pinning nothing.
+ */
+export function parseDemoGoogleAccount(raw: string | undefined): string {
+  const text = (raw ?? '').trim().toLowerCase();
+  if (text !== '' && !PLAIN_EMAIL_ADDRESS.test(text)) {
+    throw new Error(`DEMO_GOOGLE_ACCOUNT is not an email address: ${text}`);
+  }
+  return text;
+}
+
 /** The loopback address of the sign-in service, or empty. */
 export function parseLoginUpstreamUrl(raw: string | undefined): string {
   const text = (raw ?? '').trim();
@@ -1471,6 +1483,11 @@ export interface SharedServerConfiguration {
    */
   DEMO_SEND_ALLOWLIST: string[];
   /**
+   * The only Google account a demo instance accepts, lower-cased. Empty means none can be connected.
+   * Ignored outside demo mode. Env: `DEMO_GOOGLE_ACCOUNT`. Default empty.
+   */
+  DEMO_GOOGLE_ACCOUNT: string;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -2074,6 +2091,7 @@ const shared: SharedServerConfiguration = {
   }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
+  DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),

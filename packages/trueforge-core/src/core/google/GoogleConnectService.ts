@@ -89,6 +89,7 @@ export class GoogleConnectService {
   readonly #now: () => Date;
   readonly #fetchImpl: typeof fetch;
   readonly #logger: Logger;
+  readonly #onlyAccountEmail: string | null;
 
   constructor(input: {
     connections: GoogleConnectionStore;
@@ -96,8 +97,11 @@ export class GoogleConnectService {
     now: (() => Date) | undefined;
     fetchImpl: typeof fetch | undefined;
     logger: Logger;
+    /** When set, only this Google account can be connected (compared without regard to case). */
+    only_account_email: string | null;
   }) {
     this.#logger = input.logger;
+    this.#onlyAccountEmail = input.only_account_email?.trim().toLowerCase() ?? null;
     this.#connections = input.connections;
     this.#pending = input.pending;
     this.#now = input.now ?? (() => new Date());
@@ -232,6 +236,9 @@ export class GoogleConnectService {
             : 'You signed in, but Aman could not reach Gmail. Try connecting again in a minute.',
         { cause: error },
       );
+    }
+    if (this.#onlyAccountEmail !== null && accountEmail.trim().toLowerCase() !== this.#onlyAccountEmail) {
+      throw new GoogleConsentError("Only this demo's own Google account can be connected here.");
     }
     const existing = await this.#connections.get(input.owner);
     const now = this.#now().toISOString();

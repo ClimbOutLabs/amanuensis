@@ -42,7 +42,6 @@ import {
 import {
   escapeDisplayText,
   extractCardFields,
-  recipientAddresses,
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -55,7 +54,7 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
-import { DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
+import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
@@ -1408,8 +1407,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   };
 }
 
-function demoSendRefusal(): TierDecision {
-  return autoDenyDecision({ reason: 'outbound_guard', reason_detail: DEMO_SEND_REFUSAL, sensitive_read: false });
+function demoRefusal(reason_detail: string): TierDecision {
+  return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
 /**
@@ -1445,13 +1444,14 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
   const draft = action.mail_draft;
   if (
     action.tool_name === SEND_DRAFT_TOOL_NAME &&
-    draft !== undefined &&
-    !recipientsAllowed({
-      allowlist: ctx.services.demoSendAllowlist,
-      recipients: [...draft.to, ...draft.cc, ...draft.bcc],
-    })
+    ctx.services.demoSendAllowlist !== null &&
+    (draft === undefined ||
+      !recipientsAllowed({
+        allowlist: ctx.services.demoSendAllowlist,
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+      }))
   ) {
-    return demoSendRefusal();
+    return demoRefusal(DEMO_SEND_REFUSAL);
   }
   const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
   if (card === null) {
@@ -1511,23 +1511,22 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // A demo instance mails only its own addresses, so a connector send to anyone else never reaches a card.
-  if (
-    extraction.external_service &&
-    !recipientsAllowed({
-      allowlist: ctx.services.demoSendAllowlist,
-      recipients: recipientAddresses(action.canonical_params),
-    })
-  ) {
-    return demoSendRefusal();
-  }
-
   // The user's designated search provider runs without asking behind the outbound secret guard.
   if (action.tool_type === 'mcp' && action.mcp_search_provider === true) {
     const searchDecision = await classifySearchProviderTool({ action, ctx, extraction });
     if (searchDecision !== undefined) {
       return searchDecision;
     }
+  }
+
+  // A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance
+  // refuses every connector call that is not declared read-only. Only Aman's own Gmail tools check recipients.
+  if (
+    ctx.services.demoSendAllowlist !== null &&
+    action.tool_type === 'mcp' &&
+    action.mcp_hints.read_only_hint !== true
+  ) {
+    return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.

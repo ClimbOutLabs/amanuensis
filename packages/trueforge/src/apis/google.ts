@@ -48,7 +48,7 @@ function resultPage(lines: string[]): string {
 
 const START_AGAIN = 'Go back to Aman and start again.';
 
-function statusBody(input: { record: GoogleConnectionRecord | null; setup: GoogleSetupInfo }) {
+function statusBody(input: { record: GoogleConnectionRecord | null; setup: GoogleSetupInfo; locked: boolean }) {
   const { record } = input;
   const granted = record === null ? [] : grantedFeatures(record.granted_scopes);
   return {
@@ -60,7 +60,7 @@ function statusBody(input: { record: GoogleConnectionRecord | null; setup: Googl
       granted: granted.includes(feature),
     })),
     has_saved_client: record !== null,
-    available: true,
+    locked: input.locked,
     setup: input.setup,
   };
 }
@@ -120,6 +120,21 @@ function requireJsonOrSameOrigin(): MiddlewareHandler {
 }
 
 const DEMO_LOCKED_MESSAGE = "This demo's Google account is already set up and cannot be changed.";
+const DEMO_NOT_NAMED_MESSAGE =
+  "Google cannot be connected on this demo until its owner names the demo's Google account.";
+
+/**
+ * Whether Settings may start or finish a Google connection on a demo instance: only when the owner has named
+ * the demo's account, and nothing working for that account is saved yet. A saved login that is for another
+ * account, or that Google stopped accepting, can be replaced by the named account.
+ */
+function demoMayConnect(input: { record: GoogleConnectionRecord | null; account: string }): boolean {
+  const { record, account } = input;
+  return (
+    account !== '' &&
+    (record === null || record.status === 'needs_reconnect' || record.account_email?.toLowerCase() !== account)
+  );
+}
 
 function toClientInput(body: {
   client_id: string;
@@ -134,13 +149,19 @@ function toClientInput(body: {
 }
 
 export function createGoogleRouter(deps: GoogleRouterDeps) {
-  const service = new GoogleConnectService({
-    now: undefined,
-    connections: deps.googleConnectionStore,
-    pending: deps.googleConnectionStore,
-    fetchImpl: deps.fetchImpl,
-    logger: deps.logger,
-  });
+  const demoAccount = () => (configuration.DEMO_MODE ? configuration.DEMO_GOOGLE_ACCOUNT : '');
+  // Built per request so the demo's pinned account is read when it is used.
+  const serviceNow = () =>
+    new GoogleConnectService({
+      now: undefined,
+      connections: deps.googleConnectionStore,
+      pending: deps.googleConnectionStore,
+      fetchImpl: deps.fetchImpl,
+      logger: deps.logger,
+      only_account_email: configuration.DEMO_MODE ? demoAccount() : null,
+    });
+  const lockedFor = (record: GoogleConnectionRecord | null) =>
+    configuration.DEMO_MODE && !demoMayConnect({ record, account: demoAccount() });
 
   const ownerOf = (c: Parameters<ResolveRequestContext>[0]) => {
     const requestContext = deps.resolveRequestContext(c);
@@ -151,12 +172,12 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
 
   const statusHandler: RouteHandler<typeof getGoogleConnectionStatusRoute> = async c => {
     const record = await deps.googleConnectionStore.get(ownerOf(c));
-    return c.json({ data: statusBody({ record, setup: setupFor(c) }) }, 200);
+    return c.json({ data: statusBody({ record, setup: setupFor(c), locked: lockedFor(record) }) }, 200);
   };
 
   const checkHandler: RouteHandler<typeof checkGoogleClientRoute> = async c => {
     const body = c.req.valid('json');
-    const problems = await service.checkClient({
+    const problems = await serviceNow().checkClient({
       client: toClientInput(body.client),
       registered_redirect_uris: body.registered_redirect_uris,
       setup: setupFor(c),
@@ -168,7 +189,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const body = c.req.valid('json');
     const setup = setupFor(c);
     try {
-      const { authorization_url } = await service.begin({
+      const { authorization_url } = await serviceNow().begin({
         owner: ownerOf(c),
         setup,
         client: body.client === undefined ? null : toClientInput(body.client),
@@ -195,7 +216,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
       return c.html(resultPage(['The response from Google was incomplete.', START_AGAIN]), 400);
     }
     try {
-      await service.complete({ owner: ownerOf(c), state, code });
+      await serviceNow().complete({ owner: ownerOf(c), state, code });
       return c.html(resultPage(['Google is connected. You can close this window and go back to Aman.']), 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
@@ -214,8 +235,8 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     }
     const owner = ownerOf(c);
     try {
-      const record = await service.complete({ owner, state: parsed.state, code: parsed.code });
-      return c.json({ data: statusBody({ record, setup: setupFor(c) }) }, 200);
+      const record = await serviceNow().complete({ owner, state: parsed.state, code: parsed.code });
+      return c.json({ data: statusBody({ record, setup: setupFor(c), locked: lockedFor(record) }) }, 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
         deps.logger.warn('Google consent completion refused', extractErrorLogFields(caught));
@@ -226,30 +247,34 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
   };
 
   const testHandler: RouteHandler<typeof testGoogleConnectionRoute> = async c => {
-    return c.json({ data: await service.test(ownerOf(c)) }, 200);
+    return c.json({ data: await serviceNow().test(ownerOf(c)) }, 200);
   };
 
   const disconnectHandler: RouteHandler<typeof disconnectGoogleRoute> = async c => {
-    const outcome = await service.disconnect(ownerOf(c));
+    const outcome = await serviceNow().disconnect(ownerOf(c));
     return c.json({ data: { revocation_confirmed: outcome === 'revoked' } }, 200);
   };
 
+  const refuseOnDemo = (c: Parameters<MiddlewareHandler>[0], message: string) =>
+    c.json({ error: { message, type: 'unavailable' } }, 403);
+
   /**
-   * On a demo instance the owner connects the account once before the demo opens; after that nobody can
-   * reconnect or disconnect it. Registered first so it guards the routes below.
+   * On a demo instance only the demo's named Google account can be connected, once, before visitors arrive.
+   * Registered first so it guards the routes below.
    */
   const lockConnectionOnDemo: MiddlewareHandler = async (c, next) => {
-    if (configuration.DEMO_MODE && (await deps.googleConnectionStore.get(ownerOf(c))) !== null) {
-      return c.json({ error: { message: DEMO_LOCKED_MESSAGE, type: 'unavailable' } }, 403);
+    if (!configuration.DEMO_MODE) {
+      return next();
     }
-    return next();
-  };
-  const refuseDisconnectOnDemo: MiddlewareHandler = async (c, next) => {
-    if (configuration.DEMO_MODE) {
-      return c.json({ error: { message: DEMO_LOCKED_MESSAGE, type: 'unavailable' } }, 403);
+    const account = demoAccount();
+    if (account === '') {
+      return refuseOnDemo(c, DEMO_NOT_NAMED_MESSAGE);
     }
-    return next();
+    const record = await deps.googleConnectionStore.get(ownerOf(c));
+    return demoMayConnect({ record, account }) ? next() : refuseOnDemo(c, DEMO_LOCKED_MESSAGE);
   };
+  const refuseDisconnectOnDemo: MiddlewareHandler = async (c, next) =>
+    configuration.DEMO_MODE ? refuseOnDemo(c, DEMO_LOCKED_MESSAGE) : next();
 
   const router = new OpenAPIHono();
   router.use('/oauth/*', lockConnectionOnDemo);

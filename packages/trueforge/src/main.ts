@@ -657,7 +657,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
   const sentinelServices = createSentinelServices({
-    demoSendAllowlist: configuration.DEMO_MODE ? configuration.DEMO_SEND_ALLOWLIST : null,
+    demoMode: configuration.DEMO_MODE,
+    demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,

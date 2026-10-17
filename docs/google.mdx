@@ -42,13 +42,20 @@ Select Disconnect, then confirm. Aman asks Google to revoke its access and delet
 
 ## Demo instances
 
-On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and save drafts, but it can only send to addresses you list in `DEMO_SEND_ALLOWLIST`. Set it in the instance's `.env` as comma-separated addresses, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`, then restart. Capital letters and extra spaces do not matter.
+On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and save drafts, but it can only send to addresses you list. Set these in the instance's `.env`, then restart:
 
-- The list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
-- Left empty or unset, a demo sends nothing at all.
+- `DEMO_GOOGLE_ACCOUNT`: the one Google account the demo accepts, for example `DEMO_GOOGLE_ACCOUNT=maya@example.com`. Left empty, no Google account can be connected.
+- `DEMO_SEND_ALLOWLIST`: the only addresses a demo may send to, comma-separated, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`. Capital letters and extra spaces do not matter. Left empty, a demo sends nothing at all.
+
+How it behaves:
+
+- Connect the demo's Google account once, before visitors arrive, signed in as the same Aman user the visitors will use. Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted. After that nobody can reconnect or disconnect it from the panel, and the panel says so.
+- The send list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
+- The demo refuses sends it can't fully check. Connected services other than Gmail can't be used for anything that is not read-only.
 - An entry that is not a plain email address stops Aman from starting.
-- Connect the demo's Google account once, before visitors arrive. After that nobody can reconnect or disconnect it from the panel.
-- Outside demo mode the list is ignored.
+- Outside demo mode both settings are ignored.
+
+If the Google project is in Testing mode, Google signs the account out every 7 days and mail stops until it is reconnected. Publish the project to avoid this. To recover, sign in as the demo user, open Settings, Connectors, Google, and select Reconnect with the account named in `DEMO_GOOGLE_ACCOUNT`.
 
 ## What to know
 

@@ -8,6 +8,7 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseDemoGoogleAccount,
   parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
@@ -518,5 +519,20 @@ describe('parseDemoSendAllowlist', () => {
 
   it.each(['maya', '*@demo.example', 'Maya <maya@demo.example>', 'a@b'])('refuses %s at load', value => {
     expect(() => parseDemoSendAllowlist(value)).toThrow(/DEMO_SEND_ALLOWLIST/);
+  });
+});
+
+describe('parseDemoGoogleAccount', () => {
+  it('is empty when unset or blank, which lets no account connect', () => {
+    expect(parseDemoGoogleAccount(undefined)).toBe('');
+    expect(parseDemoGoogleAccount('  ')).toBe('');
+  });
+
+  it('lower-cases and trims', () => {
+    expect(parseDemoGoogleAccount(' Maya@Demo.Example ')).toBe('maya@demo.example');
+  });
+
+  it.each(['maya', 'a@b', 'maya@demo.example, other@demo.example'])('refuses %s at load', value => {
+    expect(() => parseDemoGoogleAccount(value)).toThrow(/DEMO_GOOGLE_ACCOUNT/);
   });
 });
