@@ -19,7 +19,7 @@ Presenter: "Your AI assistant knows your mother's birthday, your boss's mood and
 - Type: `Morning. Anything I should keep in mind today?`
 - On screen: Aman answers from memory without being told anything in this chat: the 4 pm check-up with Dr. Halloran at the clinic, bring the referral letter and the insurance card from the blue wallet, and Teo's coffee suggestion. The "recalled from memory" marker shows on the turn.
 - Presenter: "New chat, nothing typed yet, and it already knows today. That memory is a folder of text files on this machine."
-- Fallback: if recall returns nothing, open the chat "Brief me before my 4 pm appointment" from the left rail; it is the same answer, already stored.
+- Fallback: if recall returns nothing, type `What do you remember about how I like my messages written?` and let Aman answer from memory live.
 
 ### 2. Inbox triage with a non-English email (20 seconds) serves Impact, Design
 
@@ -52,7 +52,7 @@ Presenter: "Your AI assistant knows your mother's birthday, your boss's mood and
 - On screen: the run's chat lists today's mail and calendar, then notes that her mother's birthday is in three days (**depends on Calendar read**), and ends with a box titled **Needs your OK**: "Aman held these for you. Nothing has been done yet." Inside it: a draft birthday message to her mother, and a draft reply confirming the plumber visit, each with Approve and Deny.
 - Presenter: "Every morning Aman reads the inbox and the calendar and prepares what Maya would want sent. It never sends while she sleeps. It waits."
 - Click **Deny** on both held drafts so the demo world stays clean.
-- Fallback: if Calendar is not merged, the brief holds only the plumber reply, which works today. If no run exists, open this morning's run from the schedule's history, or show the schedule's task text and the seeded briefing chat.
+- Fallback: if Calendar is not merged, the brief holds only the plumber reply, which works today. If the run stalls, press **Run now** again, or type the schedule's task text into a new chat and let Aman do it live.
 
 ### 6. Close (10 seconds) serves Idea
 
@@ -72,7 +72,6 @@ Status key: **exists** (already in the demo seed or the mailbox fixtures on the 
 | all  | Persona name "Maya", living in Lisbon. The seed names her Mara Hollis in Barcelona and the mailbox fixtures address Alex Rivera; both must say Maya, and the seed's places must move to Lisbon (seed world, fixture generator, expectations file). | add                                                       |
 | all  | The judges' instance limits sends to a fixed list of invented addresses. Marta, Maya's mother and the landlord must be on it.                                                                                                                      | add                                                       |
 | 1    | Memory notes: short friendly style, leaves 15 minutes early for medical visits, today's 4 pm check-up with Dr. Halloran, referral letter, blue wallet, Teo's coffee.                                                                               | exists (demo seed)                                        |
-| 1    | A pre-written chat "Brief me before my 4 pm appointment" as the fallback.                                                                                                                                                                          | exists (demo seed)                                        |
 | 2    | Email, Portuguese: from Fibra Casa, subject "A sua fatura de outubro", body "42,18 euros debitados a 3 de novembro, fibra e linha móvel", with the bill as a PDF. Fixture 17 is the same bill in Spanish; translate it.                            | add (adapt fixture 17)                                    |
 | 2, 3 | Email, Spanish: from Marta Jiménez, subject "¿Comemos el fin de semana?", body "¿Sábado o domingo? Elige el día y yo elijo el sitio." She is a friend visiting from Madrid; the reply goes to her thread.                                          | add                                                       |
 | 2    | Emails, English: flight confirmation (fixture 01), dentist reminder (02), landlord repair visit (04). Fixture dates are fixed to October 2026; regenerate them a week ahead of the demo day.                                                       | exists, dates to refresh                                  |
