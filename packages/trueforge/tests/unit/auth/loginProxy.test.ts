@@ -349,7 +349,7 @@ describe('login proxy', () => {
           body: 'login=owner%40example.com&password=guess',
         });
       for (let i = 0; i < 10; i += 1) {
-        expect((await post(`198.51.100.${String(i)}`)).status).toBe(200);
+        expect((await post(`198.51.100.${String(i)}`)).status).toBe(401);
       }
       const locked = await post('198.51.100.200');
       expect(locked.status).toBe(429);
