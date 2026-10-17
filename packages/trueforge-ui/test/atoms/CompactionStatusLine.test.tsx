@@ -145,14 +145,14 @@ describe('CompactionStatusLine compaction outcomes', () => {
   it('shows shortened history for a truncated fallback, not a failure', () => {
     stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'truncated_fallback' } });
     render(<CompactionStatusLine />);
-    expect(screen.getByText('Shortened history 30m ago to fit')).toBeDefined();
+    expect(screen.getByText('Could not summarize the chat, so the oldest messages were dropped 30m ago')).toBeDefined();
     expect(screen.queryByText(/failed/i)).toBeNull();
   });
 
   it('shows a failure for skipped outcomes', () => {
     stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'skipped_invalid' } });
     render(<CompactionStatusLine />);
-    expect(screen.getByText('Compaction failed 30m ago')).toBeDefined();
+    expect(screen.getByText('Could not summarize the earlier messages 30m ago')).toBeDefined();
   });
 
   it('hides the compaction part for a cancelled turn, which is not a failure', () => {

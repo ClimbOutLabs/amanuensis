@@ -142,7 +142,7 @@ describe('ModelStreamFault retry', () => {
       throw new Error('expected an error-status AGENT_DONE event');
     }
     expect(doneEvent.error).toBe(
-      "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model",
+      'The model stopped answering partway through, twice in a row. Start a new chat, or pick a different model in Settings.',
     );
   });
 
@@ -238,7 +238,11 @@ describe('ModelStreamFault retry', () => {
     if (doneEvent?.status !== 'error') {
       throw new Error('expected an error-status AGENT_DONE event');
     }
-    expect(doneEvent.error).toBe('Internal Server Error');
-    expect(doneEvent.error).not.toContain('context is too long');
+    // Provider details go to the log; the chat gets one plain sentence about what to do.
+    expect(doneEvent.error).toBe(
+      "The model's provider could not answer. Try again in a moment, or pick another model in Settings.",
+    );
+    expect(doneEvent.error).not.toContain('Internal Server Error');
+    expect(doneEvent.error).not.toContain('too long');
   });
 });

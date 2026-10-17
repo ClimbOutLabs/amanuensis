@@ -272,7 +272,7 @@ describe('failing summarizer', () => {
     expect(event.reason).toBe('summarizer_failed');
     expect(JSON.stringify(overwriteContext(events))).toContain('The newest question');
     // No call completed, so nothing is billed.
-    expect(events.some(e => e.type === InternalEventType.MODEL_USAGE)).toBe(false);
+    expect(events.some(e => e.type === 'agent.context.overwrite' && e.usage.total_tokens !== 0)).toBe(false);
     expect(JSON.stringify(warn.mock.calls)).not.toContain('SECRET-TOKEN');
   });
 });

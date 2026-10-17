@@ -8,7 +8,11 @@ import {
   type GroupByContext,
   type MessageStatus,
 } from '@assistant-ui/react';
-import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
+import {
+  useTrueFoundryReload,
+  useTrueFoundryResumeUnavailable,
+  useTrueFoundryTerminalError,
+} from '@truefoundry/assistant-ui-runtime';
 import type { ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
@@ -130,6 +134,8 @@ export function AssistantMessageContainer() {
   const isThreadRunning = useThreadIsRunning();
   const resumeUnavailable = useTrueFoundryResumeUnavailable();
   const error = useMessageError();
+  const terminalError = useTrueFoundryTerminalError();
+  const reload = useTrueFoundryReload();
   const createdAt = useAuiState(s => s.message.createdAt);
   const messageStatus = useAuiState(s => s.message.status?.type);
   const isMessageRunning = messageStatus === 'running';
@@ -145,6 +151,11 @@ export function AssistantMessageContainer() {
     const value = s.message.metadata.custom.turnId;
     return typeof value === 'string' ? value : undefined;
   });
+  // Only the latest failed turn can be retried, so earlier failed messages stay without the button.
+  const retryAction =
+    terminalError !== undefined && terminalError.turnId === turnId
+      ? { action: { label: 'Retry', onClick: () => void reload() } }
+      : {};
   const memoryContext = useMemoryTurnContext(turnId);
   const { hasError: memoryContextHasError, retry: retryMemoryContext } = useMemoryTurnContextStatus();
   const ingestionStatusLine = useDocumentIngestionStatusLine(turnId);
@@ -255,7 +266,7 @@ export function AssistantMessageContainer() {
   return (
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
-        error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
+        error={error !== undefined ? <MessageErrorBanner message={String(error)} {...retryAction} /> : undefined}
         actionBar={
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }

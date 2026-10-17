@@ -49,10 +49,6 @@ const HOST_TOUCHED_PATHS_HEADING = '### host_owned_touched_paths';
 const MAX_CONVERSATION_SUMMARY_CHARS = 12_000;
 /** Bound for the raw rejected-output preview in the validation-failure warn log (spec 002 REQ-1). */
 export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
-/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
-export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
-/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
-export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 
 /** A separately configured summarizing model; its own context length bounds the summarization request. */
@@ -1222,11 +1218,9 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       ...input.recentTail,
     ];
     const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+    // The overwrite carries the discarded call's usage; a separate usage event would bill it twice.
     const usage = input.discardedUsage ?? getEmptyUsage();
 
-    if (input.discardedUsage !== undefined) {
-      yield { type: InternalEventType.MODEL_USAGE, usage };
-    }
     yield {
       type: EventType.AGENT_CONTEXT_OVERWRITE,
       id: newEventId(),

@@ -34,6 +34,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { ProviderRequestError } from '../errors';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -1648,8 +1649,9 @@ export async function* mapStreamToChunks({
         // malformed-response parse failure, the shape a cut/malformed stream like vLLM's
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
         // ModelStreamFault.
-        if (providerStatusCode(raw) != null) {
-          throw new Error(message, { cause });
+        const statusCode = providerStatusCode(raw);
+        if (statusCode != null) {
+          throw new ProviderRequestError(message, { statusCode, cause });
         }
         throw new ModelStreamFault(message, { cause });
       }

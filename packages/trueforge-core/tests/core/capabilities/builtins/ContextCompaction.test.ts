@@ -631,11 +631,9 @@ describe('contextCompaction model role', () => {
     if (overwrite.reason !== 'compaction_truncation_fallback') {
       throw new Error('expected compaction_truncation_fallback reason');
     }
-    const usageEvent = events.find(event => event.type === InternalEventType.MODEL_USAGE);
-    if (usageEvent === undefined || usageEvent.type !== InternalEventType.MODEL_USAGE) {
-      throw new Error('expected a MODEL_USAGE event for the discarded compaction request');
-    }
-    expect(usageEvent.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
+    // The discarded request's usage rides on the overwrite alone; a second usage event would bill it twice.
+    expect(overwrite.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
+    expect(events.filter(event => event.type !== 'agent.context.overwrite' && 'usage' in event)).toEqual([]);
   });
 
   it('folds a discarded compaction request usage into thread billable metrics with truncation fallback overwrite', async () => {
@@ -672,8 +670,8 @@ describe('contextCompaction model role', () => {
     }
 
     const metrics = thread.getAgentThreadMetrics();
-    expect(metrics.total_input_tokens).toBeGreaterThanOrEqual(11);
-    expect(metrics.total_output_tokens).toBeGreaterThanOrEqual(7);
+    expect(metrics.total_input_tokens).toBe(11);
+    expect(metrics.total_output_tokens).toBe(7);
     expect(metrics.total_summarizations).toBe(1);
     expect(JSON.stringify(thread.toSnapshot().context)).not.toContain('not a valid summary block');
   });

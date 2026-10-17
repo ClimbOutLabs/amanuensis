@@ -74,6 +74,29 @@ describe('TerminalErrorContainer', () => {
 
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(screen.getByRole('alert')).toHaveTextContent('stream stopped');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('offers a single Retry, on the latest failed turn rather than an earlier one', () => {
+    useTerminalError.mockReturnValue({ turnId: 'turn-latest', message: 'stream stopped' });
+
+    renderTerminalError([
+      {
+        role: 'assistant',
+        content: 'older partial answer',
+        status: { type: 'incomplete', reason: 'error', error: 'old failure' },
+        metadata: { custom: { turnId: 'turn-old' } },
+      },
+      {
+        role: 'assistant',
+        content: 'latest partial answer',
+        status: { type: 'incomplete', reason: 'error', error: 'stream stopped' },
+        metadata: { custom: { turnId: 'turn-latest' } },
+      },
+    ]);
+
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
   });
 
   it('clears the banner as soon as the model changes', () => {

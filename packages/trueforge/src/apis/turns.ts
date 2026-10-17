@@ -399,6 +399,8 @@ function createTurnResolver(deps: {
           modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
+          // Lets the context guard and its safety margin run; absent when the model's settings omit it.
+          modelProperties: { contextLength: resolved.modelProperties.context_length },
         };
       },
       mcp: async name => {
