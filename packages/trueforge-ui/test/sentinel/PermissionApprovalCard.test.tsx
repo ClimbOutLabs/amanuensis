@@ -336,7 +336,7 @@ describe('PermissionApprovalCard for mail', () => {
       expect(shown).toHaveTextContent('Time zone: America/New_York');
       expect(shown).toHaveTextContent('Length: 30 minutes');
       expect(shown).toHaveTextContent('Where: Room 4');
-      expect(shown).toHaveTextContent('Repeats: Only this date changes');
+      expect(shown).toHaveTextContent('Repeats: Only this one event of the series changes');
       expect(shown).toHaveTextContent('Guests: lin@example.com, sam@example.com');
       expect(screen.getByText('Google will email every guest about this.')).toBeInTheDocument();
       expect(screen.getByRole('region', { name: 'Event description' })).toHaveTextContent('Bring the plan.');

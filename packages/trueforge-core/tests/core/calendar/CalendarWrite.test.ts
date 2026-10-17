@@ -1,9 +1,13 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
+import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
-import { holdApprovalCalls } from '../../../src/core/permissions/heldActions';
+import type { AuditRecordInput } from '../../../src/core/permissions/audit';
+import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import { checkHeldReplay, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
 import type { Route } from '../email/gmail/harness';
+import { scriptedGoogle } from '../email/gmail/harness';
 import { build, EVENTS_PATH, json, text } from './harness';
 
 const WRITE = ['gmail_read', 'calendar_read', 'calendar_write'] as const;
@@ -46,9 +50,11 @@ async function approveThenDispatch(input: {
   shown: Record<string, unknown>;
   sent?: Record<string, unknown>;
   beforeDispatch?: () => void;
+  /** The call's info as the host stamped it, when it was not classified here (a held call being replayed). */
+  infoOverride?: InternalToolCallInfo;
 }) {
   const { tools, sentinel } = input.built;
-  const info = await tools.toolCallInfo({ name: input.name, arguments: input.shown });
+  const info = input.infoOverride ?? (await tools.toolCallInfo({ name: input.name, arguments: input.shown }));
   expect(info.pre_dispatch_failure).toBeUndefined();
   expect(info.tier).toBe(3);
   input.beforeDispatch?.();
@@ -379,5 +385,143 @@ describe('a write Google may have acted on', () => {
     const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
     expect(outcome.rawContent).toContain('may or may not have been saved');
     expect(writes(built.google.urls)).toHaveLength(1);
+  });
+});
+
+function recordingServices(): { services: SentinelServices; rows: AuditRecordInput[] } {
+  const rows: AuditRecordInput[] = [];
+  return {
+    rows,
+    services: {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      audit: {
+        record: row => {
+          rows.push(row);
+          return Promise.resolve();
+        },
+      },
+    },
+  };
+}
+
+describe('the permissions log', () => {
+  it('records the write once Google saved it, with what was saved', async () => {
+    const { services, rows } = recordingServices();
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
+    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    expect(rows.filter(row => row.outcome === 'ran')).toEqual([
+      expect.objectContaining({
+        tool_name: 'create_event',
+        tier: 3,
+        description:
+          'Added to Google Calendar after the owner approved it: "Dentist" on Monday, October 19, 2026, 9:00 am to 10:00 am (America/New_York)',
+      }),
+    ]);
+  });
+
+  it('records a write Google did not confirm as not saved, never as a write', async () => {
+    const { services, rows } = recordingServices();
+    const built = await build({
+      routes: [
+        (url, init) => (init?.method === 'POST' && url.pathname === EVENTS_PATH ? json({ error: {} }, 503) : undefined),
+      ],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services,
+    });
+    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    expect(rows.some(row => row.outcome === 'ran')).toBe(false);
+    expect(rows.filter(row => row.outcome === 'denied').map(row => row.description)).toEqual([
+      expect.stringContaining('Google Calendar did not confirm saving "Dentist"'),
+    ]);
+  });
+});
+
+describe('durable approvals', () => {
+  it('never offers approve-for-this-chat or always-allow for a calendar write', async () => {
+    const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({
+      name: 'create_event',
+      arguments: { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'all' },
+    });
+    expect(info.tier_reason).toBe('calendar_write');
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+});
+
+describe('a held event the owner approves later', () => {
+  const args = { ...DENTIST, time_zone: 'America/New_York' };
+
+  async function holdThenAnswer(input: { expired: boolean }) {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const google = scriptedGoogle([insertRoute]);
+    // The scheduled run classifies the call and holds it; nothing is written.
+    const run = await build({ routes: [], features: [...WRITE], unattended: true, services, google, timeZone: 'UTC' });
+    const heldInfo = await run.tools.toolCallInfo({ name: 'create_event', arguments: args });
+    const heldCall = holdApprovalCalls({
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'held-1',
+            type: 'function',
+            function: { name: 'create_event', arguments: JSON.stringify(args) },
+            tool_info: heldInfo,
+          },
+        ],
+      },
+      alreadyHeld: 0,
+      isSubAgent: false,
+    }).message.tool_calls?.[0];
+    if (heldCall === undefined) {
+      throw new Error('expected a held call');
+    }
+    const held = input.expired
+      ? {
+          ...heldCall.tool_info,
+          held_for_owner: { expires_at: new Date(Date.now() - 1000).toISOString() },
+        }
+      : heldCall.tool_info;
+    expect(writes(google.urls)).toEqual([]);
+
+    // Later the owner approves it from Needs your OK, in a chat turn on a device in another zone.
+    const owner = await build({ routes: [], features: [...WRITE], services, google, timeZone: 'Europe/Paris' });
+    const fresh = await owner.tools.toolCallInfo({ name: 'create_event', arguments: args });
+    const check = await checkHeldReplay({
+      held,
+      fresh,
+      tokens: services.token_store,
+      scope: { tenant_id: owner.sentinel.tenant_id, created_by: owner.sentinel.created_by },
+    });
+    if (!check.ok) {
+      return { check, google };
+    }
+    const outcome = await approveThenDispatch({
+      built: owner,
+      name: 'create_event',
+      shown: args,
+      infoOverride: { ...fresh, approval_token_id: check.approval_token_id },
+    });
+    return { check, google, outcome };
+  }
+
+  it('writes it once, with exactly the request the held card showed', async () => {
+    const { check, google, outcome } = await holdThenAnswer({ expired: false });
+    expect(check.ok).toBe(true);
+    expect(outcome?.failure).toBe(false);
+    expect(writes(google.urls)).toEqual([`POST ${EVENTS_PATH}?sendUpdates=none`]);
+    expect(google.bodies).toEqual([
+      expect.objectContaining({
+        start: { dateTime: '2026-10-19T09:00:00-04:00', timeZone: 'America/New_York' },
+      }),
+    ]);
+  });
+
+  it('never writes it once the hold has expired', async () => {
+    const { check, google } = await holdThenAnswer({ expired: true });
+    expect(check).toEqual({ ok: false, reason: 'expired' });
+    expect(writes(google.urls)).toEqual([]);
   });
 });

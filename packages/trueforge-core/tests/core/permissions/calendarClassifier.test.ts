@@ -96,6 +96,7 @@ const REVIEW: CalendarWriteReview = {
   guests_emailed: false,
   one_of_repeating: false,
   before: null,
+  incomplete_reason: null,
 };
 
 function writeAction(review: CalendarWriteReview | undefined): SentinelAction {
@@ -138,5 +139,31 @@ describe('Calendar write classification', () => {
     };
     const decision = await classifyTier(writeAction(REVIEW), makeCtx(services));
     expect(decision.auto_deny).toBe('offline_mode');
+  });
+
+  it('refuses a write whose guests would get something the card cannot show', async () => {
+    const decision = await classifyTier(
+      writeAction({ ...REVIEW, incomplete_reason: 'This event has a call link.' }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ auto_deny: 'incomplete_send_card', reason_detail: 'This event has a call link.' });
+  });
+
+  it('runs the outbound secret guard over the event text when guests are emailed', async () => {
+    const services = {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      outboundSecrets: () => Promise.resolve(['sk-synthetic-server-secret-0000']),
+    };
+    const leaking = {
+      ...REVIEW,
+      attendees: ['lin@example.com'],
+      guests_emailed: true,
+      description: 'Key: sk-synthetic-server-secret-0000',
+    };
+    expect((await classifyTier(writeAction(leaking), makeCtx(services))).auto_deny).toBe('outbound_guard');
+    // Without an email to guests the text stays in the owner's own calendar.
+    expect(
+      (await classifyTier(writeAction({ ...leaking, guests_emailed: false }), makeCtx(services))).auto_deny,
+    ).toBeNull();
   });
 });

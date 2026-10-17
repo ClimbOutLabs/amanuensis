@@ -34,7 +34,12 @@ export interface EventWriteBody {
   attendees: { email: string }[] | undefined;
 }
 
+/** The only calendar Aman writes: the owner's main one. */
+export const PRIMARY_CALENDAR_ID = 'primary';
+
 export interface EventWriteRequest {
+  /** With the event id, the target the approval is bound to. */
+  calendar_id: typeof PRIMARY_CALENDAR_ID;
   /** Null for a new event. */
   event_id: string | null;
   /** The version of the event the card showed; null for a new event. */
@@ -68,6 +73,8 @@ export interface CalendarWriteReview {
   /** A change to one date of a repeating event. */
   one_of_repeating: boolean;
   before: { title: string; when: string; duration: string; location: string } | null;
+  /** Why the guests would get something the card cannot show, so the write is refused; null when nothing is hidden. */
+  incomplete_reason: string | null;
 }
 
 export type ResolvedEventWrite =
@@ -243,6 +250,7 @@ export function resolveCreate(input: { call: CreateEventInput; zone: string; acc
   return {
     ok: true,
     request: {
+      calendar_id: PRIMARY_CALENDAR_ID,
       event_id: null,
       etag: null,
       send_updates: sendUpdates,
@@ -268,6 +276,7 @@ export function resolveCreate(input: { call: CreateEventInput; zone: string; acc
       guests_emailed: sendUpdates === 'all',
       one_of_repeating: false,
       before: null,
+      incomplete_reason: null,
     },
   };
 }
@@ -313,6 +322,14 @@ export function resolveUpdate(input: {
   if (existing.status === 'cancelled') {
     return { ok: false, error: 'Google Calendar has no such event.' };
   }
+  // An id from get_event's recurring_event_id names the whole series; only one date is ever changed.
+  if ((existing.recurrence?.length ?? 0) > 0) {
+    return {
+      ok: false,
+      error:
+        'That id is a whole repeating series. Change one date at a time, with the event_id list_events gives for that date.',
+    };
+  }
   if (existing.organizer?.self !== true) {
     return {
       ok: false,
@@ -353,11 +370,17 @@ export function resolveUpdate(input: {
   }
   const sendUpdates: SendUpdates = guests.length === 0 ? 'none' : (call.send_updates ?? 'none');
   const location = call.location?.trim() ?? existing.location ?? '';
-  // Only a description the change writes is shown; the one already there is left as it is.
-  const description = call.description?.trim() ?? '';
+  // Guests emailed about a change get the whole event, so the card shows the description it will have.
+  const description = call.description?.trim() ?? existing.description ?? '';
+  const guestsEmailed = sendUpdates === 'all';
+  const hidden =
+    existing.hangoutLink !== undefined ||
+    existing.conferenceData !== undefined ||
+    (existing.attachments?.length ?? 0) > 0;
   return {
     ok: true,
     request: {
+      calendar_id: PRIMARY_CALENDAR_ID,
       event_id: existing.id,
       etag: existing.etag ?? null,
       send_updates: sendUpdates,
@@ -380,8 +403,12 @@ export function resolveUpdate(input: {
       location,
       description,
       attendees: guests,
-      guests_emailed: sendUpdates === 'all',
+      guests_emailed: guestsEmailed,
       one_of_repeating: existing.recurringEventId !== undefined,
+      incomplete_reason:
+        guestsEmailed && hidden
+          ? 'This event has a call link or attached files that Google would email to the guests, and the card cannot show them. Change it with send_updates "none", or change it in Google Calendar.'
+          : null,
       before: {
         title: titleOf(existing.summary),
         when: beforeView.when,

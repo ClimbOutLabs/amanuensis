@@ -41,6 +41,7 @@ describe('a new event', () => {
       create({ title: 'Dentist', start: '2026-10-19T09:00', end: '2026-10-19T10:30', location: '12 Main St' }),
     );
     expect(request).toEqual({
+      calendar_id: 'primary',
       event_id: null,
       etag: null,
       send_updates: 'none',
@@ -66,6 +67,7 @@ describe('a new event', () => {
       guests_emailed: false,
       one_of_repeating: false,
       before: null,
+      incomplete_reason: null,
     });
   });
 
@@ -167,6 +169,7 @@ describe('a change to an event', () => {
   it('moves an event keeping its length, and shows before and after', () => {
     const { request, review } = ok(update({ event_id: 'ev1', start: '2026-10-20T15:00' }, STANDUP));
     expect(request).toEqual({
+      calendar_id: 'primary',
       event_id: 'ev1',
       etag: '"e1"',
       send_updates: 'none',
@@ -237,5 +240,32 @@ describe('a change to an event', () => {
     const shown = ok(update({ event_id: 'ev1', title: 'x' }, STANDUP)).request;
     const later = ok(update({ event_id: 'ev1', title: 'x' }, { ...STANDUP, etag: '"e2"' })).request;
     expect(hashEventWrite(later)).not.toBe(hashEventWrite(shown));
+  });
+
+  it('refuses a whole repeating series, so only one event of it is ever changed', () => {
+    const series = { ...STANDUP, recurrence: ['RRULE:FREQ=WEEKLY'] };
+    expect(update({ event_id: 'ev1', title: 'x' }, series)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('whole repeating series'),
+    });
+  });
+
+  it('shows the description guests will get, the one already there when the change keeps it', () => {
+    const described = { ...STANDUP, description: 'Agenda: budget review.' };
+    expect(ok(update({ event_id: 'ev1', title: 'x' }, described)).review.description).toBe('Agenda: budget review.');
+  });
+
+  it('marks the card incomplete when emailed guests would get a call link or files it cannot show', () => {
+    const withCall: CalendarEvent = {
+      ...STANDUP,
+      hangoutLink: 'https://meet.example.com/abc',
+      attendees: [{ email: ACCOUNT, self: true }, { email: 'lin@example.com' }],
+    };
+    expect(
+      ok(update({ event_id: 'ev1', title: 'x', send_updates: 'all' }, withCall)).review.incomplete_reason,
+    ).toContain('call link or attached files');
+    expect(
+      ok(update({ event_id: 'ev1', title: 'x', send_updates: 'none' }, withCall)).review.incomplete_reason,
+    ).toBeNull();
   });
 });

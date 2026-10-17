@@ -45,7 +45,7 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
         <Line label="Time zone" value={event.time_zone} />
         <Line label="Length" value={event.duration} />
         {event.location !== '' && <Line label="Where" value={event.location} />}
-        {event.one_of_repeating && <Line label="Repeats" value="Only this date changes" />}
+        {event.one_of_repeating && <Line label="Repeats" value="Only this one event of the series changes" />}
         <Line label="Guests" value={event.attendees.length === 0 ? 'None' : event.attendees.join(', ')} />
         {event.attendees.length > 0 && (
           <p className="text-sm font-medium text-text-primary" data-role="calendar-guests-emailed">

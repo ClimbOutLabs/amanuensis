@@ -293,34 +293,79 @@ export class CalendarToolSet extends LocalToolMCP {
     return { zone, hash };
   }
 
+  /**
+   * The permissions log row for what an approved write did once it reached Google, so the log shows writes and not
+   * only approvals. An approval that never reached this point (expired, refused at dispatch) has no such row.
+   */
+  async #audit(input: { tool_name: string; outcome: 'ran' | 'denied'; description: string }) {
+    const { services, tenant_id, created_by, conversation_id } = this.#options.sentinel;
+    await services.audit?.record({
+      tenant_id,
+      created_by,
+      conversation_id,
+      tier: 3,
+      tool_name: input.tool_name,
+      description: input.description,
+      outcome: input.outcome,
+      auto_deny_reason: null,
+    });
+  }
+
   /** Runs one approved write, only if what it would send now still hashes to what the card showed. */
   async #write(input: {
+    tool_name: string;
     approved: { zone: string; hash: string };
     resolve: (zone: string) => Promise<ResolvedEventWrite>;
     send: (request: EventWriteRequest) => Promise<{ id: string }>;
     status: 'created' | 'updated';
   }) {
+    const refuse = async (reason: string) => {
+      await this.#audit({ tool_name: input.tool_name, outcome: 'denied', description: `Not saved: ${reason}` });
+      return errorResult(reason);
+    };
+    let resolved: ResolvedEventWrite;
     try {
-      const resolved = await input.resolve(input.approved.zone);
-      if (!resolved.ok) {
-        return errorResult(`Nothing was saved. ${resolved.error}`);
-      }
-      if (hashEventWrite(resolved.request) !== input.approved.hash) {
-        return errorResult(
-          'The event changed after you approved this, so nothing was saved. Ask again to see it as it is now.',
-        );
-      }
+      resolved = await input.resolve(input.approved.zone);
+    } catch (error) {
+      await this.#audit({
+        tool_name: input.tool_name,
+        outcome: 'denied',
+        description: 'Not saved: the event could not be read.',
+      });
+      return failureResult(error);
+    }
+    if (!resolved.ok) {
+      return await refuse(`Nothing was saved. ${resolved.error}`);
+    }
+    if (hashEventWrite(resolved.request) !== input.approved.hash) {
+      return await refuse(
+        'The event changed after you approved this, so nothing was saved. Ask again to see it as it is now.',
+      );
+    }
+    const { review } = resolved;
+    const what = `"${review.title}" on ${review.when} (${review.time_zone})${review.guests_emailed ? `, guests emailed: ${review.attendees.join(', ')}` : ''}`;
+    try {
       const saved = await input.send(resolved.request);
+      await this.#audit({
+        tool_name: input.tool_name,
+        outcome: 'ran',
+        description: `${input.status === 'created' ? 'Added to' : 'Changed in'} Google Calendar after the owner approved it: ${what}`,
+      });
       return jsonResult({
         account: this.#options.account,
         event_id: saved.id,
         status: input.status,
-        title: resolved.review.title,
-        when: resolved.review.when,
-        time_zone: resolved.review.time_zone,
-        guests_emailed: resolved.review.guests_emailed,
+        title: review.title,
+        when: review.when,
+        time_zone: review.time_zone,
+        guests_emailed: review.guests_emailed,
       });
     } catch (error) {
+      await this.#audit({
+        tool_name: input.tool_name,
+        outcome: 'denied',
+        description: `Google Calendar did not confirm saving ${what}`,
+      });
       return failureResult(error);
     }
   }
@@ -331,6 +376,7 @@ export class CalendarToolSet extends LocalToolMCP {
       return errorResult(approved.refusal);
     }
     return await this.#write({
+      tool_name: CREATE_EVENT_TOOL_NAME,
       approved,
       resolve: zone => Promise.resolve(resolveCreate({ call: input, zone, account: this.#options.account })),
       send: request => this.#options.api.insertEvent(request),
@@ -344,6 +390,7 @@ export class CalendarToolSet extends LocalToolMCP {
       return errorResult(approved.refusal);
     }
     return await this.#write({
+      tool_name: UPDATE_EVENT_TOOL_NAME,
       approved,
       resolve: zone => this.#resolveWrite({ name: UPDATE_EVENT_TOOL_NAME, args: input, zone }),
       send: request => this.#options.api.patchEvent({ ...request, event_id: input.event_id }),

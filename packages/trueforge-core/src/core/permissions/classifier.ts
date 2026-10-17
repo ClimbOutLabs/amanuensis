@@ -1543,7 +1543,7 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
   const plainWhat =
     review.action === 'create'
       ? `Add ${title} to your Google Calendar on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ', this date only,' : ''} in your Google Calendar to ${title} on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`;
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`;
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1602,8 +1602,31 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         sensitive_read: false,
       });
     }
+    const review = action.calendar_write;
+    if (review.incomplete_reason !== null) {
+      return autoDenyDecision({
+        reason: 'incomplete_send_card',
+        reason_detail: review.incomplete_reason,
+        owner_message: 'Nothing was saved: the guests would get something the card could not show you.',
+        sensitive_read: false,
+      });
+    }
+    // Guests who are emailed get the event text, so it is a send and passes the same secret guard.
+    if (review.guests_emailed) {
+      const verdict = checkOutboundStrings({
+        strings: { values: [review.title, review.description, review.location], scalars: [], keys: [], plumbing: [] },
+        secrets: await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
+      });
+      if (!verdict.ok) {
+        return autoDenyDecision({
+          reason: 'outbound_guard',
+          reason_detail: `The event would be emailed to its guests, and ${describeOutboundRule(verdict.rule)}.`,
+          sensitive_read: false,
+        });
+      }
+    }
     return tier3Decision({
-      card: calendarWriteCard({ review: action.calendar_write, agent_intent: ctx.agent_intent }),
+      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
       reason: 'calendar_write',
       reason_detail: 'Adding or changing a calendar event always asks.',
       sensitive_read: false,
