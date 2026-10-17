@@ -118,7 +118,7 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         const nameField = page.getByLabel('Your name');
         await nameField.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
         const nameBox = await nameField.boundingBox();
-        const assistantBox = await page.getByLabel('Assistant name').boundingBox();
+        const assistantBox = await page.getByLabel('Name', { exact: true }).boundingBox();
         assert.ok(nameBox != null && assistantBox != null, 'both name fields should have geometry');
         assert.ok(nameBox.y < assistantBox.y, 'the owner name field comes before the assistant name field');
         await shoot('panel');
