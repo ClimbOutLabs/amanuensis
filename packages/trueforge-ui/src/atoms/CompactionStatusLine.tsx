@@ -81,10 +81,10 @@ export function CompactionStatusLine({ className }: { className?: string }) {
       // and tokensAfter is a text estimate, so their difference overstates.
       parts.push(`Compacted ${when}`);
     } else if (lastCompaction.outcome === 'truncated_fallback') {
-      parts.push(`Shortened history ${when} to fit`);
+      parts.push(`Could not summarize the chat, so the oldest messages were dropped ${when}`);
     } else if (lastCompaction.outcome !== 'skipped_blocked') {
       // skipped_blocked means the user cancelled the turn, which is not a failure.
-      parts.push(`Compaction failed ${when}`);
+      parts.push(`Could not summarize the earlier messages ${when}`);
     }
   }
 

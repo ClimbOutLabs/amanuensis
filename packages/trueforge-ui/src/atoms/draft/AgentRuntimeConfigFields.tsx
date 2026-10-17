@@ -1,6 +1,8 @@
 'use client';
 
-import type { TrueForgeAgentRuntimeConfig } from '../../server/types.js';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
+
+import type { AgentInputTokensCompactionTrigger, TrueForgeAgentRuntimeConfig } from '../../server/types.js';
 import { cn } from '../lib/cn.js';
 import { auiInputClass } from '../lib/inputClasses.js';
 import { Switch } from '../primitives/Switch.js';
@@ -13,6 +15,8 @@ export type AgentRuntimeConfigFieldsProps = {
   disabled?: boolean;
   showCapabilities?: boolean;
   layout?: 'compact' | 'detailed';
+  /** Whether the selected model reports its context length; undefined while that is not known to the catalog. */
+  modelContextLengthKnown?: boolean;
   onChange: (value: TrueForgeAgentRuntimeConfig) => void;
 };
 
@@ -101,6 +105,7 @@ export function AgentRuntimeConfigFields({
   disabled = false,
   showCapabilities = true,
   layout = 'compact',
+  modelContextLengthKnown,
   onChange,
 }: AgentRuntimeConfigFieldsProps) {
   const capabilityFields: RuntimeSwitchField[] = [
@@ -176,7 +181,16 @@ export function AgentRuntimeConfigFields({
     }),
   };
   const runtimeFields = [sandboxField, fileDownloadsField, compactionField, largeToolResponseField];
-  const compactionThreshold = value.contextManagement?.compaction?.trigger?.value ?? 50_000;
+  const compactionTrigger = value.contextManagement?.compaction?.trigger;
+  const setCompactionTrigger = (trigger: AgentInputTokensCompactionTrigger | undefined) =>
+    onChange({
+      ...value,
+      contextManagement: {
+        ...value.contextManagement,
+        compaction: { enabled: compactionEnabled, ...(trigger === undefined ? {} : { trigger }) },
+        largeToolResponse: value.contextManagement?.largeToolResponse ?? { enabled: true },
+      },
+    });
 
   const switchField = ({
     field,
@@ -299,41 +313,58 @@ export function AgentRuntimeConfigFields({
           </section>
           <section className="py-3">
             {switchField({ field: compactionField, className: 'items-center justify-between gap-4' })}
-            <label
-              className={`mt-3 flex items-center justify-between gap-4 border-l-2 border-primary-button-bg/50 pl-3 ${
-                compactionEnabled ? '' : 'opacity-50'
-              }`}
+            <div
+              className={`mt-3 border-l-2 border-primary-button-bg/50 pl-3 ${compactionEnabled ? '' : 'opacity-50'}`}
             >
-              <span>
-                <span className="text-text-primary block text-xs font-medium">Compaction threshold tokens</span>
-                <span className="text-text-secondary mt-0.5 block text-xs">
-                  Input-token threshold that triggers compaction.
+              <label className="flex items-center justify-between gap-4">
+                <span>
+                  <span className="text-text-primary block text-xs font-medium">When to summarize long chats:</span>
+                  <span className="text-text-secondary mt-0.5 block text-xs">
+                    Aman summarizes the oldest part of a long chat so the model can keep reading it.
+                  </span>
                 </span>
-              </span>
-              <input
-                type="number"
-                min={1}
-                disabled={disabled || !compactionEnabled}
-                value={compactionThreshold}
-                className={auiInputClass('h-8 w-28 disabled:opacity-60')}
-                onChange={event => {
-                  const threshold = parsePositiveInteger(event.target.value);
-                  if (threshold === null) return;
-                  onChange({
-                    ...value,
-                    contextManagement: {
-                      ...value.contextManagement,
-                      compaction: {
-                        ...value.contextManagement?.compaction,
-                        enabled: compactionEnabled,
-                        trigger: { type: 'input_tokens', value: threshold },
-                      },
-                      largeToolResponse: value.contextManagement?.largeToolResponse ?? { enabled: true },
-                    },
-                  });
-                }}
-              />
-            </label>
+                <select
+                  aria-label="When to summarize long chats:"
+                  disabled={disabled || !compactionEnabled}
+                  value={compactionTrigger === undefined ? 'automatic' : 'set_size'}
+                  className={auiInputClass('h-8 cursor-pointer py-1.5 disabled:opacity-60')}
+                  onChange={event =>
+                    setCompactionTrigger(
+                      event.target.value === 'set_size'
+                        ? { type: 'input_tokens', value: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS }
+                        : undefined,
+                    )
+                  }
+                >
+                  <option value="automatic">Automatic (recommended)</option>
+                  <option value="set_size">At a set size</option>
+                </select>
+              </label>
+              {compactionTrigger === undefined && modelContextLengthKnown === false ? (
+                <p className="text-text-secondary mt-1 text-xs">
+                  {"This model's size limit isn't known, so Aman uses a safe default."}
+                </p>
+              ) : null}
+              {compactionTrigger === undefined ? null : (
+                <label className="mt-2 flex items-center justify-between gap-4">
+                  <span className="text-text-primary block text-xs font-medium">
+                    Chat size to summarize at (in tokens)
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    disabled={disabled || !compactionEnabled}
+                    value={compactionTrigger.value}
+                    className={auiInputClass('h-8 w-28 disabled:opacity-60')}
+                    onChange={event => {
+                      const threshold = parsePositiveInteger(event.target.value);
+                      if (threshold === null) return;
+                      setCompactionTrigger({ type: 'input_tokens', value: threshold });
+                    }}
+                  />
+                </label>
+              )}
+            </div>
           </section>
           {switchField({ field: largeToolResponseField, className: 'items-center justify-between gap-4 py-3' })}
         </div>

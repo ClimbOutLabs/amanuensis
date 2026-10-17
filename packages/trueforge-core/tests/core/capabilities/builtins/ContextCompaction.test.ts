@@ -5,7 +5,6 @@ import {
   contextCompaction,
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_SUMMARY_PREFACE,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
@@ -14,6 +13,7 @@ import {
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
 import type { TaskChecklistAccess } from '../../../../src/core/capabilities/builtins/TaskChecklist';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '../../../../src/core/capabilities/builtins/tokenBudgetConstants';
 import { createToolResponseV2, newEventId, type ToolResultDisposition } from '../../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../../src/core/llm/LLMTypes';
 import {
@@ -678,8 +678,9 @@ describe('contextCompaction model role', () => {
     }
 
     const metrics = thread.getAgentThreadMetrics();
-    expect(metrics.total_input_tokens).toBeGreaterThanOrEqual(11);
-    expect(metrics.total_output_tokens).toBeGreaterThanOrEqual(7);
+    // The first try and the retry are each billed once.
+    expect(metrics.total_input_tokens).toBe(22);
+    expect(metrics.total_output_tokens).toBe(14);
     expect(metrics.total_summarizations).toBe(1);
     expect(JSON.stringify(thread.toSnapshot().context)).not.toContain('not a valid summary block');
   });

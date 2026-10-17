@@ -128,6 +128,12 @@ import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { resolveLocalTime } from '../util/clientTimezone';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
+import {
+  CHAT_TOO_LONG_MESSAGE,
+  CONTEXT_OVER_LIMIT_MESSAGE,
+  describeTurnFailure,
+  MODEL_STREAM_BROKE_MESSAGE,
+} from '../util/plainFailureMessages';
 import type { AbnormalHandoff, AbnormalHandoffCause, AbnormalHandoffEvidence } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
 import type {
@@ -294,7 +300,7 @@ function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<
       },
       (error: unknown) => {
         clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(error instanceof Error ? error : new Error(String(error), { cause: error }));
       },
     );
   });
@@ -2907,12 +2913,12 @@ export class AgentThread {
       }
       const postCompactionLength = estimateRawContextTextLength(this.context);
       if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
-        throw new Error(
-          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
-            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
-            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
-            `Start a new chat or reduce the context and try again.`,
-        );
+        this.logger.warn('Context is above the request size ceiling even after compaction; stopping the turn', {
+          contextChars: postCompactionLength,
+          ceilingChars: MAX_MODEL_REQUEST_CHARS,
+        });
+        yield this.generateErrorEvent(CHAT_TOO_LONG_MESSAGE, undefined, 'fatal_error');
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
       }
     }
 
@@ -2948,12 +2954,16 @@ export class AgentThread {
         // reports only a lower bound once past the budget.
         const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
         if (isOverLimit(postCompactionTokens)) {
-          throw new Error(
-            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
-              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
-              `refusing to send a request the provider would reject. ` +
-              `Start a new chat or reduce the context and try again.`,
+          this.logger.warn(
+            'Estimated request is above the model context limit even after compaction; stopping the turn',
+            {
+              estimatedInputTokens: Math.ceil(postCompactionTokens),
+              contextLength: modelContextLength,
+              maxOutputTokens,
+            },
           );
+          yield this.generateErrorEvent(CONTEXT_OVER_LIMIT_MESSAGE, undefined, 'fatal_error');
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
       }
     }
@@ -3056,10 +3066,7 @@ export class AgentThread {
         if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
           // A repetition fault carries its own actionable guidance; surfacing the
           // generic context-too-long text for it would mislead the user.
-          const message =
-            error instanceof ModelOutputRepetitionError
-              ? error.message
-              : "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model";
+          const message = error instanceof ModelOutputRepetitionError ? error.message : MODEL_STREAM_BROKE_MESSAGE;
           yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
@@ -4426,19 +4433,13 @@ export class AgentThread {
       // Providers / transports often reject with plain objects; instanceof Error would
       // otherwise collapse those into an opaque "Unknown error occurred" in Agent Steps.
       this.logger.error('Agent thread execution failed', extractErrorLogFields(error));
-      yield this.generateErrorEvent(describeUnknownError(error), undefined, 'fatal_error');
+      yield this.generateErrorEvent(describeTurnFailure(error), undefined, 'fatal_error');
     } finally {
       this.contextBusy = false;
     }
   }
 }
 
-/**
- * Cheap text-length estimate over the raw context, without the full message
- * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
- * giant context compacts first (or fails fast) instead of blocking the event loop
- * inside the synchronous request assembly.
- */
 /**
  * Text-only character length of one context message: string content as-is, and only
  * `text` parts of multipart content. Binary/base64 payloads in image_url,
@@ -4450,20 +4451,15 @@ function contextMessageTextLength(message: ContextMessage): number {
   if (!isLLMContextMessage(message)) {
     return 0;
   }
-  const content: unknown = message.content;
+  const content = message.content;
   if (typeof content === 'string') {
     return content.length;
   }
   if (Array.isArray(content)) {
     let total = 0;
     for (const part of content) {
-      if (
-        typeof part === 'object' &&
-        part !== null &&
-        (part as { type?: unknown }).type === 'text' &&
-        typeof (part as { text?: unknown }).text === 'string'
-      ) {
-        total += (part as { text: string }).text.length;
+      if (part.type === 'text') {
+        total += part.text.length;
       }
     }
     return total;
@@ -4476,6 +4472,12 @@ function contextMessageTextTokens(message: ContextMessage): number {
   return contextMessageTextLength(message) / 4;
 }
 
+/**
+ * Cheap text-length estimate over the raw context, without the full message
+ * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
+ * giant context compacts first (or fails fast) instead of blocking the event loop
+ * inside the synchronous request assembly.
+ */
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
   let total = 0;
   for (const message of context) {

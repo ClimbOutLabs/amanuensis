@@ -65,7 +65,11 @@ function modelMessageWithUsage(usage: { input_tokens: number; output_tokens: num
   };
 }
 
-function isLlmFactory(value: unknown): value is (name: string) => Promise<{ modelId: string; modelClient: ILLM }> {
+function isLlmFactory(
+  value: unknown,
+): value is (
+  name: string,
+) => Promise<{ modelId: string; modelClient: ILLM; modelProperties?: { contextLength: number | undefined } }> {
   return typeof value === 'function';
 }
 
@@ -96,7 +100,10 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
       type: 'custom',
       name: 'local-vllm',
       base_url: options.localUrl ?? 'http://127.0.0.1:8000/v1',
-      models: [{ model_id: 'local-model', name: 'local-model', properties: {} }],
+      models: [
+        { model_id: 'local-model', name: 'local-model', properties: {} },
+        { model_id: 'sized-model', name: 'sized-model', properties: { context_length: 32_000 } },
+      ],
     },
   });
   const tokenStore = new SqliteOAuthTokenStore(db);
@@ -254,6 +261,13 @@ describe('Token Factory daily cap in the turn path', () => {
     await modelClient.createNonStream(ask);
 
     expect(await usedToday(usageStore)).toBe(CAP);
+  });
+
+  it('passes the model context length from its settings so the context guard can run', async () => {
+    const { llm } = await startTurn({ cap: undefined });
+
+    expect((await llm('local-vllm/sized-model')).modelProperties).toEqual({ contextLength: 32_000 });
+    expect((await llm('local-vllm/local-model')).modelProperties).toEqual({ contextLength: undefined });
   });
 
   it('applies the cap to a local turn that TOKEN_FACTORY_MODE=force routes to Token Factory', async () => {
