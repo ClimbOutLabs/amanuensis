@@ -1059,7 +1059,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     writeTargetTouchesSandboxTools({
       p: target,
       cwd: identityCwd,
-      roots: ctx.workspace_cwd === null ? [] : [ctx.workspace_cwd],
+      roots: [ctx.workspace_cwd],
       resolution: ctx.path_resolution,
     })
   ) {
