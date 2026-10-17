@@ -8,9 +8,9 @@ Do one person at a time, from step 1 to step 6. Where a command says `<person>`,
 
 ## What moves and what does not
 
-Moves: chats with their original dates, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), and connector entries (unused: no agent is attached to them).
+Moves: chats with their original dates, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Approve for this chat" choices start over.
 
-Does not move: model keys, connector sign-ins and saved credentials, and safety settings (the prompt-injection screens, "Always allow" choices, search and offline settings). A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
+Does not move: model keys, connector sign-ins and saved credentials, your own skills and registered repositories, and safety settings (Settings, Permissions: offline mode, Always allow and web search; Settings, Memory: the recall and tool-output checks). A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
 Good to know:
 
@@ -202,7 +202,7 @@ Only that person's data should be there. If the old stack held more than one per
 - Model keys and the model server address: Settings, Models. Keys are never exported.
 - Connector sign-ins: a connector that signs in with OAuth arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
-- Safety settings: check the prompt-injection screens, search and offline settings on the new instance.
+- Safety settings: in Settings, open Permissions and Memory and set offline mode, web search and the recall and tool-output checks on the new instance.
 - "Always allow" choices: each tool asks again the first time and you can pick Always allow once more.
 - Schedules: they arrive switched off. Review each one and switch on the ones you want.
 

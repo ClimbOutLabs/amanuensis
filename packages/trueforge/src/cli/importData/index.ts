@@ -10,7 +10,7 @@ import type { ImportDataSession } from './session';
 
 const USAGE = `Usage: aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]
 
-Restores a data export (made by aman export-data or the Export button) into this instance. The
+Restores a data export (made by aman export-data) into this instance. The
 instance has one account, its owner, and everything imported belongs to it. The instance must be
 fresh (no chats, personas, agents or other data yet); stop the app before running this by hand.
 

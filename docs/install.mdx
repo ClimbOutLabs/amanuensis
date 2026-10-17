@@ -245,7 +245,7 @@ An instance with no sign-in keeps everything under one user id, `trueforge-defau
 
 ### Importing it into a fresh instance
 
-An export (made by `aman export-data` on the old Aman) can be restored into a fresh instance. Each instance has one account, its owner, and everything imported belongs to that owner.
+This is a one-time move run by whoever operates the instance, from a terminal on the machine that runs it. There is no button in the app for it yet, so a person who only uses the app cannot do it alone. An export (made by `aman export-data` on the old Aman) can be restored into a fresh instance. Each instance has one account, its owner, and everything imported belongs to that owner.
 
 ```bash
 installer/install.sh instance import main ~/aman-export.zip
@@ -253,7 +253,11 @@ installer/install.sh instance import main ~/aman-export.zip
 
 The installer stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.
 
-What moves: chats with their dates and totals, folders, agents (with their ids), personas and their knowledge, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the memory and tool-output switches the new instance has not set itself, and the owner's permission settings. Model keys, connector sign-ins, OAuth tokens and Always allow choices never travel; set them up again in Settings.
+What moves: chats with their dates and totals, folders, agents (with their ids), personas and their knowledge, each chat's chosen persona, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the owner's personalization, the owner's permission history, and the default model and memory summary switch if the new instance has not set them. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer is imported with that request expired and a line saying so, and "Approve for this chat" choices start over. The permission history (what ran, what was approved or denied, and when) is kept and never expires. Dates on personas, spaces, folders, schedules and persona choices show the import time.
+
+What does not move, and what to set up again: model keys, connector sign-ins, OAuth tokens and Always allow choices; your own skills and registered repositories; and your safety settings. Imported connectors arrive with no agent attached. In Settings, open Permissions to set offline mode, Always allow and web search again, Memory to turn the recall and tool-output checks back on, and Connectors to sign in; attach connectors to agents on the Agents page. An agent the export only names (a chat or schedule refers to it, but its definition is missing) is created as a stand-in with no working model; the import summary names it.
+
+An export made before permission history and persona choices were included still imports; those two parts are simply empty. To bring them across, export again from the old instance with a version that includes them.
 
 Before it writes anything the import checks the whole file, then checks that none of its ids already exist here. A failure undoes what the import wrote, and if the process is killed the next import cleans up first. Knowledge is searched by meaning, so the search model must have finished downloading (open the app once and wait a few minutes). If it has not, the import stops with "the knowledge index is still downloading, retry in a few minutes" and writes nothing.
 

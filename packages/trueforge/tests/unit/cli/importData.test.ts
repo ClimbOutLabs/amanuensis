@@ -165,5 +165,6 @@ describe('aman import-data', () => {
     const io = fakeIo();
     expect(await runCli({ argv: ['import-data', '--help'], io })).toBe(0);
     expect(io.err.join('')).toContain('Usage: aman import-data --in <file.zip>');
+    expect(io.err.join('')).not.toContain('Export button');
   });
 });
