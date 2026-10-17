@@ -1240,6 +1240,38 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
     }
   });
 
+  it('does not attach imported connectors to a chat that carries its own agent', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-detach-inline');
+    try {
+      const tampered = await repack(
+        await withConnectors(archive, [connectorRecord('plain-one', { url: 'https://plain.example.com/mcp' })]),
+        entries => {
+          const sessions = listAt(JSON.parse(String(entries.get('sessions.json'))), 'sessions.json');
+          for (const item of sessions) {
+            const agent = recordAt(recordAt(recordAt(item, 'entry').session, 'session').agent, 'agent');
+            if (agent.type === 'inline') {
+              const spec = recordAt(agent.spec, 'spec');
+              spec.mcp_servers = [{ name: 'plain-one' }, { name: 'kept-elsewhere' }];
+            }
+          }
+          entries.set('sessions.json', Buffer.from(JSON.stringify(sessions), 'utf8'));
+        },
+      );
+      await runDataImport(importDeps(target), importRequest(tampered));
+      const session = await target.stores.sessionStore.getSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+      });
+      expect(session?.agent.type).toBe('inline');
+      const names = session?.agent.type === 'inline' ? (session.agent.spec.mcp_servers ?? []).map(s => s.name) : [];
+      expect(names).toEqual(['kept-elsewhere']);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('skips security settings and says so', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-security');

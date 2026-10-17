@@ -884,6 +884,7 @@ async function importArchive<TTransaction>(
     tenantId,
     subject: importerSubject,
     resolveAgent: agentPlan.resolve,
+    connectorNames,
   };
   for (const schedule of schedules) {
     if (agentPlan.resolve({ id: schedule.agent_id, name: schedule.agent_name }) === undefined) {

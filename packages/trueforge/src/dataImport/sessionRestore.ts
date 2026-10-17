@@ -30,6 +30,7 @@ import { mechanicalAbnormalHandoff, newEventId, type ToolCallMemoSnapshot } from
 import { ActionRequiredEventSchema } from '@truefoundry/trueforge-core/core/events/schema';
 
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import { detachConnectors } from './connectorImport';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
 
 /** Shown in the chat for a request that was waiting on the owner when the archive was made. */
@@ -78,13 +79,18 @@ export interface SessionRestoreContext {
   subject: CreatedBySubject;
   /** Resolves an exported agent reference to the agent in the target instance, or undefined when there is none. */
   resolveAgent: (reference: { id: string; name: string | null }) => { id: string; name: string } | undefined;
+  /** Imported connectors start unused, so a chat's own agent loses any attachment to them. */
+  connectorNames: ReadonlySet<string>;
   /** Called right after a session is created, so the caller can undo exactly what it created. */
   onSessionCreated?: (sessionId: string) => void;
 }
 
-function resolveAgentBinding(agent: SessionAgent, resolveAgent: SessionRestoreContext['resolveAgent']): SessionAgent {
+function resolveAgentBinding(
+  agent: SessionAgent,
+  { resolveAgent, connectorNames }: Pick<SessionRestoreContext, 'resolveAgent' | 'connectorNames'>,
+): SessionAgent {
   if (agent.type === 'inline') {
-    return agent;
+    return { ...agent, spec: detachConnectors({ spec: agent.spec, names: connectorNames }) };
   }
   const resolved = resolveAgent({ id: agent.id, name: agent.name });
   return resolved === undefined ? agent : { type: 'reference', id: resolved.id, name: resolved.name };
@@ -324,7 +330,7 @@ export async function restoreSessions(
       tenant_id: context.tenantId,
       session_id: session.session_id,
       created_by_subject: context.subject,
-      agent: resolveAgentBinding(session.agent, context.resolveAgent),
+      agent: resolveAgentBinding(session.agent, context),
       external_id: session.external_id,
       metadata: session.metadata,
       source: session.source,
