@@ -148,7 +148,8 @@ function makeHarness(
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
-        searchProvider: options.searchProviderAsks === true ? { tools: ['web_search'] } : undefined,
+        searchProvider:
+          options.searchProviderAsks === true ? { tools: ['web_search'], plumbing_fields: [] } : undefined,
       });
       const threadInput: AgentThreadConstructorInput = {
         definition: {

@@ -11,6 +11,7 @@ import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution, drainTurnEvents } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -149,6 +150,7 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     previous_turn_id: undefined,
     userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
     deps: {
+      mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: options.cap, now: () => NOW }),
       sessionStore,

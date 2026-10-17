@@ -5,6 +5,8 @@ import {
   describeOutboundRule,
   OUTBOUND_GUARD_RULES,
   OUTBOUND_MAX_CHARS,
+  OUTBOUND_MAX_PLUMBING_CHARS,
+  OUTBOUND_MAX_TOTAL_CHARS,
   type OutboundGuardRule,
 } from '../../../src/core/permissions/outboundGuard';
 
@@ -130,11 +132,19 @@ describe('outbound guard: rules that trip', () => {
     expect(ruleFor({ query: 'balance', card: 4242424242424242 })).toBe('card_number');
   });
 
-  test('more than 200 characters in total, summed over every string', () => {
+  test('a string of more than 200 characters', () => {
     const words = 'the quick brown fox jumps over the lazy dog ';
     expect(ruleFor({ query: words.repeat(5).slice(0, OUTBOUND_MAX_CHARS) })).toBeUndefined();
     expect(ruleFor({ query: words.repeat(5).slice(0, OUTBOUND_MAX_CHARS + 1) })).toBe('too_long');
-    expect(ruleFor({ a: words.repeat(2), b: words.repeat(2), c: words })).toBe('too_long');
+    expect(ruleFor({ queries: [words.repeat(5).slice(0, OUTBOUND_MAX_CHARS + 1)] })).toBe('too_long');
+  });
+
+  test('strings are measured one by one, with a larger cap on all of them together', () => {
+    const words = 'the quick brown fox jumps over the lazy dog ';
+    const field = words.repeat(5).slice(0, OUTBOUND_MAX_CHARS);
+    expect(ruleFor({ a: field, b: field, c: field })).toBeUndefined();
+    const fieldCount = Math.floor(OUTBOUND_MAX_TOTAL_CHARS / OUTBOUND_MAX_CHARS) + 1;
+    expect(ruleFor({ queries: Array.from({ length: fieldCount }, () => field) })).toBe('too_long');
   });
 
   test('arguments too deep to inspect trip rather than pass unread', () => {
@@ -335,5 +345,117 @@ describe('outbound guard: ordinary queries pass', () => {
   test('empty and non-text arguments pass', () => {
     expect(ruleFor({})).toBeUndefined();
     expect(ruleFor({ limit: 5, deep: null })).toBeUndefined();
+  });
+});
+
+describe('outbound guard: provider plumbing fields', () => {
+  // Invented values only.
+  const inventedHexId = 'c0ffee00d15ea5e0bad0cafe12345678';
+  const inventedUuid = '3f2b8c1e-7a44-4d0e-9b61-5e2f0c9a1d77';
+  const inventedBase64Url = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXpfYWJjLTEyMzQ';
+  const inventedBase64Padded = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXo9PQ+/ab==';
+  const plumbing = ['session_id', 'model_name'];
+
+  function ruleWithPlumbing({
+    args,
+    secrets = [],
+  }: {
+    args: unknown;
+    secrets?: readonly string[];
+  }): OutboundGuardRule | undefined {
+    const strings = collectOutboundStrings(args, plumbing);
+    if (strings === undefined) {
+      return 'uninspectable';
+    }
+    const verdict = checkOutboundStrings({ strings, secrets });
+    return verdict.ok ? undefined : verdict.rule;
+  }
+
+  test('a declared field is kept out of the query text and out of the length rule', () => {
+    const strings = collectOutboundStrings(
+      { objective: 'find the inventor of the zipper', session_id: inventedUuid, model_name: 'invented-model-7' },
+      plumbing,
+    );
+    expect(strings?.values).toEqual(['find the inventor of the zipper']);
+    expect(strings?.plumbing).toEqual([inventedUuid, 'invented-model-7']);
+    expect(strings?.keys).toEqual(['objective', 'session_id', 'model_name']);
+  });
+
+  test('only a top-level plain value counts as plumbing, so a nested one stays user text', () => {
+    const strings = collectOutboundStrings(
+      { filters: { session_id: 'nested text' }, session_id: ['listed text'] },
+      plumbing,
+    );
+    expect(strings?.plumbing).toEqual([]);
+    expect(strings?.values).toEqual(['nested text', 'listed text']);
+  });
+
+  test('a UUID session id and a model name pass', () => {
+    expect(
+      ruleWithPlumbing({
+        args: { objective: 'zipper history', session_id: inventedUuid, model_name: 'invented-model-7' },
+      }),
+    ).toBeUndefined();
+  });
+
+  test('a long random session id passes as plumbing, whatever its alphabet', () => {
+    for (const sessionId of [inventedHexId, inventedBase64Url, inventedBase64Padded]) {
+      expect(
+        ruleWithPlumbing({
+          args: {
+            objective: 'zipper history',
+            search_queries: ['zipper inventor'],
+            session_id: sessionId,
+            model_name: 'invented-model-7',
+          },
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  test('the same runs in user text, or in a field the catalog does not declare, are held', () => {
+    for (const run of [inventedHexId, inventedBase64Url, inventedBase64Padded]) {
+      expect(ruleWithPlumbing({ args: { objective: `look up ${run}` } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { filters: { session_id: run } } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { note_id: run } })).toBe('encoded_run');
+    }
+  });
+
+  test('every other rule still reads a plumbing value', () => {
+    expect(ruleWithPlumbing({ args: { session_id: awsKeyId } })).toBe('key_prefix');
+    expect(ruleWithPlumbing({ args: { model_name: serverSecret }, secrets: [serverSecret] })).toBe('server_secret');
+    expect(ruleWithPlumbing({ args: { session_id: 'password: hunter2xx' } })).toBe('password_label');
+    expect(ruleWithPlumbing({ args: { session_id: jwt } })).toBe('jwt');
+  });
+
+  test('a plumbing value is capped, so the field cannot carry a bulk send', () => {
+    expect(ruleWithPlumbing({ args: { model_name: 'm'.repeat(OUTBOUND_MAX_PLUMBING_CHARS) } })).toBeUndefined();
+    expect(ruleWithPlumbing({ args: { model_name: 'm'.repeat(OUTBOUND_MAX_PLUMBING_CHARS + 1) } })).toBe('too_long');
+  });
+
+  test('an encoded secret in a plumbing field is held, not exempt', () => {
+    const base64Token = Buffer.from(githubToken).toString('base64');
+    const hexToken = Buffer.from(githubToken).toString('hex');
+    const base64UrlText = Buffer.from('my private notes about the lease dispute with the landlord').toString(
+      'base64url',
+    );
+    for (const value of [base64Token, hexToken, base64UrlText]) {
+      expect(value.length).toBeGreaterThan(OUTBOUND_MAX_PLUMBING_CHARS);
+      expect(ruleWithPlumbing({ args: { session_id: value } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { model_name: value } })).toBe('encoded_run');
+    }
+  });
+
+  test('a plumbing value outside the identifier shape is read as user text', () => {
+    expect(ruleWithPlumbing({ args: { session_id: `${inventedHexId} ${inventedBase64Url}` } })).toBe('encoded_run');
+  });
+
+  test('a secret split between a plumbing value and the next call is still seen whole', () => {
+    const first = collectOutboundStrings({ session_id: githubToken.slice(0, 12) }, plumbing);
+    if (first === undefined) {
+      throw new Error('test arguments must be inspectable');
+    }
+    const earlier = appendOutboundTrace({ earlier: '', strings: first });
+    expect(ruleFor({ query: githubToken.slice(12) }, [], earlier)).toBe('key_prefix');
   });
 });

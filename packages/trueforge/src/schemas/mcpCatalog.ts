@@ -17,6 +17,9 @@ import {
  */
 export const CatalogMcpServerTypeSchema = McpServerTypeSchema.exclude(['truefoundry']).openapi('CatalogMCPServerType');
 
+/** Argument names of a search provider's tools that carry its own bookkeeping, not the user's text. */
+const McpSearchPlumbingFieldsSchema = z.array(z.string().min(1).max(128)).max(16);
+
 /** Catalog entry — discovery preset the settings UI copies into a PUT body. */
 export const CatalogMcpServerSchema = z
   .object({
@@ -37,9 +40,17 @@ export const CatalogMcpServerSchema = z
   .strict()
   .openapi('CatalogMCPServer');
 
+/** A shipped catalog entry: the public preset plus what only the server reads. */
+const CatalogPresetSchema = z
+  .object({
+    ...CatalogMcpServerSchema.shape,
+    search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional(),
+  })
+  .strict();
+
 export const McpCatalogFileSchema = z
   .object({
-    mcp_servers: z.array(CatalogMcpServerSchema),
+    mcp_servers: z.array(CatalogPresetSchema),
   })
   .strict()
   .superRefine((file, ctx) => {
@@ -53,4 +64,5 @@ export const GetMcpServerCatalogResponseSchema = z
   .openapi('GetMCPServerCatalogResponse');
 
 export type CatalogMcpServer = z.infer<typeof CatalogMcpServerSchema>;
+export type CatalogPreset = z.infer<typeof CatalogPresetSchema>;
 export type McpCatalogFile = z.infer<typeof McpCatalogFileSchema>;
