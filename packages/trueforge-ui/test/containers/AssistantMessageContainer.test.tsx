@@ -405,7 +405,7 @@ describe('AssistantMessageContainer', () => {
       expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('keeps short narration folded and hidden', () => {
+    it('keeps short text before a tool call visible', () => {
       renderAssistantMessage([
         {
           role: 'assistant',
@@ -417,9 +417,70 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      const narration = screen.getByText('Let me search for that.');
-      expect(narration.closest('[hidden]')).not.toBeNull();
+      expect(screen.getByText('Let me search for that.').closest('[hidden]')).toBeNull();
       expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
+      expect(getAgentInternals().querySelector('[hidden]')).not.toBeNull();
+    });
+
+    it('shows the sentence before a run_code call and the result after it', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            { ...toolCall, toolCallId: 'tool-run', toolName: 'run_code' },
+            { type: 'text', text: 'The result is **20**.' },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
+      expect(screen.getByText('20').closest('[hidden]')).toBeNull();
+    });
+
+    it('shows the sentence before an undecided approval while the turn waits', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          status: { type: 'requires-action', reason: 'tool-calls' },
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-run',
+              toolName: 'run_code',
+              args: { language: 'python', code: 'print(4 * 5)' },
+              argsText: '{"language":"python","code":"print(4 * 5)"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-run',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
+      expect(getAgentInternals()).toHaveTextContent(/Waiting for approval/);
+    });
+
+    it('shows the answer after a tool call while the message is still running', async () => {
+      renderAssistantMessage(
+        [
+          {
+            role: 'assistant',
+            status: { type: 'running' },
+            content: [toolCall, { type: 'text', text: 'The result is 2' }],
+          },
+        ],
+        { isRunning: true },
+      );
+
+      expect((await screen.findByText('The result is 2')).closest('[hidden]')).toBeNull();
     });
 
     it('renders one disclosure per folded run with its own counts', () => {
