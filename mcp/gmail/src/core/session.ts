@@ -20,6 +20,7 @@ let _gmail: gmail_v1.Gmail | null = null;
 // Least privilege until an explicit scope list is loaded: a missing list must
 // never grant write access by default.
 let _authorizedScopes: string[] = READONLY_FALLBACK_SCOPES;
+let _scopeNotice: string | null = null;
 let _currentAccountId: string | null = null;
 let _sessionEventSuppressions = 0;
 
@@ -67,12 +68,15 @@ export function setSession(opts: {
    * named account doesn't apply.
    */
   accountId?: string | null;
+  /** Plain-words warning for a connection holding a send-capable scope; null clears it. */
+  scopeNotice?: string | null;
 }): void {
   const previousAccountId = _currentAccountId;
   _oauth2Client = opts.oauth2Client;
   _gmail = opts.gmail;
   if (opts.authorizedScopes) _authorizedScopes = opts.authorizedScopes;
   if (opts.accountId !== undefined) _currentAccountId = opts.accountId;
+  if (opts.scopeNotice !== undefined) _scopeNotice = opts.scopeNotice;
 
   // Emit only when the account id ACTUALLY changed. Same-id calls (bootstrap
   // → bootstrap re-run, or `switch_account` to the active account) are silent
@@ -122,6 +126,10 @@ export function getGmail(): gmail_v1.Gmail {
   return _gmail;
 }
 
+export function getScopeNotice(): string | null {
+  return _scopeNotice;
+}
+
 export function getAuthorizedScopes(): string[] {
   return _authorizedScopes;
 }
@@ -167,6 +175,7 @@ export function _resetForTests(): void {
   _oauth2Client = null;
   _gmail = null;
   _authorizedScopes = READONLY_FALLBACK_SCOPES;
+  _scopeNotice = null;
   _currentAccountId = null;
   _toolCallCount = 0;
   _recentErrorTs.length = 0;

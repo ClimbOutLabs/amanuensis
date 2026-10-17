@@ -14,9 +14,13 @@ Gmail support through the gmail-mcp adapter running in a local container (pinned
 
 **User-owned credentials.** Each user creates an OAuth client in the Google Cloud console. Honest consequence: this is a multi-step task in a console Amanuensis does not control, and the consent screen shows an "unverified app" warning because the user owns the client. The product makes it guided (see Auth Flow). Same decision as in `privacy-safe-mcp.md`: secrets stay on the device and are never shown in the UI.
 
-**One client, one refresh token, logical grants.** Calendar is expected to reuse this client and token; its spec will be updated to match. Read and send are logical grant records over one token: read maps to `gmail.modify`, send maps to `gmail.compose`. The user connects read-only first and adds send later with a second consent. Swap order is load-bearing: persist the new union-scoped token first, then revoke the old one.
+**One client, one refresh token, logical grants.** Calendar is expected to reuse this client and token; its spec will be updated to match. Read and send are logical grant records over one token: read maps to `gmail.readonly`, send maps to `gmail.compose`. The user connects read-only first and adds send later with a second consent. Swap order is load-bearing: persist the new union-scoped token first, then revoke the old one.
 
-**Read grant is `gmail.modify`.** Mark-read and archive need it; it does not allow permanent deletion, and `gmail.full` is never requested.
+**Read grant is `gmail.readonly`.** Google accepts `gmail.modify` for `messages.send` and `drafts.send`, so a `gmail.modify` token can send. It is therefore never part of the read connection, and the read/send split would protect nothing if it were. Mark-read, archive and label tools need `gmail.modify`; v1 ships without them and they come back only behind their own consent that says in plain words "this also lets Amanuensis send mail". `gmail.full` is never requested.
+
+**Where tokens are stored.** The refresh token lives only on the device, in the adapter's config volume as `accounts/<id>/credentials.json` (mode 0600), with the granted scope list beside it. It is never shown in the UI, logged, or sent to the model. The OAuth client secret is stored the same way.
+
+**Connections made before this change.** A stored connection that holds `gmail.modify` or `gmail.full` is not narrowed silently. On the next start the adapter logs, and `health_check` repeats, that the connection can send email as the owner and how to reconnect read-only. Settings shows the same warning with a Reconnect read-only action.
 
 **Send grant is `gmail.compose`.** The v1 send path is draft then `send_draft`. With `gmail.compose` the raw `send_email` tool is authorized at Google, so the connector blocks it at invocation.
 
@@ -136,7 +140,7 @@ Setup is UI-only: nobody edits a config file or calls an API. It runs in Setting
 3. The panel shows the "unverified app" consent wording beforehand and says which button continues.
 4. Connect starts authorization code flow with PKCE (`S256`) and a 128-bit `state`. Both are stored server-side, single use, 10-minute expiry, bound to the session, never logged. A mismatch or expiry rejects the callback.
 5. Same machine: Google redirects to a loopback-only callback listener. Remote browser: manual code paste into the form, with the shoulder-surfing and clipboard risk stated.
-6. The first consent requests `gmail.modify` only. Enabling send runs a second consent for `gmail.compose`. Granted grants derive from the scopes Google actually returned. Settings shows which grants are active.
+6. The first consent requests `gmail.readonly` only. Enabling send runs a second consent for `gmail.compose`. Granted grants derive from the scopes Google actually returned. Settings shows which grants are active.
 7. If Calendar is already connected, the existing client is reused and the Gmail scopes are added.
 
 **Verify.** After connecting, Settings runs a test connection and shows the account name and grants. **Disconnect/revoke:** see Security.

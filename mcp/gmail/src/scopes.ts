@@ -2,7 +2,8 @@
 //
 // Scope hierarchy (for reference):
 //   - gmail.readonly: Read-only access to emails
-//   - gmail.modify: Read AND write access (superset of readonly)
+//   - gmail.modify: Read, change labels, archive AND send (Google lists it as
+//     sufficient for messages.send and drafts.send); no permanent deletion
 //   - gmail.compose: Create drafts and send emails
 //   - gmail.send: Send emails only
 //   - gmail.labels: Manage labels only
@@ -29,8 +30,48 @@ export const SCOPE_REVERSE_MAP: Record<string, string> = Object.fromEntries(
   Object.entries(SCOPE_MAP).map(([short, full]) => [full, short]),
 );
 
-// Default scopes (original behavior)
-export const DEFAULT_SCOPES = ["gmail.modify", "gmail.settings.basic"];
+// Default scopes: read only. Anything that changes mail (gmail.modify), sends
+// (gmail.compose / gmail.send) or edits settings is a separate, explicit grant.
+export const DEFAULT_SCOPES = ["gmail.readonly"];
+
+// Plain-words labels shown to users when they pick scopes. Kept next to the
+// scope map so what we show cannot drift from what Google allows.
+export const SCOPE_LABELS: Record<string, string> = {
+  "gmail.readonly": "Read mail only. Cannot change, archive or send.",
+  "gmail.modify":
+    "Read, mark read, archive and label. Google also lets this permission SEND mail. Cannot permanently delete.",
+  "gmail.compose": "Create drafts and SEND mail. Includes what gmail.send allows.",
+  "gmail.send": "Send mail only. Cannot read.",
+  "gmail.labels": "Create and edit labels only.",
+  "gmail.full":
+    "Everything, including sending and permanent deletion. Does not include settings.",
+  "gmail.settings.basic":
+    "Manage filters and basic settings. Filters can move, hide or forward mail.",
+  "gmail.settings.sharing": "Manage delegation and sharing settings (rare).",
+};
+
+// Scopes that let Google accept a send even though the user only asked to read.
+const WIDER_THAN_READ_SCOPES = ["gmail.modify", "gmail.full"];
+
+/**
+ * Plain-words notice for a stored connection that holds a send-capable
+ * read/write scope, or null when there is nothing to tell the owner.
+ */
+export function wideScopeNotice({
+  scopes,
+  accountId,
+}: {
+  scopes: string[];
+  accountId: string | null;
+}): string | null {
+  const held = scopes.map(scopeUrlToName).filter((s) => WIDER_THAN_READ_SCOPES.includes(s));
+  if (held.length === 0) return null;
+  const account = accountId ?? "default";
+  return (
+    `This Gmail connection (${held.join(", ")}) can send email as you, not only read it. ` +
+    `To switch to read-only, reconnect with: gmail account auth ${account} --scopes=gmail.readonly`
+  );
+}
 
 // Least-privilege fallback used when a credential store carries NO scope
 // list at all (scopes absent, not scopes === []). A missing list means we

@@ -162,21 +162,31 @@ Environment-driven credentials (`GMAIL_CREDENTIALS_JSON` or `GMAIL_CREDENTIALS_O
 
 | Scope | Capability |
 |---|---|
-| `gmail.readonly` | Read/search/download mail |
-| `gmail.modify` | Read and modify labels; does not permanently delete |
+| `gmail.readonly` | Read, search and download mail. Cannot change or send. |
+| `gmail.modify` | Mark read, archive and label. Google also accepts sending mail with this scope. Cannot permanently delete. |
 | `gmail.compose` | Create drafts and send |
 | `gmail.send` | Send only |
 | `gmail.labels` | Manage labels |
-| `gmail.full` | Full mailbox access, including permanent deletion |
-| `gmail.settings.basic` | Manage filters/basic settings |
-| `gmail.settings.sharing` | Manage delegation/sharing settings |
+| `gmail.full` | Full mailbox access, including sending and permanent deletion |
+| `gmail.settings.basic` | Manage filters and basic settings. Filters can move, hide or forward mail. |
+| `gmail.settings.sharing` | Manage delegation and sharing settings |
 
-`gmail.full` satisfies all mail scopes, but not either settings scope. Permanent `delete_email` and `batch_delete_emails` require `gmail.full`. The default remains `gmail.modify,gmail.settings.basic`, which deliberately excludes permanent deletion.
+The default connection is `gmail.readonly` only. Each wider capability is its own explicit request:
+
+- **Change mail** (`modify_email`, `modify_thread`, `batch_modify_emails`, labels, phishing reports) needs `gmail.modify`. It is not requested by default because Google accepts it for `messages.send` and `drafts.send`, so a token holding it can send. The tools stay in the catalog and appear once you grant it.
+- **Drafts and sending** (`draft_email`, `send_draft`, `send_email`, `reply_all`) need `gmail.compose` or `gmail.send`. A `gmail.modify` grant alone does not show them.
+- **Filters** need `gmail.settings.basic`.
+
+`gmail.full` satisfies all mail scopes, but not either settings scope. Permanent `delete_email` and `batch_delete_emails` require `gmail.full`.
 
 ```bash
-gmail account auth reader --scopes=gmail.readonly
+gmail account auth reader                                   # read-only (default)
+gmail account auth mailer --scopes=gmail.readonly,gmail.modify
+gmail account auth sender --scopes=gmail.readonly,gmail.compose
 gmail account auth full --scopes=gmail.full,gmail.settings.basic
 ```
+
+A connection created earlier with `gmail.modify` or `gmail.full` keeps working, but on every start the server logs a notice that it can send mail and how to reconnect read-only (`gmail account auth <id> --scopes=gmail.readonly`). `health_check` repeats the notice. Nothing narrows the stored token silently.
 
 Tools outside the active account's granted scopes are hidden from `tools/list` and rejected at call time.
 
