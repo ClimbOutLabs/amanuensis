@@ -11,11 +11,18 @@ import type { SentinelNotSentReason, SentinelSendReceipt } from './types.js';
 export const NOT_SENT_TEXT: Record<SentinelNotSentReason, string> = {
   draft_changed: 'Not sent: the draft changed after you approved it. Review it again.',
   needs_ok_again: 'Not sent: this needs your OK again. Review it again.',
-  cannot_send: 'Not sent: the draft could not be checked, so nothing was sent.',
+  cannot_send: 'Not sent: Aman could not read the draft from Gmail, so nothing was sent. Ask Aman to send it again.',
   gmail_refused: 'Not sent: Gmail did not accept it.',
+  reconnect_google:
+    'Not sent: Aman needs you to sign in to Google again. Open Settings, Connectors, Google and choose Reconnect.',
+  rate_limited: 'Not sent: Gmail is limiting requests right now. Wait a minute, then ask Aman to send it again.',
   unconfirmed:
     'Gmail did not confirm the send, so it may have gone through. Check your Sent folder before trying again.',
 };
+
+/** Shown instead of "exactly as approved" when the sent text cannot be tied to the card the owner approved. */
+export const SENT_MISMATCH_TEXT =
+  "The text that was sent didn't match what you approved. Check your Sent folder to see what went out.";
 
 /** Reasons where asking for the card again can fix things. */
 const REVIEW_AGAIN_REASONS: readonly SentinelNotSentReason[] = ['draft_changed', 'needs_ok_again'];
@@ -29,6 +36,8 @@ export function formatSentTime(isoTime: string): string {
 
 export type SendReceiptCardProps = {
   receipt: SentinelSendReceipt;
+  /** The check code of the card the owner approved for this same tool call; null when there is none on record. */
+  approvedCheckCode: string | null;
   /** Asks for the send again so a fresh approval card is shown; only passed where that can help. */
   onReviewAgain?: (() => void) | undefined;
 };
@@ -37,7 +46,7 @@ export type SendReceiptCardProps = {
  * The approval card of a send, after the send ended. A sent receipt repeats the message the server verified and
  * the check code the card showed; a send that did not go out says so and never shows a receipt.
  */
-export const SendReceiptCard: FC<SendReceiptCardProps> = ({ receipt, onReviewAgain }) => {
+export const SendReceiptCard: FC<SendReceiptCardProps> = ({ receipt, approvedCheckCode, onReviewAgain }) => {
   if (receipt.outcome === 'not_sent') {
     return (
       <div data-role="send-not-sent" className="rounded-lg border border-border bg-card-bg px-4 py-3">
@@ -53,6 +62,7 @@ export const SendReceiptCard: FC<SendReceiptCardProps> = ({ receipt, onReviewAga
       </div>
     );
   }
+  const matchesApproval = approvedCheckCode !== null && approvedCheckCode === receipt.checkCode;
   return (
     <div data-role="send-receipt" className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center gap-2 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
@@ -61,8 +71,11 @@ export const SendReceiptCard: FC<SendReceiptCardProps> = ({ receipt, onReviewAga
       </div>
       <div className="space-y-3 px-4 py-3">
         <p className="text-sm text-text-primary" title={new Date(receipt.sentAt).toLocaleString()}>
-          Sent at {formatSentTime(receipt.sentAt)}, exactly as approved
+          {matchesApproval
+            ? `Sent at ${formatSentTime(receipt.sentAt)}, exactly as approved`
+            : `Sent at ${formatSentTime(receipt.sentAt)}`}
         </p>
+        {!matchesApproval && <p className="text-sm text-text-primary">{SENT_MISMATCH_TEXT}</p>}
         <EmailMessage email={receipt.message} heading="What was sent" checkCode={receipt.checkCode} />
       </div>
     </div>

@@ -328,7 +328,8 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
-  const sendReceipt = useOptionalSentinelState()?.receiptFor(part.toolCallId);
+  const sentinelState = useOptionalSentinelState();
+  const sendReceipt = sentinelState?.receiptFor(part.toolCallId);
   const aui = useAui();
 
   // Once the server says how a send ended, its card becomes the receipt (or the plain reason it did not go).
@@ -337,6 +338,11 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       <div data-slot="tool-call-card" data-variant="send-receipt" className="w-full">
         <SendReceiptCard
           receipt={sendReceipt}
+          approvedCheckCode={
+            sentinelState?.answerFor(part.toolCallId) === 'approved'
+              ? (sentinelState.approvalFor(part.toolCallId)?.card.email?.check_code ?? null)
+              : null
+          }
           onReviewAgain={
             isNewestMessage
               ? () => {

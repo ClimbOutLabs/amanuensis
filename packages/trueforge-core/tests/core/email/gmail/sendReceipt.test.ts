@@ -25,6 +25,20 @@ function receiptEvents(response: CallToolResponse) {
   return isCallToolResponseResult(response) ? (response.events ?? []) : [];
 }
 
+function plainExpected(): ReviewableDraft {
+  return {
+    to: ['grace@example.com', 'lin@example.com'],
+    cc: [],
+    bcc: [],
+    subject: 'Lease',
+    body: 'Thursday works.\nSee you then.',
+    threadId: 't9',
+    inReplyTo: '',
+    references: '',
+    fromName: 'Ada',
+  };
+}
+
 const BASE: ReviewableDraft = {
   to: ['a@example.com'],
   cc: [],
@@ -71,6 +85,27 @@ describe('the check code on the card', () => {
     expect(info.tier3_card?.email?.check_code).toMatch(/^[0-9A-F]{6}$/);
   });
 
+  it('is the code of the hash of exactly the message the gate verifies, thread and sender name included', async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+    const info = await tools.toolCallInfo(CALL);
+    const expected: ReviewableDraft = {
+      to: ['grace@example.com', 'lin@example.com'],
+      cc: [],
+      bcc: [],
+      subject: 'Lease',
+      body: 'Thursday works.\nSee you then.',
+      threadId: 't9',
+      inReplyTo: '',
+      references: '',
+      fromName: 'Ada',
+    };
+    expect(info.tier3_card?.email?.check_code).toBe(checkCodeOf(hashDraft(expected)));
+    expect(info.tier3_card?.email?.check_code).not.toBe(checkCodeOf(hashDraft({ ...expected, threadId: '' })));
+    expect(info.tier3_card?.email?.check_code).not.toBe(
+      checkCodeOf(hashDraft({ ...expected, body: `${expected.body} ` })),
+    );
+  });
+
   it('is not on a draft card, which sends nothing', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [] });
     const info = await tools.toolCallInfo({
@@ -99,6 +134,7 @@ describe('the receipt of an approved send', () => {
     }
     expect(event.result.sent_message_id).toBe('sent-1');
     expect(event.result.check_code).toBe(card?.check_code);
+    expect(event.result.check_code).toBe(checkCodeOf(hashDraft(plainExpected())));
     expect(Date.parse(event.result.sent_at)).toBeGreaterThanOrEqual(before);
     expect(event.result.message).toEqual({
       to: card?.to,
@@ -152,8 +188,72 @@ describe('a send that did not go out', () => {
     live = plainDraft({ id: 'd-m1', threadId: 't9', subject: 'Lease', body: 'Send me the keys.' });
     const response = await tools.callTool(CALL, undefined, context);
     expect(await notSentReason(response)).toBe('draft_changed');
-    expect(JSON.stringify(receiptEvents(response))).not.toMatch(/sent_message_id|sent_at|keys/);
+    expect(JSON.stringify(receiptEvents(response))).not.toMatch(/sent_message_id|sent_at|check_code|keys/);
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('says the draft changed when an attachment was added after the card, not that it could not be checked', async () => {
+    let live: GmailMessage = DRAFT;
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json({ id: 'd1', message: live }) : undefined),
+        sendRoute,
+      ],
+    });
+    await tools.toolCallInfo(CALL);
+    live = {
+      ...DRAFT,
+      payload: {
+        ...DRAFT.payload,
+        parts: [
+          ...(DRAFT.payload?.parts ?? []),
+          { filename: 'lease.pdf', mimeType: 'application/pdf', body: { attachmentId: 'a1', size: 10 } },
+        ],
+      },
+    };
+    expect(await notSentReason(await tools.callTool(CALL, undefined, context))).toBe('draft_changed');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('says it could not read the draft when Gmail fails on the re-read, and sends nothing', async () => {
+    let failing = false;
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url =>
+          url.pathname === '/gmail/v1/users/me/drafts/d1'
+            ? failing
+              ? json({ error: { message: 'gone' } }, 404)
+              : json({ id: 'd1', message: DRAFT })
+            : undefined,
+        sendRoute,
+      ],
+    });
+    await tools.toolCallInfo(CALL);
+    failing = true;
+    expect(await notSentReason(await tools.callTool(CALL, undefined, context))).toBe('cannot_send');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it.each([
+    [401, 'reconnect_google'],
+    [403, 'reconnect_google'],
+    [429, 'rate_limited'],
+  ] as const)('says %s from Gmail on the send as %s', async (status, reason) => {
+    const refused: Route = url =>
+      url.pathname === '/gmail/v1/users/me/drafts/send' ? json({ error: { message: 'no' } }, status) : undefined;
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(), refused] });
+    await tools.toolCallInfo(CALL);
+    expect(await notSentReason(await tools.callTool(CALL, undefined, context))).toBe(reason);
+  });
+
+  it('says a Gmail server error on the send may have gone through', async () => {
+    const failed: Route = url =>
+      url.pathname === '/gmail/v1/users/me/drafts/send' ? json({ error: { message: 'boom' } }, 502) : undefined;
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(), failed] });
+    await tools.toolCallInfo(CALL);
+    expect(await notSentReason(await tools.callTool(CALL, undefined, context))).toBe('unconfirmed');
   });
 
   it('says it needs the OK again when no review stands', async () => {

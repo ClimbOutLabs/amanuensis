@@ -8,6 +8,7 @@ import type { SandboxToolCallCardProps } from '@/atoms/SandboxToolCallCard.js';
 import type { SubAgentCardProps } from '@/atoms/SubAgentCard.js';
 import type { ToolCallCardProps } from '@/atoms/ToolCallCard.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { SENT_MISMATCH_TEXT } from '@/sentinel/SendReceiptCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { publishSendReceipt } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
@@ -954,31 +955,93 @@ describe('ToolCallContainer', () => {
       };
     }
 
-    function renderSend() {
+    function sendApproval(input: { toolCallId: string; checkCode: string }): SentinelApprovalInfo {
+      return {
+        toolCallId: input.toolCallId,
+        tier: 3,
+        card: {
+          plain_what: 'Send an email.',
+          plain_why: null,
+          cannot_be_undone: null,
+          why_asked_again: null,
+          destination: null,
+          recipient: null,
+          amount: null,
+          parsed_command: null,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
+          email: {
+            action: 'send',
+            to: ['grace@example.com'],
+            cc: [],
+            bcc: [],
+            subject: 'Lease',
+            body: 'Thursday works.',
+            check_code: input.checkCode,
+            replaces: null,
+          },
+        },
+        eventId: null,
+        threadId: null,
+      };
+    }
+
+    /** What the server remembers about the owner's earlier cards and answers, read back when the chat opens. */
+    function renderSend(history: {
+      approvals: SentinelApprovalInfo[];
+      answers: Record<string, 'approved' | 'denied'>;
+    }) {
+      const api: SentinelApi = {
+        listAuditEntries: vi.fn(async () => []),
+        getUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        updateUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        listSentinelSessionContext: vi.fn(async () => history),
+      };
       return render(
         <RuntimeHarness
+          threadId="local-1"
+          remoteId="session-1"
           messages={[{ role: 'assistant', content: [sendCall('call-1'), { type: 'text', text: 'Done.' }] }]}
         >
-          <SentinelStateProvider>
-            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-          </SentinelStateProvider>
+          <SentinelApiProvider api={api}>
+            <SentinelStateProvider>
+              <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+            </SentinelStateProvider>
+          </SentinelApiProvider>
         </RuntimeHarness>,
       );
     }
 
+    const APPROVED_A7F39C = {
+      approvals: [sendApproval({ toolCallId: 'call-1', checkCode: 'A7F39C' })],
+      answers: { 'call-1': 'approved' as const },
+    };
+
+    function sentReceipt(checkCode: string) {
+      return {
+        outcome: 'sent' as const,
+        toolCallId: 'call-1',
+        sentAt: new Date(2026, 9, 17, 9, 12).toISOString(),
+        sentMessageId: 'm-1',
+        checkCode,
+        message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+      };
+    }
+
     it('turns the card into the receipt once the server records the send', async () => {
-      renderSend();
+      renderSend(APPROVED_A7F39C);
       expect(screen.queryByText(/exactly as approved/)).not.toBeInTheDocument();
-      act(() =>
-        publishSendReceipt({
-          outcome: 'sent',
-          toolCallId: 'call-1',
-          sentAt: new Date(2026, 9, 17, 9, 12).toISOString(),
-          sentMessageId: 'm-1',
-          checkCode: 'A7F39C',
-          message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
-        }),
-      );
+      await screen.findByText('Done.');
+      act(() => publishSendReceipt(sentReceipt('A7F39C')));
       const proof = await screen.findByText('Sent at 09:12, exactly as approved');
       // The receipt is the proof the person came for, so it never folds into the collapsed agent details.
       expect(proof.closest('[hidden]')).toBeNull();
@@ -986,8 +1049,31 @@ describe('ToolCallContainer', () => {
       expect(screen.getByText('Check code', { exact: false })).toHaveTextContent('Check code A7F39C');
     });
 
+    it('does not say "exactly as approved" when the code is not the one on the card that was approved', async () => {
+      renderSend({
+        approvals: [
+          sendApproval({ toolCallId: 'call-1', checkCode: 'A7F39C' }),
+          sendApproval({ toolCallId: 'call-0', checkCode: 'E52E99' }),
+        ],
+        answers: { 'call-1': 'approved', 'call-0': 'denied' },
+      });
+      await screen.findByText('Done.');
+      // The code on this receipt only ever appeared on the card the owner denied.
+      act(() => publishSendReceipt(sentReceipt('E52E99')));
+      expect(await screen.findByText(SENT_MISMATCH_TEXT)).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/exactly as approved/);
+    });
+
+    it('does not say "exactly as approved" when this call was never approved', async () => {
+      renderSend({ approvals: APPROVED_A7F39C.approvals, answers: { 'call-1': 'denied' } });
+      await screen.findByText('Done.');
+      act(() => publishSendReceipt(sentReceipt('A7F39C')));
+      expect(await screen.findByText(SENT_MISMATCH_TEXT)).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/exactly as approved/);
+    });
+
     it('says plainly when the send did not go out, and never shows a receipt', async () => {
-      renderSend();
+      renderSend(APPROVED_A7F39C);
       act(() => publishSendReceipt({ outcome: 'not_sent', toolCallId: 'call-1', reason: 'draft_changed' }));
       expect(
         await screen.findByText('Not sent: the draft changed after you approved it. Review it again.'),

@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -91,24 +92,12 @@ export type SentinelApprovalCard = {
   email: SentinelApprovalEmail | null;
 };
 
-export const NOT_SENT_REASONS = [
-  'draft_changed',
-  'needs_ok_again',
-  'cannot_send',
-  'gmail_refused',
-  'unconfirmed',
-] as const;
+export type SentinelNotSentReason = TrueForgeApi.NotSentReason;
 
-export type SentinelNotSentReason = (typeof NOT_SENT_REASONS)[number];
+const NOT_SENT_REASONS: readonly SentinelNotSentReason[] = Object.values(TrueForgeApi.NotSentReason);
 
 /** The message a receipt repeats, as the server verified it. */
-export type SentinelReceiptMessage = {
-  to: string[];
-  cc: string[];
-  bcc: string[];
-  subject: string;
-  body: string;
-};
+export type SentinelReceiptMessage = TrueForgeApi.SendReceiptMessage;
 
 /** How a send ended, written by the server from what it verified. Keyed to the send's tool call. */
 export type SentinelSendReceipt =

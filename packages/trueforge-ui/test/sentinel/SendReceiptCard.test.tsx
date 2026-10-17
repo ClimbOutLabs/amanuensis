@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
+import { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { formatSentTime, NOT_SENT_TEXT, SendReceiptCard } from '@/sentinel/SendReceiptCard.js';
-import { NOT_SENT_REASONS, type SentinelSendReceipt } from '@/sentinel/types.js';
+import { formatSentTime, NOT_SENT_TEXT, SendReceiptCard, SENT_MISMATCH_TEXT } from '@/sentinel/SendReceiptCard.js';
+import type { SentinelSendReceipt } from '@/sentinel/types.js';
 
 // 09:12 in whatever time zone the test runs in, so the assertion reads the same everywhere.
 const LOCAL_NINE_TWELVE = new Date(2026, 9, 17, 9, 12, 30).toISOString();
@@ -25,12 +26,12 @@ const SENT: SentinelSendReceipt = {
 
 describe('SendReceiptCard for a send that went out', () => {
   it('says when it was sent, in local time, and that it went exactly as approved', () => {
-    render(<SendReceiptCard receipt={SENT} />);
+    render(<SendReceiptCard receipt={SENT} approvedCheckCode="A7F39C" />);
     expect(screen.getByText('Sent at 09:12, exactly as approved')).toBeInTheDocument();
   });
 
   it('shows the same recipients, subject, body and check code the approval card showed', () => {
-    render(<SendReceiptCard receipt={SENT} />);
+    render(<SendReceiptCard receipt={SENT} approvedCheckCode="A7F39C" />);
     expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
     expect(screen.queryByText(/Hidden copy/)).not.toBeInTheDocument();
@@ -42,8 +43,24 @@ describe('SendReceiptCard for a send that went out', () => {
   });
 
   it('has no approve or deny buttons left', () => {
-    render(<SendReceiptCard receipt={SENT} />);
+    render(<SendReceiptCard receipt={SENT} approvedCheckCode="A7F39C" />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+});
+
+describe('SendReceiptCard when the sent text is not the approved card', () => {
+  it.each([
+    ['a different check code', 'E52E99'],
+    ['no approved card on record', null],
+  ])('does not say "exactly as approved" with %s', (_name, approvedCheckCode) => {
+    render(<SendReceiptCard receipt={SENT} approvedCheckCode={approvedCheckCode} />);
+    expect(document.body.textContent).not.toMatch(/exactly as approved/);
+    expect(screen.getByText(SENT_MISMATCH_TEXT)).toBeInTheDocument();
+  });
+
+  it('compares codes exactly, not by prefix or case', () => {
+    render(<SendReceiptCard receipt={SENT} approvedCheckCode="a7f39c" />);
+    expect(document.body.textContent).not.toMatch(/exactly as approved/);
   });
 });
 
@@ -61,11 +78,16 @@ describe('SendReceiptCard for a send that did not go out', () => {
     expect(onReviewAgain).toHaveBeenCalledTimes(1);
   });
 
-  it.each(NOT_SENT_REASONS)('never shows a receipt, a time or a check code for "%s"', reason => {
-    render(<SendReceiptCard receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason }} onReviewAgain={vi.fn()} />);
-    expect(screen.getByText(NOT_SENT_TEXT[reason])).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/Sent at|exactly as approved|Check code|Email sent/);
-  });
+  it.each(Object.values(TrueForgeApi.NotSentReason))(
+    'never shows a receipt, a time or a check code for "%s"',
+    reason => {
+      render(
+        <SendReceiptCard receipt={{ outcome: 'not_sent', toolCallId: 'call-1', reason }} onReviewAgain={vi.fn()} />,
+      );
+      expect(screen.getByText(NOT_SENT_TEXT[reason])).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/Sent at|exactly as approved|Check code|Email sent/);
+    },
+  );
 
   it('offers the new card only where asking again can help', () => {
     const { rerender } = render(
