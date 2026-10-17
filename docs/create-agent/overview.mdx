@@ -41,9 +41,9 @@ Each option below is part of the agent definition. The **Set in** line on each s
   </Accordion>
 
   <Accordion title="Tool approval (API only)" icon="user-shield">
-    Some tool calls shouldn't run without a human's sign-off. **Tool approval** pauses the agent before such a call, shows the tool name and arguments, and resumes only after the user chooses **Allow once**, **Allow for this chat**, or **Deny** in the chat UI.
+    Some tool calls shouldn't run without a human's sign-off. **Tool approval** pauses the agent before such a call, shows the tool name and arguments, and resumes only after the user chooses one of the approval choices in the chat UI: **Approve** (this one call only), **Approve for this chat** (this kind of call for the rest of the chat), **Always allow** (remember it for every chat, offered only for some tools), or **Deny**.
 
-    **Allow for this chat** applies only to that exact tool on that exact MCP server for the current session. The grant is stored with the session, shared with its subagents, and does not become a global policy.
+    **Approve for this chat** applies only to that exact tool on that exact MCP server for the current session. The grant is stored with the session, shared with its subagents, and does not become a global policy.
 
     By default, the harness decides what to gate from the tool's own **MCP annotation**: if the server marks a tool as **write or destructive** (the default `["@write", "@destructive"]`), the agent pauses for approval before running it. Read-only tools run autonomously.
 

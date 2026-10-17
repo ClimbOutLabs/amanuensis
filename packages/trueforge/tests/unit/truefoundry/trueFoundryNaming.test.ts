@@ -311,6 +311,7 @@ describe('TrueFoundry naming vs NameSchema', () => {
           metadata: {},
         },
       ],
+      logger: createLogger({ silent: true }),
     });
     expect(models).toEqual([{ accountName: PROVIDER_ACCOUNT, modelName: MODEL_NAME, properties: {} }]);
     const fqn = `${models[0]?.accountName}/${models[0]?.modelName}`;
