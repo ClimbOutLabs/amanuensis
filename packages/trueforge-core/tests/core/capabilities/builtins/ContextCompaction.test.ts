@@ -631,8 +631,8 @@ describe('contextCompaction model role', () => {
     if (overwrite.reason !== 'compaction_truncation_fallback') {
       throw new Error('expected compaction_truncation_fallback reason');
     }
-    // The discarded request's usage rides on the overwrite alone; a second usage event would bill it twice.
-    expect(overwrite.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
+    // Both the first try and the retry are billed, on the overwrite alone; a second usage event would bill them twice.
+    expect(overwrite.usage).toEqual({ input_tokens: 2, output_tokens: 2, total_tokens: 4 });
     expect(events.filter(event => event.type !== 'agent.context.overwrite' && 'usage' in event)).toEqual([]);
   });
 
@@ -1407,13 +1407,13 @@ describe('contextCompaction session mode', () => {
     const missingSection = `<summary>
 ## user_goal
 Plan a trip.
-## facts_established
-none
 ## answers_given
 none
 ## open_questions
 none
 ## user_preferences_and_constraints
+none
+## last_request
 none
 </summary>`;
     const model = makeMockILLM({
@@ -1546,7 +1546,8 @@ none
       // misclassified as coding just because checklistState exists
     });
     const events = await collectProcessPreLLM(capability);
-    expect(model.createNonStream).toHaveBeenCalledTimes(1);
+    // The coding-shaped reply is invalid for a conversation, so the single retry is spent too.
+    expect(model.createNonStream).toHaveBeenCalledTimes(2);
     const calls = jest.mocked(model.createNonStream).mock.calls;
     const messages = calls[0]?.[0].messages;
     expect(messages).toBeDefined();
@@ -2201,7 +2202,7 @@ describe('compaction reliability journey (spec 002)', () => {
 
   // Truncation fallback: every invalid summary truncates deterministically instead of
   // skipping. The context shrinks on every attempt; there is no retry loop to break.
-  it('truncates on every invalid summary without a retry loop', async () => {
+  it('truncates on every invalid summary after one retry, never a loop', async () => {
     const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
     const model = stubModel(invalid);
     const capability = makeCapability(model);
@@ -2210,8 +2211,8 @@ describe('compaction reliability journey (spec 002)', () => {
       expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeDefined();
       expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
     }
-    // Each attempt calls the model once for the summary, then truncates. No backoff.
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(3);
+    // Each attempt calls the model for the summary plus one retry, then truncates. No backoff.
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(6);
   });
 
   it('preserves system messages and recent turns in the truncation fallback', async () => {
@@ -2257,5 +2258,134 @@ describe('compaction reliability journey (spec 002)', () => {
       throw new Error('expected an overwrite event');
     }
     expect(overwrite.context.length).toBeGreaterThan(0);
+  });
+});
+
+describe('compaction with a single steady model', () => {
+  // Invented replies shaped like the failures seen in production: an empty reply, a reply whose
+  // text sits only in the model's thinking, a long summary with two of six sections, and noise.
+  const TWO_OF_SIX_REPLY = `<summary>
+## user_goal
+Plan a week of hikes around Lake Tahoe in June.
+## facts_established
+The Rubicon Trail is about 8 miles one way (source: trail guide lookup).
+Parking at Emerald Bay fills before 9am (source: ranger page).
+</summary>`;
+  const GARBAGE_REPLY = 'Sure! Here is how I would think about summarizing this chat, but first a joke.';
+  const STRICT_USAGE = { input_tokens: 1, output_tokens: 1, total_tokens: 2 };
+
+  function reply(output: Record<string, unknown>) {
+    return { output: { role: 'assistant', ...output }, usage: STRICT_USAGE, finish_reason: 'stop' };
+  }
+
+  function modelReplying(...replies: ReturnType<typeof reply>[]) {
+    const createNonStream = jest.fn();
+    for (const next of replies) {
+      createNonStream.mockResolvedValueOnce(next);
+    }
+    return makeMockILLM({ createNonStream });
+  }
+
+  function capabilityFor(model: ReturnType<typeof makeMockILLM>, logger?: ReturnType<typeof makeSilentLogger>) {
+    return contextCompaction({
+      logger,
+      definition: { modelId: undefined, configuredModels: undefined, modelClient: model },
+      compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
+    });
+  }
+
+  function outcomeOf(events: Awaited<ReturnType<typeof collectProcessPreLLM>>) {
+    const event = events.find(e => e.type === 'agent.context.compaction');
+    if (event === undefined || event.type !== 'agent.context.compaction') {
+      throw new Error('expected a compaction event');
+    }
+    return event;
+  }
+
+  function persistedSummary(events: Awaited<ReturnType<typeof collectProcessPreLLM>>) {
+    const overwrite = events.find(e => e.type === 'agent.context.overwrite');
+    if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') {
+      throw new Error('expected an overwrite');
+    }
+    return JSON.stringify(overwrite.context);
+  }
+
+  it('retries once with a shorter prompt and thinking off when the reply is empty', async () => {
+    const model = modelReplying(
+      reply({ content: '' }),
+      reply({ content: completedConversationSummary('Which trail is shadiest?') }),
+    );
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(outcomeOf(events).outcome).toBe('applied');
+    const calls = jest.mocked(model.createNonStream).mock.calls;
+    expect(calls).toHaveLength(2);
+    const first = calls[0]?.[0];
+    const retry = calls[1]?.[0];
+    expect(String(retry?.messages[0]?.content).length).toBeLessThan(String(first?.messages[0]?.content).length);
+    expect(Reflect.get(retry ?? {}, 'enable_thinking')).toBe(false);
+    expect(Reflect.get(first ?? {}, 'enable_thinking')).toBeUndefined();
+  });
+
+  it('reads the summary from the thinking text when the reply content is empty', async () => {
+    const model = modelReplying(
+      reply({
+        content: null,
+        thinking_blocks: [
+          {
+            type: 'thinking',
+            thinking: `Let me write it out.\n${completedConversationSummary('Which trail is shadiest?')}`,
+          },
+        ],
+      }),
+    );
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(outcomeOf(events).outcome).toBe('applied');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(1);
+    expect(persistedSummary(events)).toContain('Which trail is shadiest?');
+  });
+
+  it('accepts a summary with the essential sections and fills the rest as none, logging only section names', async () => {
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }));
+    const logger = makeSilentLogger();
+    const warnSpy = jest.spyOn(logger, 'warn');
+    const events = await collectProcessPreLLM(capabilityFor(model, logger));
+    expect(outcomeOf(events).outcome).toBe('applied');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(1);
+    const persisted = persistedSummary(events);
+    for (const name of CONVERSATION_REQUIRED_SUMMARY_SECTIONS) {
+      expect(persisted).toContain(`## ${name}`);
+    }
+    expect(persisted).toContain('Rubicon Trail');
+    const logged = warnSpy.mock.calls.map(call => String(call[0])).join('\n');
+    expect(logged).toContain('answers_given');
+    expect(logged).toContain('last_request');
+    expect(logged).not.toContain('Rubicon');
+  });
+
+  it('retries and then falls back to truncation when a partial summary lacks an essential section', async () => {
+    const lacksFacts = `<summary>\n## user_goal\nPlan a hike.\n## last_request\nWhich trail?\n</summary>`;
+    const model = modelReplying(reply({ content: lacksFacts }), reply({ content: lacksFacts }));
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+  });
+
+  it('retries once on garbage and uses the retry reply when it is good', async () => {
+    const model = modelReplying(
+      reply({ content: GARBAGE_REPLY }),
+      reply({ content: completedConversationSummary('Which trail is shadiest?') }),
+    );
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    expect(outcomeOf(events).outcome).toBe('applied');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+  });
+
+  it('falls back to truncation after two garbage replies and never retries a third time', async () => {
+    const model = modelReplying(reply({ content: GARBAGE_REPLY }), reply({ content: GARBAGE_REPLY }));
+    const events = await collectProcessPreLLM(capabilityFor(model));
+    const compaction = outcomeOf(events);
+    expect(compaction.outcome).toBe('truncated_fallback');
+    expect(compaction.reason).toBe('missing_block');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
   });
 });
