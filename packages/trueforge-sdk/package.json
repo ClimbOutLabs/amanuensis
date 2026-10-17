@@ -88,6 +88,17 @@
             },
             "default": "./dist/cjs/api/resources/server/exports.js"
         },
+        "./data": {
+            "import": {
+                "types": "./dist/esm/api/resources/data/exports.d.mts",
+                "default": "./dist/esm/api/resources/data/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/data/exports.d.ts",
+                "default": "./dist/cjs/api/resources/data/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/data/exports.js"
+        },
         "./mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/mcpServers/exports.d.mts",
@@ -483,6 +494,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
+        },
+        "./settings/google": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/google/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/google/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/google/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
         },
         "./package.json": "./package.json"
     },

@@ -65,6 +65,8 @@ export interface AgentExternalIdRow {
 }
 
 export interface CreateAgentInput {
+  /** Data import keeps an exported agent's id so its chats and schedules still point at it; omitted, a fresh ULID is minted. */
+  id?: string;
   tenant_id: string;
   name: ResourceName;
   description: string;
@@ -130,7 +132,7 @@ export interface IAgentStore<TTransaction = never> {
     transaction?: TTransaction,
   ): Promise<readonly AgentExternalIdRow[]>;
   getAgent(input: GetAgentInput, transaction?: TTransaction): Promise<AgentRecord | undefined>;
-  /** Inserts a new agent with a generated ULID. Throws AgentNameConflictError or AgentExternalIdConflictError on unique clash. */
+  /** Inserts a new agent with the supplied id, or a generated ULID. Throws AgentNameConflictError or AgentExternalIdConflictError on unique clash. */
   createAgent(input: CreateAgentInput, transaction?: TTransaction): Promise<AgentRecord>;
   /** Patches `manifest`, `description`, and/or `external_id`. Throws AgentExternalIdConflictError on unique clash. Returns undefined if missing. */
   updateAgent(input: UpdateAgentInput, transaction?: TTransaction): Promise<AgentRecord | undefined>;

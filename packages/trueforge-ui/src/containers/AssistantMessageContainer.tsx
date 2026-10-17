@@ -34,6 +34,7 @@ import { NeedsYourOkContainer } from './NeedsYourOkContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
 import { ToolCallContainer } from './ToolCallContainer.js';
+import { ToolRefusalNoticesContainer } from './ToolRefusalNoticesContainer.js';
 
 /**
  * Dispatches a leaf message part to its renderer. "data" parts (generative
@@ -278,6 +279,7 @@ export function AssistantMessageContainer() {
     <>
       {runs.length === 0 && renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
       <RunCodeSetupNoticesContainer parts={parts} />
+      <ToolRefusalNoticesContainer parts={parts} />
       {ingestionStatusLine !== undefined && (
         <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
           {ingestionStatusLine}

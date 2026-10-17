@@ -8,6 +8,7 @@ import { Tier3Card } from "./Tier3Card.js";
 
 export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.ApprovalToolCallRef.Raw, TrueForge.ApprovalToolCallRef> = core.serialization.object({
         "canAlwaysAllow": core.serialization.property("can_always_allow", core.serialization.boolean().optional()),
+        "canChatAllow": core.serialization.property("can_chat_allow", core.serialization.boolean().optional()),
         "expiresAt": core.serialization.property("expires_at", core.serialization.string().optional()),
         "held": core.serialization.booleanLiteral(true).optional(),
         "id": core.serialization.string(),
@@ -20,6 +21,7 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.Ap
 export declare namespace ApprovalToolCallRef {
     export interface Raw {
         can_always_allow?: boolean | null;
+        can_chat_allow?: boolean | null;
         expires_at?: string | null;
         held?: true | null;
         id: string;

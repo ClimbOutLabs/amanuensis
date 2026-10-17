@@ -256,13 +256,40 @@ export class DeferredTool extends LocalToolMCP {
    * a host tool instead, running the host tool directly rather than rejecting the call. Returns
    * undefined when no host tool matches, so the caller falls back to the ordinary rejection.
    */
-  private async routeToHostTool(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<CallToolResponse | undefined> {
+  private async routeToHostTool({
+    toolName,
+    args,
+    approvalDecision,
+  }: {
+    toolName: string;
+    args: Record<string, unknown>;
+    approvalDecision: ApprovalDecision | undefined;
+  }): Promise<CallToolResponse | undefined> {
     const hostSet = await this.findHostToolProvider(toolName);
     if (!hostSet) {
       return undefined;
+    }
+    // An approval belongs to the card the user saw, which names the requested server; it never covers a host tool.
+    if (approvalDecision !== undefined) {
+      return toolResultResponse({
+        text: JSON.stringify({
+          error: `'${toolName}' is a host tool, not a tool on the requested MCP server, so the approval given does not cover it. Call ${toolName} directly.`,
+        }),
+        isError: true,
+      });
+    }
+    // Only a call that needs no approval is routed. Anything else must be called directly, so the host classifies
+    // it, shows its own card and checks its own approval; a connector's generic card would not cover it.
+    const info = await hostSet.toolCallInfo({ name: toolName, arguments: args });
+    if (
+      (info.tier !== undefined && info.tier > 1) ||
+      info.is_approval_required === true ||
+      info.pre_dispatch_failure !== undefined
+    ) {
+      return toolResultResponse({
+        text: JSON.stringify({ error: `'${toolName}' is a built-in tool, so call ${toolName} directly.` }),
+        isError: true,
+      });
     }
     const response = await hostSet.callTool({ name: toolName, arguments: args });
     return this.withHostRoutingNote(response, toolName);
@@ -558,7 +585,11 @@ export class DeferredTool extends LocalToolMCP {
             return resolved;
           }
           if (!resolved.tools.some(t => t.name === input.tool_name)) {
-            const hostRoute = await this.routeToHostTool(input.tool_name, input.input);
+            const hostRoute = await this.routeToHostTool({
+              toolName: input.tool_name,
+              args: input.input,
+              approvalDecision,
+            });
             if (hostRoute) {
               return hostRoute;
             }

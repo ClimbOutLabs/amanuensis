@@ -11,6 +11,7 @@ import {
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
 import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
+import { createHash } from 'node:crypto';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
@@ -94,8 +95,15 @@ function contextAppend(context: ContextAppend['context']): ContextAppend {
   };
 }
 
+/** A decision as the host records it: bound to the call's approval token (none here) and arguments. */
 function decisionMessage(approval: RecordedApproval) {
-  return { type: EventType.USER_TOOL_APPROVAL, tool_call_id: TOOL_CALL_ID, approval };
+  return {
+    type: EventType.USER_TOOL_APPROVAL,
+    tool_call_id: TOOL_CALL_ID,
+    approval,
+    approval_token_id: null,
+    arguments_hash: createHash('sha256').update('{}').digest('hex'),
+  };
 }
 
 /** The decided tool call the tip turn already recorded, in the shape the store persists. */

@@ -39,6 +39,7 @@ import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-sto
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -85,6 +86,8 @@ export interface ApprovalTestServer {
   mcpServerStore: () => IMcpServerStore;
   /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
   sessionStore: () => SqliteSessionStore;
+  /** The database itself, so a test can construct any other store over the same data. */
+  db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
@@ -111,19 +114,22 @@ function buildApp(input: {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
+  const googleConnectionStore = new SqliteGoogleConnectionStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
@@ -133,6 +139,7 @@ function buildApp(input: {
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
@@ -166,6 +173,7 @@ function buildApp(input: {
     oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
+    outboundSecrets,
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,
@@ -287,6 +295,7 @@ export async function startApprovalTestServer(options?: {
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
     sessionStore: () => new SqliteSessionStore(db),
+    db: () => db,
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },

@@ -31,6 +31,8 @@ export type {
   SubAgentCompletionMarker,
 } from './runtime/AgentThread.types';
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
+export { stageAttachment } from './runtime/attachmentStaging';
+export type { StagedAttachment } from './runtime/attachmentStaging';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export {
   extractBase64,
@@ -52,6 +54,7 @@ export type {
 } from '../documents/documentExtraction';
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
+export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
   DOCUMENTS_SERVER_ID,
@@ -233,6 +236,7 @@ export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } 
 export type { ToolCallMemoSnapshot, ToolCallResult } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
+export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
 export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
@@ -309,6 +313,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
 export type {
@@ -365,7 +370,9 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
-export { slotSocketPathsIn } from './sandbox/slots/slotContract';
+export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
+export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
+export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';

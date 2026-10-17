@@ -78,6 +78,7 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
+import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
@@ -173,6 +174,7 @@ interface ServerPersistence<TTransaction> {
   /** Not tenant-scoped: one counter row per UTC day for this instance. */
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
+  googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   approvalTokenStore: ApprovalTokenStore;
@@ -344,6 +346,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
+      import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
     ]),
   ]);
   const [
@@ -367,6 +370,7 @@ async function createStandalonePersistence(options: {
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
+    { SqliteGoogleConnectionStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -403,6 +407,7 @@ async function createStandalonePersistence(options: {
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
+    googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -459,6 +464,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
+      import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
     ]),
   ]);
   const [
@@ -482,6 +488,7 @@ async function createDistributedPersistence(options: {
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
+    { PostgresGoogleConnectionStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -569,6 +576,7 @@ async function createDistributedPersistence(options: {
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
+    googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -608,6 +616,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     tokenFactoryUsageStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     approvalTokenStore,
@@ -661,18 +670,20 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => getConfiguredSecretValues(configuration),
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpOAuthStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => getConfiguredSecretValues(configuration),
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpOAuthStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({
@@ -755,6 +766,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     withTransaction,
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     scheduleStore,
     agentStore,
     skillStore,
@@ -781,6 +793,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     oidcDiscovery,
     authenticator,
     authorizer,
+    outboundSecrets,
   });
 
   return {
@@ -789,6 +802,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     controller,
     oidcDiscovery,
     destroyDb,
+    googleConnectionStore,
     redis,
     requestReplyRouter,
     sessionStore,
@@ -865,6 +879,7 @@ try {
     controller,
     oidcDiscovery,
     destroyDb,
+    googleConnectionStore,
     redis,
     requestReplyRouter,
     sessionStore,
@@ -913,6 +928,14 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
+  const googlePendingPurgeTimer = setInterval(() => {
+    googleConnectionStore.purgeExpiredPending().catch((error: unknown) => {
+      logger.warn('Google pending consent purge failed', extractErrorLogFields(error));
+    });
+  }, 300_000);
+  googlePendingPurgeTimer.unref();
 
   if (
     mountFrontend(app, {
@@ -1116,6 +1139,7 @@ try {
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
       oidcDiscovery?.stop();
+      clearInterval(googlePendingPurgeTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

@@ -26,6 +26,7 @@ import { PostgresAgentStore } from '../../src/db/postgres/agent-store/PostgresAg
 import { PostgresApprovalTokenStore } from '../../src/db/postgres/approval-token-store/PostgresApprovalTokenStore';
 import { PostgresChatImageStore } from '../../src/db/postgres/chat-image-store/PostgresChatImageStore';
 import { PostgresGlobalSettingsStore } from '../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
+import { PostgresGoogleConnectionStore } from '../../src/db/postgres/google-connection-store/PostgresGoogleConnectionStore';
 import { PostgresMcpServerStore } from '../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
 import { PostgresMcpToolGrantStore } from '../../src/db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore';
 import { PostgresModelProviderStore } from '../../src/db/postgres/model-provider-store/PostgresModelProviderStore';
@@ -47,6 +48,7 @@ import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-sto
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -232,18 +234,21 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
+  const googleConnectionStore = new SqliteGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -252,8 +257,10 @@ async function startSqlite(): Promise<OwnershipServer> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     agentStore,
@@ -315,18 +322,21 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new PostgresSentinelSettingsStore(db);
   const mcpToolGrantStore = new PostgresMcpToolGrantStore(db);
+  const googleConnectionStore = new PostgresGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -335,8 +345,10 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     agentStore,

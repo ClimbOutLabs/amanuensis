@@ -13,6 +13,14 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
+import type { ReviewableDraft } from '../email/gmail/draftReview';
+import {
+  GMAIL_SERVER_ID,
+  isGmailReadToolName,
+  isGmailWriteToolName,
+  SEND_DRAFT_TOOL_NAME,
+  UPDATE_DRAFT_TOOL_NAME,
+} from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   actionIdFor,
@@ -56,6 +64,7 @@ import {
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  failClosedDecision,
   tier1Decision,
   tier2Decision,
   tier3Decision,
@@ -77,11 +86,14 @@ import {
   splitCompoundSegments,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  writeTargetTouchesSandboxTools,
   type FileDigest,
   type PathResolution,
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
+  hasReadPrivateData,
+  markPrivateDataRead,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -122,6 +134,13 @@ export interface SentinelAction {
    * server-owned maps tool from server config, never from model params.
    */
   maps_hosts?: MapsHosts | undefined;
+  /**
+   * The message a Gmail write would send or save, as the host holds it. Set by the Gmail tool set from a live
+   * read and the validated call, so the card shows what would really go out.
+   */
+  mail_draft?: ReviewableDraft | undefined;
+  /** For a draft change: the saved draft it replaces, as Gmail holds it now. */
+  mail_replaces?: ReviewableDraft | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1055,6 +1074,40 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
+  // Programs and Python startup files in the sandbox tool folders run on later commands and host bookkeeping.
+  if (
+    writeTargetTouchesSandboxTools({
+      p: target,
+      cwd: identityCwd,
+      roots: [ctx.workspace_cwd],
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return tier3Decision({
+      card: {
+        plain_what: `Save \`${target}\` in a folder where this workspace keeps programs it can run.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone:
+          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: 'sandbox_tool_write',
+      reason_detail: 'Writes into the sandbox tool folders always require approval.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
   return decideTier2({
     ctx,
     action,
@@ -1287,6 +1340,9 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }
+  if (hasReadPrivateData(ctx.web_search)) {
+    return held('mcp_search_after_private_read', 'this chat read your email, and a search could carry it out');
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
@@ -1304,6 +1360,140 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Most characters of subject the card shows inside its sentence. */
+const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
+
+function displayList(addresses: readonly string[]): string {
+  const shown = addresses.map(address => escapeDisplayText(address));
+  if (shown.length <= 1) {
+    return shown.join('');
+  }
+  return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
+}
+
+function cardSubject(subject: string): string {
+  const chars = Array.from(escapeDisplayText(subject));
+  const cut =
+    chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
+      ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
+      : chars.join('');
+  return `"${cut.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The approval card for a Gmail write, built from the message as the host holds it (the draft Gmail stores
+ * for a send, the content the call will write for a draft), never from model prose. The whole message is on
+ * the card, uncut, so what is approved is everything that is sent. Null when the message was not supplied.
+ */
+function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card | null {
+  const { action } = input;
+  const content = action.mail_draft;
+  if (content === undefined) {
+    return null;
+  }
+  const kind =
+    action.tool_name === SEND_DRAFT_TOOL_NAME
+      ? 'send'
+      : action.tool_name === UPDATE_DRAFT_TOOL_NAME
+        ? 'change'
+        : 'save';
+  const parts = [
+    `to ${displayList(content.to) === '' ? 'no one' : displayList(content.to)}`,
+    ...(content.cc.length > 0 ? [`Copy: ${displayList(content.cc)}`] : []),
+    ...(content.bcc.length > 0 ? [`Hidden copy: ${displayList(content.bcc)}`] : []),
+  ];
+  const subject = cardSubject(content.subject);
+  const replaces = action.mail_replaces;
+  const recipientsLine = [
+    ...parts,
+    ...(content.fromName === ''
+      ? []
+      : [`Sent as "${escapeDisplayText(content.fromName).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]),
+  ].join('. ');
+  const plainWhat =
+    kind === 'send'
+      ? `Send ${subject} from your Gmail ${recipientsLine}.`
+      : kind === 'change'
+        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${displayList(replaces.to) === '' ? 'no one' : displayList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`;
+  return {
+    plain_what: plainWhat,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: kind === 'send' ? "Once this is sent, it can't be unsent." : null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    email: {
+      action: kind,
+      to: content.to.map(address => escapeDisplayText(address)),
+      cc: content.cc.map(address => escapeDisplayText(address)),
+      bcc: content.bcc.map(address => escapeDisplayText(address)),
+      subject: escapeDisplayText(content.subject),
+      body: escapeDisplayText(content.body, { keepNewlines: true }),
+      replaces:
+        replaces === undefined
+          ? null
+          : {
+              subject: escapeDisplayText(replaces.subject),
+              to: replaces.to.map(address => escapeDisplayText(address)),
+            },
+    },
+  };
+}
+
+/**
+ * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
+ * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
+ */
+async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Gmail needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (isGmailReadToolName(action.tool_name)) {
+    markPrivateDataRead(ctx.web_search);
+    return tier1Decision({
+      reason: 'gmail_read',
+      reason_detail: 'Read your email.',
+      sensitive_read: true,
+    });
+  }
+  if (!isGmailWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown Gmail tool.' });
+  }
+  if (ctx.services.unattended) {
+    return autoDenyDecision({
+      reason: 'unattended_run',
+      reason_detail: 'Scheduled runs can read your email but never draft or send it.',
+      sensitive_read: false,
+    });
+  }
+  const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
+  if (card === null) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The message could not be loaded to show you, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const isSend = action.tool_name === SEND_DRAFT_TOOL_NAME;
+  return tier3Decision({
+    card,
+    reason: isSend ? 'gmail_send' : 'gmail_draft',
+    reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -1317,6 +1507,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
+    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
   });
   if (offline) {
     if (extraction.external_service) {
@@ -1340,6 +1531,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return autoDenyDecision({
       reason: 'destination_unverifiable',
       reason_detail: 'External-service action with no verifiable destination; never carded.',
+      sensitive_read: false,
+    });
+  }
+
+  // A send whose card would hide a recipient or cut its content is refused: approval must cover all of it.
+  if (extraction.incomplete_send !== null) {
+    return autoDenyDecision({
+      reason: 'incomplete_send_card',
+      reason_detail: extraction.incomplete_send.model_message,
+      owner_message: extraction.incomplete_send.owner_message,
       sensitive_read: false,
     });
   }
@@ -1446,6 +1647,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     readOnlyHint &&
     action.mcp_hints.open_world_hint === false &&
+    !extraction.sends &&
     !sensitiveReadHit(action.canonical_params)
   ) {
     if (action.mcp_first_party === true) {
@@ -1488,7 +1690,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const recognized = extraction.connector_what !== null;
   return tier3Decision({
     card,
-    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason: extraction.sends ? 'connector_send' : recognized ? 'connector_outbound' : 'unrecognized_tool',
     reason_detail: recognized
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
@@ -1559,6 +1761,10 @@ export function approvalCardForGatedCall(input: { action: SentinelAction; agent_
  */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
+
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
+    return classifyGmailTool(action, ctx);
+  }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
   // named 'exec' must not be downgraded to Tier 2; it falls through to the
