@@ -53,7 +53,7 @@ import {
   startHeapMonitor,
 } from "@george43g/robustness";
 import { getRecentErrorCount, getToolCallCount, setSession } from "./core/session.js";
-import { READONLY_FALLBACK_SCOPES } from "./scopes.js";
+import { READONLY_FALLBACK_SCOPES, wideScopeNotice } from "./scopes.js";
 import { buildMcpServer, type CallToolFn } from "./server/build.js";
 import { resolveToolPrefix } from "./server/tool-prefix.js";
 
@@ -248,6 +248,9 @@ export async function bootstrapSession(opts: BootstrapOptions = {}): Promise<Ses
       });
     }
   }
+
+  const scopeNotice = wideScopeNotice({ scopes: authorizedScopes, accountId: accountId ?? null });
+  if (scopeNotice) logWarn(scopeNotice);
 
   setSession({
     oauth2Client,
