@@ -362,7 +362,12 @@ describe('Google refusals', () => {
     const { tools } = await build({
       routes: [eventsRoute(googleError({ status: 403, reason: 'accessNotConfigured' }), 403)],
     });
-    expect((await list(tools)).raw).toContain('Google Calendar API');
+    const said = (await list(tools)).raw;
+    expect(said).toContain('Google Calendar API');
+    // The panel's Calendar section has the link and the Enable step; there is no "step 2 for Calendar".
+    expect(said).toContain('Calendar API link');
+    expect(said).toContain('select Enable');
+    expect(said).not.toContain('step 2');
   });
 
   it('tells the user to connect Calendar when the scope is missing', async () => {

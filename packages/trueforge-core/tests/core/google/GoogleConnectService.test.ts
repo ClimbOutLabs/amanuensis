@@ -11,6 +11,7 @@ import type { GoogleSetupInfo } from '../../../src/core/google/setupMode';
 import { capturingLogger, connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
 
 const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
+const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
@@ -375,6 +376,26 @@ describe('GoogleConnectService', () => {
       await connections.save(connectedRecord());
       google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
       google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
+    });
+
+    it('also checks Calendar when it was granted, and says when its API is off', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      google.on(CALENDAR_EVENTS_URL, () =>
+        json({ error: { status: 'PERMISSION_DENIED', errors: [{ reason: 'accessNotConfigured' }] } }, 403),
+      );
+      expect(await service.test(OWNER)).toEqual({ result: 'calendar_unavailable', account_email: 'ada@example.com' });
+    });
+
+    it('passes when Calendar answers', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      google.on(CALENDAR_EVENTS_URL, () => json({ timeZone: 'America/Sao_Paulo', items: [] }));
       expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
     });
 

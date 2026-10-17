@@ -7,7 +7,7 @@ const CALENDAR: GoogleRestProduct = {
   name: 'Google Calendar',
   baseUrl: 'https://www.googleapis.com/calendar/v3/calendars/primary',
   apiOffMessage:
-    "The Google Calendar API isn't turned on in your Google project. Open Settings, Connectors, Google, follow step 2 for Calendar, then try again.",
+    "The Google Calendar API isn't turned on in your Google project. Open Settings, Connectors, Google, open the Calendar API link in the Calendar section, select Enable, then try again.",
   scopeMessage:
     "Google hasn't given Aman permission to read your calendar. Open Settings, Connectors, Google and connect Calendar.",
   notFoundMessage: 'Google Calendar has no such event.',

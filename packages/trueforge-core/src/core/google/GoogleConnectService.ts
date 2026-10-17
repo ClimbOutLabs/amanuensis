@@ -1,5 +1,6 @@
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { CalendarApi } from '../calendar/CalendarApi';
 import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
 import { clientProblems, type ClientProblem, type ClientType } from './clientJson';
@@ -9,7 +10,7 @@ import type {
   GoogleOwner,
   PendingGoogleAuthorizationStore,
 } from './connection';
-import { GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
+import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
 import { GoogleAccessTokens } from './GoogleAccessTokens';
 import {
   buildAuthorizationUrl,
@@ -59,10 +60,12 @@ export class GoogleConsentError extends Error {
   }
 }
 
-const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
+const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable', 'calendar_unavailable'] as const;
 
 export const GoogleTestResultSchema = z.object({
-  result: z.enum(GOOGLE_TEST_OUTCOMES),
+  result: z
+    .enum(GOOGLE_TEST_OUTCOMES)
+    .describe('calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.'),
   account_email: z.string().nullable().describe('The connected address when the test passed.'),
 });
 export type GoogleTestResult = z.infer<typeof GoogleTestResultSchema>;
@@ -279,6 +282,18 @@ export class GoogleConnectService {
           account_email: accountEmail,
           updated_at: this.#now().toISOString(),
         });
+      }
+      if (grantedFeatures(record.granted_scopes).includes('calendar_read')) {
+        const calendar = new CalendarApi({ tokens, fetchImpl: this.#fetchImpl, sleep: undefined });
+        try {
+          await calendar.calendarTimeZone();
+        } catch (error) {
+          if (!(error instanceof GoogleApiError)) {
+            throw error;
+          }
+          this.#logger.warn('Google Calendar did not answer the connection test', safeFailureFields(error));
+          return { result: 'calendar_unavailable', account_email: accountEmail };
+        }
       }
       return { result: 'ok', account_email: accountEmail };
     } catch (error) {
