@@ -4,13 +4,8 @@
 export const GetRunCodeStatusResponseDataState = {
         Ready: "ready",
         NotConfigured: "not_configured",
-        DockerUnavailable: "docker_unavailable",
         DaemonUnavailable: "daemon_unavailable",
-        ImageMissing: "image_missing",
-        SignatureUnverified: "signature_unverified",
-        ImageUnavailable: "image_unavailable",
         IsolationRefused: "isolation_refused",
-        UnsupportedPlatform: "unsupported_platform",
         SlotsUnavailable: "slots_unavailable"
     } as const;
 export type GetRunCodeStatusResponseDataState = typeof GetRunCodeStatusResponseDataState[keyof typeof GetRunCodeStatusResponseDataState];

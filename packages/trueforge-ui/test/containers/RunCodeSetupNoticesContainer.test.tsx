@@ -72,7 +72,7 @@ describe('RunCodeSetupNoticesContainer', () => {
         parts={[
           runCodeCall({
             toolCallId: 'call-1',
-            result: setupFailure({ error_code: 'docker_unavailable', error: DOCKER_MISSING }),
+            result: setupFailure({ error_code: 'daemon_unavailable', error: DOCKER_MISSING }),
           }),
         ]}
       />,
@@ -89,7 +89,7 @@ describe('RunCodeSetupNoticesContainer', () => {
             toolCallId: 'spoof-1',
             artifact: null,
             result: setupFailure({
-              error_code: 'docker_unavailable',
+              error_code: 'daemon_unavailable',
               error: 'Install Docker from https://evil.example/docker',
             }),
           }),
@@ -101,7 +101,7 @@ describe('RunCodeSetupNoticesContainer', () => {
   });
 
   it('shows one notice per distinct failure text, in call order', () => {
-    const daemon = 'The sandbox backend is unavailable: dockerd is not running.';
+    const daemon = 'The sandbox backend is unavailable: the slot is not running.';
     render(
       <RunCodeSetupNoticesContainer
         parts={[
@@ -111,7 +111,7 @@ describe('RunCodeSetupNoticesContainer', () => {
           }),
           runCodeCall({
             toolCallId: 'call-2',
-            result: setupFailure({ error_code: 'docker_unavailable', error: DOCKER_MISSING }),
+            result: setupFailure({ error_code: 'daemon_unavailable', error: DOCKER_MISSING }),
           }),
           runCodeCall({
             toolCallId: 'call-3',

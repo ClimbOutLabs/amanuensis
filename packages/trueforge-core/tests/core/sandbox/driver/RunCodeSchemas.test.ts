@@ -148,12 +148,7 @@ describe('run_code setup failures', () => {
   };
 
   it('are exactly the codes where no code ran and the text is written for the user', () => {
-    expect([...RUN_CODE_SETUP_ERROR_CODES].sort()).toEqual([
-      'daemon_unavailable',
-      'docker_unavailable',
-      'image_unavailable',
-      'isolation_refused',
-    ]);
+    expect([...RUN_CODE_SETUP_ERROR_CODES].sort()).toEqual(['daemon_unavailable', 'isolation_refused']);
   });
 
   it('exclude failures of code that ran or that the model can fix itself', () => {
@@ -176,29 +171,29 @@ describe('run_code setup failures', () => {
   it('parse from a full failed result without needing its other fields', () => {
     const full = RunCodeResultSchema.parse({
       status: 'failed',
-      error_code: 'docker_unavailable',
-      error: 'Docker is missing.',
+      error_code: 'daemon_unavailable',
+      error: 'The sandbox slots are down.',
       ...fullResult,
     });
     expect(RunCodeSetupFailureSchema.parse(full)).toEqual({
       status: 'failed',
-      error_code: 'docker_unavailable',
-      error: 'Docker is missing.',
+      error_code: 'daemon_unavailable',
+      error: 'The sandbox slots are down.',
     });
     expect(
-      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable', error: 'x' }).success,
+      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'daemon_unavailable', error: 'x' }).success,
     ).toBe(true);
   });
 
   it('reject ok results, whatever their output says, and failures without text', () => {
     expect(
-      RunCodeSetupFailureSchema.safeParse({ status: 'ok', exit_code: 1, error_code: 'docker_unavailable', error: 'x' })
+      RunCodeSetupFailureSchema.safeParse({ status: 'ok', exit_code: 1, error_code: 'daemon_unavailable', error: 'x' })
         .success,
     ).toBe(false);
     expect(
-      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable', error: '' }).success,
+      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'daemon_unavailable', error: '' }).success,
     ).toBe(false);
-    expect(RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable' }).success).toBe(
+    expect(RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'daemon_unavailable' }).success).toBe(
       false,
     );
   });

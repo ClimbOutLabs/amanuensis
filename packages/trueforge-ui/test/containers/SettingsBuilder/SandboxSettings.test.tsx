@@ -9,19 +9,13 @@ import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
-const IMAGE = 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@sha256:' + 'a'.repeat(64);
-
 const limits = {
-  isolation_driver: 'docker',
-  image: IMAGE,
   default_timeout_seconds: 60,
   max_timeout_seconds: 600,
   memory_mb: 2048,
   disk_mb: 1024,
   stdout_stderr_cap_kb: 256,
-  image_pull_timeout_seconds: 600,
   network_egress: false,
-  cosign_key_configured: true,
 };
 
 function serverWith(sandboxIsolation: unknown): AgentUIServer {
@@ -67,69 +61,27 @@ const STATES: Array<{ status: RunCodeStatus; headline: string; fix: RegExp | nul
   { status: { state: 'ready' }, headline: 'Code execution is on', fix: null, pill: 'Ready' },
   {
     status: { state: 'not_configured' },
-    headline: 'Code execution is off: no sandbox image is configured',
-    fix: /Ask whoever runs this server/,
+    headline: 'Code execution is off: the sandbox is not set up',
+    fix: /aman doctor sandbox --fix/,
     pill: 'Off',
   },
   {
-    status: { state: 'docker_unavailable' },
-    headline: 'Code execution is off: Docker is not available to the server',
-    fix: /Docker socket/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'daemon_unavailable', detail: 'docker info failed' },
-    headline: 'Code execution is off: Docker is not responding',
-    fix: /Start or restart the Docker daemon/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'image_missing' },
-    headline: 'Sandbox image not downloaded yet',
-    fix: /run some code/,
-    pill: 'Setting up',
-  },
-  {
-    status: { state: 'signature_unverified', detail: 'cosign signature verification failed' },
-    headline: "Code execution is off: the sandbox image's signature could not be verified",
-    fix: /Restart the server with internet access/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'image_unavailable', detail: 'digest mismatch' },
-    headline: 'Code execution is off: the sandbox image does not match this release',
-    fix: /exact image for this release/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'isolation_refused', detail: 'canary refused' },
-    headline: 'Code execution is off: the sandbox could not apply its safety limits',
-    fix: /Update Docker/,
-    pill: 'Off',
-  },
-  {
-    status: { state: 'unsupported_platform', detail: 'needs Linux' },
-    headline: "Code execution is off: this server's system is not supported",
-    fix: /Run the server on Linux/,
-    pill: 'Off',
-  },
-];
-
-const SLOT_STATES: {
-  status: RunCodeStatus;
-  headline: string;
-  fix: RegExp | undefined;
-}[] = [
-  { status: { state: 'ready', backend: 'slots' }, headline: 'Code execution is on', fix: undefined },
-  {
-    status: { state: 'slots_unavailable', backend: 'slots', detail: 'The sandbox slots are not running.' },
+    status: { state: 'slots_unavailable', detail: 'The sandbox slots are not running.' },
     headline: 'Code execution is off: the sandbox is not running',
     fix: /aman doctor sandbox --fix/,
+    pill: 'Off',
   },
   {
-    status: { state: 'isolation_refused', backend: 'slots', detail: 'apparmor: wrong profile' },
+    status: { state: 'daemon_unavailable', detail: 'agent unreachable' },
+    headline: 'Code execution is off: the sandbox is not running',
+    fix: /aman doctor sandbox --fix/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'isolation_refused', detail: 'apparmor: wrong profile' },
     headline: 'Code execution is off: the sandbox could not prove it is safe',
     fix: /aman doctor sandbox --fix/,
+    pill: 'Off',
   },
 ];
 
@@ -137,44 +89,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('SandboxSettings on the sandbox slots', () => {
-  it.each(SLOT_STATES)(
-    'words the $status.state state without Docker, images or signatures',
-    async ({ status, headline, fix }) => {
-      renderPage({ getRunCodeStatus: async () => status });
-
-      await screen.findByText(headline);
-      const page = document.body.textContent ?? '';
-      expect(page).not.toMatch(/docker|image|signature/i);
-      expect(screen.getByText(/isolated sandboxes with no network access/)).toBeInTheDocument();
-      if (fix !== undefined) {
-        expect(cardOf('Status').getByText(fix)).toBeInTheDocument();
-      }
-      expect(screen.queryByRole('heading', { name: 'Image' })).not.toBeInTheDocument();
-    },
-  );
-
-  it('keeps the technical detail under Technical details', async () => {
-    renderPage({
-      getRunCodeStatus: async () => ({
-        state: 'isolation_refused',
-        backend: 'slots',
-        detail: 'apparmor: wrong profile',
-      }),
-    });
-    await screen.findByText('Code execution is off: the sandbox could not prove it is safe');
-    expect(screen.getByText('apparmor: wrong profile')).toBeInTheDocument();
-  });
-});
-
 describe('SandboxSettings', () => {
   it('names the page and says what the sandbox is for', async () => {
     renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
 
     expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
-    expect(screen.getByText(/isolated sandbox with no network access/)).toBeInTheDocument();
+    expect(screen.getByText(/isolated sandboxes with no network access/)).toBeInTheDocument();
     await screen.findByText('Code execution is on');
-    expect(screen.getByText(/isolated Docker container with no network access/)).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(/docker|image|signature/i);
   });
 
   it.each(STATES)('explains the $status.state state in plain language', async ({ status, headline, fix, pill }) => {
@@ -198,51 +120,14 @@ describe('SandboxSettings', () => {
     expect(screen.queryByText(/unavailable\.$/)).not.toBeInTheDocument();
   });
 
-  it('shows the short image name and the checks that follow from the state', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'signature_unverified', detail: 'bad signature' }) });
+  it('shows no image card and keeps server setting names out of the advice', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'not_configured' }) });
 
-    await screen.findByRole('heading', { name: 'Image' });
-    const image = cardOf('Image');
-    expect(image.getByText('amanuensis-sandbox 0.1.0')).toBeInTheDocument();
-    expect(image.queryByText(IMAGE)).not.toBeInTheDocument();
-    expect(image.getByText('Downloaded')).toBeInTheDocument();
-    expect(image.getByText('Not verified')).toBeInTheDocument();
-    // The full reference with its digest lives under Technical details.
-    expect(cardOf('Status').getByText(IMAGE)).toBeInTheDocument();
-  });
-
-  it.each(['docker_unavailable', 'daemon_unavailable', 'unsupported_platform'] as const)(
-    'keeps only the version when %s makes the download and signature checks meaningless',
-    async state => {
-      renderPage({ getRunCodeStatus: async () => ({ state, detail: 'x' }) });
-
-      await screen.findByRole('heading', { name: 'Image' });
-      const image = cardOf('Image');
-      expect(image.getByText('Version')).toBeInTheDocument();
-      expect(image.queryByText('Download')).not.toBeInTheDocument();
-      expect(image.queryByText('Signature')).not.toBeInTheDocument();
-    },
-  );
-
-  it('says there is no image when the server has none configured', async () => {
-    renderPage({
-      getRunCodeStatus: async () => ({ state: 'not_configured' }),
-      sandboxIsolation: { ...limits, image: '' },
-    });
-
-    await screen.findByRole('heading', { name: 'Image' });
-    const image = cardOf('Image');
-    expect(image.getByText('Not configured')).toBeInTheDocument();
-    expect(image.queryByText('Version')).not.toBeInTheDocument();
-  });
-
-  it('keeps server setting names out of the advice and under Technical details', async () => {
-    renderPage({ getRunCodeStatus: async () => ({ state: 'signature_unverified', detail: 'x' }) });
-
-    await screen.findByText(/signature could not be verified/);
+    await screen.findByText(/the sandbox is not set up/);
+    expect(screen.queryByRole('heading', { name: 'Image' })).not.toBeInTheDocument();
     const card = cardOf('Status');
     expect(card.getByText('What to do').parentElement).not.toHaveTextContent('SANDBOX_');
-    expect(card.getByText('SANDBOX_COSIGN_PUBLIC_KEY_PATH')).toBeInTheDocument();
+    expect(card.getByText('SANDBOX_BACKEND')).toBeInTheDocument();
   });
 
   it('says when the status was last checked', async () => {
@@ -286,11 +171,11 @@ describe('SandboxSettings', () => {
   it('checks again when Re-check is pressed', async () => {
     const getRunCodeStatus = vi
       .fn<() => Promise<RunCodeStatus>>()
-      .mockResolvedValueOnce({ state: 'docker_unavailable' })
+      .mockResolvedValueOnce({ state: 'slots_unavailable' })
       .mockResolvedValueOnce({ state: 'ready' });
     renderPage({ getRunCodeStatus });
 
-    expect(await screen.findByText(/Docker is not available to the server/)).toBeInTheDocument();
+    expect(await screen.findByText(/the sandbox is not running/)).toBeInTheDocument();
 
     fireEvent.click(cardOf('Status').getByRole('button', { name: 'Re-check' }));
 

@@ -2,7 +2,6 @@ import type { z } from 'zod';
 import type { PersistedPassthroughEvent } from '../schemas/events';
 import { MEMORY_RECALL_EVENT_TYPE, MemoryRecallPersistedEventSchema } from '../schemas/memoryEvents';
 import { PROFILE_LEARNED_EVENT_TYPE, ProfileLearnedPersistedEventSchema } from '../schemas/profileLearningEvents';
-import { PROVISIONING_EVENT_TYPE, ProvisioningPersistedEventSchema } from '../schemas/provisionEvents';
 import { SKILL_USED_EVENT_TYPE, SkillUsedPersistedEventSchema } from '../schemas/skillEvents';
 
 /**
@@ -53,7 +52,6 @@ const PASSTHROUGH_AUDIT_EVENT_SCHEMAS: {
   [MEMORY_RECALL_EVENT_TYPE]: MemoryRecallPersistedEventSchema,
   [PROFILE_LEARNED_EVENT_TYPE]: ProfileLearnedPersistedEventSchema,
   [SKILL_USED_EVENT_TYPE]: SkillUsedPersistedEventSchema,
-  [PROVISIONING_EVENT_TYPE]: ProvisioningPersistedEventSchema,
 };
 
 function isRegisteredPassthroughEventType(type: string): type is PersistedPassthroughEvent['type'] {

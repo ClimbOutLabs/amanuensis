@@ -76,7 +76,6 @@ import {
   type SandboxInvocationPurpose,
 } from './commandClassification';
 import { classifyExecCommand, interpreterInvocationRefusal, type ExecGuardHost } from './driver/ExecGuard';
-import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
@@ -1271,7 +1270,7 @@ ${execNetworkSentences({ offline })} Make separate tool calls in one response; t
 `;
 }
 
-/** What the run_code description says is installed; the slot guest ships a smaller set than the Docker image. */
+/** What the run_code description says is installed; the slot guest ships a set it advertises. */
 function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string {
   return offline
     ? 'Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. No installs at runtime: if a package is missing, say so instead of installing it.'
@@ -4317,20 +4316,11 @@ export class Sandbox extends LocalToolMCP {
         'run_code is not available: no sandbox isolation driver is configured for this deployment. Report the failure instead of running the code another way.',
       );
     }
-    // the turn's abort signal reaches the backend (provisioning observes
-    // it); provisioning progress is honest — every driver message is logged
-    // immediately and, when the step ran, rides a passthrough event to the
-    // UI/chat stream on the tool response.
-    const provisioningMessages: string[] = [];
     let result: RunCodeResult;
     try {
       result = await service.runCode(input, {
         signal: context?.signal,
         attachments: [...this.runCodeIngressStaging.values()],
-        onProgress: (message: string) => {
-          provisioningMessages.push(message);
-          this.logger.info('run_code provisioning progress', { message });
-        },
         onHarvestedFiles: this.runCodeHarvestSink,
       });
     } catch (error) {
@@ -4354,18 +4344,6 @@ export class Sandbox extends LocalToolMCP {
     return toolResultResponse({
       text: JSON.stringify(result),
       isError: result.status === 'failed',
-      ...(provisioningMessages.length > 0
-        ? {
-            overrides: {
-              events: [
-                buildProvisioningEvent({
-                  succeeded: !(result.status === 'failed' && result.error_code === 'image_unavailable'),
-                  messages: provisioningMessages,
-                }),
-              ],
-            },
-          }
-        : {}),
     });
   }
 

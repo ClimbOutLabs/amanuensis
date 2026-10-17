@@ -3,18 +3,15 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
-import { GetRunCodeStatusResponseDataBackend } from "./GetRunCodeStatusResponseDataBackend.js";
 import { GetRunCodeStatusResponseDataState } from "./GetRunCodeStatusResponseDataState.js";
 
 export const GetRunCodeStatusResponseData: core.serialization.ObjectSchema<serializers.GetRunCodeStatusResponseData.Raw, TrueForge.GetRunCodeStatusResponseData> = core.serialization.object({
-        "backend": GetRunCodeStatusResponseDataBackend.optional(),
         "detail": core.serialization.string().optional(),
         "state": GetRunCodeStatusResponseDataState
     });
 
 export declare namespace GetRunCodeStatusResponseData {
     export interface Raw {
-        backend?: GetRunCodeStatusResponseDataBackend.Raw | null;
         detail?: string | null;
         state: GetRunCodeStatusResponseDataState.Raw;
     }

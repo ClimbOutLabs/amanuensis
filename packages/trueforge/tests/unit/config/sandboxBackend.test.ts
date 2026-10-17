@@ -31,9 +31,9 @@ async function loadConfig(env: Partial<Record<(typeof KEYS)[number], string>>): 
 }
 
 describe('sandbox backend config', () => {
-  it('defaults to docker with four slots and a 2 GiB workspace quota', async () => {
+  it('defaults to the sandbox provider with four slots and a 2 GiB workspace quota', async () => {
     const { default: configuration } = await loadConfig({});
-    expect(configuration.SANDBOX_BACKEND).toBe('docker');
+    expect(configuration.SANDBOX_BACKEND).toBe('provider');
     expect(configuration.SANDBOX_SLOTS).toBe(4);
     expect(configuration.SANDBOX_SLOTS_DIR).toBe('');
     expect(configuration.SANDBOX_SESSION_DISK_MB).toBe(2048);
@@ -60,8 +60,8 @@ describe('sandbox backend config', () => {
   });
 
   it('refuses an unknown backend instead of falling back', async () => {
-    await expect(loadConfig({ SANDBOX_BACKEND: 'host' })).rejects.toThrow(
-      'SANDBOX_BACKEND must be one of docker, slots',
+    await expect(loadConfig({ SANDBOX_BACKEND: 'docker' })).rejects.toThrow(
+      'SANDBOX_BACKEND must be one of slots, provider',
     );
   });
 });

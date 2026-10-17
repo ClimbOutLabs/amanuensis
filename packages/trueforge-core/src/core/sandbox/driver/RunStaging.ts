@@ -4,7 +4,7 @@ import { chmod, chown, lstat, mkdir, readdir, realpath, rm, writeFile } from 'no
 import { join } from 'node:path';
 import { runCodeProgramName, type RunCodeLanguage, type SandboxIdentity } from './IsolationDriver';
 
-/** Uid:gid baked into the sandbox image, used when the server is root and cannot run the container as itself. */
+/** Uid:gid of the sandbox user, used when the server is root and cannot run the code as itself. */
 const IMAGE_SANDBOX_UID = 65532;
 const IMAGE_SANDBOX_GID = 65532;
 

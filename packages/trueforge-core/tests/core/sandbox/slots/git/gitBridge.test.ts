@@ -142,7 +142,6 @@ describe('GitBridge (real git on both sides)', () => {
         .filter(([key]) => key.startsWith('GIT_CONFIG_VALUE_'))
         .map(([, value]) => value);
       expect(config).toContain('/dev/null');
-      expect(Object.keys(call.env)).not.toContain('SANDBOX_COSIGN_PUBLIC_KEY_PATH');
     }
   });
 

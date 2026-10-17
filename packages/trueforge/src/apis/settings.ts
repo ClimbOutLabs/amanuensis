@@ -8,7 +8,6 @@ import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
-import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
@@ -85,9 +84,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/run-code',
     createRunCodeRouter({
-      backend: () => configuration.SANDBOX_BACKEND,
-      imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
-      ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
+      ensureReady: signal => getSharedRunCodeService(deps.logger)?.ensureReady(signal),
     }),
   );
   router.route(

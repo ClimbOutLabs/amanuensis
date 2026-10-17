@@ -262,9 +262,7 @@ export type { CodeModeClientInstall, CodeModeTransport } from './sandbox/codeMod
 export { CodeModeErrorSourceSchema, CodeModeReplySchema, CodeModeRequestSchema } from './sandbox/codeMode/types';
 export type { CodeModeErrorSource, CodeModeReply, CodeModeRequest } from './sandbox/codeMode/types';
 export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './sandbox/egressPolicy';
-// run_code isolation-driver stack (Docker v1; Firecracker parked until /dev/kvm is confirmed)
-export { DockerDriver } from './sandbox/driver/DockerDriver';
-export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
+// run_code isolation-driver stack (sandbox slots)
 export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
 export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
 export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';

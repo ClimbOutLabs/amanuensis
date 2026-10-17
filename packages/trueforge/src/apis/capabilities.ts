@@ -55,23 +55,15 @@ function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
 /** Reason reported when the Settings > Memory screen switch cannot be turned on because no classifier service is configured. */
 export const MEMORY_SCREEN_NOT_CONFIGURED_REASON = 'No screening service configured';
 
-/**
- * The run_code isolation driver's effective, non-secret config. Read-only:
- * selection happens once at server start; changing it requires a config change
- * and restart. The cosign key path is never exposed — only whether one is set.
- */
+/** The run_code sandbox's effective, non-secret limits. Read-only: changing them requires a restart. */
 function sandboxIsolationCapability(): SandboxIsolationCapability {
   return SandboxIsolationCapabilitySchema.parse({
-    isolation_driver: configuration.SANDBOX_ISOLATION_DRIVER,
-    image: configuration.SANDBOX_IMAGE,
     default_timeout_seconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
     max_timeout_seconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
     memory_mb: configuration.SANDBOX_MEMORY_MB,
     disk_mb: configuration.SANDBOX_DISK_MB,
     stdout_stderr_cap_kb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
-    image_pull_timeout_seconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
     network_egress: configuration.SANDBOX_NETWORK_EGRESS,
-    cosign_key_configured: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() !== '',
   });
 }
 

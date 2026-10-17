@@ -1,16 +1,13 @@
 import { z } from 'zod';
 
-/** Model-visible error codes. One taxonomy for both drivers. */
+/** Model-visible error codes. */
 export const RUN_CODE_ERROR_CODES = [
   'timeout',
   'memory_exceeded',
   'disk_exceeded',
   'output_exceeded',
-  'image_unavailable',
   'daemon_unavailable',
-  /** Docker socket not detected: user-actionable install message, surfaced verbatim. */
-  'docker_unavailable',
-  /** Created container failed isolation verification: refused, surfaced verbatim. */
+  /** A slot failed isolation verification: refused, surfaced verbatim. */
   'isolation_refused',
   'concurrency_exceeded',
   'invalid_input',
@@ -25,9 +22,7 @@ export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
  * must be shown to the user verbatim.
  */
 export const RUN_CODE_SETUP_ERROR_CODES = [
-  'image_unavailable',
   'daemon_unavailable',
-  'docker_unavailable',
   'isolation_refused',
 ] as const satisfies readonly RunCodeErrorCode[];
 
@@ -113,26 +108,14 @@ export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;
 export const RUN_CODE_STATUS_STATES = [
   'ready',
   'not_configured',
-  'docker_unavailable',
   'daemon_unavailable',
-  'image_missing',
-  'signature_unverified',
-  'image_unavailable',
   'isolation_refused',
-  'unsupported_platform',
   'slots_unavailable',
 ] as const;
-
-/** Which backend executes code; absent means Docker, as older servers report. */
-export const RUN_CODE_BACKENDS = ['docker', 'slots'] as const;
 
 export const RunCodeStatusSchema = z.object({
   state: z.enum(RUN_CODE_STATUS_STATES).describe('Whether run_code can execute code, or the reason it cannot.'),
   detail: z.string().optional().describe('Technical detail from the sandbox check. Absent when the state says it all.'),
-  backend: z
-    .enum(RUN_CODE_BACKENDS)
-    .optional()
-    .describe('Which backend runs code: docker, or the isolated sandbox slots.'),
 });
 
 export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;

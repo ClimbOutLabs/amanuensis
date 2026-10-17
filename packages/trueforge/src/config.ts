@@ -297,40 +297,18 @@ function parseReflectBudget(options: {
   throw new Error(`${options.envKey} must be one of low, mid, high; got ${JSON.stringify(options.raw)}`);
 }
 
-/** Which process-isolation backend runs `run_code` executions. */
-export type SandboxIsolationDriver = 'docker' | 'firecracker';
-
-/**
- * Parses `SANDBOX_ISOLATION_DRIVER`. Unset/blank → default. Anything else throws
- * instead of silently falling back to a different isolation backend.
- */
-function parseIsolationDriver(options: {
-  envKey: string;
-  raw: string | undefined;
-  defaultValue: SandboxIsolationDriver;
-}): SandboxIsolationDriver {
-  if (options.raw === undefined || options.raw.trim() === '') {
-    return options.defaultValue;
-  }
-  const value = options.raw.trim().toLowerCase();
-  if (value === 'docker' || value === 'firecracker') {
-    return value;
-  }
-  throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
-}
-
-/** Where `run_code` and the shell tools execute: Docker containers, or the gVisor sandbox slots. */
-export type SandboxBackend = 'docker' | 'slots';
+/** Where `run_code` and the shell tools execute: the gVisor sandbox slots, or the configured sandbox provider. */
+export type SandboxBackend = 'slots' | 'provider';
 
 function parseSandboxBackend(options: { envKey: string; raw: string | undefined }): SandboxBackend {
   if (options.raw === undefined || options.raw.trim() === '') {
-    return 'docker';
+    return 'provider';
   }
   const value = options.raw.trim().toLowerCase();
-  if (value === 'docker' || value === 'slots') {
+  if (value === 'provider' || value === 'slots') {
     return value;
   }
-  throw new Error(`${options.envKey} must be one of docker, slots; got ${JSON.stringify(options.raw)}`);
+  throw new Error(`${options.envKey} must be one of slots, provider; got ${JSON.stringify(options.raw)}`);
 }
 
 /** Most slot services the compose files define. */
@@ -971,15 +949,9 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD: number;
   /**
-   * run_code isolation driver. Env: `SANDBOX_ISOLATION_DRIVER`. Default 'docker';
-   * 'firecracker' is opt-in but config-only in this build (the driver is not
-   * implemented yet, so selecting it refuses to start). Selection happens once at
-   * server start; changing it requires a config change and restart.
-   */
-  SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
-  /**
-   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'docker'; 'slots' sends run_code and the
-   * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
+   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'provider', which leaves run_code off and
+   * uses the configured sandbox provider for the shell and file tools; 'slots' sends run_code and those
+   * tools to the gVisor sandbox slots.
    */
   SANDBOX_BACKEND: SandboxBackend;
   /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
@@ -992,26 +964,11 @@ export interface SharedServerConfiguration {
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
-   * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
-   * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
-   * Blank (the default) leaves run_code dormant — existing standalone installs
-   * boot without it; the release process stamps the built digest here to opt
-   * in, and a non-blank value gets the full fail-closed startup validation.
-   */
-  SANDBOX_IMAGE: string;
-  /**
    * Parent directory for per-run run_code isolation dirs
    * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
-   * Derived: `{app data dir}/sandbox-runs` (both topologies: the Docker
-   * driver is host-local even in distributed mode).
+   * Derived: `{app data dir}/sandbox-runs`.
    */
   SANDBOX_RUNS_DIR: string;
-  /**
-   * Directory where the Docker driver remembers its last successful image
-   * signature verification, so readiness works offline.
-   * Derived: `{app data dir}/sandbox-state`.
-   */
-  SANDBOX_STATE_DIR: string;
   /**
    * Scratch directory for the server's own git work on behalf of sandbox slots (clone, fetch, push). Every
    * operation uses a fresh subdirectory and removes it. Derived: `{app data dir}/git-bridge`.
@@ -1044,38 +1001,16 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_STDOUT_STDERR_CAP_KB: number;
   /**
-   * Bound for the first-run image pull, seconds. Startup asserts
-   * run_code's own dispatch deadline (`getRunCodeToolCallTimeoutMs`) covers
-   * this plus max_timeout_seconds, fail-closed — the normal per-tool timeout
-   * is scoped out. Env: `SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS`. Default 600.
-   */
-  SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS: number;
-  /**
    * RESERVED for a future version. v1 drivers ignore it; startup FAILS CLOSED
    * when true. Env: `SANDBOX_NETWORK_EGRESS`. Default false.
    */
   SANDBOX_NETWORK_EGRESS: boolean;
-  /**
-   * Path to the cosign public-key PEM used to verify the sandbox image signature
-   * (fail-closed). Env: `SANDBOX_COSIGN_PUBLIC_KEY_PATH`. Required when
-   * the isolation driver is docker; the release process ships the key.
-   */
-  SANDBOX_COSIGN_PUBLIC_KEY_PATH: string;
   /**
    * Turn artifact retention: index rows (and blobs no surviving row references)
    * older than this many days are deleted by a daily startup-anchored sweep.
    * Env: `TURN_ARTIFACT_RETENTION_DAYS`. Default 30.
    */
   TURN_ARTIFACT_RETENTION_DAYS: number;
-  /**
-   * Firecracker stanza — config only in this build; the driver is parked until
-   * /dev/kvm is confirmed on the target host. Only read when
-   * SANDBOX_ISOLATION_DRIVER=firecracker.
-   */
-  SANDBOX_FIRECRACKER_KVM_DEVICE: string;
-  SANDBOX_FIRECRACKER_KERNEL: string;
-  SANDBOX_FIRECRACKER_ROOTFS: string;
-  SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED: boolean;
   /**
    * Max bytes for an HTTP request body. Env: `MAX_REQUEST_BODY_BYTES`. Default 36 MiB.
    */
@@ -1728,11 +1663,6 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD'),
     defaultValue: 26_214_400,
   }),
-  SANDBOX_ISOLATION_DRIVER: parseIsolationDriver({
-    envKey: 'SANDBOX_ISOLATION_DRIVER',
-    raw: getEnv('SANDBOX_ISOLATION_DRIVER'),
-    defaultValue: 'docker',
-  }),
   SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
   SANDBOX_SLOTS: parsePositiveInt({
     envKey: 'SANDBOX_SLOTS',
@@ -1745,9 +1675,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: 2048,
   }),
-  SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
-  SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
   SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
     Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
@@ -1777,29 +1705,15 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_STDOUT_STDERR_CAP_KB'),
     defaultValue: 256,
   }),
-  SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS: parsePositiveInt({
-    envKey: 'SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS',
-    raw: getEnv('SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS'),
-    defaultValue: 600,
-  }),
   SANDBOX_NETWORK_EGRESS: parseBoolean({
     envKey: 'SANDBOX_NETWORK_EGRESS',
     raw: getEnv('SANDBOX_NETWORK_EGRESS'),
     defaultValue: false,
   }),
-  SANDBOX_COSIGN_PUBLIC_KEY_PATH: getEnv('SANDBOX_COSIGN_PUBLIC_KEY_PATH', { defaultValue: '' }) ?? '',
   TURN_ARTIFACT_RETENTION_DAYS: parsePositiveInt({
     envKey: 'TURN_ARTIFACT_RETENTION_DAYS',
     raw: getEnv('TURN_ARTIFACT_RETENTION_DAYS'),
     defaultValue: 30,
-  }),
-  SANDBOX_FIRECRACKER_KVM_DEVICE: getEnv('SANDBOX_FIRECRACKER_KVM_DEVICE', { defaultValue: '/dev/kvm' }) ?? '/dev/kvm',
-  SANDBOX_FIRECRACKER_KERNEL: getEnv('SANDBOX_FIRECRACKER_KERNEL', { defaultValue: '' }) ?? '',
-  SANDBOX_FIRECRACKER_ROOTFS: getEnv('SANDBOX_FIRECRACKER_ROOTFS', { defaultValue: '' }) ?? '',
-  SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED: parseBoolean({
-    envKey: 'SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED',
-    raw: getEnv('SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED'),
-    defaultValue: false,
   }),
   MAX_REQUEST_BODY_BYTES: parsePositiveInt({
     envKey: 'MAX_REQUEST_BODY_BYTES',
@@ -2495,13 +2409,7 @@ if (isTrueFoundryModeEnabled(configuration)) {
   }
 }
 
-// run_code isolation driver: fail closed at startup. Selection happens
-// once at server start; changing it requires a config change and restart.
-// the image pin is the feature opt-in. A blank SANDBOX_IMAGE (the default
-// for existing standalone installs) leaves run_code dormant — Docker is
-// required only when run_code executes (plan §2.8), not at boot — while a
-// configured image gets the full fail-closed validation.
-const runCodeConfigured = configuration.SANDBOX_BACKEND === 'docker' && configuration.SANDBOX_IMAGE.trim() !== '';
+// Fail closed at startup on a slot setup that cannot work.
 if (configuration.SANDBOX_BACKEND === 'slots') {
   if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
     throw new Error('SANDBOX_SLOTS_DIR is required when SANDBOX_BACKEND=slots: it holds the slot control directories.');
@@ -2512,11 +2420,6 @@ if (configuration.SANDBOX_BACKEND === 'slots') {
 }
 validateRunCodeStartupConfig({
   networkEgress: configuration.SANDBOX_NETWORK_EGRESS,
-  isolationDriver: configuration.SANDBOX_ISOLATION_DRIVER,
-  platform: process.platform,
-  image: configuration.SANDBOX_IMAGE,
-  imageConfigured: runCodeConfigured,
-  imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
   defaultTimeoutSeconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
   maxTimeoutSeconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
   memoryMb: configuration.SANDBOX_MEMORY_MB,
@@ -2525,19 +2428,6 @@ validateRunCodeStartupConfig({
   runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
   serverExecutionTimeoutSeconds: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS,
 });
-// The cosign key is only needed once an image is configured; a dormant
-// install must not fail boot for a key it will never use.
-if (
-  runCodeConfigured &&
-  configuration.SANDBOX_ISOLATION_DRIVER === 'docker' &&
-  configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === ''
-) {
-  throw new Error(
-    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
-      'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',
-  );
-}
-
 if (!configuration.STANDALONE && configuration.TRUEFORGE_API_KEY.trim() === '') {
   throw new Error('TRUEFORGE_API_KEY must not be empty when STANDALONE=false.');
 }
@@ -2581,13 +2471,12 @@ export function getAuthCookieSuffix(config: ServerConfiguration = configuration)
 
 /**
  * run_code's own dispatch deadline in milliseconds. Derived from the
- * configured sandbox bounds — `image_pull_timeout_seconds` +
- * `max_timeout_seconds` + 60 s margin — so the long deadline tracks the
+ * configured sandbox bounds — `max_timeout_seconds` + 60 s margin — so the long deadline tracks the
  * bounds it protects and stays scoped to sandbox/run_code instead of every
  * tool (which use `TOOL_CALL_TIMEOUT_MS`).
  */
 export function getRunCodeToolCallTimeoutMs(config: ServerConfiguration = configuration): number {
-  return (config.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS + config.SANDBOX_MAX_TIMEOUT_SECONDS) * 1000 + 60_000;
+  return config.SANDBOX_MAX_TIMEOUT_SECONDS * 1000 + 60_000;
 }
 
 /** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty → `/`. */
