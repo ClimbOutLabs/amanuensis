@@ -1,9 +1,14 @@
+import { createLogger } from 'winston';
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import type { ApprovalDecision } from '../../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
+import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
+import { DeferredTool } from '../../../../src/core/runtime/DeferredTool';
+import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
+import { makeMockIMCPServer, OBJECT_INPUT_SCHEMA } from '../../harnessMocks';
 import { plainDraft } from './fixtures';
-import { build, json, type Route } from './harness';
+import { build, json, text, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 const sendRoute: Route = url =>
@@ -77,5 +82,40 @@ describe('an approved send at dispatch', () => {
     expect(outcome.failure).toBe(true);
     expect(outcome.rawContent).toContain('Approval invalid');
     expect(sends).toBe(0);
+  });
+});
+
+describe('a send reached through call_tool on a connector', () => {
+  it('is not run: the connector would show a generic card, so the model is told to call send_draft directly', async () => {
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url =>
+          url.pathname === '/gmail/v1/users/me/drafts/d1'
+            ? json({ id: 'd1', message: draft('Thursday works.') })
+            : undefined,
+        sendRoute,
+      ],
+    });
+    const connector = makeMockIMCPServer({
+      name: 'notes',
+      preload: false,
+      tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
+    });
+    const deferred = new DeferredTool([connector], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      hostToolSets: [tools],
+    });
+    const response = await deferred.callTool({
+      name: 'call_tool',
+      arguments: { mcp_server: 'notes', tool_name: 'send_draft', input: { draft_id: 'd1' } },
+    });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('expected a resolved response');
+    }
+    expect(response.result.isError).toBe(true);
+    expect(text(response)).toContain('call send_draft directly');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 });

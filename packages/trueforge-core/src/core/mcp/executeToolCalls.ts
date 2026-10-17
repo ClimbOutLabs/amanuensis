@@ -1502,6 +1502,9 @@ export async function executeToolCalls({
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
+            ...(toolCall.tool_info.mint_canonical_params === undefined
+              ? {}
+              : { approved_params: toolCall.tool_info.mint_canonical_params }),
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),

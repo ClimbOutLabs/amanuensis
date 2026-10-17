@@ -5,6 +5,7 @@ import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/
 import type { GmailThread } from '../../../../src/core/email/gmail/gmailWire';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { GOOGLE_TOKEN_URL } from '../../../../src/core/google/oauth';
+import type { ToolInvocationContext } from '../../../../src/core/mcp/IMCPServer';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -190,4 +191,12 @@ export async function approvalProblem(input: {
     },
     ctx: { ...input.sentinel, repository_id: null, agent_intent: null, offline: false },
   });
+}
+
+/** What the host hands a tool with an approved call: the params the approval was minted over. */
+export function approvedContext(info: Awaited<ReturnType<GmailToolSet['toolCallInfo']>>): ToolInvocationContext {
+  return {
+    admission_provenance: { source: 'user_approval', decision: 'allow' },
+    approved_params: info.mint_canonical_params,
+  };
 }
