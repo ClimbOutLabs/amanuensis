@@ -35,6 +35,7 @@ import {
   escapeDisplayText,
   extractCardFields,
   renderOutboundArguments,
+  sendRefusal,
   type ExtractionResult,
 } from './extractorRegistry';
 import { isMapsToolName, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
@@ -1331,10 +1332,15 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A send the card cannot show exactly as it will go out is refused: approval must cover all of it.
-  if (extraction.unsendable !== null) {
+  const refusal = sendRefusal({
+    tool_name: action.tool_name,
+    canonical_params: action.canonical_params,
+    tool_type: action.tool_type,
+  });
+  if (refusal !== null) {
     return autoDenyDecision({
       reason: 'outbound_guard',
-      reason_detail: extraction.unsendable,
+      reason_detail: refusal,
       sensitive_read: false,
     });
   }

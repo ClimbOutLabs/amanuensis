@@ -194,7 +194,7 @@ describe('recipients on the card', () => {
       await classifyTier(
         connectorCall({
           tool_name: 'post_message',
-          params: { to: 'a@x.example', url: 'https://x.example/​path' },
+          params: { to: 'a@x.example', url: 'https://x.example/\u200Bpath' },
         }),
         makeCtx(),
       ),
@@ -203,7 +203,7 @@ describe('recipients on the card', () => {
   });
 
   test('a recipient with spoofing characters is refused instead of carded', async () => {
-    const decision = await send({ to: 'a@x.example‮gnp.exe' });
+    const decision = await send({ to: 'a@x.example\u202Egnp.exe' });
     expect(decision.card).toBeNull();
     expect(decision.auto_deny).toBe('outbound_guard');
   });

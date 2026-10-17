@@ -309,24 +309,25 @@ function hasHiddenRecipient(value: unknown, depth = 0): boolean {
 }
 
 /**
- * Why a send cannot be shown on its card exactly as it will go out, or null. Mail is refused on any
- * hidden character; other sends only on a hidden recipient, since hidden text elsewhere is shown as codes.
+ * Why a send cannot be shown on its card exactly as it will go out, or null; such a send is refused,
+ * never carded. Mail is refused on any hidden character; other sends only on a hidden recipient,
+ * since hidden text elsewhere is shown as codes. A key the card would cut refuses a connector send.
  */
-function unsendableReason(input: {
-  params: Record<string, unknown>;
-  words: string;
-  external_service: boolean;
-  connector: boolean;
+export function sendRefusal(input: {
+  tool_name: string;
+  canonical_params: Record<string, unknown>;
+  tool_type?: 'truefoundry-system' | 'mcp' | undefined;
 }): string | null {
-  const mail = hasPhrase(input.words, ...MAIL_WORDS);
-  if (!input.external_service && !mail) {
+  const params = input.canonical_params;
+  const mail = hasPhrase(nameWords(input.tool_name), ...MAIL_WORDS);
+  if (!mail && !isExternalServiceAction(input.tool_name)) {
     return null;
   }
-  if (mail ? containsHiddenCharacters(input.params) : hasHiddenRecipient(input.params)) {
+  if (mail ? containsHiddenCharacters(params) : hasHiddenRecipient(params)) {
     return HIDDEN_SEND_REFUSAL;
   }
-  const keyIsCut = Object.keys(input.params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0);
-  return input.connector && keyIsCut ? LONG_KEY_SEND_REFUSAL : null;
+  const keyIsCut = Object.keys(params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0);
+  return input.tool_type === 'mcp' && keyIsCut ? LONG_KEY_SEND_REFUSAL : null;
 }
 
 /** Host (with any port) of an http(s) URL, or null when the value is not one. */
@@ -519,8 +520,6 @@ export interface ExtractionResult {
   external_service: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
-  /** Why a send cannot be shown to the user exactly as it will go out, or null. Such a send is refused, never carded. */
-  unsendable: string | null;
 }
 
 /**
@@ -542,22 +541,15 @@ export function extractCardFields(input: {
     entry?.external_service ?? EXTERNAL_SERVICE_FRAGMENTS.some(f => input.tool_name.toLowerCase().includes(f));
   const base = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
   const destinationUnverifiable = externalService && base.destination === null && base.recipient === null;
-  const words = nameWords(input.tool_name);
-  const unsendable = unsendableReason({
-    params: input.canonical_params,
-    words,
-    external_service: externalService,
-    connector: input.tool_type === 'mcp',
-  });
   if (input.tool_type !== 'mcp') {
     return {
       fields: base,
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
       connector_what: null,
-      unsendable,
     };
   }
+  const words = nameWords(input.tool_name);
   // Deleting or installing is described by the classifier's own destructive and install cards.
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
     ? undefined
@@ -580,7 +572,6 @@ export function extractCardFields(input: {
     fields,
     destination_unverifiable: destinationUnverifiable,
     external_service: externalService,
-    unsendable,
     connector_what:
       family === undefined
         ? null

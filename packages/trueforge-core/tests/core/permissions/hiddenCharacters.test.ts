@@ -22,12 +22,12 @@ describe('hidden characters', () => {
   test('tab, newline and carriage return lay text out and are not hidden in a message', () => {
     expect(hasHiddenCharacters('a\tb\r\nc\n')).toBe(false);
     expect(hasHiddenCharacters('a\u0000b')).toBe(true);
-    expect(hasHiddenCharacters('a​b')).toBe(true);
+    expect(hasHiddenCharacters('a\u200Bb')).toBe(true);
   });
 
   test('searches keys and nested values', () => {
     expect(containsHiddenCharacters({ a: [{ b: 'ok' }], c: 3, d: null })).toBe(false);
     expect(containsHiddenCharacters({ a: [{ b: 'x\u{E0041}' }] })).toBe(true);
-    expect(containsHiddenCharacters({ 'k​': 'ok' })).toBe(true);
+    expect(containsHiddenCharacters({ 'k\u200B': 'ok' })).toBe(true);
   });
 });
