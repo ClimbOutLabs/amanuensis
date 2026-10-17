@@ -4,7 +4,7 @@
  * the test sees exactly what the approval cards say and what the pins carry.
  */
 import { z } from '@hono/zod-openapi';
-import { TurnSchema, type Turn, type TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import { type Turn, type TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -81,11 +81,8 @@ async function runTurn({
   return GetTurnResponseSchema.parse(await turn.json()).data;
 }
 
-type PendingCall = Extract<Turn['state'], { status: 'done' }>['required_actions'][number] extends infer Action
-  ? Action extends { type: 'tool.approval_required' }
-    ? Action['tool_calls'][number]
-    : never
-  : never;
+type RequiredAction = Extract<Turn['state'], { status: 'done' }>['required_actions'][number];
+type PendingCall = Extract<RequiredAction, { type: 'tool.approval_required' }>['tool_calls'][number];
 
 /** The one call a paused turn waits on, with the thread it belongs to. */
 function pendingCall(turn: Turn): { thread_id: string; call: PendingCall } | undefined {
@@ -276,5 +273,3 @@ describe('grounded finder over the real server path', () => {
     TURN_TIMEOUT_MS,
   );
 });
-
-void TurnSchema;
