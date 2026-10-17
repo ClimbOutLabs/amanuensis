@@ -221,6 +221,8 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     );
     for (const entry of entries) {
       const session = recordAt(entry['session'], 'session');
+      // Import never carries Approve for this chat choices; expectNoApprovalGrants checks the target side.
+      session['approval_grants'] = '<never imported>';
       entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
         stringAt(artifact['path'], 'path'),
       );
@@ -291,11 +293,6 @@ function normalizeSection(name: string, parsed: unknown): unknown {
       include_uploads: manifest['include_uploads'],
     };
   }
-  if (name === 'chats.json') {
-    const chats = recordAt(normalized, name);
-    chats['chats'] = sortBy(recordsAt(chats['chats'], 'chats'), chat => stringAt(chat['id'], 'id'));
-    return chats;
-  }
   return normalized;
 }
 
@@ -307,11 +304,18 @@ function auditRowsWithoutIds(archive: Map<string, Buffer>): JsonRecord[] {
   });
 }
 
+function expectNoApprovalGrants(archive: Map<string, Buffer>): void {
+  for (const entry of recordsAt(parseJson(archive.get('sessions.json'), 'sessions.json'), 'sessions.json')) {
+    expect(recordAt(entry['session'], 'session')['approval_grants']).toEqual([]);
+  }
+}
+
 function expectExportsToMatch(first: Buffer, second: Buffer): void {
   const firstEntries = new Map(readZipEntries(first).map(entry => [entry.name, entry.data]));
   const secondEntries = new Map(readZipEntries(second).map(entry => [entry.name, entry.data]));
   expect([...secondEntries.keys()].sort()).toEqual([...firstEntries.keys()].sort());
   expect(auditRowsWithoutIds(secondEntries)).toEqual(auditRowsWithoutIds(firstEntries));
+  expectNoApprovalGrants(secondEntries);
   for (const [name, data] of firstEntries) {
     const other = secondEntries.get(name);
     expect(other).toBeDefined();
