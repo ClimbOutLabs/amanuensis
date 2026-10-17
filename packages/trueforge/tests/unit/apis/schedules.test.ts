@@ -470,7 +470,7 @@ describe('internal schedule execution', () => {
       agent_id: agent.id,
       agent_name: agent.name,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC', status: 'active' },
+      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone: 'America/Chicago', status: 'active' },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -529,6 +529,34 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
+  });
+
+  it("reads the run's times in the schedule's own zone, since no device is there to name one", async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-zone',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    await execute(run.id);
+
+    expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ deps: expect.objectContaining({ clientTimezone: 'America/Chicago' }) }),
+    );
   });
 
   it('maps an unknown run to 404', async () => {

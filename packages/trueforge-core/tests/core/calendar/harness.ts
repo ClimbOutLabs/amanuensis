@@ -15,7 +15,7 @@ import { connectedRecord, FakeConnections, OWNER } from '../google/fakes';
 export { googleError, json, text } from '../email/gmail/harness';
 
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
-const EVENTS_PATH = '/calendar/v3/calendars/primary/events';
+export const EVENTS_PATH = '/calendar/v3/calendars/primary/events';
 
 /** The list endpoint, answering every request with the same page. */
 export const eventsRoute =

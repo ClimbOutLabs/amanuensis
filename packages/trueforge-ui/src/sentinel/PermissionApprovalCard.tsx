@@ -5,6 +5,7 @@ import { useState, type FC } from 'react';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
@@ -155,20 +156,22 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email } = card;
+  const { email, calendar_event: calendarEvent } = card;
+  const badge =
+    email !== null ? EMAIL_BADGES[email.action] : calendarEvent !== null ? CALENDAR_BADGES[calendarEvent.action] : null;
   return (
     <div className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
           <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
-          {email === null ? (
+          {badge === null ? (
             <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
               {toolName}
             </span>
           ) : (
             <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 text-xs text-text-secondary">
-              {EMAIL_BADGES[email.action]}
+              {badge}
             </span>
           )}
         </div>
@@ -205,6 +208,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         )}
 
         {email !== null && <EmailMessage email={email} />}
+
+        {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 

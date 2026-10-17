@@ -46,6 +46,34 @@ export const Tier3EmailSchema = z
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
 
+const Tier3CalendarEventBeforeSchema = z
+  .object({
+    title: z.string().describe('Title before the change.'),
+    when: z.string().describe('Local date and time before the change, in plain words.'),
+    duration: z.string().describe('How long the event lasted before the change.'),
+    location: z.string().describe('Place before the change; empty when none.'),
+  })
+  .describe('The event as it is now, before a change.')
+  .openapi('Tier3CalendarEventBefore');
+
+export const Tier3CalendarEventSchema = z
+  .object({
+    action: z.enum(['create', 'change']).describe('Whether a new event is added or an existing one changed.'),
+    calendar: z.string().describe('The Google account whose main calendar is written.'),
+    title: z.string().describe('Event title.'),
+    when: z.string().describe('Local date and time in plain words.'),
+    time_zone: z.string().describe('IANA time zone the times are in.'),
+    duration: z.string().describe('How long the event lasts, in plain words.'),
+    location: z.string().describe('Place; empty when none.'),
+    description: z.string().describe('Description the write sets; empty when none.'),
+    attendees: z.array(z.string()).describe('Every guest on the event.'),
+    guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
+    one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
+    before: Tier3CalendarEventBeforeSchema.nullable(),
+  })
+  .describe('The calendar event a write adds or changes, shown in full.')
+  .openapi('Tier3CalendarEvent');
+
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
@@ -74,6 +102,7 @@ export const Tier3CardSchema = z
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
     email: Tier3EmailSchema.nullable().optional(),
+    calendar_event: Tier3CalendarEventSchema.nullable().optional(),
   })
   .openapi('Tier3Card');
 

@@ -101,6 +101,8 @@ function CopyField({ label, value, href }: { label: string; value: string; href?
 }
 
 const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
+const CALENDAR_WRITE_FEATURE = 'calendar_write' satisfies GoogleFeature;
+const CALENDAR_FEATURES: GoogleFeature[] = [CALENDAR_FEATURE, CALENDAR_WRITE_FEATURE];
 
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
@@ -345,7 +347,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             )}
             <ul className="space-y-1 text-text-secondary">
               {status.features
-                .filter(item => item.feature !== CALENDAR_FEATURE)
+                .filter(item => !CALENDAR_FEATURES.includes(item.feature))
                 .map(item => (
                   <li key={item.feature}>
                     {item.label}: {item.granted ? 'allowed' : 'not allowed'}
@@ -373,9 +375,28 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 </div>
                 {grantedFeatures(status).includes(CALENDAR_FEATURE) ? (
                   <>
-                    <p className="text-text-secondary">
-                      Aman can read events on your calendar. It cannot add, change or delete them.
-                    </p>
+                    {grantedFeatures(status).includes(CALENDAR_WRITE_FEATURE) ? (
+                      <p className="text-text-secondary">
+                        Aman can read events on your calendar, and add or change events after you approve each one. It
+                        cannot delete events.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-text-secondary">
+                          Aman can read events on your calendar. To let Aman add events it finds in your mail or chats,
+                          select Allow Aman to add events. You still approve each event before it is saved.
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          type="button"
+                          disabled={busy || offline}
+                          onClick={() => void beginConsent({ useSavedClient: true, features: CALENDAR_FEATURES })}
+                        >
+                          Allow Aman to add events
+                        </Button>
+                      </>
+                    )}
                     <p className="text-text-secondary">
                       If Calendar stops answering, check that its API is still on: open this page and click Enable.
                     </p>
@@ -388,8 +409,8 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 ) : (
                   <>
                     <p className="text-text-secondary">
-                      Lets Aman read events on your calendar, such as a birthday coming up. It cannot add, change or
-                      delete them.
+                      Lets Aman read events on your calendar, such as a birthday coming up. Letting Aman add events is a
+                      separate step once Calendar is connected.
                     </p>
                     <ol className="list-decimal space-y-3 pl-5">
                       <li>

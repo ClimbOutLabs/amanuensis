@@ -1,9 +1,9 @@
 /**
  * Canonical owner of what Aman may ask a Google account for. A feature is the unit the user sees and
  * the tools are gated on; each maps to the narrowest scope that covers it. Never a full-mailbox or
- * full-calendar scope: calendar is read-only and limited to events.
+ * full-calendar scope: calendar access is limited to events.
  */
-export const GOOGLE_FEATURES = ['gmail_read', 'gmail_compose', 'calendar_read'] as const;
+export const GOOGLE_FEATURES = ['gmail_read', 'gmail_compose', 'calendar_read', 'calendar_write'] as const;
 export type GoogleFeature = (typeof GOOGLE_FEATURES)[number];
 
 interface GoogleFeatureInfo {
@@ -23,6 +23,10 @@ const FEATURE_INFO: Record<GoogleFeature, GoogleFeatureInfo> = {
   calendar_read: {
     scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
     label: 'Read events on your calendar',
+  },
+  calendar_write: {
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+    label: 'Add and change events you approve',
   },
 };
 

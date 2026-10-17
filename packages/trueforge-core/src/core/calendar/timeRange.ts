@@ -4,13 +4,21 @@ import { utcOffsetMinutes } from '../util/clientTimezone';
 import { MAX_RANGE_DAYS } from './toolContract';
 
 const MS_PER_DAY = 86_400_000;
-/** The instant a calendar day begins in the zone. Checked twice, so a day that starts across a clock change is right. */
-function startOfDay({ date, zone }: { date: string; zone: string }): Date {
-  const parsed = parseDateOnly(date);
-  const wallClock = parsed === undefined ? Number.NaN : Date.UTC(parsed.year, parsed.month - 1, parsed.day);
-  const first = wallClock - utcOffsetMinutes({ instant: new Date(wallClock), zone }) * 60_000;
-  const second = wallClock - utcOffsetMinutes({ instant: new Date(first), zone }) * 60_000;
+/**
+ * The instant a wall-clock time on a day falls at in the zone. Checked twice, so a time across a clock change is
+ * right; a time the clocks skip lands just after the gap.
+ */
+export function zonedInstant(input: { date: string; hour: number; minute: number; zone: string }): Date {
+  const parsed = parseDateOnly(input.date);
+  const wallClock =
+    parsed === undefined ? Number.NaN : Date.UTC(parsed.year, parsed.month - 1, parsed.day, input.hour, input.minute);
+  const first = wallClock - utcOffsetMinutes({ instant: new Date(wallClock), zone: input.zone }) * 60_000;
+  const second = wallClock - utcOffsetMinutes({ instant: new Date(first), zone: input.zone }) * 60_000;
   return new Date(second);
+}
+
+function startOfDay({ date, zone }: { date: string; zone: string }): Date {
+  return zonedInstant({ date, hour: 0, minute: 0, zone });
 }
 
 /** The calendar date before or after another; the text is returned unchanged when it is not a real date. */

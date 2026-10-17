@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
+import type { SentinelApprovalCalendarEvent, SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
   return {
@@ -19,6 +19,7 @@ function baseCard(): SentinelApprovalCard {
     destination_host: null,
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
   };
 }
 
@@ -298,5 +299,57 @@ describe('PermissionApprovalCard for mail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  describe('a calendar event', () => {
+    const event: SentinelApprovalCalendarEvent = {
+      action: 'change',
+      calendar: 'ada@example.com',
+      title: 'Team sync (online)',
+      when: 'Tuesday, October 20, 2026, 2:00 pm to 2:30 pm',
+      time_zone: 'America/New_York',
+      duration: '30 minutes',
+      location: 'Room 4',
+      description: 'Bring the plan.',
+      attendees: ['lin@example.com', 'sam@example.com'],
+      guests_emailed: true,
+      one_of_repeating: true,
+      before: {
+        title: 'Team sync',
+        when: 'Monday, October 19, 2026, 8:00 am to 8:30 am',
+        duration: '30 minutes',
+        location: '',
+      },
+    };
+
+    it('shows before and after, the calendar, local time with its zone, length, place and every guest', () => {
+      renderCard({ plain_what: 'Change "Team sync" in your Google Calendar.', calendar_event: event });
+      expect(screen.getByText('Change event')).toBeInTheDocument();
+      expect(screen.queryByText('payment')).not.toBeInTheDocument();
+      const shown = screen.getByText('Now').parentElement?.parentElement;
+      expect(shown).toHaveTextContent('Title: Team sync');
+      expect(shown).toHaveTextContent('When: Monday, October 19, 2026, 8:00 am to 8:30 am');
+      expect(shown).toHaveTextContent('After the change');
+      expect(shown).toHaveTextContent('Calendar: Main calendar of ada@example.com');
+      expect(shown).toHaveTextContent('Title: Team sync (online)');
+      expect(shown).toHaveTextContent('When: Tuesday, October 20, 2026, 2:00 pm to 2:30 pm');
+      expect(shown).toHaveTextContent('Time zone: America/New_York');
+      expect(shown).toHaveTextContent('Length: 30 minutes');
+      expect(shown).toHaveTextContent('Where: Room 4');
+      expect(shown).toHaveTextContent('Repeats: Only this date changes');
+      expect(shown).toHaveTextContent('Guests: lin@example.com, sam@example.com');
+      expect(screen.getByText('Google will email every guest about this.')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Event description' })).toHaveTextContent('Bring the plan.');
+    });
+
+    it('says plainly when there are no guests, and for a new event shows what will be saved', () => {
+      renderCard({
+        calendar_event: { ...event, action: 'create', attendees: [], guests_emailed: false, before: null },
+      });
+      expect(screen.getByText('Add event')).toBeInTheDocument();
+      expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
+      expect(screen.getByText('None')).toBeInTheDocument();
+      expect(screen.queryByText(/Google will/)).not.toBeInTheDocument();
+    });
   });
 });

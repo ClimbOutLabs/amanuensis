@@ -160,6 +160,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      // A scheduled run has no device, so times are read in the schedule's own zone.
+      clientTimezone: item.schedule.manifest.timezone,
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,

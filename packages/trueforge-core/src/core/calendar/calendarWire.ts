@@ -19,6 +19,8 @@ const AttendeeSchema = z.object({
 
 export const CalendarEventSchema = z.object({
   id: z.string(),
+  /** Changes whenever the event does, so a change can be bound to the version that was shown. */
+  etag: z.string().optional(),
   status: z.string().optional(),
   eventType: z.string().optional(),
   summary: z.string().optional(),
