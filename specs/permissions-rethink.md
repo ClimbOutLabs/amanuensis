@@ -62,9 +62,9 @@ Three standing trusts run a connector call without a card instead. Each runs as 
 
 ## Durable Approvals
 
-An approval is given at one of three scopes, chosen on the card:
+The choices are **Approve**, **Approve for this chat**, **Always allow**, and **Deny**, always shown in that order. Every card offers **Approve** and **Deny**. The live card in a chat adds **Approve for this chat** for calls that scope can cover; the card for an action a scheduled run held for the owner adds **Always allow** for calls that scope can cover. The first three give an approval at one of three scopes; **Deny** refuses the call and nothing runs.
 
-- **Once.** The approval is a single-use token recorded in the server's database, bound to a hash of the action's exact parameters. It survives restarts, so an approval given before a restart still stands for the action it covered. The token expires 24 hours after it is issued. Immediately before the call runs, the server re-verifies the parameters byte-for-byte; anything the hash covers that changed after approval invalidates the token and the agent must ask again. A changed action (different parameters) always requires a fresh approval, and a once approval cannot be replayed for a later action.
+- **Approve.** The approval covers this one call. It is a single-use token recorded in the server's database, bound to a hash of the action's exact parameters. It survives restarts, so an approval given before a restart still stands for the action it covered. The token expires 24 hours after it is issued. Immediately before the call runs, the server re-verifies the parameters byte-for-byte; anything the hash covers that changed after approval invalidates the token and the agent must ask again. A changed action (different parameters) always requires a fresh approval, and a single-call approval cannot be replayed for a later action.
 - **Approve for this chat.** Chat scope is offered only for calls whose effect is inspect or verify, or that carry an implementation-plan grant. For a connector tool, the grant covers that tool for the rest of the session: later calls to it in the same chat are admitted without a card. For sandbox exec, the grant key is per invocation (a digest of purpose, command, working directory, and environment), so approving one invocation never authorizes a different one. The grant ends with the session.
 - **Always allow.** A standing per-user grant for one read-only connector tool on one connector, recorded in the server's database and applied until the user revokes it. Calls it admits run as Tier 1 and are recorded in the audit feed. It never crosses to another user, connector, or tool.
 
@@ -91,7 +91,7 @@ All tests use synthetic data, never the user's real data.
 - A Tier 3 action with an unverifiable destination or a network need while offline is denied without a card
 - Web search through the designated provider runs silently within its bounds (guard pass, turn cap, returned URLs only) and asks when the switch is off or a bound fails
 - First-party read-only closed-world connector tools, and tools holding an Always allow grant, run without a card and are audited
-- Chat-scope and Always allow approvals admit later calls at their scope; a once approval cannot be replayed
+- Chat-scope and Always allow approvals admit later calls at their scope; a single-call Approve cannot be replayed
 - Approvals survive a server restart
 - Unclassifiable actions default to Tier 3
 
