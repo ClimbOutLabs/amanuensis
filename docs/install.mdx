@@ -226,6 +226,8 @@ aman password                  # with several instances: aman password --instanc
 
 It asks for a new password twice, signs everyone out of that instance, and restarts only its sign-in service and app. Run it on the computer where Aman is installed; that is how Aman knows you are the owner.
 
+The app restart stops a chat or task that is running. If a step fails, the command says whether the old password and old sign-ins still work, and what to run next.
+
 ## What is off in this version
 
 Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.

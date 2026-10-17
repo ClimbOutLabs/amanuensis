@@ -110,37 +110,132 @@ test_prompts_on_a_terminal() {
   t_begin "on a terminal it asks for the new password twice, not shown, and a wrong repeat asks again"
   sandbox_new
   install_machine
-  run_install_tty "New password for $OWNER:=>wrong-first-time
-Repeat the new password:=>not-the-same
-New password for $OWNER:=>$NEW_PASSWORD
-Repeat the new password:=>$NEW_PASSWORD" instance password
+  run_install_tty "New password for $OWNER, 8 to 72 characters (not shown):=>wrong-first-time
+Repeat the new password (not shown):=>not-the-same
+New password for $OWNER, 8 to 72 characters (not shown):=>$NEW_PASSWORD
+Repeat the new password (not shown):=>$NEW_PASSWORD" instance password
   assert_rc 0
-  assert_contains "$OUT" "New password for $OWNER:"
-  assert_contains "$OUT" "Repeat the new password:"
+  assert_contains "$OUT" "New password for $OWNER, 8 to 72 characters (not shown):"
+  assert_contains "$OUT" "Repeat the new password (not shown):"
   assert_contains "$OUT" "The passwords do not match. Type them again."
   assert_not_contains "$OUT" "$NEW_PASSWORD" "not echoed"
   assert_eq "$(cat "$SB_STATE/hash_stdin")" "$NEW_PASSWORD"
   sandbox_drop
 }
 
+# The line number of the first docker call containing the text, 0 when there is none.
+log_line() { grep -nF -- "$1" "$STUB_LOG" | head -n 1 | cut -d: -f1 | grep . || echo 0; }
+dex_stopped() { [ -e "$SB_STATE/dex_stopped_aman-${1:-main}" ]; }
+DEX_UP="force-recreate --no-deps --wait --wait-timeout 240 dex"
+APP_UP="force-recreate --no-deps --wait --wait-timeout 240 app"
+
 test_sessions_are_signed_out() {
-  t_begin "only the sign-in service and the app restart, and the sign-in keys are cleared so old sessions end"
+  t_begin "the sign-in service stops, its keys are deleted as the Dex user, then it starts, then the app restarts"
   sandbox_new
   install_machine
-  local before_up
+  local before_up stop wipe dex app
   before_up=$(log_count "up -d")
   change_password "$NEW_PASSWORD
 $NEW_PASSWORD
 " instance password
   assert_rc 0
-  assert_contains "$(wipes)" "aman_main_dex" "the sign-in service's saved keys are cleared"
   assert_log_has "--project-name aman-main"
-  assert_log_has "stop dex"
-  assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 dex"
-  assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 app"
+  stop=$(log_line "stop dex")
+  wipe=$(log_line "rm -f /var/dex/dex.db")
+  dex=$(log_line "$DEX_UP")
+  app=$(log_line "$APP_UP")
+  if [ "$stop" -gt 0 ] && [ "$stop" -lt "$wipe" ] && [ "$wipe" -lt "$dex" ] && [ "$dex" -lt "$app" ]; then t_pass; else t_fail "order is stop=$stop delete=$wipe dex=$dex app=$app"; fi
+  assert_eq "$(wipes)" "aman_main_dex:/var/dex dex.db dex.db-wal dex.db-shm " "the mounted folder and the three database files"
+  if grep -Eq 'run --rm --network none --user 1001:1001 -v aman_main_dex:/var/dex --entrypoint sh [^ ]*dex[^ ]* -c rm -f' "$STUB_LOG"; then t_pass; else t_fail "the delete does not run as the Dex user in the Dex image"; fi
   assert_eq "$(( $(log_count "up -d") - before_up ))" 2 "two restarts, nothing else"
   assert_log_lacks "up -d --force-recreate --wait --wait-timeout 240 --no-deps loopback"
   assert_flat_contains "$OUT" "Everyone is signed out of instance main"
+  sandbox_drop
+}
+
+test_the_stub_refuses_a_delete_that_cannot_work() {
+  t_begin "the Docker stand-in refuses the delete in the app image or as another user, as a real volume owned by 1001 does"
+  sandbox_new
+  install_machine
+  local dex_image
+  dex_image=$(sed -n 's/.*--entrypoint sh \([^ ]*dex[^ ]*\) -c .*/\1/p' "$STUB_LOG" | head -n 1)
+  : "${dex_image:=dexidp/dex}"
+  "$SB_BIN/docker" run --rm --network none -v aman_main_dex:/var/dex --entrypoint sh aman-app:x -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_fail "the app image deleted it" || t_pass
+  "$SB_BIN/docker" run --rm --network none --user 10001:10001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_fail "uid 10001 deleted it" || t_pass
+  "$SB_BIN/docker" run --rm --network none --user 1001:1001 -v aman_main_dex:/var/dex --entrypoint sh "$dex_image" -c rm -f /var/dex/dex.db >/dev/null 2>&1 && t_pass || t_fail "uid 1001 in the Dex image was refused"
+  sandbox_drop
+}
+
+# Runs the command with the docker calls containing $1 failing.
+change_failing() { # failing text
+  with_input "$NEW_PASSWORD
+$NEW_PASSWORD
+"
+  STUB_FAIL_ON=$1
+  run_install instance password
+  unset STUB_FAIL_ON
+  clear_input
+}
+
+test_stop_fails() {
+  t_begin "if the sign-in service does not stop, nothing changes and the message says the old sign-ins still work"
+  sandbox_new
+  install_machine
+  local before
+  before=$(dex_env)
+  change_failing "stop dex"
+  assert_rc 1
+  assert_flat_contains "$ERR" "Nothing was changed: the old password and the old sign-ins still work"
+  assert_eq "$(dex_env)" "$before" "the old hash stays"
+  assert_eq "$(wipes)" "" "nothing deleted"
+  if dex_stopped; then t_fail "the sign-in service was left stopped"; else t_pass; fi
+  sandbox_drop
+}
+
+test_delete_fails() {
+  t_begin "if the keys cannot be deleted, the old password stays, the sign-in service is started again and the message says old sign-ins still work"
+  sandbox_new
+  install_machine
+  local before
+  before=$(dex_env)
+  change_failing "rm -f /var/dex/dex.db"
+  assert_rc 1
+  assert_flat_contains "$ERR" "the old password and every old sign-in still work"
+  assert_flat_contains "$ERR" "Run aman password again"
+  assert_eq "$(dex_env)" "$before" "the old hash stays"
+  assert_eq "$(log_count "$DEX_UP")" 1 "the sign-in service was started again"
+  assert_eq "$(log_count "$APP_UP")" 0 "the app was not touched"
+  if dex_stopped; then t_fail "the sign-in service was left stopped"; else t_pass; fi
+  sandbox_drop
+}
+
+test_sign_in_service_does_not_start() {
+  t_begin "if the sign-in service does not start again, the new password and cleared keys stay and the message says what to run"
+  sandbox_new
+  install_machine
+  local old
+  old=$(hash_of)
+  change_failing "--wait-timeout 240 dex"
+  assert_rc 1
+  assert_flat_contains "$ERR" "the old sign-ins ended, but the sign-in service did not start again. Run: aman doctor instance --fix"
+  assert_eq "$([ "$(hash_of)" != "$old" ] && echo changed)" changed "the new hash is saved"
+  assert_eq "$(wipes)" "aman_main_dex:/var/dex dex.db dex.db-wal dex.db-shm " "the keys are gone"
+  if dex_stopped; then t_pass; else t_fail "the sign-in service is not stopped"; fi
+  assert_eq "$(log_count "$APP_UP")" 0 "the app waits for the sign-in service"
+  sandbox_drop
+}
+
+test_app_does_not_start() {
+  t_begin "if the app does not restart, the message says old sign-ins can last up to ten minutes"
+  sandbox_new
+  install_machine
+  local old
+  old=$(hash_of)
+  change_failing "--wait-timeout 240 app"
+  assert_rc 1
+  assert_flat_contains "$ERR" "old sign-ins can keep working for up to ten minutes. Run: aman doctor instance --fix"
+  assert_eq "$([ "$(hash_of)" != "$old" ] && echo changed)" changed "the new hash is saved"
+  if dex_stopped; then t_fail "the sign-in service was left stopped"; else t_pass; fi
   sandbox_drop
 }
 
@@ -221,6 +316,11 @@ test_short_password_is_refused
 test_wrong_repeat_changes_nothing
 test_prompts_on_a_terminal
 test_sessions_are_signed_out
+test_the_stub_refuses_a_delete_that_cannot_work
+test_stop_fails
+test_delete_fails
+test_sign_in_service_does_not_start
+test_app_does_not_start
 test_several_instances_need_a_name
 test_instance_flag_picks_one
 test_unknown_instance

@@ -798,22 +798,38 @@ instance_pick() {
   printf '%s' "$name"
 }
 
-# Sessions are signed with the sign-in service's keys, which it keeps in its database. Clearing them while it is stopped
-# makes it start with new keys, and the app starts again so it forgets the old ones: every earlier session ends.
-instance_sign_out_everyone() { # name
-  local name=$1
-  dc "$name" stop dex >/dev/null 2>&1 || die "The sign-in service of instance $name did not stop. Run: aman doctor instance --fix"
-  D run --rm --network none -v "aman_${name}_dex:/var/dex" --entrypoint sh "$REL_APP_TAG" -c 'rm -f /var/dex/dex.db /var/dex/dex.db-wal /var/dex/dex.db-shm' >/dev/null 2>&1 ||
-    die "The password was changed, but the old sign-ins could not be ended. Run the same command again."
-  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 dex >/dev/null 2>&1 ||
-    die "The sign-in service of instance $name did not start again. Run: aman doctor instance --fix"
+# Starts the sign-in service again, so a failed step does not leave the instance without sign-in.
+instance_dex_up() { # name
+  dc "$1" up -d --force-recreate --no-deps --wait --wait-timeout 240 dex >/dev/null 2>&1
+}
+
+# Sessions are signed with the sign-in service's keys, which it keeps in its database. Clearing the database while the
+# service is stopped makes it start with new keys, and the app starts again so it forgets the old ones: every earlier
+# sign-in ends. The volume belongs to the Dex user, so the delete runs as that user in the Dex image. The new hash is
+# written only after the delete worked, and a failure before that starts the service again with the old password.
+instance_set_password() { # name, new dex.env content, new hash
+  local name=$1 content=$2 hash=$3 dir
+  dir=$(instance_dir "$name")
+  dc "$name" stop dex >/dev/null 2>&1 ||
+    die "The sign-in service of instance $name did not stop. Nothing was changed: the old password and the old sign-ins still work. Run: aman doctor instance --fix, then run aman password again."
+  if ! D run --rm --network none --user 1001:1001 -v "aman_${name}_dex:/var/dex" --entrypoint sh "$REL_DEX_IMAGE" -c 'rm -f /var/dex/dex.db /var/dex/dex.db-wal /var/dex/dex.db-shm' >/dev/null 2>&1; then
+    instance_dex_up "$name" || true
+    die "The old sign-ins could not be ended. Nothing was changed: the old password and every old sign-in still work. Run aman password again; if it fails again, run: aman doctor instance --fix"
+  fi
+  printf '%s\n' "$content" | write_if_changed "$dir/dex.env" 600 || true
+  if ! grep -qF -- "$hash" "$dir/dex.env"; then
+    instance_dex_up "$name" || true
+    die "Everyone was signed out, but the new password could not be saved, so the old password still works. Run aman password again."
+  fi
+  instance_dex_up "$name" ||
+    die "The password was changed and the old sign-ins ended, but the sign-in service did not start again. Run: aman doctor instance --fix"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app >/dev/null 2>&1 ||
-    die "The app of instance $name did not start again. Run: aman doctor instance --fix"
+    die "The password was changed, but the app of instance $name did not start again, so old sign-ins can keep working for up to ten minutes. Run: aman doctor instance --fix"
 }
 
 # Changes the owner's password. Running it on this computer is the proof of ownership; the old password is not asked for.
 cmd_instance_password() {
-  local name email hash dir
+  local name email hash content
   require_installed
   name=$(instance_pick)
   email=$(reg_get "$name" owner_email)
@@ -821,12 +837,11 @@ cmd_instance_password() {
   lock_acquire
   load_installed_release
   AMAN_PASSWORD=
-  ask_password AMAN_PASSWORD "New password for $email:" "Repeat the new password:"
+  ask_password AMAN_PASSWORD "New password for $email, 8 to 72 characters" "Repeat the new password"
   hash=$(hash_password "$REL_APP_TAG")
   AMAN_PASSWORD=
-  dir=$(instance_dir "$name")
-  render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
-  instance_sign_out_everyone "$name"
+  content=$(render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash")
+  instance_set_password "$name" "$content" "$hash"
   log_event "owner password changed for instance $name; every sign-in ended"
   say "Everyone is signed out of instance $name."
   say "Password changed. Sign in again with the new password."
