@@ -193,7 +193,9 @@ function placeAddresses(params: Record<string, unknown>): unknown[] {
   }
   return places
     .slice(0, PLACES_CARD_MAX)
-    .map((place: unknown) => (typeof place === 'object' && place !== null ? Reflect.get(place, 'address') : undefined));
+    .map((place: unknown) =>
+      typeof place === 'object' && place !== null && 'address' in place ? place.address : undefined,
+    );
 }
 
 /** Only the addresses leave the machine, so only they are the outbound text of a pin call. */
