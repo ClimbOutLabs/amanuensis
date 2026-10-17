@@ -66,6 +66,22 @@ describe('export secret scrubbing', () => {
     expect(scrubber.redactionCount()).toBe(2);
   });
 
+  it('redacts credential-named fields by the shared name rule, keeping counts and identity fields', () => {
+    const scrubber = createExportScrubber([]);
+    expect(
+      scrubber.json({
+        oauth: { code_verifier: 'v-1', session_cookie: 'c-1' },
+        max_tokens: 5,
+        approval_token_id: 'a-1',
+      }),
+    ).toEqual({
+      oauth: { code_verifier: REDACTED, session_cookie: REDACTED },
+      max_tokens: 5,
+      approval_token_id: 'a-1',
+    });
+    expect(scrubber.redactionCount()).toBe(2);
+  });
+
   it.each(Object.entries(sample))('redacts a %s credential in free text and keeps the prose', (_name, value) => {
     const scrubber = createExportScrubber([]);
     expect(scrubber.text(`before ${value} after`)).toBe('before [redacted] after');

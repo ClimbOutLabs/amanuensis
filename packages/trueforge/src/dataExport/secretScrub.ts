@@ -45,28 +45,18 @@ function isStructuralKey(key: string): boolean {
   return key === 'id' || key.endsWith('_id') || key === 'name' || key.endsWith('_name') || STRUCTURAL_KEYS.has(key);
 }
 
-/** JSON keys whose values are always secrets. */
-const SECRET_KEYS = new Set([
-  'token',
-  'secret',
-  'password',
-  'passwd',
-  'api_key',
-  'apikey',
-  'api_secret',
-  'access_token',
-  'refresh_token',
-  'auth_token',
-  'private_key',
-  'client_secret',
-  'authorization',
-  'db_password',
-  'webhook_secret',
-  'signing_secret',
-  'session_token',
-]);
+/** Field names whose values are credentials, matched after dropping case and separators. */
+const CREDENTIAL_NAME =
+  /authorization|cookie|password|passwd|secret|token|apikey|privatekey|credential|verifier|oauthcode|authcode/;
 
-const CREDENTIAL_SCHEMES = 'postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|rediss?|amqps?';
+/**
+ * True when a field holds a credential by its name alone, wherever it appears.
+ * Counts and flags under a credential-like name (`max_tokens`) carry nothing secret, so only text and structures count.
+ */
+export function isCredentialField(key: string, value: unknown): boolean {
+  const holdsText = (typeof value === 'string' && value !== '') || (typeof value === 'object' && value !== null);
+  return holdsText && CREDENTIAL_NAME.test(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
+}
 
 /** Credential-shaped values, wherever they appear. Each matches the whole credential, or only its secret part. */
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
@@ -84,9 +74,14 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\bBearer\s+[A-Za-z0-9\-._~+/=]{20,}/g, // Bearer <token>
   // PEM private key through its END line; a block cut off before END is redacted to the end of the text.
   /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----[\s\S]*?(?:-----END \1PRIVATE KEY-----|$)/g,
-  // Password inside a connection URL (`postgres://user:password@host`); the user and host stay.
-  new RegExp(`(?<=\\b(?:${CREDENTIAL_SCHEMES})://[^\\s:@/]+:)[^\\s@/]+(?=@)`, 'g'),
+  // Password inside a URL (`postgres://user:password@host`); the user and host stay.
+  /(?<=\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
 ];
+
+/** Credential-shaped substrings replaced in free text, without counting them. */
+export function redactSecretShapes(text: string): string {
+  return SECRET_VALUE_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED), text);
+}
 
 export function normalizeSecrets(values: Iterable<string | null | undefined>): string[] {
   const seen = new Set<string>();
@@ -184,11 +179,12 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
     if (typeof value === 'object' && value !== null) {
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(value)) {
-        if (SECRET_KEYS.has(key.toLowerCase()) && entry !== null && entry !== '') {
+        // Identity fields win, so a credential reference such as `approval_token_id` survives import.
+        if (isStructuralKey(key) && typeof entry === 'string') {
+          out[key] = entry;
+        } else if (isCredentialField(key, entry)) {
           redactions += 1;
           out[key] = REDACTED;
-        } else if (isStructuralKey(key) && typeof entry === 'string') {
-          out[key] = entry;
         } else {
           out[key] = scrubJson(entry);
         }

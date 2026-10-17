@@ -1,5 +1,6 @@
 import { Writable } from 'node:stream';
 import winston, { type Logger } from 'winston';
+import { createExportScrubber, REDACTED } from '../../src/dataExport/secretScrub';
 import { createServerLogger } from '../../src/logger';
 
 const PLANTED = {
@@ -71,6 +72,40 @@ describe.each([
     expect(text).toContain('1024');
   });
 
+  it('redacts credential and content fields at the top level of an entry', () => {
+    const { logger, output } = captureLogger(standalone);
+    logger.info('top level', {
+      password: PLANTED.loginPass,
+      apiKey: PLANTED.providerKey,
+      body: PLANTED.emailBody,
+      refresh_token: PLANTED.bearer,
+      max_tokens: 1024,
+    });
+
+    const text = output();
+    expectNoPlantedSecret(text);
+    expect(text).toContain('top level');
+    expect(text).toContain('1024');
+  });
+
+  it('redacts a credential field set on a child logger', () => {
+    const { logger, output } = captureLogger(standalone);
+    logger.child({ authorization: `Bearer ${PLANTED.bearer}`, cookie: PLANTED.cookie }).warn('child entry');
+
+    const text = output();
+    expectNoPlantedSecret(text);
+    expect(text).toContain('child entry');
+  });
+
+  it('redacts a credential property carried by a logged error', () => {
+    const { logger, output } = captureLogger(standalone);
+    logger.error(Object.assign(new Error('login failed'), { password: PLANTED.loginPass }));
+
+    const text = output();
+    expectNoPlantedSecret(text);
+    expect(text).toContain('login failed');
+  });
+
   it('redacts secrets carried by a logged error, its stack and its cause', () => {
     const { logger, output } = captureLogger(standalone);
     const cause = new Error(`fetch failed for https://api.example.test/v1?api_key=${PLANTED.providerKey}`);
@@ -99,4 +134,17 @@ describe.each([
     expect(text).not.toContain(verifierPrefix);
     expect(text).toContain('token exchange failed');
   });
+});
+
+it('applies the same credential name rule as the data export', () => {
+  const fields = { cookie: PLANTED.cookie, code_verifier: PLANTED.verifier, client_secret: PLANTED.urlPass };
+  expect(createExportScrubber([]).json(fields)).toEqual({
+    cookie: REDACTED,
+    code_verifier: REDACTED,
+    client_secret: REDACTED,
+  });
+
+  const { logger, output } = captureLogger(false);
+  logger.info('shared rule', fields);
+  expectNoPlantedSecret(output());
 });
