@@ -252,7 +252,7 @@ describe('an approved write at dispatch', () => {
       sent: { ...DENTIST, attendees: ['someone@example.com'], send_updates: 'all' },
     });
     expect(outcome.failure).toBe(true);
-    expect(outcome.rawContent).toContain('changed after you approved them');
+    expect(outcome.rawContent).toContain('Approval invalid');
     expect(writes(built.google.urls)).toEqual([]);
   });
 
@@ -272,7 +272,7 @@ describe('an approved write at dispatch', () => {
       },
     });
     expect(outcome.failure).toBe(true);
-    expect(outcome.rawContent).toContain('The event changed after you approved this');
+    expect(outcome.rawContent).toContain('Approval invalid');
     expect(writes(built.google.urls)).toEqual([]);
   });
 
@@ -296,6 +296,23 @@ describe('an approved write at dispatch', () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
     const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST });
     expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+});
+
+describe('the write tool itself', () => {
+  it('writes nothing when its arguments are not the ones approved, whatever route the call took', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    const response = await built.tools.callTool(
+      { name: 'create_event', arguments: { ...DENTIST, title: 'Dentist and lunch' } },
+      undefined,
+      {
+        admission_provenance: { source: 'user_approval', decision: 'allow' },
+        approved_params: info.mint_canonical_params,
+      },
+    );
+    expect(text(response)).toContain('changed after you approved them');
     expect(writes(built.google.urls)).toEqual([]);
   });
 });

@@ -170,6 +170,21 @@ export class CalendarToolSet extends LocalToolMCP {
     };
   }
 
+  /**
+   * Re-derives a write's approved params from the call as it reaches dispatch, reading the event again for a change,
+   * so an approval ends when the arguments or the event changed after the card.
+   */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    if (!isCalendarWriteToolName(params.name)) {
+      return undefined;
+    }
+    const prepared = await this.#prepareWrite(params);
+    if ('failure' in prepared) {
+      throw new Error(prepared.failure);
+    }
+    return prepared.approved;
+  }
+
   /** What a write call will do, for its card; a failure says why it cannot be shown and so is not offered. */
   async #prepareWrite(
     params: CallToolRequest['params'],
