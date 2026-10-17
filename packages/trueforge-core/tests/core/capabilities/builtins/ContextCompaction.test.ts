@@ -6,10 +6,10 @@ import {
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
   DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  HOST_SUMMARY_PREFACE,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
   resolveCompactionThresholdTokens,
-  salvageCompactionSummary,
   validateCompactionSummary,
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
@@ -24,7 +24,11 @@ import {
 import type { AgentDefinition } from '../../../../src/core/runtime/AgentDefinition';
 import { AgentThread } from '../../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
-import { isLLMContextMessage, userAuthoredText } from '../../../../src/core/runtime/contextUtils';
+import {
+  internalSystemMessage,
+  isLLMContextMessage,
+  userAuthoredText,
+} from '../../../../src/core/runtime/contextUtils';
 import {
   SANDBOX_EXEC_TOOL_NAME,
   type BoundRepository,
@@ -636,7 +640,7 @@ describe('contextCompaction model role', () => {
       throw new Error('expected a MODEL_USAGE event for the discarded compaction request');
     }
     // Both the first try and the retry are billed.
-    expect(usageEvent.usage).toMatchObject({ input_tokens: 2, output_tokens: 2, total_tokens: 4 });
+    expect(usageEvent.usage).toEqual({ input_tokens: 2, output_tokens: 2, total_tokens: 4 });
   });
 
   it('folds a discarded compaction request usage into thread billable metrics with truncation fallback overwrite', async () => {
@@ -2069,67 +2073,6 @@ describe('compactionValidationFingerprint (spec 002)', () => {
   });
 });
 
-describe('salvageCompactionSummary (spec 002)', () => {
-  const sections = CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
-  const body = (name: string) => `content for ${name}`;
-
-  function sectionsOnly(): string {
-    return sections.map(name => `## ${name}\n${body(name)}`).join('\n\n');
-  }
-
-  it('reconstructs a canonical block when the <summary> wrapper is missing', () => {
-    const salvaged = salvageCompactionSummary(sectionsOnly(), sections);
-    if (salvaged === undefined) throw new Error('expected salvage to succeed');
-    // The rebuilt block must pass the strict validator.
-    const validated = validateCompactionSummary(salvaged, sections);
-    expect(validated.reason).toBeUndefined();
-    for (const name of sections) {
-      expect(salvaged).toContain(`## ${name}`);
-      expect(salvaged).toContain(body(name));
-    }
-  });
-
-  it('ignores preamble text around the sections', () => {
-    const salvaged = salvageCompactionSummary(`Here is your summary:\n\n${sectionsOnly()}`, sections);
-    if (salvaged === undefined) throw new Error('expected salvage to succeed');
-    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
-    expect(salvaged).not.toContain('Here is your summary');
-  });
-
-  it('treats a missing closing tag as the end of the last section', () => {
-    const salvaged = salvageCompactionSummary(`<summary>\n${sectionsOnly()}`, sections);
-    if (salvaged === undefined) throw new Error('expected salvage to succeed');
-    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
-  });
-
-  it('strips trailing junk after a present closing tag', () => {
-    const salvaged = salvageCompactionSummary(
-      `<summary>\n${sectionsOnly()}\n</summary>\nSome trailing chatter.`,
-      sections,
-    );
-    if (salvaged === undefined) throw new Error('expected salvage to succeed');
-    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
-    expect(salvaged).not.toContain('trailing chatter');
-  });
-
-  it('returns undefined when a required section is missing', () => {
-    const missing = sections
-      .filter(name => name !== 'last_request')
-      .map(name => `## ${name}\n${body(name)}`)
-      .join('\n\n');
-    expect(salvageCompactionSummary(missing, sections)).toBeUndefined();
-  });
-
-  it('returns undefined when a required section is duplicated', () => {
-    const duplicated = `${sectionsOnly()}\n\n## user_goal\nA different goal.`;
-    expect(salvageCompactionSummary(duplicated, sections)).toBeUndefined();
-  });
-
-  it('returns undefined for empty input', () => {
-    expect(salvageCompactionSummary('', sections)).toBeUndefined();
-  });
-});
-
 describe('compaction reliability journey (spec 002)', () => {
   function stubModel(content: string) {
     return makeMockILLM({
@@ -2176,6 +2119,29 @@ describe('compaction reliability journey (spec 002)', () => {
     const events = await collectProcessPreLLM(makeCapability(model));
     expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeDefined();
     expect(findCompactionEvent(events).outcome).toBe('applied');
+  });
+
+  function wholeSections(skip?: string): string {
+    return CONVERSATION_REQUIRED_SUMMARY_SECTIONS.filter(name => name !== skip)
+      .map(name => `## ${name}\nBody of ${name}.`)
+      .join('\n\n');
+  }
+
+  it('rebuilds a complete reply that has text before the sections or no closing tag', async () => {
+    for (const content of [`Here is your summary:\n\n${wholeSections()}`, `<summary>\n${wholeSections()}`]) {
+      const events = await collectProcessPreLLM(makeCapability(stubModel(content)));
+      expect(findCompactionEvent(events).outcome).toBe('applied');
+    }
+  });
+
+  it('truncates when a loose reply lacks a section, is empty, or repeats a section', async () => {
+    const repeated = `${wholeSections()}\n\n## user_goal\nA different goal.`;
+    for (const content of [wholeSections('last_request'), '', repeated]) {
+      const model = stubModel(content);
+      const events = await collectProcessPreLLM(makeCapability(model));
+      expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    }
   });
 
   // AC-3: duplicated sections are not salvageable; the warn log carries a content-free diagnostic.
@@ -2324,7 +2290,11 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     expect(calls).toHaveLength(2);
     const first = calls[0]?.[0];
     const retry = calls[1]?.[0];
-    expect(String(retry?.messages[0]?.content).length).toBeLessThan(String(first?.messages[0]?.content).length);
+    const firstSystem = String(first?.messages[0]?.content);
+    const retrySystem = String(retry?.messages[0]?.content);
+    expect(retrySystem.startsWith(firstSystem)).toBe(true);
+    expect(retrySystem).toContain('under 600 words');
+    expect(Reflect.get(retry ?? {}, 'max_tokens')).toBeLessThanOrEqual(2048);
     expect(Reflect.get(retry ?? {}, 'enable_thinking')).toBe(false);
     expect(Reflect.get(first ?? {}, 'enable_thinking')).toBeUndefined();
   });
@@ -2438,5 +2408,124 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     expect(compaction.outcome).toBe('truncated_fallback');
     expect(compaction.reason).toBe('missing_block');
     expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+  });
+
+  const PRIOR_SUMMARY = internalSystemMessage(
+    `${HOST_SUMMARY_PREFACE}\n\n${completedConversationSummary('Which neighborhood is best?')}`,
+  );
+  const BIG_REQUEST = `Make me a packing list for Lisbon. ${'Notes from my trip planning. '.repeat(200)}`;
+
+  it('restores the latest user request and marks missing sections as not captured when the kept part has none', async () => {
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }));
+    const events = await collectProcessPreLLM(capabilityFor(model), [
+      { role: 'user', content: 'Hello' },
+      { role: 'user', content: BIG_REQUEST },
+    ]);
+    expect(outcomeOf(events).outcome).toBe('applied');
+    const persisted = persistedSummary(events);
+    expect(persisted).toContain('Make me a packing list for Lisbon');
+    expect(persisted).toContain('not captured; rely on the messages below');
+    expect(persisted).not.toContain('## last_request\\nnone');
+  });
+
+  it('does not repeat the request when the summary is complete', async () => {
+    const model = modelReplying(reply({ content: completedConversationSummary('Make me a packing list for Lisbon') }));
+    const events = await collectProcessPreLLM(capabilityFor(model), [
+      { role: 'user', content: 'Hello' },
+      { role: 'user', content: BIG_REQUEST },
+    ]);
+    expect(outcomeOf(events).outcome).toBe('applied');
+    expect(persistedSummary(events).split('Make me a packing list for Lisbon')).toHaveLength(2);
+  });
+
+  it('rejects a partial summary that would replace an earlier summary, and keeps the earlier one', async () => {
+    const model = modelReplying(reply({ content: TWO_OF_SIX_REPLY }), reply({ content: TWO_OF_SIX_REPLY }));
+    const events = await collectProcessPreLLM(capabilityFor(model), [
+      PRIOR_SUMMARY,
+      { role: 'user', content: 'Hello' },
+      { role: 'user', content: BIG_REQUEST },
+    ]);
+    expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+    expect(persistedSummary(events)).toContain('Budget-conscious; prefers walkable neighborhoods.');
+  });
+
+  it('emits the first call usage when the turn is cancelled during the retry', async () => {
+    const controller = new AbortController();
+    const createNonStream = jest
+      .fn()
+      .mockResolvedValueOnce(reply({ content: GARBAGE_REPLY }))
+      .mockImplementationOnce(async () => {
+        controller.abort(new Error('cancel during retry'));
+        return reply({ content: GARBAGE_REPLY });
+      });
+    const processor = capabilityFor(makeMockILLM({ createNonStream })).preLLMProcessors?.[0];
+    if (processor === undefined) throw new Error('expected a preLLMProcessor');
+    const events: Awaited<ReturnType<typeof collectProcessPreLLM>> = [];
+    await expect(
+      (async () => {
+        for await (const event of processor.processPreLLM({ ...makeExecution(), signal: controller.signal })) {
+          events.push(event);
+        }
+      })(),
+    ).rejects.toBeDefined();
+    const usage = events.find(e => e.type === InternalEventType.MODEL_USAGE);
+    if (usage === undefined || usage.type !== InternalEventType.MODEL_USAGE) {
+      throw new Error('expected the first call usage');
+    }
+    expect(usage.usage).toEqual(STRICT_USAGE);
+    expect(outcomeOf(events).outcome).toBe('skipped_blocked');
+  });
+
+  describe('in coding mode', () => {
+    const CODING_PARTIAL = `<summary>
+## goal
+Fix the flaky retry in the sync worker.
+## findings
+- src/worker.ts: retry loop swallows the final error
+</summary>`;
+    const LACKS_FINDINGS = `<summary>
+## goal
+Fix the flaky retry in the sync worker.
+## remaining_work
+Add a test.
+</summary>`;
+
+    function codingCapability(model: ReturnType<typeof makeMockILLM>) {
+      return contextCompaction({
+        logger: undefined,
+        definition: { modelId: undefined, configuredModels: undefined, modelClient: model },
+        boundRepository: STUB_BOUND_REPOSITORY,
+        compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
+      });
+    }
+
+    it('accepts a partial summary with goal and findings inside a proper envelope', async () => {
+      const model = modelReplying(reply({ content: CODING_PARTIAL }));
+      const events = await collectProcessPreLLM(codingCapability(model), [
+        { role: 'user', content: 'Hello' },
+        { role: 'user', content: BIG_REQUEST },
+      ]);
+      expect(outcomeOf(events).outcome).toBe('applied');
+      const persisted = persistedSummary(events);
+      for (const name of REQUIRED_SUMMARY_SECTIONS) {
+        expect(persisted).toContain(`## ${name}`);
+      }
+      expect(persisted).toContain('retry loop swallows the final error');
+      expect(persisted).toContain('Make me a packing list for Lisbon');
+    });
+
+    it('retries and then truncates when a partial summary lacks findings', async () => {
+      const model = modelReplying(reply({ content: LACKS_FINDINGS }), reply({ content: LACKS_FINDINGS }));
+      const events = await collectProcessPreLLM(codingCapability(model));
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    });
+
+    it('uses the coding prompt on the retry', async () => {
+      const model = modelReplying(reply({ content: '' }), reply({ content: CODING_PARTIAL }));
+      await collectProcessPreLLM(codingCapability(model));
+      const retry = jest.mocked(model.createNonStream).mock.calls[1]?.[0];
+      expect(String(retry?.messages[0]?.content)).toContain('engineering handoff');
+    });
   });
 });
