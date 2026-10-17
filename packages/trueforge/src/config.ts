@@ -1412,7 +1412,7 @@ export interface SharedServerConfiguration {
   /**
    * Optional cheaper Token Factory model registered next to the default on the env-managed
    * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
    */
   TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**

@@ -663,6 +663,31 @@ describe('submitProfileLearning', () => {
     await harness.db.destroy();
   });
 
+  it('hands the pass to the small model when the turn runs on Token Factory', async () => {
+    const harness = await makeHarness();
+    await submitProfileLearning({
+      ...harness.member,
+      turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
+      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
+      ...turnFields(),
+    });
+    expect(harness.resolveLlm).toHaveBeenCalledWith('tokenfactory/nvidia-nemotron-3-nano-30b-a3b');
+    await harness.db.destroy();
+  });
+
+  it('keeps a configured pass model over the small model', async () => {
+    const harness = await makeHarness();
+    await submitProfileLearning({
+      ...harness.member,
+      config: passConfig({ modelFqn: 'small-provider/small-model' }),
+      turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
+      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
+      ...turnFields(),
+    });
+    expect(harness.resolveLlm).toHaveBeenCalledWith('small-provider/small-model');
+    await harness.db.destroy();
+  });
+
   it('keeps the user-authored fields it read back after the model call', async () => {
     const harness = await makeHarness();
     await seedProfile({

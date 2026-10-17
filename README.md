@@ -211,19 +211,19 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `openai/gpt-oss-120b`), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to run a smaller model beside Super, set `TOKEN_FACTORY_CHEAPER_MODEL` to its id, for example NVIDIA Nemotron 3 Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`), and restart. It then appears in **Settings, Models** and can be assigned to roles.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles.
 
-**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model.
+**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, except the helper jobs below: while a turn runs on Token Factory, they use the small model unless you pick one for that role.
 
-| Role                | What it does                                            | Where the model comes from                                  |
-| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
-| Main chat           | Answers you, including requests for a briefing          | Main chat model                                             |
-| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model           |
-| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                  |
-| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model               |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the model that answered      |
-| Knowledge relevance | Checks which library passages help answer a question    | The active persona's model                                  |
-| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas** |
+| Role                | What it does                                            | Where the model comes from                                      |
+| ------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing          | Main chat model                                                 |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model               |
+| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                      |
+| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the small model on Token Factory      |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the small model on Token Factory |
+| Knowledge relevance | Checks which library passages help answer a question    | The small model on Token Factory, else the persona's model      |
+| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas**     |
 
 **Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up, and a small model such as Nemotron 3 Nano does them at a fraction of the cost of Nemotron 3 Super (see the price table below). Chat answers and briefings are open-ended reasoning over memory and tools, so they stay on Nemotron 3 Super. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
 

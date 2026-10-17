@@ -69,6 +69,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -122,6 +123,16 @@ import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/t
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+
+/** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
+function turnHelperModelFqn(): string | undefined {
+  return envManagedHelperModelFqn({
+    apiKey: configuration.NEBIUS_API_KEY,
+    managedByTrueFoundry: isTrueFoundryModeEnabled(),
+    model: configuration.TOKEN_FACTORY_MODEL,
+    cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
+  });
+}
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
@@ -1077,6 +1088,7 @@ export async function beginTurnExecution(params: {
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
     memoryClientPresent: deps.memoryClient !== undefined,
+    helperFqn: turnHelperModelFqn(),
   });
   // Same one-read-per-turn contract for the recall screen: the Settings toggle's
   // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -1101,6 +1113,7 @@ export async function beginTurnExecution(params: {
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
     modelUsage,
+    helperFqn: turnHelperModelFqn(),
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
@@ -1731,6 +1744,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
+      helperFqn: turnHelperModelFqn(),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1840,6 +1854,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
           userText: extractUserMessageText(body.input),
+          helperFqn: turnHelperModelFqn(),
           turnModelFqn: await resolveTurnModelFqn({
             tenantId: requestContext.tenant_id,
             personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
@@ -1871,6 +1886,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
+      helperFqn: turnHelperModelFqn(),
     });
 
     const abortController = new AbortController();

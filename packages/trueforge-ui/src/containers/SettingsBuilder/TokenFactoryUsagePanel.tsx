@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/atoms/primitives/Button.js';
+import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { formatCostUsd, formatTokens } from '@/utils/modelUsage.js';
 import { useTokenFactoryUsage } from './tokenFactoryUsage.js';
 
@@ -15,6 +16,7 @@ function Cost({ value }: { value: number | null }) {
  */
 export function TokenFactoryUsagePanel({ providerConfigured }: { providerConfigured: boolean }) {
   const { supported, usage, loading, error, refresh } = useTokenFactoryUsage();
+  const offline = useOptionalSentinelApiState()?.settings?.offline_mode ?? false;
   if (!supported) return null;
   if (usage === null && error === null) {
     return loading ? <p className="mt-4 text-sm text-text-secondary">Loading today's usage…</p> : null;
@@ -45,6 +47,17 @@ export function TokenFactoryUsagePanel({ providerConfigured }: { providerConfigu
           Refresh
         </Button.Secondary>
       </header>
+
+      {offline ? (
+        <p
+          role="status"
+          data-testid="token-factory-offline-notice"
+          className="mt-2 rounded-md border border-warning-bg/40 bg-warning-bg/10 px-2.5 py-1.5 text-xs text-text-primary"
+        >
+          Offline mode is on. It stops tools from reaching the internet, but Token Factory is online, so its answers
+          still travel over the internet. To keep everything on this device, pick a model that runs here.
+        </p>
+      ) : null}
 
       {error !== null ? (
         <p role="alert" className="mt-2 text-sm text-failure-bg">

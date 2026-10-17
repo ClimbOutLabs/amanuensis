@@ -132,6 +132,8 @@ export interface ResolveTurnSummarizeContextParams {
    * agent-store read is skipped and the turn retains verbatim.
    */
   memoryClientPresent: boolean;
+  /** The small model for helper jobs; see `routeHelperModel`. */
+  helperFqn?: string | undefined;
 }
 
 /**
@@ -159,6 +161,7 @@ export async function resolveTurnSummarizeContext(
     personaModelName,
     sessionAgent,
     memoryClientPresent,
+    helperFqn,
   } = params;
   const enabled = await resolveMemorySummarizeEnabled({ globalSettingsStore, logger });
   if (!isMemorySummarizeEffective(enabled)) {
@@ -190,6 +193,7 @@ export async function resolveTurnSummarizeContext(
       personaModelName,
       sessionAgent,
       agentStore,
+      helperFqn,
     });
     if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
       logger.debug(

@@ -21,11 +21,11 @@ describe('token factory config', () => {
     return mod.default;
   }
 
-  it('defaults to the Nemotron model, the gpt-oss cheaper model, and no cap', async () => {
+  it('defaults to the Nemotron model, the Nemotron Nano small model, and no cap', async () => {
     const config = await loadConfig();
     expect(config.NEBIUS_API_KEY).toBeUndefined();
     expect(config.TOKEN_FACTORY_MODEL).toBe('nvidia/nemotron-3-super-120b-a12b');
-    expect(config.TOKEN_FACTORY_CHEAPER_MODEL).toBe('openai/gpt-oss-120b');
+    expect(config.TOKEN_FACTORY_CHEAPER_MODEL).toBe('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B');
     expect(config.TOKEN_FACTORY_DAILY_TOKEN_CAP).toBeUndefined();
   });
 

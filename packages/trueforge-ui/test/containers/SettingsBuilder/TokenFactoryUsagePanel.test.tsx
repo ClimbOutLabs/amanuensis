@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import ModelSettings from '@/containers/SettingsBuilder/ModelSettings.js';
 import { TokenFactoryUsagePanel } from '@/containers/SettingsBuilder/TokenFactoryUsagePanel.js';
 import type { TokenFactoryUsage } from '@/plugins/trueforge-agent-server-adapter/catalogs/tokenFactoryUsageCatalog.js';
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ModelProviderBase } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -164,5 +166,43 @@ describe('ModelSettings', () => {
     const panel = await screen.findByTestId('token-factory-usage');
     expect(within(panel).getByText('Token Factory today')).toBeInTheDocument();
     expect(await within(panel).findAllByTestId('token-factory-model-row')).toHaveLength(2);
+  });
+
+  describe('offline mode', () => {
+    function renderWithOffline({ offline }: { offline: boolean }) {
+      const settings: SentinelUserSettings = {
+        offline_mode: offline,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+      };
+      const api: SentinelApi = {
+        listAuditEntries: vi.fn(async () => []),
+        getUserSettings: vi.fn(async () => settings),
+        updateUserSettings: vi.fn(async () => settings),
+        listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
+      };
+      return render(
+        <SentinelApiProvider api={api}>
+          <ServerProvider server={serverWithUsage(async () => USAGE)}>
+            <TokenFactoryUsagePanel providerConfigured />
+          </ServerProvider>
+        </SentinelApiProvider>,
+      );
+    }
+
+    it('says plainly that answers still use the internet while offline mode is on', async () => {
+      renderWithOffline({ offline: true });
+
+      const notice = await screen.findByTestId('token-factory-offline-notice');
+      expect(notice).toHaveTextContent('Offline mode is on.');
+      expect(notice).toHaveTextContent('Token Factory is online');
+    });
+
+    it('shows no notice while offline mode is off', async () => {
+      renderWithOffline({ offline: false });
+
+      await screen.findAllByTestId('token-factory-model-row');
+      expect(screen.queryByTestId('token-factory-offline-notice')).toBeNull();
+    });
   });
 });
