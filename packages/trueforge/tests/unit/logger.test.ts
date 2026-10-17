@@ -3,15 +3,15 @@ import winston, { type Logger } from 'winston';
 import { createServerLogger } from '../../src/logger';
 
 const PLANTED = {
-  apiKey: 'sk-test-plantedApiKey000000000000',
+  providerKey: 'sk-test-plantedApiKey000000000000',
   bearer: 'plantedBearerToken1111111111111111',
   cookie: 'planted-session-cookie-2222',
   oauthCode: 'plantedOAuthCode3333',
-  password: 'planted-Passw0rd-4444',
+  loginPass: 'planted-Passw0rd-4444',
   emailBody: 'Planted email body about the quarterly plan 5555',
   eventDescription: 'Planted calendar notes for the offsite 6666',
-  urlPassword: 'plantedDbPass7777',
-  queryToken: 'plantedQueryToken8888',
+  urlPass: 'plantedDbPass7777',
+  queryCredential: 'plantedQueryToken8888',
   basic: 'cGxhbnRlZDpiYXNpYzk5OTk=',
   secondCookie: 'planted-second-cookie-1010',
   verifier: 'plantedPkceVerifier1212',
@@ -49,19 +49,19 @@ describe.each([
 
     logger.info('request', {
       method: 'POST',
-      url: `/api/v1/oauth/callback?code=${PLANTED.oauthCode}&state=abc&token=${PLANTED.queryToken}`,
+      url: `/api/v1/oauth/callback?code=${PLANTED.oauthCode}&state=abc&token=${PLANTED.queryCredential}`,
       headers: {
         Authorization: `Bearer ${PLANTED.bearer}`,
         Cookie: `session=${PLANTED.cookie}`,
-        'x-api-key': PLANTED.apiKey,
+        'x-api-key': PLANTED.providerKey,
       },
-      body: { email: 'owner@example.test', password: PLANTED.password },
+      body: { email: 'owner@example.test', password: PLANTED.loginPass },
       message_body: { body: PLANTED.emailBody },
       event: { summary: 'Offsite', description: PLANTED.eventDescription },
-      database: `postgres://app:${PLANTED.urlPassword}@db.example.test:5432/app`,
+      database: `postgres://app:${PLANTED.urlPass}@db.example.test:5432/app`,
       max_tokens: 1024,
     });
-    logger.warn(`upstream rejected Authorization: Basic ${PLANTED.basic} with key ${PLANTED.apiKey}`);
+    logger.warn(`upstream rejected Authorization: Basic ${PLANTED.basic} with key ${PLANTED.providerKey}`);
     logger.warn(`proxy saw Cookie: session=${PLANTED.cookie}; prefs=${PLANTED.secondCookie}`);
 
     const text = output();
@@ -73,9 +73,9 @@ describe.each([
 
   it('redacts secrets carried by a logged error, its stack and its cause', () => {
     const { logger, output } = captureLogger(standalone);
-    const cause = new Error(`fetch failed for https://api.example.test/v1?api_key=${PLANTED.apiKey}`);
+    const cause = new Error(`fetch failed for https://api.example.test/v1?api_key=${PLANTED.providerKey}`);
     const error = new Error(
-      `token exchange failed: {"access_token":"${PLANTED.bearer}","password":"${PLANTED.password}"}`,
+      `token exchange failed: {"access_token":"${PLANTED.bearer}","password":"${PLANTED.loginPass}"}`,
       {
         cause,
       },
