@@ -21,7 +21,13 @@ import type {
   JsonValue,
   PreLLMEphemeralAgentContextProcessor,
 } from '@truefoundry/trueforge-core/core';
-import { HOST_SUMMARY_PREFACE, InternalEventType, newEventId } from '@truefoundry/trueforge-core/core';
+import {
+  HOST_SUMMARY_PREFACE,
+  InternalEventType,
+  isHostWrappedText,
+  isUntrustedDocumentText,
+  newEventId,
+} from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 import type {
@@ -44,19 +50,12 @@ import type {
   MemoryScreenRecord,
   MemoryScreenStats,
 } from './memoryEvents';
-import {
-  MEMORY_ORIGIN_METADATA_KEY,
-  retainOperationId,
-  submitRetain,
-  USER_STATED_ORIGIN,
-  type AmanMemoryOrigin,
-} from './memoryRetain';
+import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
+import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 
 const MEMORY_STATE_KEY = 'aman.memory';
-const INTERNAL_TAG_PREFIX = '<tfy-internal>';
-const UNTRUSTED_DOCUMENT_TAG_PREFIX = '<untrusted-document>';
 const MAX_QUERY_CHARS = 2000;
 const RECALL_QUERY_SEPARATOR = '\n';
 const MAX_PENDING_ENTRIES = 50;
@@ -247,19 +246,25 @@ function hasRole(message: ContextMessage): message is ContextMessage & { role: s
   return 'role' in message;
 }
 
-function flattenTextContent(content: unknown): string {
+function textParts(content: unknown): string[] {
   if (typeof content === 'string') {
-    return content;
+    return [content];
   }
   if (Array.isArray(content)) {
     return content
       .filter((part): part is { type: string; text: string } => {
         return Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'text';
       })
-      .map(part => part.text)
-      .join('\n');
+      .map(part => part.text);
   }
-  return '';
+  return [];
+}
+
+/** What the user typed in a message: host notes and extracted file text are dropped part by part. */
+function userAuthoredContent(content: unknown): string {
+  return textParts(content)
+    .filter(text => !isHostWrappedText(text))
+    .join('\n');
 }
 
 function formatAssistantContent(content: unknown): string {
@@ -300,11 +305,7 @@ export function extractQueryParts(context: readonly ContextMessage[], window: nu
     if (!message || !hasRole(message) || message.role !== 'user') {
       continue;
     }
-    const text = flattenTextContent(message.content);
-    if (text.startsWith(INTERNAL_TAG_PREFIX)) {
-      continue;
-    }
-    const trimmed = text.trim();
+    const trimmed = userAuthoredContent(message.content).trim();
     if (!trimmed) {
       continue;
     }
@@ -374,8 +375,8 @@ function detectCompactionMarker(context: readonly ContextMessage[]): string | un
     if (!hasRole(message) || message.role !== 'user') {
       continue;
     }
-    const text = flattenTextContent(message.content);
-    if (text.startsWith(INTERNAL_TAG_PREFIX) && text.includes(HOST_SUMMARY_PREFACE)) {
+    const text = textParts(message.content).join('\n');
+    if (isHostWrappedText(text) && !isUntrustedDocumentText(text) && text.includes(HOST_SUMMARY_PREFACE)) {
       marker = fingerprint(text);
     }
   }
@@ -423,8 +424,8 @@ export function extractPreviousExchange(
   for (let i = assistantIndex - 1; i >= 0; i -= 1) {
     const message = context[i];
     if (message && hasRole(message) && message.role === 'user') {
-      const text = flattenTextContent(message.content);
-      if (!text.startsWith(INTERNAL_TAG_PREFIX) && !text.startsWith(UNTRUSTED_DOCUMENT_TAG_PREFIX)) {
+      const text = userAuthoredContent(message.content);
+      if (text.trim() !== '') {
         userText = text;
         userIndex = i;
         break;
@@ -441,8 +442,7 @@ export function extractPreviousExchange(
       return false;
     }
     return (
-      message.role === 'tool' ||
-      (message.role === 'user' && flattenTextContent(message.content).startsWith(UNTRUSTED_DOCUMENT_TAG_PREFIX))
+      message.role === 'tool' || (message.role === 'user' && textParts(message.content).some(isUntrustedDocumentText))
     );
   });
   return { userText, assistantText, origin: readUntrusted ? 'tool_ingested' : USER_STATED_ORIGIN };
@@ -962,11 +962,7 @@ function lastUserText(context: readonly ContextMessage[]): string | undefined {
     if (!message || !hasRole(message) || message.role !== 'user') {
       continue;
     }
-    const text = flattenTextContent(message.content);
-    if (text.startsWith(INTERNAL_TAG_PREFIX)) {
-      continue;
-    }
-    const trimmed = text.trim();
+    const trimmed = userAuthoredContent(message.content).trim();
     if (!trimmed) {
       continue;
     }

@@ -4,7 +4,7 @@ import winston from 'winston';
 import { drainTurnEvents } from '../../../src/apis/turns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
-import { MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryRetain';
+import { MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryOrigin';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 

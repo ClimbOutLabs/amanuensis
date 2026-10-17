@@ -677,18 +677,19 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   return title;
 }
 
-/**
- * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
- * joined with a blank line, or `''` when there is none. A turn's input can carry several user
- * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
- * silently drop any but the first.
- */
+/** True when any user message in a create-turn input carries an attached file. */
 function inputAttachesFiles(input: TurnInputItem[]): boolean {
   return input
     .filter(isAgentInputUserMessage)
     .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
 }
 
+/**
+ * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
+ * joined with a blank line, or `''` when there is none. A turn's input can carry several user
+ * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
+ * silently drop any but the first.
+ */
 export function extractUserMessageText(input: TurnInputItem[] | undefined): string {
   const userMessages = input?.filter(isAgentInputUserMessage) ?? [];
   return userMessages

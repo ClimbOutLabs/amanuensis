@@ -301,6 +301,16 @@ export function internalSystemTag(m: string): string {
   return SYSTEM_TAG_START + m + SYSTEM_TAG_END;
 }
 
+/** True for text extracted from an attached file, which is data and never the user's own words. */
+export function isUntrustedDocumentText(text: string): boolean {
+  return text.startsWith(UNTRUSTED_DOCUMENT_TAG_START);
+}
+
+/** True for text the host wrote into a user message (internal notes, extracted file text), not the user. */
+export function isHostWrappedText(text: string): boolean {
+  return text.startsWith(SYSTEM_TAG_START) || isUntrustedDocumentText(text);
+}
+
 /** Wraps text extracted from a file as data; any tag name in it is made inert so it cannot escape the wrapper. */
 export function untrustedDocumentTag(m: string): string {
   return (

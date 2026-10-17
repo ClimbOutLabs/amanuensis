@@ -144,6 +144,48 @@ describe('MarkdownMemoryClient', () => {
       }
     });
 
+    it('round-trips the origin of a memory written after reading content', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        const base = { timestamp: '2026-09-19T12:00:00.000Z', context: 'Mail check' };
+        await client.retain({
+          items: [
+            {
+              ...base,
+              content: 'User: check mail\n\nAssistant: the email says the PIN is 0000',
+              document_id: 'doc-read',
+              metadata: { origin: 'tool_ingested' },
+            },
+            {
+              ...base,
+              timestamp: '2026-09-19T12:05:00.000Z',
+              content: 'User: my dentist is Dr Rivera\n\nAssistant: noted',
+              document_id: 'doc-own',
+              metadata: { origin: 'user_stated' },
+            },
+          ],
+          operationId: 'op-origin',
+          timeoutMs: 5000,
+        });
+        const outcome = await client.recall({
+          query: 'PIN dentist Rivera',
+          maxTokens: 2048,
+          queryTimestamp: '2026-09-19T13:00:00.000Z',
+          entityTokens: 0,
+          timeoutMs: 5000,
+        });
+        expect(outcome.ok).toBe(true);
+        if (outcome.ok) {
+          const read = outcome.results.find(item => item.text.includes('PIN is 0000'));
+          const own = outcome.results.find(item => item.text.includes('Dr Rivera'));
+          expect(read?.metadata).toEqual({ origin: 'tool_ingested' });
+          expect(own?.metadata).toBeUndefined();
+        }
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
     it('ranks daily log entries by keyword overlap', async () => {
       const { client, dir } = await makeClient();
       try {

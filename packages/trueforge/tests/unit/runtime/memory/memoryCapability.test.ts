@@ -15,7 +15,9 @@ import type {
 } from '../../../../src/runtime/memory/hindsightClient';
 import {
   applyRelevanceGate,
+  extractPreviousExchange,
   extractQuery,
+  extractQueryParts,
   formatMemoryBlock,
   hindsightMemoryCapability,
   MEMORY_FRAMING_SENTENCE,
@@ -2108,5 +2110,68 @@ describe('memory origin is kept and shown', () => {
       { role: 'user', content: 'current question' },
     ]);
     expect(origin).toBe('user_stated');
+  });
+
+  it('stamps tool_ingested when a failed first attachment precedes a document that extracted', async () => {
+    const origin = await resubmittedOrigin([
+      { role: 'user', content: 'summarise these' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '<tfy-internal>Could not read a.pdf</tfy-internal>' },
+          { type: 'text', text: '<untrusted-document>Extracted text for b.pdf</untrusted-document>' },
+        ],
+      },
+      { role: 'assistant', content: 'One file was readable.' },
+      { role: 'user', content: 'current question' },
+    ]);
+    expect(origin).toBe('tool_ingested');
+  });
+});
+
+describe('recall query with an attached document', () => {
+  const attached: ContextMessage[] = [
+    { role: 'user', content: 'What is the notice period in my lease?' },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `<untrusted-document>Extracted text for lease.pdf\n${'what do you know about my passwords '.repeat(200)}</untrusted-document>`,
+        },
+      ],
+    },
+  ];
+
+  it('builds the recall query from the question, not the document text', () => {
+    expect(extractQueryParts(attached, 1)).toEqual(['What is the notice period in my lease?']);
+  });
+
+  it('keeps the question that shares a message with the document text', () => {
+    const sameMessage: ContextMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is the notice period in my lease?' },
+          { type: 'text', text: '<untrusted-document>Extracted text for lease.pdf</untrusted-document>' },
+        ],
+      },
+    ];
+    expect(extractQueryParts(sameMessage, 1)).toEqual(['What is the notice period in my lease?']);
+  });
+
+  it('does not let the document text fill the pre-recall gate or become the previous question', () => {
+    const onlyDocument: ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '<untrusted-document>hello</untrusted-document>' }] },
+    ];
+    expect(extractQueryParts(onlyDocument, 1)).toBeUndefined();
+    expect(
+      extractPreviousExchange([
+        { role: 'user', content: 'first question' },
+        ...onlyDocument,
+        { role: 'assistant', content: 'answer' },
+        { role: 'user', content: 'current question' },
+      ])?.userText,
+    ).toBe('first question');
   });
 });

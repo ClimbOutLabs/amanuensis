@@ -31,6 +31,7 @@ export type {
   SubAgentCompletionMarker,
 } from './runtime/AgentThread.types';
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
+export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
