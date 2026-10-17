@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
-import { publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
+import { publishSendReceipt, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider, useOptionalSentinelState } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApi, SentinelSessionContext } from '@/sentinel/types.js';
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
@@ -39,6 +39,7 @@ const CARD = {
   outbound_text: null,
   destination_host: null,
   outbound_truncated: false,
+  email: null,
 };
 
 describe('SentinelStateProvider', () => {
@@ -132,6 +133,57 @@ describe('SentinelStateProvider', () => {
     );
     await waitFor(() => {
       expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
+    });
+  });
+
+  describe('send receipts', () => {
+    function ReceiptProbe({ toolCallId }: { toolCallId: string }) {
+      const receipt = useOptionalSentinelState()?.receiptFor(toolCallId);
+      return <span data-testid="receipt">{receipt === undefined ? 'none' : receipt.outcome}</span>;
+    }
+
+    const notSent = { outcome: 'not_sent', toolCallId: 'call-9', reason: 'draft_changed' } as const;
+
+    it('shows a receipt that arrives live, found by the invocation key', () => {
+      render(
+        <RuntimeHarness messages={[]}>
+          <SentinelStateProvider>
+            <ReceiptProbe toolCallId={INVOCATION_KEY} />
+          </SentinelStateProvider>
+        </RuntimeHarness>,
+      );
+      expect(screen.getByTestId('receipt')).toHaveTextContent('none');
+      act(() => publishSendReceipt(notSent));
+      expect(screen.getByTestId('receipt')).toHaveTextContent('not_sent');
+    });
+
+    it('rebuilds a receipt from saved history after a reload', async () => {
+      const api: SentinelApi = {
+        listAuditEntries: vi.fn(async () => []),
+        getUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        updateUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        listSentinelSessionContext: vi.fn(async () => ({ approvals: [], receipts: { 'call-9': notSent } })),
+      };
+      render(
+        <RuntimeHarness messages={[]} threadId="local-1" remoteId="session-1">
+          <SentinelApiProvider api={api}>
+            <SentinelStateProvider>
+              <ReceiptProbe toolCallId="call-9" />
+            </SentinelStateProvider>
+          </SentinelApiProvider>
+        </RuntimeHarness>,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('receipt')).toHaveTextContent('not_sent');
+      });
     });
   });
 });

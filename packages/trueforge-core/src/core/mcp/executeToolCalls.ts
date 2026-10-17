@@ -1488,6 +1488,7 @@ export async function executeToolCalls({
           {
             admission_provenance: admission,
             dispatch_id: dispatchId,
+            tool_call_id: toolCall.id,
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,

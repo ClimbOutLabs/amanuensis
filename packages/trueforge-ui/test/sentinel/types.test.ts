@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
+import { SendReceiptPersistedEvent, ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
 import {
+  extractSendReceiptFromEvent,
   extractSentinelFromEvent,
   extractSentinelSessionContext,
   parseAuditEntries,
@@ -157,6 +158,69 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
     expect(approvals[0]?.card.outbound_truncated).toBe(true);
+  });
+
+  it('reads the whole message of a mail card after the SDK deserializes it', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-2',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-12',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Change a saved draft in your Gmail.',
+              plain_why: null,
+              cannot_be_undone: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+              email: {
+                action: 'change',
+                to: ['grace@example.com'],
+                cc: [],
+                bcc: ['audit@example.com'],
+                subject: 'Lease',
+                body: 'Thursday works.\n\nAda',
+                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+              },
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
+      action: 'change',
+      to: ['grace@example.com'],
+      cc: [],
+      bcc: ['audit@example.com'],
+      subject: 'Lease',
+      body: 'Thursday works.\n\nAda',
+      check_code: null,
+      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+    });
+  });
+
+  it('has no email on a card that carries none, or one it cannot read', () => {
+    const card = (email: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-13', tier: 3, tier3_card: { plain_what: 'Do it', email } }],
+      })[0]?.card.email;
+    expect(card(undefined)).toBeNull();
+    expect(card(null)).toBeNull();
+    expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
+    expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
@@ -451,6 +515,79 @@ describe('parseUserSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+    });
+  });
+});
+
+describe('send receipts', () => {
+  const sent = {
+    type: 'aman.email.send_receipt',
+    id: 'evt_1',
+    created_at: '2026-10-17T09:12:00.000Z',
+    tool_call_id: 'call-1',
+    result: {
+      outcome: 'sent',
+      sent_at: '2026-10-17T09:12:00.000Z',
+      sent_message_id: 'm-1',
+      check_code: 'A7F39C',
+      message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+    },
+  };
+
+  it('reads a sent receipt from a persisted event', () => {
+    expect(extractSendReceiptFromEvent(sent)).toEqual({
+      outcome: 'sent',
+      toolCallId: 'call-1',
+      sentAt: '2026-10-17T09:12:00.000Z',
+      sentMessageId: 'm-1',
+      checkCode: 'A7F39C',
+      message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+    });
+  });
+
+  it('reads the same receipt after the SDK has camel-cased it on the live stream', () => {
+    const parsed = SendReceiptPersistedEvent.parseOrThrow(sent, {
+      unrecognizedObjectKeys: 'passthrough',
+      allowUnrecognizedUnionMembers: true,
+      allowUnrecognizedEnumValues: true,
+    });
+    expect(extractSendReceiptFromEvent(parsed)).toMatchObject({
+      outcome: 'sent',
+      toolCallId: 'call-1',
+      sentMessageId: 'm-1',
+      checkCode: 'A7F39C',
+    });
+  });
+
+  it('reads a send that did not go out, with its reason and nothing else', () => {
+    expect(extractSendReceiptFromEvent({ ...sent, result: { outcome: 'not_sent', reason: 'draft_changed' } })).toEqual({
+      outcome: 'not_sent',
+      toolCallId: 'call-1',
+      reason: 'draft_changed',
+    });
+  });
+
+  it.each([
+    ['a sent receipt without a message id', { ...sent, result: { ...sent.result, sent_message_id: undefined } }],
+    ['a sent receipt without a check code', { ...sent, result: { ...sent.result, check_code: undefined } }],
+    ['a sent receipt without its message', { ...sent, result: { ...sent.result, message: undefined } }],
+    ['a reason it does not know', { ...sent, result: { outcome: 'not_sent', reason: 'because' } }],
+    ['an event of another type', { ...sent, type: 'aman.skill.used' }],
+    ['an event without a tool call', { ...sent, tool_call_id: undefined }],
+  ])('drops %s instead of showing half a receipt', (_name, event) => {
+    expect(extractSendReceiptFromEvent(event)).toBeUndefined();
+  });
+
+  it('puts each receipt in the session context under its tool call', () => {
+    const context = extractSentinelSessionContext([
+      sent,
+      { ...sent, tool_call_id: 'call-2', result: { outcome: 'not_sent', reason: 'needs_ok_again' } },
+    ]);
+    expect(Object.keys(context.receipts ?? {}).sort()).toEqual(['call-1', 'call-2']);
+    expect(context.receipts?.['call-2']).toEqual({
+      outcome: 'not_sent',
+      toolCallId: 'call-2',
+      reason: 'needs_ok_again',
     });
   });
 });

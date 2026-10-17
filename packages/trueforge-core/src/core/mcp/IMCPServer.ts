@@ -20,6 +20,8 @@ export interface ToolInvocationContext {
   admission_provenance: ToolAdmissionProvenance;
   /** Stable host identity for one requested provider invocation. */
   dispatch_id?: string | undefined;
+  /** The model's tool call being run; a tool that reports back to the chat names it. */
+  tool_call_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /**

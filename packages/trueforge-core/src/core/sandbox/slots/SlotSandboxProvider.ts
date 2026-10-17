@@ -252,11 +252,11 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
-  async destroySandbox(params: { sandboxId: string }): Promise<void> {
+  async destroySandbox(params: { sandboxId: string; signal?: AbortSignal | undefined }): Promise<void> {
     const target = this.resolve(params.sandboxId);
     const result = await this.whileBusy({
-      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: undefined }),
-      signal: undefined,
+      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: params.signal }),
+      signal: params.signal,
     });
     if (!result.ok) {
       throw new Error(`Failed to remove the sandbox workspace: ${describeAgentError(result.error)}`);
@@ -290,6 +290,11 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   getFileUploadsDir(): string {
     return `${STATE_DIR}/uploads`;
+  }
+
+  /** Reads below the transfer directory may be as large as a document; ordinary reads are capped lower by the agent. */
+  getDocumentSnapshotDir(): string {
+    return `${STATE_DIR}/transfer`;
   }
 
   getSkillsDir(): string {

@@ -13,6 +13,7 @@ import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
   MAX_DOCUMENT_FILES,
+  MAX_OCR_PAGES_PER_CALL,
   MAX_TOTAL_DOCUMENT_BYTES,
   SESSION_BUDGET_SCALE,
   sourceForLine,
@@ -26,6 +27,7 @@ import {
   type NetWorthObservationInput,
 } from '../../../src/documents/netWorthReport';
 import { makeStubPublicSandbox } from '../harnessMocks';
+import { syntheticPdf, syntheticPng } from './syntheticFiles';
 
 function makePdf(pageLines: readonly (readonly string[])[]): Buffer {
   const pageCount = pageLines.length;
@@ -149,7 +151,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('synthetic image bytes'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async input => {
         calls.push({ pages: input.pages, content: Buffer.from(input.filePath) });
@@ -167,7 +169,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('synthetic image bytes'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => {
         throw new Error('(exit code 1): tesseract failed');
@@ -191,7 +193,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('image'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => [{ page_number: 1, text: 'x'.repeat(MAX_CHARS_PER_DOCUMENT + 100) }],
     });
@@ -464,7 +466,7 @@ describe('local document pipeline', () => {
       downloadFile: async path => {
         const filename = path.slice(path.lastIndexOf('/') + 1);
         const entry = files.find(candidate => candidate[0] === filename);
-        return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : Buffer.from('synthetic screenshot');
+        return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : syntheticPng();
       },
       runNativePdfText: async input => {
         const filename = input.filePath.slice(input.filePath.lastIndexOf('/') + 1);
@@ -532,7 +534,7 @@ describe('document page-range extraction', () => {
       onFileProgress: undefined,
       budget: overrides.budget,
       pageRange: overrides.pageRange,
-      downloadFile: async () => Buffer.from('pdf-bytes'),
+      downloadFile: async () => syntheticPdf(),
       runNativePdfText: async input => {
         const pages = Object.entries(overrides.nativePages ?? {}).map(([page, text]) => ({
           page_number: Number(page),
@@ -651,5 +653,68 @@ describe('document page-range extraction', () => {
     expect(document?.issue).toContain('aggregate page/character budget is exhausted');
     expect(document?.issue).toContain('re-running cannot show more');
     expect(document?.issue).not.toContain('page_start=');
+  });
+});
+
+describe('files are checked by their bytes before OCR', () => {
+  async function extractOne({
+    filename,
+    bytes,
+    totalPages = 1,
+  }: {
+    filename: string;
+    bytes: Buffer;
+    totalPages?: number;
+  }) {
+    const ocrCalls: { pages: readonly number[] | undefined; maxPages: number }[] = [];
+    const result = await extractDocumentText({
+      files: [{ filename, path: `uploads/${filename}` }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => bytes,
+      runNativePdfText: async () => ({ total_pages: totalPages, pages: [] }),
+      runOcr: async input => {
+        ocrCalls.push({ pages: input.pages, maxPages: input.maxPages });
+        return (input.pages ?? [1]).map(page_number => ({ page_number, text: `page ${String(page_number)}` }));
+      },
+    });
+    return { document: result.documents[0], ocrCalls };
+  }
+
+  it('does not run PDF tools on a file that is not a PDF', async () => {
+    const { document } = await extractOne({ filename: 'invoice.pdf', bytes: Buffer.from('MZ not a pdf') });
+    expect(document?.issue).toBe('invoice.pdf is not a valid PDF, so it cannot be read.');
+  });
+
+  it('does not run OCR on bytes that are not an image of the type the name says', async () => {
+    const notAnImage = await extractOne({ filename: 'scan.png', bytes: syntheticPdf() });
+    expect(notAnImage.document?.issue).toContain('is not a valid image of the type its name says');
+    expect(notAnImage.ocrCalls).toEqual([]);
+    const wrongType = await extractOne({ filename: 'scan.jpg', bytes: syntheticPng() });
+    expect(wrongType.document?.issue).toContain('is not a valid image of the type its name says');
+  });
+
+  it('does not run OCR on an image with too many pixels', async () => {
+    const { document, ocrCalls } = await extractOne({
+      filename: 'huge.png',
+      bytes: syntheticPng({ width: 20_000, height: 20_000 }),
+    });
+    expect(document?.issue).toContain('is too large to read (20000 by 20000 pixels)');
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it('reads a normal image', async () => {
+    const { document, ocrCalls } = await extractOne({ filename: 'ok.png', bytes: syntheticPng() });
+    expect(document?.pages[0]?.lines[0]?.text).toBe('page 1');
+    expect(ocrCalls).toHaveLength(1);
+  });
+
+  it('reads at most 20 scanned pages per call and names where the rest starts', async () => {
+    const { document, ocrCalls } = await extractOne({ filename: 'scan.pdf', bytes: syntheticPdf(), totalPages: 100 });
+    expect(ocrCalls).toHaveLength(1);
+    expect(ocrCalls[0]?.pages).toEqual(Array.from({ length: MAX_OCR_PAGES_PER_CALL }, (_, index) => index + 1));
+    expect(document?.issue).toContain('OCR read the first 20 scanned pages');
+    expect(document?.issue).toContain('page_start=21');
   });
 });

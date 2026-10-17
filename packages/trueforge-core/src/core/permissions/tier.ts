@@ -17,8 +17,41 @@ export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
-export const AUTO_DENY_REASONS = ['destination_unverifiable', 'offline_mode', 'outbound_guard'] as const;
+export const AUTO_DENY_REASONS = [
+  'destination_unverifiable',
+  'offline_mode',
+  'outbound_guard',
+  'unattended_run',
+] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
+
+export const Tier3EmailSchema = z
+  .object({
+    action: z
+      .enum(['send', 'save', 'change'])
+      .describe('What happens to the message: sent, saved as a draft, or a saved draft changed.'),
+    to: z.array(z.string()).describe('Recipients.'),
+    cc: z.array(z.string()).describe('Copied recipients.'),
+    bcc: z.array(z.string()).describe('Hidden copy recipients.'),
+    subject: z.string().describe('Subject line.'),
+    body: z.string().describe('The whole message text, exactly as it will be sent.'),
+    check_code: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Short code for a send, repeated on its receipt; null for a draft. Absent on older cards.'),
+    replaces: z
+      .object({
+        subject: z.string().describe('Subject of the draft being replaced.'),
+        to: z.array(z.string()).describe('Recipients of the draft being replaced.'),
+      })
+      .nullable()
+      .describe('The saved draft a change replaces, or null.'),
+  })
+  .describe('The message an email action sends or saves, shown in full.')
+  .openapi('Tier3Email');
+
+export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
 
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
@@ -47,6 +80,7 @@ export const Tier3CardSchema = z
       .nullable()
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
+    email: Tier3EmailSchema.nullable().optional(),
   })
   .openapi('Tier3Card');
 

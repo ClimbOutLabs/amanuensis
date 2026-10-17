@@ -2,14 +2,17 @@
  * Live tests against real slot agents. Set AMAN_SLOTS_TEST_DIR to a directory holding one control
  * directory per slot (`<dir>/1/agent.sock`, ...), for example after `pnpm sandbox:slots`. Without it every
  * test returns early, so the suite stays green on machines without slots.
+ * `pnpm test:slots-live` runs the attachment cases against an installed instance's slots, with no setup.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { extractDocumentsFromSandbox } from '../../../../src/core/capabilities/builtins/DocumentTools';
 import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
 import { gitLocalImportHardeningConfigEntries } from '../../../../src/core/permissions/gitHardening';
+import { stageAttachment } from '../../../../src/core/runtime/attachmentStaging';
 import { RunCodeService } from '../../../../src/core/sandbox/driver/RunCodeService';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../../src/core/sandbox/Sandbox';
 import { GitBridge } from '../../../../src/core/sandbox/slots/git/gitBridge';
@@ -18,7 +21,11 @@ import { SLOT_AGENT_SOCKET_NAME } from '../../../../src/core/sandbox/slots/slotC
 import { SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
+import { MAX_BYTES_PER_DOCUMENT } from '../../../../src/documents/documentExtraction';
+import { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../../../../src/documents/ocrLanguages';
+import { cjkCollectionPdf, unicodeTextPdf, unicodeTextPdfPages } from '../../documents/syntheticFiles';
 import { makeSilentLogger } from '../../harnessMocks';
+import { FAMILY_FIXTURES, missingForFamily, renderFamilyPng, type ScriptFamily } from './liveFixtures';
 
 const SLOTS_DIR = process.env['AMAN_SLOTS_TEST_DIR'];
 const SLOT_COUNT = Number.parseInt(process.env['AMAN_SLOTS_TEST_COUNT'] ?? '1', 10);
@@ -364,4 +371,171 @@ describe('sandbox slots (live agents)', () => {
       await rm(base, { recursive: true, force: true });
     }
   });
+});
+
+describe('reading attachments on sandbox slots (live agents)', () => {
+  function liveSandbox(): { sandbox: Sandbox; provider: SlotSandboxProvider } {
+    const provider = new SlotSandboxProvider({
+      socketPaths: socketPaths(),
+      defaultExecTimeoutSeconds: 60,
+      treeDiskMb: 512,
+      fileMaxBytesForDownload: MAX_BYTES_PER_DOCUMENT,
+      logger: makeSilentLogger(),
+      sleepMs: undefined,
+      gitBridge: undefined,
+    });
+    const sandbox = new Sandbox({
+      provider,
+      workspaceVerificationCoordinator: undefined,
+      blockDestructiveToolsInCodeMode: true,
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      logger: makeSilentLogger(),
+      tracing: NOOP_AGENT_TRACING,
+      ocrLanguages: DEFAULT_OCR_LANGUAGES,
+    });
+    return { sandbox, provider };
+  }
+
+  /** Stages bytes the way chat uploads and email attachments are staged, and reads them back as the model would. */
+  async function readBack({
+    sandbox,
+    filename,
+    bytes,
+    mime,
+  }: {
+    sandbox: Sandbox;
+    filename: string;
+    bytes: Buffer;
+    mime: string;
+  }) {
+    const staged = await stageAttachment({ sandbox, filename, bytes, mime, ordinal: 1 });
+    const extraction = await extractDocumentsFromSandbox(sandbox, [staged.path]);
+    const document = extraction.documents[0];
+    return {
+      document,
+      text: (document?.pages ?? []).flatMap(page => page.lines.map(line => line.text)).join('\n'),
+    };
+  }
+
+  /** poppler wraps right-to-left runs in embedding marks and pads wide characters; neither is text. */
+  const plain = (text: string): string => text.replace(/[\u202a-\u202e\u2066-\u2069]/g, '').replace(/[ \t]+/g, ' ');
+
+  test('the guest has the PDF tools, the OCR engine and every language the server may select', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const { provider } = liveSandbox();
+    const { sandboxId } = await provider.createSandbox();
+    const tools = await provider.exec({ sandboxId, command: 'command -v pdfinfo pdftotext pdftoppm tesseract' });
+    expect(tools.success && tools.response.exitCode).toBe(0);
+    const languages = await provider.exec({ sandboxId, command: 'tesseract --list-langs' });
+    expect(languages.success).toBe(true);
+    const installed = languages.success ? languages.response.result.split('\n') : [];
+    for (const language of requiredOcrLanguages(DEFAULT_OCR_LANGUAGES)) {
+      expect(installed).toContain(language);
+    }
+  });
+
+  test('a generated multi-page PDF is staged and its text of every page comes back', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const { sandbox } = liveSandbox();
+    const pages = Array.from({ length: 6 }, (_, index) => [
+      `Page ${String(index + 1)} of the invented quarterly report`,
+    ]);
+    const { document, text } = await readBack({
+      sandbox,
+      filename: 'report.pdf',
+      bytes: unicodeTextPdfPages(pages),
+      mime: 'application/pdf',
+    });
+    expect(document?.issue).toBeNull();
+    expect(document?.pages).toHaveLength(6);
+    expect(text).toContain('Page 1 of the invented quarterly report');
+    expect(text).toContain('Page 6 of the invented quarterly report');
+  });
+
+  test('a file larger than the ordinary read cap is read back for extraction', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const { sandbox } = liveSandbox();
+    const padded = unicodeTextPdfPages([['Large but readable']], { paddingBytes: 12 * 1024 * 1024 });
+    const { document, text } = await readBack({
+      sandbox,
+      filename: 'large.pdf',
+      bytes: padded,
+      mime: 'application/pdf',
+    });
+    expect(document?.issue).toBeNull();
+    expect(text).toContain('Large but readable');
+  });
+
+  test('PDF text in Portuguese, Arabic, Hindi, Japanese, Chinese and Korean comes back right', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const { sandbox } = liveSandbox();
+    const arabic = 'فاتورة الدفع غدا';
+    const unicode = await readBack({
+      sandbox,
+      filename: 'languages.pdf',
+      bytes: unicodeTextPdf([
+        'Fatura número 4200: pagamento até amanhã, São João',
+        [...arabic].reverse().join(''),
+        'कुल राशि चार हजार दो सौ रुपये',
+      ]),
+      mime: 'application/pdf',
+    });
+    expect(plain(unicode.text)).toContain('Fatura número 4200: pagamento até amanhã, São João');
+    expect(plain(unicode.text)).toContain(arabic);
+    expect(plain(unicode.text)).toContain('कुल राशि चार हजार दो सौ रुपये');
+
+    // Fonts that are not embedded and name an Adobe character collection need poppler-data in the image.
+    const collections = [
+      { ordering: 'Japan1', encoding: 'UniJIS-UCS2-H', line: '請求書の合計は四千二百円です' },
+      { ordering: 'GB1', encoding: 'UniGB-UCS2-H', line: '发票总额为四千二百元' },
+      { ordering: 'Korea1', encoding: 'UniKS-UCS2-H', line: '청구서 합계는 사천이백 원입니다' },
+    ] as const;
+    for (const { ordering, encoding, line } of collections) {
+      const read = await readBack({
+        sandbox,
+        filename: `${ordering}.pdf`,
+        bytes: cjkCollectionPdf({ ordering, encoding, lines: [line] }),
+        mime: 'application/pdf',
+      });
+      expect(plain(read.text)).toContain(line);
+    }
+  });
+
+  // One case per script family. The images are drawn on the machine running this test, which needs python3
+  // with Pillow and the fonts named in liveFixtures.ts; a family that cannot be drawn is reported and skipped.
+  test.each(Object.keys(FAMILY_FIXTURES) as ScriptFamily[])(
+    "OCR reads a scanned %s image with that script's languages",
+    async family => {
+      if (SLOTS_DIR === undefined) {
+        return;
+      }
+      const missing = missingForFamily(family);
+      if (missing !== undefined) {
+        console.warn(`OCR case for ${family} skipped: ${missing}`);
+        return;
+      }
+      const { sandbox } = liveSandbox();
+      const { document, text } = await readBack({
+        sandbox,
+        filename: `${family}.png`,
+        bytes: renderFamilyPng(family),
+        mime: 'image/png',
+      });
+      const fixture = FAMILY_FIXTURES[family];
+      expect(document?.extraction_mode).toBe('ocr');
+      expect((text.match(fixture.script) ?? []).length).toBeGreaterThan(20);
+      for (const word of fixture.expected) {
+        expect(text).toContain(word);
+      }
+    },
+  );
 });

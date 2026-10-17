@@ -30,6 +30,7 @@ import { EVENTS_PAGE_LIMIT } from './common';
 import { MemoryRecallPersistedEventSchema, type MemoryRecallPersistedEvent } from './memoryEvents';
 import { ProfileLearnedPersistedEventSchema, type ProfileLearnedPersistedEvent } from './profileLearningEvents';
 import { ProvisioningPersistedEventSchema, type ProvisioningPersistedEvent } from './provisionEvents';
+import { SendReceiptPersistedEventSchema, type SendReceiptPersistedEvent } from './sendReceiptEvents';
 import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './skillEvents';
 
 /**
@@ -48,6 +49,7 @@ export const SessionEventWithPassthroughSchema = z
     MemoryRecallPersistedEventSchema,
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
+    SendReceiptPersistedEventSchema,
     ProvisioningPersistedEventSchema,
   ])
   .openapi('SessionEvent');
@@ -64,6 +66,7 @@ export const SessionEventTypeSchema = z
     MemoryRecallPersistedEventSchema.shape.type.value,
     ProfileLearnedPersistedEventSchema.shape.type.value,
     SkillUsedPersistedEventSchema.shape.type.value,
+    SendReceiptPersistedEventSchema.shape.type.value,
     ProvisioningPersistedEventSchema.shape.type.value,
   ])
   .openapi('SessionEventType');
@@ -101,6 +104,7 @@ export const TurnStreamingEventSchema = z
     MemoryRecallPersistedEventSchema,
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
+    SendReceiptPersistedEventSchema,
     ProvisioningPersistedEventSchema,
     // Context compaction can run mid-turn and writes to the live stream just like the
     // persisted log; omitting it here breaks SDK deserialization of the turn stream the
@@ -177,5 +181,9 @@ export const ListSessionEventsResponseSchema = z
  * (see db/completedTurnEvents.ts).
  */
 export type PersistedPassthroughEvent =
-  MemoryRecallPersistedEvent | ProfileLearnedPersistedEvent | SkillUsedPersistedEvent | ProvisioningPersistedEvent;
+  | MemoryRecallPersistedEvent
+  | ProfileLearnedPersistedEvent
+  | SkillUsedPersistedEvent
+  | SendReceiptPersistedEvent
+  | ProvisioningPersistedEvent;
 export type TurnStreamingEvent = z.infer<typeof TurnStreamingEventSchema>;

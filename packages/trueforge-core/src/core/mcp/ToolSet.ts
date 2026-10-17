@@ -123,6 +123,8 @@ function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
+    case 'unattended_run':
+      return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     default:

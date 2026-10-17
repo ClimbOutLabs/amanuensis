@@ -75,6 +75,7 @@ async function dispatchApproved(input: {
   disposition: string | undefined;
   reasonCode: string | undefined;
   executed: boolean;
+  context: unknown;
 }> {
   const { toolSet, callTool } = mockToolSet();
   const result = await executeToolCalls({
@@ -111,6 +112,7 @@ async function dispatchApproved(input: {
     disposition: outcome.disposition,
     reasonCode: outcome.remediation?.reason_code,
     executed: callTool.mock.calls.length === 1,
+    context: callTool.mock.calls[0]?.[2],
   };
 }
 
@@ -146,6 +148,19 @@ describe('executeToolCalls sentinel pre-dispatch: mint identity', () => {
     });
     expect(outcome.disposition).not.toBe('policy_blocked');
     expect(outcome.executed).toBe(true);
+  });
+
+  test('tells the tool which model call it is running', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const params = { command: 'ls -la' };
+    const tokenId = await mintToken({ services, tool_name: 'exec', canonical_params: params });
+    const outcome = await dispatchApproved({
+      services,
+      wireName: 'test_tool',
+      wireArgs: params,
+      toolInfo: { original_tool_name: 'exec', approval_token_id: tokenId },
+    });
+    expect(outcome.context).toMatchObject({ tool_call_id: 'call-1' });
   });
 
   test('falls back to original_tool_name when mint_tool_name is absent', async () => {

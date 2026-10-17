@@ -437,7 +437,7 @@ export const HEALTHY_INSTANCE_CHECKS =
     'disk\tok\t50.0 GB is free where the data lives.\t',
     'clock\tok\tThe clock is within 60 seconds of the login provider.\t',
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
-    'attachments\toff\tReading email attachments is not available.\t',
+    'attachments\toff\tReading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.\t',
     'demo\toff\tDemo mode is off.\t',
     'model\toff\tNo Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.\t',
   ].join('\n') + '\n';

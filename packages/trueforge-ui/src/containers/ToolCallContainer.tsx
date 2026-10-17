@@ -17,6 +17,7 @@ import { useCallback, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
+import { SendReceiptCard } from '../sentinel/SendReceiptCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
@@ -327,6 +328,26 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
+  const sendReceipt = useOptionalSentinelState()?.receiptFor(part.toolCallId);
+  const aui = useAui();
+
+  // Once the server says how a send ended, its card becomes the receipt (or the plain reason it did not go).
+  if (sendReceipt !== undefined) {
+    return (
+      <div data-slot="tool-call-card" data-variant="send-receipt" className="w-full">
+        <SendReceiptCard
+          receipt={sendReceipt}
+          onReviewAgain={
+            isNewestMessage
+              ? () => {
+                  aui.thread().append({ role: 'user', content: [{ type: 'text', text: 'Send that draft again.' }] });
+                }
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
 
   if (part.toolName === ASK_USER_TOOL_NAME) {
     if (hasPendingAskUserResponse(part)) {

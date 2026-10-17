@@ -250,6 +250,35 @@ export interface McpToolGrantTable {
   created_at: Date;
 }
 
+/** A user's Google login. PRIMARY KEY (tenant_id, created_by). `granted_scopes` is space-separated. */
+export interface GoogleConnectionTable {
+  tenant_id: string;
+  created_by: string;
+  client_id: string;
+  client_secret: string;
+  client_type: 'desktop' | 'web';
+  refresh_token: string;
+  granted_scopes: string;
+  account_email: string | null;
+  status: 'connected' | 'needs_reconnect';
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** The one Google consent a user has in flight. PRIMARY KEY (tenant_id, created_by). `scopes` is space-separated. */
+export interface GoogleOAuthPendingTable {
+  tenant_id: string;
+  created_by: string;
+  state_hash: string;
+  pkce_verifier: string;
+  client_id: string;
+  client_secret: string;
+  client_type: 'desktop' | 'web';
+  redirect_uri: string;
+  scopes: string;
+  created_at: Date;
+}
+
 export interface GlobalSettingsTable {
   key: string;
   value: string;
@@ -874,6 +903,8 @@ export interface Database {
   session_persona: SessionPersonaTable;
   mcp_server: McpServerTable;
   mcp_tool_grant: McpToolGrantTable;
+  google_connection: GoogleConnectionTable;
+  google_oauth_pending: GoogleOAuthPendingTable;
   oauth_token: OAuthTokenTable;
   oauth_pending_authorization: OAuthPendingAuthorizationTable;
   repository: RepositoryTable;

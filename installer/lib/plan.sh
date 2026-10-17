@@ -252,9 +252,9 @@ print_plan() {
     fi
   fi
   if sandbox_needed; then
-    ui_hint "Run code (Python, shell, files) runs in a sandbox."
+    ui_hint "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)."
   else
-    ui_hint "Run code stays off (installed with --no-sandbox)."
+    ui_hint "Run code and reading attachments stay off (installed with --no-sandbox)."
   fi
 }
 
@@ -604,7 +604,8 @@ install_execute() {
     for name in $(reg_names); do
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
-      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
+        { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
         instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
         instance_up "$name" ${recreate:+"$recreate"} || exit 1

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessage, type ThreadMessageLike } from '@assistant-ui/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AskUserPromptProps } from '@/atoms/adapters/AskUserPromptAdapter.js';
@@ -9,6 +9,7 @@ import type { SubAgentCardProps } from '@/atoms/SubAgentCard.js';
 import type { ToolCallCardProps } from '@/atoms/ToolCallCard.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { publishSendReceipt } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApi, SentinelApprovalInfo } from '@/sentinel/types.js';
 import { SlotsProvider, type SlotOverrides } from '@/theme/SlotsProvider.js';
@@ -884,6 +885,7 @@ describe('ToolCallContainer', () => {
         outbound_text: 'text: hello',
         destination_host: host,
         outbound_truncated: false,
+        email: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -938,6 +940,59 @@ describe('ToolCallContainer', () => {
       expect(screen.queryByText('old.example.com')).not.toBeInTheDocument();
       expect(screen.getAllByText('Sends to')).toHaveLength(1);
       expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+    });
+  });
+
+  describe('a send that has ended', () => {
+    function sendCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
+      return {
+        type: 'tool-call',
+        toolCallId: id,
+        toolName: 'send_draft',
+        args: { draft_id: 'd1' },
+        result: JSON.stringify({ status: 'sent' }),
+      };
+    }
+
+    function renderSend() {
+      return render(
+        <RuntimeHarness
+          messages={[{ role: 'assistant', content: [sendCall('call-1'), { type: 'text', text: 'Done.' }] }]}
+        >
+          <SentinelStateProvider>
+            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+          </SentinelStateProvider>
+        </RuntimeHarness>,
+      );
+    }
+
+    it('turns the card into the receipt once the server records the send', async () => {
+      renderSend();
+      expect(screen.queryByText(/exactly as approved/)).not.toBeInTheDocument();
+      act(() =>
+        publishSendReceipt({
+          outcome: 'sent',
+          toolCallId: 'call-1',
+          sentAt: new Date(2026, 9, 17, 9, 12).toISOString(),
+          sentMessageId: 'm-1',
+          checkCode: 'A7F39C',
+          message: { to: ['grace@example.com'], cc: [], bcc: [], subject: 'Lease', body: 'Thursday works.' },
+        }),
+      );
+      const proof = await screen.findByText('Sent at 09:12, exactly as approved');
+      // The receipt is the proof the person came for, so it never folds into the collapsed agent details.
+      expect(proof.closest('[hidden]')).toBeNull();
+      expect(screen.getByText('Subject: Lease')).toBeInTheDocument();
+      expect(screen.getByText('Check code', { exact: false })).toHaveTextContent('Check code A7F39C');
+    });
+
+    it('says plainly when the send did not go out, and never shows a receipt', async () => {
+      renderSend();
+      act(() => publishSendReceipt({ outcome: 'not_sent', toolCallId: 'call-1', reason: 'draft_changed' }));
+      expect(
+        await screen.findByText('Not sent: the draft changed after you approved it. Review it again.'),
+      ).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/exactly as approved|Check code/);
     });
   });
 });

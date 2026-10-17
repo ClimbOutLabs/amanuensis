@@ -15,6 +15,7 @@ import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
+import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -151,7 +152,14 @@ export function AssistantMessageContainer() {
 
   const parts = useAuiState(s => s.message.parts);
 
-  const { runs, hasFinal } = computeAgentStepsSplit(parts, isMessageRunning);
+  // A send receipt is the proof the person came for, so it stays in view instead of folding into agent details.
+  const sentinel = useOptionalSentinelState();
+  const { runs, hasFinal } = computeAgentStepsSplit(
+    parts,
+    isMessageRunning,
+    part =>
+      part.type === 'tool-call' && part.toolCallId !== undefined && sentinel?.receiptFor(part.toolCallId) !== undefined,
+  );
 
   // Progressive disclosure inputs: errors and approvals surface with an amber
   // dot and auto-expand while the turn is running; a clean completed run with no tools, no

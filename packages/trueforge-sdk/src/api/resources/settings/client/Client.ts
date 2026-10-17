@@ -3,6 +3,7 @@
 import type { BaseClientOptions } from "../../../../BaseClient.js";
 import { normalizeClientOptionsWithAuth, type NormalizedClientOptionsWithAuth } from "../../../../BaseClient.js";
 import * as core from "../../../../core/index.js";
+import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
@@ -26,6 +27,7 @@ export class SettingsClient {
     protected _sandboxProviders: SandboxProvidersClient | undefined;
     protected _skills: SkillsClient | undefined;
     protected _toolOutputScreens: ToolOutputScreensClient | undefined;
+    protected _google: GoogleClient | undefined;
 
     constructor(options: SettingsClient.Options) {
 
@@ -62,5 +64,9 @@ export class SettingsClient {
 
     public get toolOutputScreens(): ToolOutputScreensClient {
         return (this._toolOutputScreens ??= new ToolOutputScreensClient(this._options));
+    }
+
+    public get google(): GoogleClient {
+        return (this._google ??= new GoogleClient(this._options));
     }
 }
