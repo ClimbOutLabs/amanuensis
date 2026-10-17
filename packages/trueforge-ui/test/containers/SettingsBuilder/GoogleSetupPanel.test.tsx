@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GoogleSetupPanel from '@/containers/SettingsBuilder/GoogleSetupPanel.js';
@@ -370,7 +370,12 @@ describe('GoogleSetupPanel', () => {
     const row = await screen.findByLabelText('Calendar');
     expect(row).toHaveTextContent('Calendar: not connected');
     expect(row).toHaveTextContent('cannot add, change or delete');
-    expect(row).toHaveTextContent('turn on the Google Calendar API');
+    expect(row).toHaveTextContent('Turn on the Google Calendar API');
+    expect(row).toHaveTextContent('click Enable');
+    expect(row).not.toHaveTextContent(/scope|consent screen/i);
+    const link = within(row).getByRole('link', { name: /Calendar API link/ });
+    expect(link).toHaveAttribute('href', 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com');
+    expect(link).toHaveAttribute('target', '_blank');
     expect(screen.queryByText(/Read events on your calendar: /)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Calendar' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read'] }));
@@ -380,6 +385,32 @@ describe('GoogleSetupPanel', () => {
     renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
     expect(await screen.findByLabelText('Calendar')).toHaveTextContent('Calendar: connected');
     expect(screen.queryByRole('button', { name: 'Connect Calendar' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Calendar API link once Calendar is connected, so the message that names it has somewhere to point', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('click Enable');
+    expect(within(row).getByRole('link', { name: /Calendar API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com',
+    );
+  });
+
+  it('says in plain words when mail works but Calendar did not answer', async () => {
+    renderPanel(
+      makePort({
+        getGoogleStatus: async () => withCalendar(connectedStatus()),
+        testGoogleConnection: async () => ({ result: 'calendar_unavailable', accountEmail: 'ada@example.com' }),
+      }).port,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }));
+    expect(
+      await screen.findByText(
+        'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Working/)).not.toBeInTheDocument();
   });
 
   it('keeps Calendar when reconnecting', async () => {

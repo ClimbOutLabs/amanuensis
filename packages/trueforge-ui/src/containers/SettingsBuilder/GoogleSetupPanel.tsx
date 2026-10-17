@@ -14,6 +14,7 @@ import type {
   GoogleConsentStart,
   GoogleFeature,
   GoogleSetupPort,
+  GoogleTestResult,
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
@@ -105,7 +106,7 @@ function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
 }
 
-function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unreachable', account: string | null) {
+function describeTest(result: GoogleTestResult['result'], account: string | null) {
   switch (result) {
     case 'ok':
       return `Working. Connected as ${account ?? 'your Google account'}.`;
@@ -115,6 +116,8 @@ function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unre
       return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
     case 'unreachable':
       return "Aman couldn't reach Google just now. Try again in a minute.";
+    case 'calendar_unavailable':
+      return 'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.';
   }
 }
 
@@ -368,13 +371,44 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     </Button>
                   )}
                 </div>
-                <p className="text-text-secondary">
-                  {grantedFeatures(status).includes(CALENDAR_FEATURE)
-                    ? 'Aman can read events on your calendar. It cannot add, change or delete them.'
-                    : 'Lets Aman read events on your calendar, such as a birthday coming up. It cannot add, change or delete them. Before you connect, turn on the Google Calendar API in your Google project and add the calendar read scope to your consent screen.'}
-                </p>
-                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
-                  <CopyField label="Calendar API link" value={GOOGLE_CALENDAR_API_URL} />
+                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? (
+                  <>
+                    <p className="text-text-secondary">
+                      Aman can read events on your calendar. It cannot add, change or delete them.
+                    </p>
+                    <p className="text-text-secondary">
+                      If Calendar stops answering, check that its API is still on: open this page and click Enable.
+                    </p>
+                    <CopyField
+                      label="Calendar API link"
+                      value={GOOGLE_CALENDAR_API_URL}
+                      href={GOOGLE_CALENDAR_API_URL}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-text-secondary">
+                      Lets Aman read events on your calendar, such as a birthday coming up. It cannot add, change or
+                      delete them.
+                    </p>
+                    <ol className="list-decimal space-y-3 pl-5">
+                      <li>
+                        <p className="font-medium">Turn on the Google Calendar API</p>
+                        <p className="text-text-secondary">On the page, click Enable.</p>
+                        <CopyField
+                          label="Calendar API link"
+                          value={GOOGLE_CALENDAR_API_URL}
+                          href={GOOGLE_CALENDAR_API_URL}
+                        />
+                      </li>
+                      <li>
+                        <p className="font-medium">Select Connect Calendar</p>
+                        <p className="text-text-secondary">
+                          On Google&apos;s screen, leave the calendar box ticked and continue.
+                        </p>
+                      </li>
+                    </ol>
+                  </>
                 )}
               </div>
             ) : null}
