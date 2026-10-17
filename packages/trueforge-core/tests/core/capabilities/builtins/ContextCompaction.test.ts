@@ -2507,12 +2507,20 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     it('is refused when an essential section is none or empty', async () => {
       const noneBody = '<summary>\n## user_goal\nnone\n## facts_established\nNone.\n</summary>';
       const emptyBody = '<summary>\n## user_goal\n\n## facts_established\nThe trail is 8 miles.\n</summary>';
-      const completeWithNone = completedConversationSummary('x').replace('Get help planning a trip to Kyoto.', 'none');
-      for (const content of [noneBody, emptyBody, completeWithNone]) {
+      for (const content of [noneBody, emptyBody]) {
         const model = modelReplying(reply({ content }), reply({ content }));
         const events = await collectProcessPreLLM(capabilityFor(model));
         expect(outcomeOf(events).outcome).toBe('truncated_fallback');
       }
+    });
+
+    it('still accepts a complete summary of a chat that gathered no facts', async () => {
+      const noFacts = completedConversationSummary('Hello').replace(
+        'The user is traveling in October (source: user message).',
+        'none',
+      );
+      const events = await collectProcessPreLLM(capabilityFor(modelReplying(reply({ content: noFacts }))));
+      expect(outcomeOf(events).outcome).toBe('applied');
     });
 
     it('does not repeat the request when last_request is present', async () => {

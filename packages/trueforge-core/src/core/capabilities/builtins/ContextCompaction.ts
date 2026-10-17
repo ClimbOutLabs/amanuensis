@@ -1038,9 +1038,13 @@ export function validateCompactionSummary(
   return { summary: `<summary>${summary}</summary>` };
 }
 
-/** An essential section holding nothing, or the template's "checked, nothing there", saves nothing. */
 function isBlankSectionBody(body: string | undefined): boolean {
-  return body === undefined || /^(none\.?)?$/i.test(body.trim());
+  return body === undefined || body.trim() === '';
+}
+
+/** The template's "checked, nothing there"; on a partial summary it would stand for what the model dropped. */
+function isNoneSectionBody(body: string | undefined): boolean {
+  return body !== undefined && /^none\.?$/i.test(body.trim());
 }
 
 /**
@@ -1181,7 +1185,9 @@ function evaluateSummaryReply(input: {
     return { summary: strict.summary, missingSections: [] };
   }
   // Every check runs again on the rebuilt block, so a self-referential goal is still rejected.
-  if (input.allowPartial) {
+  // A partial summary whose essential sections only say "none" would replace the context with nothing.
+  const essentialIsNone = input.essentialSections.some(name => isNoneSectionBody(rebuilt.bodies.get(name)));
+  if (input.allowPartial && !essentialIsNone) {
     const revalidated = validateCompactionSummary(rebuilt.block, input.requiredSections, input.userText);
     if (revalidated.reason === undefined) {
       return { summary: revalidated.summary, missingSections: rebuilt.missing };
