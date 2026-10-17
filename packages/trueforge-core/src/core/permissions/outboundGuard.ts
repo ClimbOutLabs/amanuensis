@@ -155,11 +155,13 @@ function compactForm(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-const PRIVATE_KEY_BLOCK = /-{3,}\s*BEGIN[\sA-Z0-9]*PRIVATE\s+KEY/i;
-const JWT = /eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/;
+/** A whole PEM private key, BEGIN through END; with no END line it runs to the end of the text. */
+export const PRIVATE_KEY_BLOCK =
+  /-{3,}\s*BEGIN[\sA-Z0-9]*PRIVATE\s+KEY[\s\S]*?(?:-{3,}\s*END[\sA-Z0-9]*PRIVATE\s+KEY-*|$)/i;
+export const JWT = /eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/;
 
 /** Provider key shapes. Each needs enough body that an ordinary hyphenated word cannot match. */
-const KEY_PREFIXES: readonly RegExp[] = [
+export const KEY_PREFIXES: readonly RegExp[] = [
   // AWS access key ids.
   /\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b/,
   // GitHub tokens.
@@ -177,6 +179,8 @@ const KEY_PREFIXES: readonly RegExp[] = [
   /\bv1\.[A-Za-z0-9_-]{30,}/,
   // Google, Stripe, Hugging Face, npm, GitLab, SendGrid, Twilio.
   /\bAIza[0-9A-Za-z_-]{35}/,
+  // Google OAuth access tokens.
+  /\bya29\.[A-Za-z0-9_-]{20,}/,
   /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/,
   /\bhf_[A-Za-z0-9]{30,}/,
   /\bnpm_[A-Za-z0-9]{30,}/,
@@ -188,15 +192,15 @@ const KEY_PREFIXES: readonly RegExp[] = [
 ];
 
 /** A password label, its delimiter, then a value. A bare mention of "password" does not match. */
-const PASSWORD_LABEL = /\b(?:pass(?:word|wd|code|phrase)|pwd)s?["']?\s*[:=]\s*["'`]?[^\s"'`]{3,}/i;
+export const PASSWORD_LABEL = /(\b(?:pass(?:word|wd|code|phrase)|pwd)s?["']?\s*[:=]\s*["'`]?)([^\s"'`]{3,})/i;
 /** `passcode 123456`: the label may take its value after a space when the value contains a digit. */
-const PASSCODE_THEN_DIGITS = /\bpass(?:code|phrase)\s+["'`]?\S*\d\S*/i;
+export const PASSCODE_THEN_DIGITS = /(\bpass(?:code|phrase)\s+["'`]?)(\S*\d\S*)/i;
 /**
  * Other credential labels need a longer value with a digit in it, so `api key: 2024 changes` and
  * `token: the movie` pass while `token=ab12cd34ef` does not.
  */
-const CREDENTIAL_LABEL =
-  /\b(?:secret|token|api[\s_-]?key|access[\s_-]?key|auth(?:orization)?)s?["']?\s*[:=]\s*["'`]?(?=[^\s"'`]*\d)[^\s"'`]{8,}/i;
+export const CREDENTIAL_LABEL =
+  /(\b(?:secret|token|api[\s_-]?key|access[\s_-]?key|auth(?:orization)?)s?["']?\s*[:=]\s*["'`]?)((?=[^\s"'`]*\d)[^\s"'`]{8,})/i;
 
 /** Digit and symbol stand-ins for letters (`passw0rd`, `p@ssword`), undone before the label rules run. */
 const LEET: Readonly<Record<string, string>> = {

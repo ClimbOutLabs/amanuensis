@@ -423,6 +423,15 @@ export {
   isMapsToolName,
 } from './permissions/mapsToolNames';
 export {
+  CREDENTIAL_LABEL,
+  JWT,
+  KEY_PREFIXES,
+  OUTBOUND_MIN_SECRET_LENGTH,
+  PASSCODE_THEN_DIGITS,
+  PASSWORD_LABEL,
+  PRIVATE_KEY_BLOCK,
+} from './permissions/outboundGuard';
+export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,

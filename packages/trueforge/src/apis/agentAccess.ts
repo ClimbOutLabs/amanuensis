@@ -79,7 +79,7 @@ export async function resolveManagedAgentIds<TTransaction>(input: {
 }
 
 /**
- * Every agent the caller may manage. Unlike {@link resolveManagedAgentIds}, an `all` list scope is
+ * Every agent the caller may manage. Unlike `resolveManagedAgentIds`, an `all` list scope is
  * resolved per agent (standalone and OIDC allow managing only agents the caller created), so the
  * result is the caller's agents on those instances too.
  */

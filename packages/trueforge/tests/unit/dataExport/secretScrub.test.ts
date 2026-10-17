@@ -1,3 +1,4 @@
+import { KEY_PREFIXES } from '@truefoundry/trueforge-core/core';
 import { createExportScrubber, normalizeSecrets, REDACTED } from '../../../src/dataExport/secretScrub';
 
 // Credential-shaped samples are assembled so no literal in this file looks like a real secret.
@@ -9,7 +10,7 @@ const sample = {
   googleOauth: ['ya29', 'a0AfH6SMBabcdefghij0123456789'].join('.'),
   jwt: ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'abcdefghijKLMNOP'].join('.'),
   github: ['ghp', 'abcdefgh1234567890abcdefgh'].join('_'),
-  openai: ['sk', 'abcdefgh12345678'].join('-'),
+  openai: ['sk', 'abcdefghij0123456789abcd'].join('-'),
 };
 
 describe('export secret scrubbing', () => {
@@ -70,5 +71,63 @@ describe('export secret scrubbing', () => {
     expect(scrubber.url(`https://host.example.com/${sample.github}`)).toBe('https://host.example.com/[redacted]');
     expect(scrubber.url('https://host.example.com/mcp')).toBe('https://host.example.com/mcp');
     expect(scrubber.url('not a url')).toBe(REDACTED);
+  });
+
+  it('removes a whole PEM private key, body and END line included', () => {
+    const pem = [
+      ['-----BEGIN RSA', 'PRIVATE KEY-----'].join(' '),
+      'MIIEowIBAAKCAQEAbodyline1',
+      'bodyline2xyz',
+      ['-----END RSA', 'PRIVATE KEY-----'].join(' '),
+    ];
+    const scrubber = createExportScrubber([]);
+    const out = scrubber.text(`before\n${pem.join('\n')}\nafter`);
+    expect(out).toBe('before\n[redacted]\nafter');
+    expect(scrubber.text(`note\n${pem.slice(0, 3).join('\n')}`)).toBe('note\n[redacted]');
+  });
+
+  describe('parity with the outbound guard', () => {
+    // One sample per guard key pattern; the length check fails when the guard gains a pattern without a sample.
+    const guardSamples = [
+      ['AKIA', 'ABCDEFGHIJKLMNOP'].join(''),
+      ['ASIA', 'ABCDEFGHIJKLMNOP'].join(''),
+      ['ghp', 'abcdefgh1234567890abcdefgh'].join('_'),
+      ['github', 'pat', 'abcdefgh1234567890abcdefgh'].join('_'),
+      ['sk', 'ant', 'abcdefghij1234'].join('-'),
+      ['sk', 'abcdefghij0123456789abcd'].join('-'),
+      ['xoxb', '1234567890', 'abcdefghij'].join('-'),
+      ['xapp', '1234567890', 'abcdefghij'].join('-'),
+      ['v1', 'abcdefghij0123456789abcdefghij01'].join('.'),
+      ['AIza', 'abcdefghij0123456789abcdefghij01234'].join(''),
+      ['ya29', 'a0AfH6SMBabcdefghij0123456789'].join('.'),
+      ['sk', 'test', 'abcdefghij0123456789'].join('_'),
+      ['hf', 'abcdefghij0123456789abcdefghij01'].join('_'),
+      ['npm', 'abcdefghij0123456789abcdefghij01'].join('_'),
+      ['glpat', 'abcdefghij0123456789'].join('-'),
+      ['SG', 'abcdefghij0123456789', 'abcdefghij0123456789'].join('.'),
+      ['SK', 'abcdef0123456789abcdef0123456789'].join(''),
+      'Bearer abcdefghij0123456789abcd',
+    ];
+
+    it('has a sample for every guard key pattern', () => {
+      expect(guardSamples).toHaveLength(KEY_PREFIXES.length + 1);
+    });
+
+    it.each(guardSamples)('redacts %s', value => {
+      const scrubber = createExportScrubber([]);
+      expect(scrubber.text(`key ${value} end`)).toBe('key [redacted] end');
+    });
+
+    it.each([
+      ['password: hunter2xyz', 'password: [redacted]'],
+      ['api_key=ab12cd34ef56', 'api_key=[redacted]'],
+      ['passcode 123456', 'passcode [redacted]'],
+    ])('redacts the value of the label in %s', (input, expected) => {
+      expect(createExportScrubber([]).text(input)).toBe(expected);
+    });
+
+    it('leaves ordinary hyphenated words alone', () => {
+      expect(createExportScrubber([]).text('the sk-learn-style-words stay')).toBe('the sk-learn-style-words stay');
+    });
   });
 });
