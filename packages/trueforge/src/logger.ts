@@ -5,6 +5,7 @@
  * human-readable standalone format to keep local logs terse.
  */
 import winston, { type Logger } from 'winston';
+import { createExportScrubber, REDACTED } from './dataExport/secretScrub';
 
 const STANDALONE_META_SKIP = new Set(['level', 'message', 'timestamp', 'version', 'component', 'stack', 'splat']);
 
@@ -22,6 +23,109 @@ export function shouldColorize(): boolean {
   }
   return process.stderr.isTTY;
 }
+
+const REDACTION_EXEMPT_KEYS = new Set(['level', 'timestamp', 'version', 'component']);
+
+/** Field names whose values are credentials, wherever they appear in a log entry. */
+const CREDENTIAL_KEY =
+  /authorization|cookie|password|passwd|secret|token|apikey|privatekey|credential|verifier|oauthcode|authcode/;
+
+/** Email and calendar content is dropped by exact field name. */
+const CONTENT_KEYS = new Set([
+  'body',
+  'bodytext',
+  'bodyhtml',
+  'textbody',
+  'htmlbody',
+  'html',
+  'snippet',
+  'raw',
+  'content',
+  'description',
+  'attendees',
+]);
+
+const CREDENTIAL_PARAMS =
+  'token|access_token|refresh_token|id_token|api_key|apikey|key|password|passwd|client_secret|secret';
+
+/** Credentials written into free text: header lines, query or form parameters, quoted JSON fields, URL userinfo. */
+const TEXT_REDACTIONS: readonly (readonly [RegExp, string])[] = [
+  [
+    /\b((?:proxy-)?authorization|cookie|set-cookie|x-api-key|api-key)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r\n"'}]+)/gi,
+    `$1$2${REDACTED}`,
+  ],
+  [new RegExp(`([?&;]|\\b)(${CREDENTIAL_PARAMS})=[^&\\s"'#]+`, 'gi'), `$1$2=${REDACTED}`],
+  // An OAuth authorization code only counts as one inside a query string, not `exit code=1`.
+  [/([?&])code=[^&\s"'#]+/g, `$1code=${REDACTED}`],
+  [
+    // Quotes are optional: a JSON parse error may quote only part of a value, or a bare one.
+    /("[a-z_]*(?:password|passwd|secret|token|api_?key|authorization|cookie|verifier)[a-z_]*"\s*:\s*)(?:"(?:[^"\\]|\\.)*"?|[^\s,}"]+)/gi,
+    `$1"${REDACTED}"`,
+  ],
+  [/\bBasic\s+[A-Za-z0-9+/=]{8,}/g, `Basic ${REDACTED}`],
+  [/(\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g, `$1${REDACTED}`],
+];
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return CONTENT_KEYS.has(normalized) || CREDENTIAL_KEY.test(normalized);
+}
+
+const shapeScrubber = createExportScrubber([]);
+
+function redactText(text: string): string {
+  let out = shapeScrubber.text(text);
+  for (const [pattern, replacement] of TEXT_REDACTIONS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
+function redactValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (typeof value === 'string') {
+    return redactText(value);
+  }
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  if (seen.has(value)) {
+    return '[circular]';
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map(entry => redactValue(entry, seen));
+  }
+  if (value instanceof Error) {
+    // A nested Error would serialize to `{}`; keep what explains the failure, redacted.
+    return {
+      name: value.name,
+      message: redactText(value.message),
+      ...(value.stack === undefined ? {} : { stack: redactText(value.stack) }),
+      ...(value.cause === undefined ? {} : { cause: redactValue(value.cause, seen) }),
+    };
+  }
+  const entries = value instanceof Headers ? [...value.entries()] : Object.entries(value);
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of entries) {
+    // Counts and flags under a credential-like name (`max_tokens`) carry nothing secret.
+    const holdsText = typeof entry === 'string' || (typeof entry === 'object' && entry !== null);
+    out[key] = holdsText && isSensitiveKey(key) ? REDACTED : redactValue(entry, seen);
+  }
+  return out;
+}
+
+/**
+ * Credentials and email or calendar content never reach a log line: every entry passes here.
+ * Runs after `errors()`, so an Error's message and stack are plain fields by then.
+ */
+const redactFormat = winston.format(info => {
+  for (const key of Object.keys(info)) {
+    if (!REDACTION_EXEMPT_KEYS.has(key)) {
+      info[key] = redactValue(info[key], new WeakSet());
+    }
+  }
+  return info;
+});
 
 function standaloneMeta(info: object): string {
   const copied: Record<string, unknown> = { ...info };
@@ -42,6 +146,7 @@ function standaloneFormat(color: boolean): winston.Logform.Format {
   const parts: winston.Logform.Format[] = [
     winston.format.timestamp({ format: 'HH:mm:ss' }),
     winston.format.errors({ stack: true }),
+    redactFormat(),
   ];
   if (color) {
     parts.push(winston.format.colorize({ level: true }));
@@ -60,6 +165,7 @@ function jsonFormat(): winston.Logform.Format {
   return winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
+    redactFormat(),
     winston.format.json(),
   );
 }
