@@ -4276,10 +4276,20 @@ export class AgentThread {
         return;
       }
 
-      for (const event of this.pendingHeldReplayEvents) {
-        yield event;
+      // send() commits context without output events, so the replayed call and the denial note
+      // are recorded here, before they are shown.
+      if (this.pendingHeldReplayEvents.length > 0) {
+        yield* this.appendToContext({
+          context: [],
+          output: this.pendingHeldReplayEvents,
+          currentContextUsage: undefined,
+          usage: undefined,
+        });
+        for (const event of this.pendingHeldReplayEvents) {
+          yield event;
+        }
+        this.pendingHeldReplayEvents = [];
       }
-      this.pendingHeldReplayEvents = [];
 
       const iterationLimit = this.definition.iterationLimit ?? DEFAULT_ITERATION_LIMIT;
       // Starts empty; set only after stepLLMCall in this execute(). That is intentional:

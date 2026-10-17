@@ -293,6 +293,18 @@ describe('POST /{session_id}/turns approval conflicts', () => {
     });
   });
 
+  it('tells the owner in plain words to wait when the reply is still running', async () => {
+    const app = await buildApp({ status: 'allow' });
+    rejectCreateTurnWith(new PreviousTurnRunningError(TIP_TURN_ID));
+
+    const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { message: 'The reply is still being written. Wait for it to finish, then try again.' },
+    });
+  });
+
   describe('when the session tip moved after the request read it', () => {
     const stale = () => new StaleApprovalContinuationError('turn-old', TIP_TURN_ID);
 

@@ -6,6 +6,7 @@ import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourc
 import { EventType } from '../../src/agent-session/schemas/events';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
+import { PreviousTurnRunningError } from '../../src/agent-session/store/SessionStoreErrors';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import type { ToolSource } from '../../src/core/mcp/IMCPServer';
@@ -17,6 +18,7 @@ import {
   type SentinelServices,
   type Tier2ActionKind,
 } from '../../src/core/permissions';
+import { HELD_DENIED_NOTE } from '../../src/core/permissions/heldActions';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?' });
@@ -168,7 +170,7 @@ async function setup() {
   const approval = (status: 'allow' | 'deny') => [
     { type: EventType.USER_TOOL_APPROVAL, thread_id: 'main', tool_call_id: 'call-send', approval: { status } },
   ];
-  return { session, run, approval, callTool, create, seenServices };
+  return { session, run, approval, callTool, create, seenServices, resolver };
 }
 
 describe('a scheduled run that held an action', () => {
@@ -248,5 +250,54 @@ describe('a scheduled run that held an action', () => {
     expect(attendedServices?.unattended).toBe(false);
     expect((await unattendedServices?.tier2AutoAllow(identity))?.size).toBe(0);
     expect((await attendedServices?.tier2AutoAllow(identity))?.size).toBe(0);
+  });
+});
+
+describe('answering a held action', () => {
+  const persistedEvents = async (session: Awaited<ReturnType<typeof setup>>['session'], turnId: string) => {
+    const page = await session.listEvents({ limit: 100, last_turn_id: turnId });
+    return page.data.filter(item => item.turn_id === turnId).map(item => item.event);
+  };
+
+  it('keeps the approved call and its result on record, under one call id', async () => {
+    const { session, run, approval } = await setup();
+    await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
+
+    const replay = await run(approval('allow'), { stop: true });
+
+    const events = await persistedEvents(session, replay.id);
+    const message = events.find(event => event.type === EventType.MODEL_MESSAGE);
+    const result = events.find(event => event.type === EventType.TOOL_RESPONSE_V2);
+    const callId = message?.type === EventType.MODEL_MESSAGE ? message.tool_calls?.[0]?.id : undefined;
+    expect(callId).toBeDefined();
+    expect(result?.type === EventType.TOOL_RESPONSE_V2 ? result.tool_call_id : undefined).toBe(callId);
+  });
+
+  it('keeps the denial note on record', async () => {
+    const { session, run, approval } = await setup();
+    await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
+
+    const replay = await run(approval('deny'), { stop: true });
+
+    const events = await persistedEvents(session, replay.id);
+    const message = events.find(event => event.type === EventType.MODEL_MESSAGE);
+    expect(message?.type === EventType.MODEL_MESSAGE ? message.content : undefined).toBe(HELD_DENIED_NOTE);
+  });
+
+  it('is refused while the latest turn is still running, and cancels nothing', async () => {
+    const { session, run, approval, callTool, resolver } = await setup();
+    await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
+    const reply = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'Hello again' }],
+      signal: new AbortController().signal,
+      resolver,
+    });
+    expect(reply.state.status).toBe('running');
+
+    await expect(run(approval('allow'), { stop: true })).rejects.toThrow(PreviousTurnRunningError);
+
+    expect((await session.getTurn(reply.id))?.state.status).toBe('running');
+    expect(callTool).not.toHaveBeenCalled();
   });
 });
