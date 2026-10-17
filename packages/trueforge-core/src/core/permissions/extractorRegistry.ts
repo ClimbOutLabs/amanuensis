@@ -279,7 +279,17 @@ const FILE_DATA_KEY_SET = new Set(
   ['content', 'data', 'bytes', 'content_bytes', 'file_data', 'base64', 'raw'].map(normalizeKey),
 );
 const ATTACHMENT_MAX_DEPTH = 6;
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000e-\u001f]/;
+
+/** True for text holding control characters other than tab, newline and carriage return, which marks it as binary. */
+function hasBinaryControl(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code <= 8 || (code >= 0x0e && code <= 0x1f)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function isAttachmentKey(key: string): boolean {
   return ATTACHMENT_KEY_SET.has(normalizeKey(key));
@@ -305,7 +315,7 @@ function decodeFileData(value: string): string {
   }
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (!CONTROL_CHARACTERS.test(text)) {
+    if (!hasBinaryControl(text)) {
       return text;
     }
   } catch {
