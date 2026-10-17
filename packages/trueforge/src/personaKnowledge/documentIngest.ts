@@ -1,6 +1,7 @@
 import { extractRawText } from 'mammoth';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { inflateRawSync } from 'node:zlib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
@@ -31,8 +32,8 @@ export interface ExtractedUpload {
 const MAX_PDF_PAGES = 300;
 /**
  * Zip bombs: a 15 MB .docx can inflate to gigabytes. The chunker caps text at
- * 500k chars, but mammoth inflates the whole archive first — so the
- * uncompressed size is checked up front via the zip central directory.
+ * 500k chars, but mammoth inflates the whole archive first — so the real
+ * uncompressed size is checked up front with a bounded inflate.
  */
 const MAX_DOCX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
 
@@ -134,22 +135,21 @@ async function extractPdfText(bytes: Uint8Array): Promise<{ text: string; note?:
 }
 
 /**
- * Sums the uncompressed size of every entry from the zip central directory.
- * Returns null when the archive isn't a parseable zip (mammoth reports that).
- *
- * Zip64 is parsed for real, not skipped: a zip64 end-of-central-directory
- * stores 0xFFFF/0xFFFFFFFF sentinels in the 32-bit fields, and treating those
- * as "unparseable" would fail open while the zip reader parses the archive
- * just fine. Any malformed structure still returns null — the zip reader
- * trips over the same bytes and rejects the file.
+ * Real uncompressed size of the zip, capped: each entry is inflated with an
+ * output bound, because a bomb can understate its size in both the local and
+ * central headers. The declared sizes are summed too, so a lying zip64 record
+ * is refused before anything inflates. Zip64 is parsed for real, not skipped.
+ * Returns null when the structure can't be walked; the caller refuses the file
+ * rather than handing it to the zip reader unchecked.
  */
-function docxUncompressedBytes(bytes: Uint8Array): number | null {
+function docxInflatedBytes(bytes: Uint8Array): number | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const EOCD_SIG = 0x0605_4b50;
   const CDH_SIG = 0x0201_4b50;
+  const LOCAL_SIG = 0x0403_4b50;
   const ZIP64_LOCATOR_SIG = 0x0706_4b50;
   const ZIP64_EOCD_SIG = 0x0606_4b50;
-  const ZIP64_EXTRA_ID = 0x0001;
+  const SENTINEL = 0xffff_ffff;
   // The end-of-central-directory record is at least 22 bytes; a comment can
   // push it back, so scan the tail.
   let eocdOffset = -1;
@@ -170,7 +170,7 @@ function docxUncompressedBytes(bytes: Uint8Array): number | null {
   };
   let cdEntries = BigInt(view.getUint16(eocdOffset + 10, true));
   let cdOffset = view.getUint32(eocdOffset + 16, true);
-  if (cdEntries === BigInt(0xffff) || cdOffset === 0xffff_ffff) {
+  if (cdEntries === BigInt(0xffff) || cdOffset === SENTINEL) {
     // Zip64: real values live in the zip64 EOCD, found via the 20-byte
     // locator immediately before the EOCD.
     const locatorOffset = eocdOffset - 20;
@@ -196,68 +196,108 @@ function docxUncompressedBytes(bytes: Uint8Array): number | null {
   if (cdOffset >= bytes.byteLength) {
     return null;
   }
+  let declared = 0;
   let total = 0;
   let offset = cdOffset;
   for (let n = BigInt(0); n < cdEntries; n += BigInt(1)) {
     if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== CDH_SIG) {
       return null;
     }
+    const method = view.getUint16(offset + 10, true);
     const nameLen = view.getUint16(offset + 28, true);
     const extraLen = view.getUint16(offset + 30, true);
-    let entrySize = view.getUint32(offset + 24, true);
-    if (entrySize === 0xffff_ffff) {
-      // Zip64 entry: the true 64-bit size is the first field of the zip64
-      // extra record (it is only present when the 32-bit field is the
-      // sentinel, and uncompressed size is first in the field order).
-      const extraOffset = offset + 46 + nameLen;
-      const size64 = readZip64ExtraSize(view, bytes.byteLength, extraOffset, extraLen, ZIP64_EXTRA_ID);
-      if (size64 === null || size64 > BigInt(MAX_DOCX_UNCOMPRESSED_BYTES)) {
-        return MAX_DOCX_UNCOMPRESSED_BYTES + 1;
-      }
-      entrySize = Number(size64);
+    const zip64 = readZip64Extra(view, bytes.byteLength, offset + 46 + nameLen, extraLen);
+    if (zip64 === null) {
+      return null;
     }
-    total += entrySize;
+    // The zip64 record holds, in order, each of these fields whose 32-bit value is the sentinel.
+    let widenedIndex = 0;
+    const widen = (raw: number): bigint | undefined => {
+      if (raw !== SENTINEL) {
+        return BigInt(raw);
+      }
+      widenedIndex += 1;
+      return zip64[widenedIndex - 1];
+    };
+    const declaredSize = widen(view.getUint32(offset + 24, true));
+    const compressedSize = widen(view.getUint32(offset + 20, true));
+    const localOffset = widen(view.getUint32(offset + 42, true));
+    if (declaredSize === undefined || compressedSize === undefined || localOffset === undefined) {
+      return null;
+    }
+    if (declaredSize > BigInt(MAX_DOCX_UNCOMPRESSED_BYTES - declared)) {
+      return MAX_DOCX_UNCOMPRESSED_BYTES + 1;
+    }
+    declared += Number(declaredSize);
+    if (localOffset + BigInt(30) > BigInt(bytes.byteLength)) {
+      return null;
+    }
+    const local = Number(localOffset);
+    if (view.getUint32(local, true) !== LOCAL_SIG) {
+      return null;
+    }
+    const dataStart = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    if (BigInt(dataStart) + compressedSize > BigInt(bytes.byteLength)) {
+      return null;
+    }
+    const data = bytes.subarray(dataStart, dataStart + Number(compressedSize));
+    if (method === 0) {
+      total += data.byteLength;
+    } else if (method === 8) {
+      try {
+        total += inflateRawSync(data, { maxOutputLength: MAX_DOCX_UNCOMPRESSED_BYTES - total + 1 }).byteLength;
+      } catch (error) {
+        // Inflating past the bound throws ERR_BUFFER_TOO_LARGE; anything else is corrupt data.
+        const tooLarge =
+          typeof error === 'object' && error !== null && 'code' in error && error.code === 'ERR_BUFFER_TOO_LARGE';
+        return tooLarge ? MAX_DOCX_UNCOMPRESSED_BYTES + 1 : null;
+      }
+    } else {
+      return null;
+    }
     if (total > MAX_DOCX_UNCOMPRESSED_BYTES) {
       return total;
     }
     offset += 46 + nameLen + extraLen + view.getUint16(offset + 32, true);
   }
-  return total;
+  return Math.max(declared, total);
 }
 
 /**
- * Reads the uncompressed size (first uint64) of the zip64 extra field with
- * the given id. Returns null when the extra block is absent or malformed.
+ * The 64-bit values of the zip64 extra field (id 0x0001), in record order.
+ * Empty when the entry has no such field; null when the extra block is malformed.
  */
-function readZip64ExtraSize(
-  view: DataView,
-  byteLength: number,
-  extraOffset: number,
-  extraLen: number,
-  extraId: number,
-): bigint | null {
-  let cursor = extraOffset;
+function readZip64Extra(view: DataView, byteLength: number, extraOffset: number, extraLen: number): bigint[] | null {
+  const ZIP64_EXTRA_ID = 0x0001;
   const end = extraOffset + extraLen;
-  if (end > byteLength || cursor < 0) {
+  if (end > byteLength) {
     return null;
   }
+  let cursor = extraOffset;
   while (cursor + 4 <= end) {
     const id = view.getUint16(cursor, true);
     const size = view.getUint16(cursor + 2, true);
-    if (id === extraId) {
-      if (size < 8 || cursor + 4 + 8 > end || cursor + 4 + 8 > byteLength) {
-        return null;
+    if (cursor + 4 + size > end) {
+      return null;
+    }
+    if (id === ZIP64_EXTRA_ID) {
+      const values: bigint[] = [];
+      for (let at = cursor + 4; at + 8 <= cursor + 4 + size; at += 8) {
+        values.push(view.getBigUint64(at, true));
       }
-      return view.getBigUint64(cursor + 4, true);
+      return values;
     }
     cursor += 4 + size;
   }
-  return null;
+  return [];
 }
 
 async function extractDocxText(bytes: Uint8Array): Promise<string> {
-  const uncompressed = docxUncompressedBytes(bytes);
-  if (uncompressed !== null && uncompressed > MAX_DOCX_UNCOMPRESSED_BYTES) {
+  const uncompressed = docxInflatedBytes(bytes);
+  if (uncompressed === null) {
+    throw new Error('This file could not be opened as a Word document. Try saving it again as .docx.');
+  }
+  if (uncompressed > MAX_DOCX_UNCOMPRESSED_BYTES) {
     throw new Error(
       'This Word document expands to an enormous size when opened, so it can’t be indexed safely. Try a smaller file.',
     );

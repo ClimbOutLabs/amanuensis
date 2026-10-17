@@ -1,10 +1,12 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { deflateRawSync } from 'node:zlib';
 import { Response as UndiciResponse } from 'undici';
 
 import {
   extractTextFromUpload,
   fetchUrlSnapshot,
+  MAX_UPLOAD_BYTES,
   pinnedDispatcher,
 } from '../../../src/personaKnowledge/documentIngest';
 
@@ -74,6 +76,55 @@ function storedZip(entries: Array<[name: string, content: string]>): Uint8Array 
   const out = new Uint8Array(total);
   let at = 0;
   for (const part of [...chunks, ...central, new Uint8Array(end.buffer)]) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/**
+ * One deflated entry whose local header and central directory both claim
+ * `declaredSize` uncompressed bytes, whatever the data really inflates to.
+ */
+function deflatedZip(name: string, content: Uint8Array, declaredSize: number): Uint8Array {
+  const nameBytes = new TextEncoder().encode(name);
+  const compressed = deflateRawSync(content);
+  const crc = crc32(content);
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true);
+  local.setUint16(4, 20, true);
+  local.setUint16(8, 8, true); // deflate
+  local.setUint32(14, crc, true);
+  local.setUint32(18, compressed.length, true);
+  local.setUint32(22, declaredSize, true);
+  local.setUint16(26, nameBytes.length, true);
+  const dir = new DataView(new ArrayBuffer(46));
+  dir.setUint32(0, 0x02014b50, true);
+  dir.setUint16(10, 8, true); // deflate
+  dir.setUint32(16, crc, true);
+  dir.setUint32(20, compressed.length, true);
+  dir.setUint32(24, declaredSize, true);
+  dir.setUint16(28, nameBytes.length, true);
+  dir.setUint32(42, 0, true);
+  const centralStart = 30 + nameBytes.length + compressed.length;
+  const centralSize = 46 + nameBytes.length;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, centralStart, true);
+  const parts = [
+    new Uint8Array(local.buffer),
+    nameBytes,
+    compressed,
+    new Uint8Array(dir.buffer),
+    nameBytes,
+    new Uint8Array(end.buffer),
+  ];
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
     out.set(part, at);
     at += part.length;
   }
@@ -278,6 +329,23 @@ describe('extractTextFromUpload', () => {
       }
     }
     await expect(extractTextFromUpload({ filename: 'bomb.docx', bytes: docx })).rejects.toThrow(/enormous/);
+  });
+
+  it('refuses a zip bomb whose headers understate its real size', async () => {
+    // 64 MiB of zeros deflates to a few kilobytes; every header claims 1 KiB.
+    const docx = deflatedZip('word/document.xml', new Uint8Array(64 * 1024 * 1024), 1024);
+    expect(docx.byteLength).toBeLessThan(MAX_UPLOAD_BYTES);
+    await expect(extractTextFromUpload({ filename: 'understated.docx', bytes: docx })).rejects.toThrow(/enormous/);
+  });
+
+  it('refuses a .docx whose zip structure cannot be checked', async () => {
+    const docx = storedZip([['word/document.xml', '<w:document/>']]);
+    const view = new DataView(docx.buffer, docx.byteOffset, docx.byteLength);
+    // Point the end record at a central directory that is not there.
+    view.setUint32(docx.byteLength - 22 + 16, 1, true);
+    await expect(extractTextFromUpload({ filename: 'broken.docx', bytes: docx })).rejects.toThrow(
+      /could not be opened as a Word document/,
+    );
   });
 
   it('refuses a zip64 zip bomb before inflating it', async () => {

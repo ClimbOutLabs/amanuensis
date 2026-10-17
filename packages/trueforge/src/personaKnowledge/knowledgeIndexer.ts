@@ -438,6 +438,34 @@ export function getPersonaKnowledgeIndexer(options: PersonaKnowledgeIndexerOptio
   return indexer;
 }
 
+/** Bytes one persona's library holds on disk: its database files and any blobs still waiting to be indexed. */
+export async function personaLibraryBytes(input: {
+  knowledgeDir: string;
+  tenantId: string;
+  personaId: string;
+}): Promise<number> {
+  const { dbPath } = personaKnowledgeLocation(input);
+  const blobsDir = path.dirname(blobPath({ ...input, documentId: 'size-probe' }));
+  const sizeOf = async (file: string): Promise<number> => {
+    try {
+      return (await stat(file)).size;
+    } catch {
+      // A file that is not there yet holds nothing.
+      return 0;
+    }
+  };
+  let blobNames: string[] = [];
+  try {
+    blobNames = await readdir(blobsDir);
+  } catch {
+    // No uploads are pending.
+  }
+  const sizes = await Promise.all(
+    [dbPath, `${dbPath}-wal`, ...blobNames.map(name => path.join(blobsDir, name))].map(sizeOf),
+  );
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
 /** Persists the raw upload bytes for the background indexer. Exported for the API layer. */
 export async function writeKnowledgeBlob(input: {
   knowledgeDir: string;

@@ -1,12 +1,12 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Response as UndiciResponse } from 'undici';
 import { createLogger } from 'winston';
 
-import { createPersonaKnowledgeRouter } from '../../../src/apis/personaKnowledge';
+import { createPersonaKnowledgeRouter, MAX_LIBRARY_BYTES_PER_USER } from '../../../src/apis/personaKnowledge';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createAppErrorHandler } from '../../../src/app';
 import type { RequestContext } from '../../../src/auth/identity';
@@ -271,6 +271,25 @@ describe('persona knowledge router', () => {
     as(userA);
     expect((await app.request('/persona-zara/knowledge/nope', { method: 'DELETE' })).status).toBe(404);
     expect((await app.request(`/persona-zara/knowledge/${data.id}`, { method: 'DELETE' })).status).toBe(200);
+    expect(await listDocuments('persona-zara')).toHaveLength(0);
+  });
+
+  it('refuses a new document once the user has filled their libraries across personas', async () => {
+    const { app, knowledgeDir, listDocuments } = await setup();
+    // A pending upload on another of the same user's personas already uses the whole allowance.
+    const blobsDir = path.join(knowledgeDir, TENANT_ID, 'persona-mike.blobs');
+    mkdirSync(blobsDir, { recursive: true });
+    const pending = path.join(blobsDir, 'pending.bin');
+    writeFileSync(pending, '');
+    truncateSync(pending, MAX_LIBRARY_BYTES_PER_USER);
+
+    const response = await app.request(
+      '/persona-zara/knowledge',
+      jsonInit('POST', { kind: 'upload', filename: 'notes.txt', content_base64: toBase64('invented notes') }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { message: string } }).error.message).toMatch(/full/);
     expect(await listDocuments('persona-zara')).toHaveLength(0);
   });
 

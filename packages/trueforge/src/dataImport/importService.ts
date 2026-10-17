@@ -42,6 +42,7 @@ import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sess
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
+import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
@@ -1215,8 +1216,9 @@ async function importArchive<TTransaction>(
           if (artifact.status === 'stored') {
             const blob = artifact.archive_entry === undefined ? undefined : contents.files.get(artifact.archive_entry);
             if (blob !== undefined) {
+              // The archive's type is not trusted: an upload is always served as a plain download.
               await deps.turnArtifactStore.recordStoredArtifact(
-                { ...identity, name: artifact.name, data: blob, mime: artifact.mime ?? 'application/octet-stream' },
+                { ...identity, name: artifact.name, data: blob, mime: PERSISTED_ARTIFACT_MIME },
                 tx,
               );
             } else {
