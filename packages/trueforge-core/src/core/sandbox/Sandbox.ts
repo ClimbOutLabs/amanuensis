@@ -82,6 +82,8 @@ import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './
 import { buildExecResultShape } from './execResultSemantics';
 import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
 import {
+  GIT_REMOTE_CHANGED_REFUSAL,
+  gitProbeRunner,
   gitRemotesMatch,
   observeGitRemotes,
   remoteObservationRequired,
@@ -1761,8 +1763,6 @@ const GIT_CONFIG_UNSAFE_REFUSAL =
   "This repository's git settings could run programs, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
 const HOST_GIT_CONFIG_UNSAFE_REFUSAL =
   "This repository's git settings could run programs, so the host did not authenticate this git command and it was not run. Remove the unsafe settings from .git/config or use a fresh clone.";
-const HOST_GIT_REMOTE_CHANGED_REFUSAL =
-  'The git remote is not the one shown for approval, so the host did not authenticate this git command and it was not run. Ask for the command again to review the current remote.';
 const HOST_GIT_CONFIG_UNREADABLE_REFUSAL =
   "Could not read this repository's git settings, so the host did not authenticate this git command and it was not run.";
 const GIT_CONFIG_UNREADABLE_REFUSAL =
@@ -3541,6 +3541,7 @@ export class Sandbox extends LocalToolMCP {
     env?: Record<string, string> | undefined;
     timeoutSeconds?: number | undefined;
     signal?: AbortSignal | undefined;
+    approvedGitRemotes?: GitRemotePrecondition | undefined;
   }): Promise<ExecResult> {
     // A command carrying the token never runs inside the in-sandbox lock wrapper, so the token reaches
     // only the pinned git process. The host-side workspace mutation lock already serialises it.
@@ -3552,6 +3553,7 @@ export class Sandbox extends LocalToolMCP {
       ...(input.env === undefined ? {} : { env: input.env }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.approvedGitRemotes === undefined ? {} : { approvedGitRemotes: input.approvedGitRemotes }),
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
@@ -3897,6 +3899,7 @@ export class Sandbox extends LocalToolMCP {
     planAdmission: { context: ToolInvocationContext | undefined; scope: ImplementationPlanGrantScope } | undefined,
     dispatchMarker: { dispatched: boolean },
     preflight: ExecPreflight | undefined,
+    approvedGitRemotes: GitRemotePrecondition | undefined,
   ): Promise<VerifiedExecOutcome> {
     const guarded = effect === 'verify' || effect === 'commit' || effect === 'edit' || effect === 'execute';
     // A verify or commit purpose only takes the durable coordination path when a repository
@@ -3913,6 +3916,7 @@ export class Sandbox extends LocalToolMCP {
               cwd: input.cwd,
               env,
               ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
+              ...(approvedGitRemotes === undefined ? {} : { approvedGitRemotes }),
             })
           : this.execWorkspaceExclusive({
               hostAuthored: false,
@@ -3922,6 +3926,7 @@ export class Sandbox extends LocalToolMCP {
               cwd: input.cwd,
               env,
               timeoutSeconds: input.timeoutSeconds,
+              approvedGitRemotes,
             });
       // Workspace-root discovery above (unbound path) is complete; the target
       // command is about to reach the provider. A SandboxNotAvailableError from
@@ -4028,6 +4033,7 @@ export class Sandbox extends LocalToolMCP {
                     cwd: input.cwd,
                     env,
                     timeoutSeconds: input.timeoutSeconds,
+                    approvedGitRemotes,
                   }),
                 };
               }
@@ -4574,22 +4580,16 @@ export class Sandbox extends LocalToolMCP {
           });
           return current !== undefined && gitRemotesMatch({ approved: approvedRemotes, current })
             ? undefined
-            : HOST_GIT_REMOTE_CHANGED_REFUSAL;
+            : GIT_REMOTE_CHANGED_REFUSAL;
         }
       : undefined;
     return { exec: { ...input.exec, command: built.command }, env: built.env, preflight };
   }
 
   private gitProbeRunner(input: { sandboxId: string; cwd: string | undefined }): GitProbeRunner {
-    return async probe => {
-      const result = await this.provider.exec({
-        sandboxId: input.sandboxId,
-        command: probe.command,
-        cwd: input.cwd,
-        env: { ...probe.env, LC_ALL: 'C' },
-      });
-      return result.success && result.response.exitCode === 0 ? result.response.result : undefined;
-    };
+    return gitProbeRunner(probe =>
+      this.provider.exec({ sandboxId: input.sandboxId, command: probe.command, cwd: input.cwd, env: probe.env }),
+    );
   }
 
   /** The remotes a host-authenticated git command would contact, read without credentials before it is approved. */
@@ -4598,9 +4598,10 @@ export class Sandbox extends LocalToolMCP {
     env: Record<string, string> | undefined;
     cwd: string | undefined;
   }): Promise<GitRemotePrecondition | undefined> {
+    // A push carried by the host names its destination from its own preview instead.
     if (
       this.githubGitToken === null ||
-      this.provider.hostGit !== undefined ||
+      this.provider.hostGit?.isPush(input.command) === true ||
       Object.keys(input.env ?? {}).length > 0
     ) {
       return undefined;
@@ -4711,6 +4712,7 @@ export class Sandbox extends LocalToolMCP {
         planScope === undefined ? undefined : { context, scope: planScope },
         dispatchMarker,
         gitPrep.preflight,
+        approvedRemotes,
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
@@ -4775,6 +4777,7 @@ export class Sandbox extends LocalToolMCP {
         planScope === undefined ? undefined : { context, scope: planScope },
         retryDispatchMarker,
         retryGitPrep.preflight,
+        approvedRemotes,
       );
       if (retryExecution.status === 'blocked') {
         return hostRefusalResponse(retryExecution.reason);

@@ -9,6 +9,7 @@ import {
   type HostAuthenticatedGitExec,
   type HostAuthenticatedGitPlan,
 } from './hostAuthenticatedGit';
+import type { ExecResult } from './provider/Provider';
 
 export const GitRemotePreconditionSchema = z.object({
   remotes: z.array(GitRemoteSchema).min(1).max(32),
@@ -20,6 +21,19 @@ export type GitRemotePrecondition = z.infer<typeof GitRemotePreconditionSchema>;
 
 /** Runs a token-free probe in the sandbox; its output on success, undefined when it could not be run or failed. */
 export type GitProbeRunner = (probe: HostAuthenticatedGitExec) => Promise<string | undefined>;
+
+export const GIT_REMOTE_CHANGED_REFUSAL =
+  'The git remote is not the one shown for approval, so the host did not authenticate this git command and it was not run. Ask for the command again to review the current remote.';
+
+/** A probe runner over a sandbox exec; output is read in the C locale so it never depends on the image. */
+export function gitProbeRunner(
+  execute: (probe: { command: string; env: Record<string, string> }) => Promise<ExecResult>,
+): GitProbeRunner {
+  return async probe => {
+    const result = await execute({ command: probe.command, env: { ...probe.env, LC_ALL: 'C' } });
+    return result.success && result.response.exitCode === 0 ? result.response.result : undefined;
+  };
+}
 
 /** A command that names its repository by URL carries it in its own text; every other form must be observed. */
 export function remoteObservationRequired(plan: HostAuthenticatedGitPlan): boolean {
