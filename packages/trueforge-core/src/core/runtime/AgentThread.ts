@@ -1417,7 +1417,7 @@ export class AgentThread {
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
   // Messages send() added for held-action decisions. They reach the stream at the start of execute(),
   // because events produced while a turn is being prepared are not persisted.
-  private pendingHeldReplayEvents: ModelMessageEvent[] = [];
+  private pendingHeldReplay: { message: InternalEnrichedAssistantMessage; finishReason: FinishReason } | undefined;
   private heldReplayOutput: ModelMessageEvent | undefined;
   // Calls an unattended turn could not save for the owner, so the app can say so. Lives for one turn.
   private readonly notSavedCalls = new Map<string, NotSavedReason>();
@@ -1823,8 +1823,7 @@ export class AgentThread {
             ? {}
             : { toolCallMemo: nudgeFlush.toolCallMemoAfterFlush }),
         });
-        this.pendingHeldReplayEvents = heldReplay.events;
-        this.heldReplayOutput = heldReplay.events.at(-1);
+        this.pendingHeldReplay = heldReplay.shown;
         if (nudgeFlush.toolCallMemoAfterFlush !== undefined) {
           this.toolCallMemo = nudgeFlush.toolCallMemoAfterFlush;
         }
@@ -1887,9 +1886,12 @@ export class AgentThread {
     approvals: readonly UserToolApprovalMessage[];
     heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
     signal: AbortSignal | undefined;
-  }): Promise<{ context: ContextMessage[]; events: ModelMessageEvent[] }> {
+  }): Promise<{
+    context: ContextMessage[];
+    shown: { message: InternalEnrichedAssistantMessage; finishReason: FinishReason } | undefined;
+  }> {
     if (input.approvals.length === 0) {
-      return { context: [], events: [] };
+      return { context: [], shown: undefined };
     }
     const allowedCalls = input.approvals.flatMap(approval => {
       const held = input.heldById.get(approval.tool_call_id);
@@ -1903,18 +1905,7 @@ export class AgentThread {
     }
     if (allowedCalls.length === 0) {
       const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };
-      return {
-        context: [note],
-        events: [
-          buildModelMessageEvent({
-            assistantMessage: note,
-            threadId: this.threadId,
-            finishReason: 'stop',
-            usage: undefined,
-            id: newEventId(),
-          }),
-        ],
-      };
+      return { context: [note], shown: { message: note, finishReason: 'stop' } };
     }
     const sentinel = this.sentinel;
     if (sentinel === undefined) {
@@ -1977,18 +1968,7 @@ export class AgentThread {
       tool_call_id: call.id,
       approval: { status: 'allow', scope: 'once' },
     }));
-    return {
-      context: [copy, ...decisions],
-      events: [
-        buildModelMessageEvent({
-          assistantMessage: copy,
-          threadId: this.threadId,
-          finishReason: 'tool_calls',
-          usage: undefined,
-          id: newEventId(),
-        }),
-      ],
-    };
+    return { context: [copy, ...decisions], shown: { message: copy, finishReason: 'tool_calls' } };
   }
 
   /**
@@ -4276,10 +4256,26 @@ export class AgentThread {
         return;
       }
 
-      for (const event of this.pendingHeldReplayEvents) {
+      // The event is minted here, when it is saved: an id made during send() would sort before the
+      // turn's own turn.created, and the chat's history would drop it.
+      if (this.pendingHeldReplay !== undefined) {
+        const event = buildModelMessageEvent({
+          assistantMessage: this.pendingHeldReplay.message,
+          threadId: this.threadId,
+          finishReason: this.pendingHeldReplay.finishReason,
+          usage: undefined,
+          id: newEventId(),
+        });
+        this.pendingHeldReplay = undefined;
+        this.heldReplayOutput = event;
+        yield* this.appendToContext({
+          context: [],
+          output: [event],
+          currentContextUsage: undefined,
+          usage: undefined,
+        });
         yield event;
       }
-      this.pendingHeldReplayEvents = [];
 
       const iterationLimit = this.definition.iterationLimit ?? DEFAULT_ITERATION_LIMIT;
       // Starts empty; set only after stepLLMCall in this execute(). That is intentional:

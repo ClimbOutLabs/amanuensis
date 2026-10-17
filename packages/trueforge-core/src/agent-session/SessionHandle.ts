@@ -63,7 +63,7 @@ import type {
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
 } from './store/ISessionStore';
-import { TurnNotFoundError } from './store/SessionStoreErrors';
+import { PreviousTurnRunningError, TurnNotFoundError } from './store/SessionStoreErrors';
 import { TurnHandle } from './TurnHandle';
 
 /** How many recent ancestors SessionHandle persists on each turn. Store-local. */
@@ -192,6 +192,15 @@ export type ApprovalResubmission<TTurnCustom extends object> =
   | { outcome: 'conflict'; tool_call_id: string }
   | { outcome: 'unrecorded' };
 
+/** True when the item is an approval decision on a held action the turn's snapshot still has unanswered. */
+function answersHeldCall<TTurnCustom extends object>(turn: TurnRecord<TTurnCustom>, item: TurnInputItem): boolean {
+  if (!isApprovalDecisionMessage(item)) {
+    return false;
+  }
+  const thread = turn.snapshot.threads[item.thread_id];
+  return thread !== undefined && findUndecidedHeldToolCalls(thread.context).some(call => call.id === item.tool_call_id);
+}
+
 /**
  * Same decision, same effect. An omitted allow scope means `once`, so it matches an
  * explicit `once`; a widened or narrowed scope does not, because a grant already applied
@@ -318,6 +327,10 @@ export class SessionHandle<
     // validation kill a running turn on its way out. The freeze happens below, once
     // nothing is left that can reject.
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
+    // Answering a held card must never cancel the reply that is still running; the owner waits for it.
+    if (previous?.state.status === 'running' && (input.input ?? []).some(item => answersHeldCall(previous, item))) {
+      throw new PreviousTurnRunningError(previous.turn_id);
+    }
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
     // A scheduled chat never gets the owner's relaxations, even on turns they type: its context still
@@ -657,15 +670,7 @@ export class SessionHandle<
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
-    return (
-      previous !== undefined &&
-      items.every(item => {
-        const thread = previous.snapshot.threads[item.thread_id];
-        return (
-          thread !== undefined && findUndecidedHeldToolCalls(thread.context).some(call => call.id === item.tool_call_id)
-        );
-      })
-    );
+    return previous !== undefined && items.every(item => answersHeldCall(previous, item));
   }
 
   /**

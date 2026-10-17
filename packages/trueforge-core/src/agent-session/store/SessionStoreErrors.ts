@@ -112,9 +112,7 @@ export class PreviousTurnRunningError extends SessionStoreConflictError {
   readonly previous_turn_id: string;
 
   constructor(previous_turn_id: string) {
-    super(
-      `Previous turn ${previous_turn_id} is still running; freezeAndGetTurn must be called before creating a successor`,
-    );
+    super('The reply is still being written. Wait for it to finish, then try again.');
     this.name = 'PreviousTurnRunningError';
     this.previous_turn_id = previous_turn_id;
   }

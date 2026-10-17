@@ -227,8 +227,12 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     });
     // Drain the stream so a failure while the call runs reaches the caller instead of passing silently.
     let outcome: HeldActionOutcome = 'unclear';
+    // The replay runs under a fresh call id, announced by the answer turn's own model message.
+    const replayedCallIds = new Set<string>();
     for await (const event of stream) {
-      if (event.type === 'tool.response.v2' && event.toolCallId === toolCallId) {
+      if (event.type === 'model.message') {
+        for (const call of event.toolCalls ?? []) replayedCallIds.add(call.id);
+      } else if (event.type === 'tool.response.v2' && replayedCallIds.has(event.toolCallId)) {
         outcome = outcomeOfDisposition(event.disposition);
       }
     }

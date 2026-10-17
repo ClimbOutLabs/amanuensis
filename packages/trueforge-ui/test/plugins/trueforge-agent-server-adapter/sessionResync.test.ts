@@ -272,6 +272,10 @@ describe('answerHeldAction', () => {
     });
   }
 
+  function replayMessage(toolCallId: string) {
+    return { type: 'model.message', id: 'm1', toolCalls: [{ id: toolCallId }] };
+  }
+
   function toolResponse(toolCallId: string, disposition: string) {
     return { type: 'tool.response.v2', toolCallId, disposition };
   }
@@ -283,12 +287,10 @@ describe('answerHeldAction', () => {
     ['never_ran', 'not_run'],
     ['policy_blocked', 'not_run'],
     ['denied', 'not_run'],
-  ] as const)('reports %s on the held call as %s', async (disposition, outcome) => {
+  ] as const)('reports %s on the replayed call as %s', async (disposition, outcome) => {
+    // The replay runs under a fresh call id, announced by the answer turn's own model message.
     const { extensions } = createFakeClient({
-      createTurnStream: streamOf(
-        toolResponse('other_call', 'executed_nonzero'),
-        toolResponse('call_held', disposition),
-      ),
+      createTurnStream: streamOf(replayMessage('call_replayed'), toolResponse('call_replayed', disposition)),
     });
     assert.equal(
       await extensions.answerHeldAction({
@@ -301,8 +303,23 @@ describe('answerHeldAction', () => {
     );
   });
 
-  it('says it is unclear when the answer turn never reports on the held call', async () => {
-    const { extensions } = createFakeClient({ createTurnStream: streamOf(toolResponse('other_call', 'executed_ok')) });
+  it('ignores a result for a call the answer turn did not replay', async () => {
+    const { extensions } = createFakeClient({
+      createTurnStream: streamOf(replayMessage('call_replayed'), toolResponse('other_call', 'executed_ok')),
+    });
+    assert.equal(
+      await extensions.answerHeldAction({
+        sessionId: 'ses_1',
+        threadId: 'main',
+        toolCallId: 'call_held',
+        answer: 'approve',
+      }),
+      'unclear',
+    );
+  });
+
+  it('says it is unclear when the answer turn reports no tool result', async () => {
+    const { extensions } = createFakeClient({ createTurnStream: streamOf({ type: 'model.message', id: 'm1' }) });
     assert.equal(
       await extensions.answerHeldAction({
         sessionId: 'ses_1',

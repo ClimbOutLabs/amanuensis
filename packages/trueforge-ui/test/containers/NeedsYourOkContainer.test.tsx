@@ -224,7 +224,9 @@ describe('NeedsYourOkContainer', () => {
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('This chat is still busy. Try again in a moment.')).toBeInTheDocument();
+      expect(
+        screen.getByText('The reply is still being written. Wait for it to finish, then answer.'),
+      ).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });

@@ -40,7 +40,7 @@ export function describeHeldAnswerFailure(error: unknown): HeldAnswerFailure {
     const refusal = code === undefined ? undefined : REFUSAL_TEXT[code];
     if (refusal !== undefined) return { kind: 'refused', message: refusal, expired: code === 'held_action_expired' };
     if (code === 'previous_turn_running') {
-      return { kind: 'retry', message: 'This chat is still busy. Try again in a moment.' };
+      return { kind: 'retry', message: 'The reply is still being written. Wait for it to finish, then answer.' };
     }
     return {
       kind: 'refused',
