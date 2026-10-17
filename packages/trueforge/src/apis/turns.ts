@@ -970,19 +970,7 @@ export interface TurnEventDrainInput {
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
-  memory?:
-    | {
-        client: MemoryClient;
-        userText: string;
-        sessionTitle: string | undefined;
-        /**
-         * Present only when turn summarization is enabled (the Settings toggle's
-         * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
-         * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
-         */
-        summarize?: SummarizeTurnContext | undefined;
-      }
-    | undefined;
+  memory?: DrainTurnEventsInput['memory'];
 }
 
 /**
@@ -2154,6 +2142,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           : {
               client: memoryClient,
               userText: extractUserMessageText(body.input),
+              attachedFiles: inputAttachesFiles(body.input ?? []),
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,

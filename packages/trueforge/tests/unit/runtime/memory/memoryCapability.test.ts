@@ -2081,11 +2081,6 @@ describe('memory origin is kept and shown', () => {
   it('keeps tool_ingested when a vanished retain is resubmitted for a turn that read a tool result', async () => {
     const origin = await resubmittedOrigin([
       { role: 'user', content: 'check my mail' },
-      {
-        role: 'assistant',
-        content: '',
-        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'x', arguments: '{}' } }],
-      },
       { role: 'tool', tool_call_id: 'c1', content: 'email body' },
       { role: 'assistant', content: 'You have one email.' },
       { role: 'user', content: 'current question' },
