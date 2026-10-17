@@ -41,23 +41,14 @@ const CONTENT_KEYS = new Set([
   'attendees',
 ]);
 
-const CREDENTIAL_PARAMS =
-  'token|access_token|refresh_token|id_token|api_key|apikey|key|password|passwd|client_secret|secret';
-
-/** Credentials written into free text: header lines, query or form parameters, quoted JSON fields. */
+/** Credentials written into free text under fixed names: header lines, OAuth codes, Basic credentials. */
 const TEXT_REDACTIONS: readonly (readonly [RegExp, string])[] = [
   [
     /\b((?:proxy-)?authorization|cookie|set-cookie|x-api-key|api-key)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r\n"'}]+)/gi,
     `$1$2${REDACTED}`,
   ],
-  [new RegExp(`([?&;]|\\b)(${CREDENTIAL_PARAMS})=[^&\\s"'#]+`, 'gi'), `$1$2=${REDACTED}`],
   // An OAuth authorization code only counts as one inside a query string, not `exit code=1`.
   [/([?&])code=[^&\s"'#]+/g, `$1code=${REDACTED}`],
-  [
-    // Quotes are optional: a JSON parse error may quote only part of a value, or a bare one.
-    /("[a-z_]*(?:password|passwd|secret|token|api_?key|authorization|cookie|verifier)[a-z_]*"\s*:\s*)(?:"(?:[^"\\]|\\.)*"?|[^\s,}"]+)/gi,
-    `$1"${REDACTED}"`,
-  ],
   [/\bBasic\s+[A-Za-z0-9+/=]{8,}/g, `Basic ${REDACTED}`],
 ];
 
@@ -71,12 +62,22 @@ function redactField(key: string, value: unknown, seen: WeakSet<object>): unknow
   return isCredentialField(key, value) || isContentField(key, value) ? REDACTED : redactValue(value, seen);
 }
 
+// Quotes are optional on the value: a JSON parse error may quote only part of a value, or a bare one.
+const QUOTED_JSON_FIELD = /("([^"\\]*)"\s*:\s*)("(?:[^"\\]|\\.)*"?|[^\s,}"\]]+)/g;
+const QUERY_PARAMETER = /([?&;]|\b)([A-Za-z0-9_.-]+)=([^&\s"'#]+)/g;
+
 function redactText(text: string): string {
   let out = redactSecretShapes(text);
   for (const [pattern, replacement] of TEXT_REDACTIONS) {
     out = out.replace(pattern, replacement);
   }
-  return out;
+  out = out.replace(QUOTED_JSON_FIELD, (field: string, prefix: string, name: string, value: string) =>
+    isCredentialField(name, value) ? `${prefix}"${REDACTED}"` : field,
+  );
+  // A bare `key` parameter is an API key in a query string, though not as a JSON field name.
+  return out.replace(QUERY_PARAMETER, (parameter: string, lead: string, name: string, value: string) =>
+    name.toLowerCase() === 'key' || isCredentialField(name, value) ? `${lead}${name}=${REDACTED}` : parameter,
+  );
 }
 
 function redactValue(value: unknown, seen: WeakSet<object>): unknown {

@@ -45,17 +45,17 @@ function isStructuralKey(key: string): boolean {
   return key === 'id' || key.endsWith('_id') || key === 'name' || key.endsWith('_name') || STRUCTURAL_KEYS.has(key);
 }
 
-/** Field names whose values are credentials, matched after dropping case and separators. */
-const CREDENTIAL_NAME =
-  /authorization|cookie|password|passwd|secret|token|apikey|privatekey|credential|verifier|oauthcode|authcode/;
-
 /**
- * True when a field holds a credential by its name alone, wherever it appears.
- * Counts and flags under a credential-like name (`max_tokens`) carry nothing secret, so only text and structures count.
+ * Field names whose values are credentials, matched at the end of the name after dropping case and separators.
+ * Anchoring keeps counts and descriptors (`max_tokens`, `input_tokens_breakdown`, `credential_type`) readable.
  */
+const CREDENTIAL_NAME =
+  /(authorization|cookies?|password|passwd|secret|token|apikey|privatekey|credentials?|verifier|oauthcode|authcode)$/;
+
+/** True when a field holds a credential by its name alone, wherever it appears; an empty value holds nothing. */
 export function isCredentialField(key: string, value: unknown): boolean {
-  const holdsText = (typeof value === 'string' && value !== '') || (typeof value === 'object' && value !== null);
-  return holdsText && CREDENTIAL_NAME.test(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const present = value !== null && value !== undefined && value !== '';
+  return present && CREDENTIAL_NAME.test(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
 }
 
 /** Credential-shaped values, wherever they appear. Each matches the whole credential, or only its secret part. */
@@ -179,12 +179,11 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
     if (typeof value === 'object' && value !== null) {
       const out: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(value)) {
-        // Identity fields win, so a credential reference such as `approval_token_id` survives import.
-        if (isStructuralKey(key) && typeof entry === 'string') {
-          out[key] = entry;
-        } else if (isCredentialField(key, entry)) {
+        if (isCredentialField(key, entry)) {
           redactions += 1;
           out[key] = REDACTED;
+        } else if (isStructuralKey(key) && typeof entry === 'string') {
+          out[key] = entry;
         } else {
           out[key] = scrubJson(entry);
         }

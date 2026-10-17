@@ -82,6 +82,26 @@ describe('export secret scrubbing', () => {
     expect(scrubber.redactionCount()).toBe(2);
   });
 
+  it('redacts numbers and booleans under a credential name', () => {
+    const scrubber = createExportScrubber([]);
+    expect(scrubber.json({ password: 123456, token: 98765432, api_key: true, env: { DB_PASSWORD: 31415926 } })).toEqual(
+      { password: REDACTED, token: REDACTED, api_key: REDACTED, env: { DB_PASSWORD: REDACTED } },
+    );
+  });
+
+  it('keeps counts and descriptors whose names only contain a credential word', () => {
+    const scrubber = createExportScrubber([]);
+    const record = {
+      usage: { input_tokens: 3, input_tokens_breakdown: { cached: 1 }, tokens: { input: 3 } },
+      max_tokens: 1024,
+      cookie_policy: 'strict',
+      credential_type: 'oauth',
+      authorization_endpoint: 'https://auth.example.test/authorize',
+    };
+    expect(scrubber.json(record)).toEqual(record);
+    expect(scrubber.redactionCount()).toBe(0);
+  });
+
   it.each(Object.entries(sample))('redacts a %s credential in free text and keeps the prose', (_name, value) => {
     const scrubber = createExportScrubber([]);
     expect(scrubber.text(`before ${value} after`)).toBe('before [redacted] after');

@@ -148,3 +148,15 @@ it('applies the same credential name rule as the data export', () => {
   logger.info('shared rule', fields);
   expectNoPlantedSecret(output());
 });
+
+it('redacts credential fields written into free text by any credential name', () => {
+  // Standalone output prints the message unescaped, so the kept field reads as written.
+  const { logger, output } = captureLogger(true);
+  logger.warn(`upstream said {"private_key":"${PLANTED.loginPass}","max_tokens":1024}`);
+  logger.warn(`retrying /v1/connect?client_assertion=x&session_cookie=${PLANTED.cookie}&limit=5`);
+
+  const text = output();
+  expectNoPlantedSecret(text);
+  expect(text).toContain('"max_tokens":1024');
+  expect(text).toContain('limit=5');
+});
