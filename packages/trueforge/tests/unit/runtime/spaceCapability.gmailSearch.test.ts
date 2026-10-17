@@ -127,7 +127,8 @@ describe('a web search after the chat read mail', () => {
             modelId: undefined,
             modelSupportsVision: false,
           }),
-        mcp: () => Promise.resolve({ url: inert.url, headers: {}, search_provider: { tools: [] } }),
+        mcp: () =>
+          Promise.resolve({ url: inert.url, headers: {}, search_provider: { tools: [], plumbing_fields: [] } }),
         mcpRequestTimeoutMs: 10_000,
         mcpConnectTimeoutMs: 10_000,
         logger: createLogger({ silent: true }),

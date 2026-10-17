@@ -25,6 +25,7 @@ import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import { PostgresAgentStore } from '../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresApprovalTokenStore } from '../../src/db/postgres/approval-token-store/PostgresApprovalTokenStore';
 import { PostgresGlobalSettingsStore } from '../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
+import { PostgresGoogleConnectionStore } from '../../src/db/postgres/google-connection-store/PostgresGoogleConnectionStore';
 import { PostgresMcpServerStore } from '../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
 import { PostgresMcpToolGrantStore } from '../../src/db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore';
 import { PostgresModelProviderStore } from '../../src/db/postgres/model-provider-store/PostgresModelProviderStore';
@@ -45,6 +46,7 @@ import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentSto
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -228,6 +230,7 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
+  const googleConnectionStore = new SqliteGoogleConnectionStore(db);
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
@@ -239,6 +242,7 @@ async function startSqlite(): Promise<OwnershipServer> {
       sandboxProviders: sandboxProviderStore,
       mcpServers: mcpServerStore,
       tokens: tokenStore,
+      googleConnections: googleConnectionStore,
     }),
   });
   const backends = await seedBackends({
@@ -250,6 +254,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     agentStore,
@@ -303,6 +308,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new PostgresSentinelSettingsStore(db);
   const mcpToolGrantStore = new PostgresMcpToolGrantStore(db);
+  const googleConnectionStore = new PostgresGoogleConnectionStore(db);
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
@@ -314,6 +320,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
       sandboxProviders: sandboxProviderStore,
       mcpServers: mcpServerStore,
       tokens: tokenStore,
+      googleConnections: googleConnectionStore,
     }),
   });
   const backends = await seedBackends({
@@ -325,6 +332,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     skillStore,
     sandboxProviderStore,
     agentStore,
