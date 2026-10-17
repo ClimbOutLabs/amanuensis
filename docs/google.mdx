@@ -61,14 +61,14 @@ Select Disconnect, then confirm. This turns off both mail and calendar. Aman ask
 
 ## Demo instances
 
-On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and save drafts, but it can only send to addresses you list. Set these in the instance's `.env`, then restart:
+On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and calendar events and save drafts, but it can only send to addresses you list. Set these in the instance's `.env`, then restart:
 
 - `DEMO_GOOGLE_ACCOUNT`: the one Google account the demo accepts, for example `DEMO_GOOGLE_ACCOUNT=maya@example.com`. Left empty, no Google account can be connected.
 - `DEMO_SEND_ALLOWLIST`: the only addresses a demo may send to, comma-separated, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`. Capital letters and extra spaces do not matter. Left empty, a demo sends nothing at all.
 
 How it behaves:
 
-- Connect the demo's Google account once, before visitors arrive, signed in as the same Aman user the visitors will use. Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted. After that nobody can reconnect or disconnect it from the panel, and the panel says so.
+- Connect the demo's Google account once, before visitors arrive, signed in as the same Aman user the visitors will use. Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted, and the demo asks Google for every feature at once. After that nobody can reconnect or disconnect it from the panel, and the panel says so. If a feature was left out when you signed in, the panel stays open so the named account can connect again and add it.
 - The send list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
 - The demo refuses sends it can't fully check. Connected services other than Gmail can't be used for anything that is not read-only.
 - An entry that is not a plain email address stops Aman from starting.

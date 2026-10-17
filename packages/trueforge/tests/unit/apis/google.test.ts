@@ -1,3 +1,4 @@
+import { GOOGLE_FEATURES, scopesForFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
@@ -14,6 +15,7 @@ const ID = '123456789-abcdefghij.apps.googleusercontent.com';
 const SECRET = 'GOCSPX-abcdefghijklmnop';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+const EVERY_SCOPE = scopesForFeatures(GOOGLE_FEATURES).join(' ');
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const LAN = 'http://192.168.1.20:8791';
 const BASE = '/api/v1/user/settings/google';
@@ -189,6 +191,7 @@ describe('Google connection API', () => {
       originalAccount = configuration.DEMO_GOOGLE_ACCOUNT;
       configuration.DEMO_MODE = true;
       configuration.DEMO_GOOGLE_ACCOUNT = 'ada@example.com';
+      granted = EVERY_SCOPE;
     });
     afterEach(() => {
       configuration.DEMO_MODE = originalMode;
@@ -269,6 +272,40 @@ describe('Google connection API', () => {
       revoked = false;
       expect((await connect()).status).toBe(200);
       expect(await statusOf()).toMatchObject({ state: 'connected', locked: true });
+    });
+
+    it('asks Google for every feature, whatever the request named', async () => {
+      const begin = await call({
+        method: 'POST',
+        path: '/oauth/begin',
+        body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
+      });
+      expect(begin.status).toBe(201);
+      const url = new URL(BeginResponse.parse(JSON.parse(begin.text)).data.authorization_url);
+      expect(url.searchParams.get('scope')).toBe(EVERY_SCOPE);
+    });
+
+    it('lets the named account come back for a feature it was not given, then locks', async () => {
+      granted = READ;
+      await connect();
+      expect(await statusOf()).toMatchObject({ state: 'connected', account_email: 'ada@example.com', locked: false });
+      granted = EVERY_SCOPE;
+      expect((await connect()).status).toBe(200);
+      const status = await statusOf();
+      expect(status).toMatchObject({ state: 'connected', account_email: 'ada@example.com', locked: true });
+      expect(status.features.every((feature: { granted: boolean }) => feature.granted)).toBe(true);
+    });
+
+    it('still refuses any other account while a feature is missing, and saves nothing', async () => {
+      granted = READ;
+      await connect();
+      const before = await statusOf();
+      profileEmail = 'judge@gmail.example';
+      granted = EVERY_SCOPE;
+      const { status, text } = await connect();
+      expect(status).toBe(400);
+      expect(text).toContain("Only this demo's own Google account can be connected here.");
+      expect(await statusOf()).toEqual(before);
     });
 
     it('lets the named account replace a saved login that belongs to another account', async () => {

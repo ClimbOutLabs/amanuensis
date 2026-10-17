@@ -126,15 +126,19 @@ const DEMO_NOT_NAMED_MESSAGE =
 
 /**
  * Whether Settings may start or finish a Google connection on a demo instance: only when the owner has named
- * the demo's account, and nothing working for that account is saved yet. A saved login that is for another
- * account, or that Google stopped accepting, can be replaced by the named account.
+ * the demo's account, and no working login with every feature is saved for it yet. A saved login that is for
+ * another account, that Google stopped accepting, or that lacks a feature can be replaced by the named account.
  */
 function demoMayConnect(input: { record: GoogleConnectionRecord | null; account: string }): boolean {
   const { record, account } = input;
-  return (
-    account !== '' &&
-    (record === null || record.status === 'needs_reconnect' || record.account_email?.toLowerCase() !== account)
-  );
+  if (account === '') {
+    return false;
+  }
+  if (record === null || record.status === 'needs_reconnect' || record.account_email?.toLowerCase() !== account) {
+    return true;
+  }
+  const granted = grantedFeatures(record.granted_scopes);
+  return GOOGLE_FEATURES.some(feature => !granted.includes(feature));
 }
 
 function toClientInput(body: {
@@ -198,7 +202,8 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
         owner: ownerOf(c),
         setup,
         client: body.client === undefined ? null : toClientInput(body.client),
-        features: body.features,
+        // A demo locks once every feature is granted, so its one consent asks for all of them.
+        features: configuration.DEMO_MODE ? GOOGLE_FEATURES : body.features,
       });
       return c.json({ data: { authorization_url, setup } }, 201);
     } catch (error) {

@@ -1,7 +1,7 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { DEMO_SEND_REFUSAL } from '../../../../src/core/permissions/sendAllowlist';
 import { plainDraft } from './fixtures';
-import { build, json, route, text, type Route } from './harness';
+import { approvedContext, build, json, route, text, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 const DEMO_LIST = ['maya@demo.example', 'friend@demo.example'];
@@ -66,15 +66,17 @@ describe('demo send allowlist on send_draft', () => {
       expect(sentCount(google.urls)).toBe(0);
     });
 
-    it('is refused again at send time even if a review was recorded', async () => {
+    it('is refused again at send time even when the send was approved', async () => {
       const { tools, google, sentinel } = await build({
         features: [...COMPOSE],
         routes: [draftRoute(mail), sendRoute],
         demoSendAllowlist: null,
       });
-      await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+      const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+      const info = await tools.toolCallInfo(call);
+      expect(info.is_approval_required).toBe(true);
       sentinel.services.demoSendAllowlist = DEMO_LIST;
-      const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+      const response = await tools.callTool(call, undefined, approvedContext(info));
       expect(text(response)).toContain(DEMO_SEND_REFUSAL);
       expect(sentCount(google.urls)).toBe(0);
     });
@@ -93,9 +95,10 @@ describe('demo send allowlist on send_draft', () => {
       routes: [draftRoute(mail), sendRoute],
       demoSendAllowlist: DEMO_LIST,
     });
-    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
     expect(JSON.parse(text(response))).toMatchObject({ status: 'sent' });
     expect(sentCount(google.urls)).toBe(1);
   });
@@ -126,10 +129,13 @@ describe('demo send allowlist on send_draft', () => {
 
   it('changes nothing outside demo mode', async () => {
     const mail = plainDraft({ id: 'm', to: 'stranger@outside.example', body: 'Hi' });
-    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
-    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('sent');
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(JSON.parse(text(response))).toMatchObject({ status: 'sent' });
+    expect(sentCount(google.urls)).toBe(1);
   });
 
   it('still saves drafts to anyone, since a draft never leaves the account', async () => {

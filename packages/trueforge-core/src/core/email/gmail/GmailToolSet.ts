@@ -620,7 +620,7 @@ export class GmailToolSet extends LocalToolMCP {
           'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
         );
       }
-      // Checked again against the draft as it is now, in case it changed since the card was offered.
+      // Checked again here so the list holds even for a send approved before demo mode limited it.
       if (
         !recipientsAllowed({
           allowlist: this.#options.sentinel.services.demoSendAllowlist,
