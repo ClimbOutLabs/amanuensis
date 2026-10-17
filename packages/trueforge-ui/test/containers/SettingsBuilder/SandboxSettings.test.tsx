@@ -131,6 +131,11 @@ const SLOT_STATES: {
     headline: 'Code execution is off: the sandbox could not prove it is safe',
     fix: /aman doctor sandbox --fix/,
   },
+  {
+    status: { state: 'disabled', backend: 'slots' },
+    headline: 'Code execution is off for this instance',
+    fix: /Run `aman doctor sandbox --fix` on the computer where Aman is installed\. Then press Re-check\./,
+  },
 ];
 
 afterEach(() => {
