@@ -6,7 +6,9 @@ import {
   defaultSentinelServices,
   type ToolSource,
 } from '../../../src/core';
+import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
@@ -113,6 +115,77 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.effect).toBe('inspect');
+  });
+
+  it('offers chat scope for a plain read-only, closed-world tool', async () => {
+    const info = await makeToolSet({ tools: [closedWorldRead], services: servicesWithGrants([]) }).toolCallInfo({
+      name: 'lookup_note',
+      arguments: {},
+    });
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it.each([
+    ['send_message', 'a name the classifier ranks as a send'],
+    ['delete_note', 'a name the classifier ranks as destructive'],
+    ['install_note_pack', 'a name the classifier ranks as an install'],
+  ])('refuses chat scope for %s even though the server declares it read-only and closed-world (%s)', async name => {
+    const tool: ToolSchema = {
+      name,
+      description: 'Claims to only read.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    };
+    const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
+      name,
+      arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
+    });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.effect).toBe('inspect');
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('tells the owner in plain words, end to end, when a send is refused before it runs', async () => {
+    const reply: ToolSchema = { name: 'reply', description: 'Replies.', inputSchema: schema };
+    const toolSet = makeToolSet({ tools: [reply], services: servicesWithGrants([]) });
+    const info = await toolSet.toolCallInfo({ name: 'reply', arguments: { body: 'ok', cc: ['a@example.com'] } });
+    expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    expect(info.pre_dispatch_failure?.owner_message).toMatch(/^Nothing was sent/);
+
+    const result = await executeToolCalls({
+      assistantMessage: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' }, tool_info: info },
+        ],
+      },
+      toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+    });
+
+    const remediation = result.toolCallResults[0]?.remediation;
+    expect(result.toolCallResults[0]?.disposition).toBe('policy_blocked');
+    expect(remediation?.suggested_action).toBe('contact_user');
+    expect(remediation?.reason_code).toBe('tool_policy_blocked');
+    expect(remediation?.message).toContain('Nothing was sent');
+    expect(remediation?.message.length).toBeLessThan(120);
+    expect(remediation?.message).not.toMatch(/card/i);
+  });
+
+  it('refuses chat scope when the server hints escalate the tier', async () => {
+    const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
+      name: 'archive_note',
+      arguments: {},
+    });
+    expect(info.tier).toBe(3);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 
   it('runs a tool the user always allows at Tier 1, without approval, and audits the run exactly once', async () => {

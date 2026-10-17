@@ -23,6 +23,7 @@ export type { TerminalTurnState, Turn, TurnInputItem, TurnMetrics, TurnState } f
 
 export {
   SessionAgentInlineSchema,
+  SessionAgentSchema,
   SessionMetadataSchema,
   SessionMetricsSchema,
   SessionSchema,
@@ -119,6 +120,7 @@ export type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
@@ -145,7 +147,7 @@ export {
 
 export type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 export { TurnResourceResolver } from './TurnResourceResolver';
-export type { TurnSandboxFactory } from './TurnResourceResolver';
+export type { TurnModelRole, TurnSandboxFactory } from './TurnResourceResolver';
 
 export { SessionHandle, abnormalHandoffCauseForCancellation } from './SessionHandle';
 export type { ApprovalResubmission } from './SessionHandle';

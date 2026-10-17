@@ -56,9 +56,17 @@ export interface IndexedKnowledgeChunk {
   embedding: Float32Array;
 }
 
+/** One stored chunk of a knowledge document, in reading order. Embeddings are derived data and never leave the repository. */
+export interface KnowledgeDocumentChunk {
+  chunkIndex: number;
+  text: string;
+}
+
 export interface PersonaKnowledgeRepository {
   listDocuments(): KnowledgeDocumentRecord[];
   getDocument(input: { documentId: string }): KnowledgeDocumentRecord | undefined;
+  /** The document's chunks (index and text only), ordered by chunk index. Backs the data export. */
+  listDocumentChunks(input: { documentId: string }): KnowledgeDocumentChunk[];
   createDocument(input: NewKnowledgeDocument): KnowledgeDocumentRecord;
   updateDocumentStatus(input: {
     documentId: string;
@@ -74,6 +82,8 @@ export interface PersonaKnowledgeRepository {
   setDocumentChunks(input: { documentId: string; chunks: IndexedKnowledgeChunk[] }): void;
   deleteDocument(input: { documentId: string }): void;
   countReadyChunks(): number;
+  /** Bytes the library's live data holds. Space freed by deletes is not counted, though the file keeps it. */
+  usedBytes(): number;
   searchNearest(input: { embedding: Float32Array; limit: number }): KnowledgeSearchHit[];
   close(): void;
 }

@@ -29,6 +29,7 @@ function storeWith(values: Map<string, GlobalSettingRecord>): IGlobalSettingsSto
     deleteSetting: async input => {
       values.delete(input.key);
     },
+    compareAndSetSetting: async () => false,
   };
 }
 
@@ -93,6 +94,7 @@ describe('readToolOutputScreenSetting', () => {
         throw new Error('db down');
       },
       deleteSetting: async () => {},
+      compareAndSetSetting: async () => false,
     };
     const setting = await readToolOutputScreenSetting({ globalSettingsStore: failing, logger: silentLogger });
     expect(setting.overridden).toBe(false);

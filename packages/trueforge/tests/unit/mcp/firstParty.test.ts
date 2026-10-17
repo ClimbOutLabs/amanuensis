@@ -113,7 +113,13 @@ describe('firstPartyAfterSave', () => {
       false,
     ],
     ['a memory provider when the operator listed nothing', remote({ memory_provider: true }), true, [], false],
-    ['a memory provider whose check did not pass in this save', remote({ memory_provider: true }), false, ORIGINS, false],
+    [
+      'a memory provider whose check did not pass in this save',
+      remote({ memory_provider: true }),
+      false,
+      ORIGINS,
+      false,
+    ],
     ['a connector added by URL on a listed origin', remote(), true, ORIGINS, false],
     ['a connector whose memory provider designation is off', remote({ memory_provider: false }), true, ORIGINS, false],
   ] as const)('%s', (_label, manifest, memoryProviderChecked, origins, expected) => {
@@ -121,6 +127,8 @@ describe('firstPartyAfterSave', () => {
   });
 
   it('never marks a gateway-managed manifest', () => {
-    expect(firstPartyAfterSave({ manifest: gatewayManifest, memoryProviderChecked: true, origins: ORIGINS })).toBe(false);
+    expect(firstPartyAfterSave({ manifest: gatewayManifest, memoryProviderChecked: true, origins: ORIGINS })).toBe(
+      false,
+    );
   });
 });
