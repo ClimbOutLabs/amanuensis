@@ -246,7 +246,7 @@ describe('grounded finder over the real server path', () => {
   );
 
   it(
-    'asks before the search when searches are set to Ask, with the words, host, endpoint and credits',
+    'asks before the search when searches are set to Ask, with the words, host and credits',
     async () => {
       await setSearchWithoutAsking(false);
       const sessionId = await createSession(server);
@@ -259,7 +259,8 @@ describe('grounded finder over the real server path', () => {
       const searchCard = pendingCall(first)?.call.tier3_card;
       expect(searchCard?.plain_what).toContain(FIND_PLACES_QUERY);
       expect(searchCard?.plain_what).toContain('api.tavily.com');
-      expect(searchCard?.plain_what).toContain('/search');
+      expect(searchCard?.plain_what).not.toMatch(/endpoint/);
+      expect(searchCard?.plain_what).not.toContain('/search');
       expect(searchCard?.plain_what).toContain('2 Tavily credits');
 
       const second = await approve({ server, sessionId, paused: first });
@@ -267,7 +268,9 @@ describe('grounded finder over the real server path', () => {
       const extractCard = pendingCall(second)?.call.tier3_card;
       expect(extractCard?.plain_what).toContain(HARBOUR_URL);
       expect(extractCard?.plain_what).toContain(GARDEN_URL);
-      expect(extractCard?.plain_what).toContain('/extract');
+      expect(extractCard?.plain_what).toContain('api.tavily.com');
+      expect(extractCard?.plain_what).not.toMatch(/endpoint/);
+      expect(extractCard?.plain_what).not.toContain('/extract');
       expect(extractCard?.plain_what).toContain('1 Tavily credit');
     },
     TURN_TIMEOUT_MS,

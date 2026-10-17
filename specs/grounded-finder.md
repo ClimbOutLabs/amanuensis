@@ -30,7 +30,7 @@ Read from Tavily's official docs on 2026-10-17 (docs.tavily.com):
 
 **The key is the one set in Settings.** It is read from the connector's saved `Authorization` header. A missing key, or the preset's untouched placeholder, means keyless, which is used only for search and extract. The key never appears in a card, a log, an audit row or a tool result.
 
-**Same approval and guard.** Both tools run through the existing search-provider path: the Ask / Run without asking setting, the outbound secret guard, the 20-search loop breaker, held-for-owner in scheduled runs, the Searched chip and the audit row. Extract may name only URLs the search of this turn returned, so a model cannot compose a fetch. When a call asks, the card shows the exact query or URL list, the destination `api.tavily.com`, the endpoint, and the credits it will use (or "free, no key" when keyless).
+**Same approval and guard.** Both tools run through the existing search-provider path: the Ask / Run without asking setting, the outbound secret guard, the 20-search loop breaker, held-for-owner in scheduled runs, the Searched chip and the audit row. Extract may name only URLs the search of this turn returned, so a model cannot compose a fetch. When a call asks, the card shows the exact query or URL list, the destination `api.tavily.com`, and the credits it will use (or "free, no key" when keyless).
 
 **Pages are untrusted.** Tool results mark page text as untrusted, and the read-content screen the host already applies to tool output applies here too. Page text never gives instructions.
 

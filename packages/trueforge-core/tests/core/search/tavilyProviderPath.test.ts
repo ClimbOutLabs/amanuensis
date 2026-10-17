@@ -85,7 +85,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(h.audit.map(row => row.tool_name)).toEqual(['tavily_search', 'tavily_extract']);
   });
 
-  it('asks for a search with the query, host, endpoint and credits, and sends nothing until approved', async () => {
+  it('asks for a search with the query, host and credits, without naming the endpoint, and sends nothing until approved', async () => {
     const h = harness({ searchWithoutAsking: false });
     const info = await h.toolSet.toolCallInfo(search);
     expect(info.tier).toBe(3);
@@ -93,7 +93,8 @@ describe('Tavily through the designated search provider path', () => {
     const card = info.tier3_card;
     expect(card?.plain_what).toContain('English speaking doctor Lisbon');
     expect(card?.plain_what).toContain('api.tavily.com');
-    expect(card?.plain_what).toContain('/search');
+    expect(card?.plain_what).not.toMatch(/endpoint/);
+    expect(card?.plain_what).not.toContain('/search');
     expect(card?.plain_what).toContain('2 Tavily credits');
     expect(card?.destination_host).toBe('api.tavily.com');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
@@ -101,13 +102,15 @@ describe('Tavily through the designated search provider path', () => {
     expect(h.sent).toEqual([]);
   });
 
-  it('asks for an extract before any search, listing the exact links, endpoint and credit', async () => {
+  it('asks for an extract before any search, listing the exact links, host and credit without the endpoint', async () => {
     const h = harness({ searchWithoutAsking: true });
     const info = await h.toolSet.toolCallInfo(extract);
     expect(info.tier).toBe(3);
     expect(info.tier3_card?.plain_what).toContain(HARBOUR_URL);
     expect(info.tier3_card?.plain_what).toContain(GARDEN_URL);
-    expect(info.tier3_card?.plain_what).toContain('/extract');
+    expect(info.tier3_card?.plain_what).toContain('api.tavily.com');
+    expect(info.tier3_card?.plain_what).not.toMatch(/endpoint/);
+    expect(info.tier3_card?.plain_what).not.toContain('/extract');
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
     expect(info.tier3_card?.destination_host).toBe('api.tavily.com');
     expect(info.tier3_card?.why_asked_again).toMatch(/no search result this turn returned/);
