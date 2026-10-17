@@ -2241,14 +2241,40 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
+/** Settings whose whole value is a credential. */
+export const SECRET_SETTING_NAMES = [
+  'TRUEFORGE_API_KEY',
+  'NEBIUS_API_KEY',
+  'MEMORY_SCREEN_AUTH_TOKEN',
+  'OIDC_CLIENT_SECRET',
+  'TRUEFOUNDRY_API_KEY',
+  'TRUEFOUNDRY_SANDBOX_API_KEY',
+  'POSTGRES_PASSWORD',
+] as const;
+
+/** Connection URL settings: secret as a whole, and for the password inside. */
+export const SECRET_URL_SETTING_NAMES = ['DATABASE_URL', 'REDIS_URL'] as const;
+
+type SecretSettingName = (typeof SECRET_SETTING_NAMES)[number] | (typeof SECRET_URL_SETTING_NAMES)[number];
+
 /** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-function urlPassword(raw: string): string | undefined {
+export function urlPassword(raw: string): string | undefined {
   try {
     const password = decodeURIComponent(new URL(raw).password);
     return password === '' ? undefined : password;
   } catch {
     return undefined;
   }
+}
+
+/** The secret values among settings: each credential setting, and each connection URL with its password. */
+export function secretSettingValues(settings: Partial<Record<SecretSettingName, string | undefined>>): string[] {
+  const values: (string | undefined)[] = SECRET_SETTING_NAMES.map(name => settings[name]);
+  for (const name of SECRET_URL_SETTING_NAMES) {
+    const url = settings[name];
+    values.push(url, url === undefined ? undefined : urlPassword(url));
+  }
+  return values.filter((value): value is string => value !== undefined && value !== '');
 }
 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
@@ -2266,27 +2292,25 @@ export type ConfiguredSecretSettings = Pick<
 
 /**
  * Secret values this process holds from its own configuration, for the outbound secret guard:
- * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
- * place to extend when a new secret setting is added.
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. A new secret
+ * setting is added to SECRET_SETTING_NAMES and read here.
  */
 export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
-  const candidates: (string | undefined)[] = [
-    config.TRUEFORGE_API_KEY,
-    config.NEBIUS_API_KEY,
-    config.MEMORY_SCREEN_AUTH_TOKEN,
-    config.OIDC?.OIDC_CLIENT_SECRET,
-  ];
-  if (!config.STANDALONE) {
-    candidates.push(
-      config.TRUEFOUNDRY_API_KEY,
-      config.TRUEFOUNDRY_SANDBOX_API_KEY,
-      config.DATABASE_URL,
-      urlPassword(config.DATABASE_URL),
-      config.REDIS_URL,
-      urlPassword(config.REDIS_URL),
-    );
-  }
-  return candidates.filter((value): value is string => value !== undefined && value !== '');
+  // POSTGRES_PASSWORD is left out: this process holds it inside DATABASE_URL.
+  return secretSettingValues({
+    TRUEFORGE_API_KEY: config.TRUEFORGE_API_KEY,
+    NEBIUS_API_KEY: config.NEBIUS_API_KEY,
+    MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
+    OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    ...(config.STANDALONE
+      ? {}
+      : {
+          TRUEFOUNDRY_API_KEY: config.TRUEFOUNDRY_API_KEY,
+          TRUEFOUNDRY_SANDBOX_API_KEY: config.TRUEFOUNDRY_SANDBOX_API_KEY,
+          DATABASE_URL: config.DATABASE_URL,
+          REDIS_URL: config.REDIS_URL,
+        }),
+  });
 }
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {

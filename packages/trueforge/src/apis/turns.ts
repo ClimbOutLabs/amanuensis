@@ -679,6 +679,11 @@ function createTurnResolver(deps: {
       previousTurnId: previousTurnId ?? null,
       sessionTitle,
       providerServerName: memoryProviderServerName,
+      searchProviderServerName: async () => {
+        const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
+        return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
+          ?.name;
+      },
       // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
       recallEnabled: undefined,
       internalSourceState,

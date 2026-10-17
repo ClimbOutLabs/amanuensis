@@ -212,7 +212,8 @@ export class TFYSandboxProvider implements SandboxProvider {
         if (!response.ok) {
           const text = await response.text();
           this.logger.error(`Sandbox server returned ${String(response.status)}: ${text}`);
-          return { success: false, error: `Sandbox server returned ${String(response.status)}: ${text}` };
+          // The body can echo the request back, including credentials in `env`; the model gets the status only.
+          return { success: false, error: `Sandbox server returned ${String(response.status)}` };
         }
 
         const result = (await response.json()) as ExecResult;

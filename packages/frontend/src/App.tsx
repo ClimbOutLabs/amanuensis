@@ -83,6 +83,7 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 
 const AMAN_THEME: ThemeConfig = {
   defaultMode: 'light',
+  webFonts: false,
   brand: {
     mode: 'icon-title',
     name: 'Amanuensis',
@@ -92,6 +93,8 @@ const AMAN_THEME: ThemeConfig = {
 /** Host brand: primary CTA fill is a gradient (see `index.css`); keep solid token for accents. */
 const appTheme: ThemeConfig = {
   className: 'harness-primary-gradient',
+  // The shell CSP keeps stylesheets and fonts on the app origin.
+  webFonts: false,
   tokens: {
     primaryButtonBg: '#6366F1',
     primaryButtonHover: '#3d2dd4',

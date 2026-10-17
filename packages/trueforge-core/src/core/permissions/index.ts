@@ -29,7 +29,7 @@ export {
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
 export { verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
-export { extractCardFields, genericExtractor, isExternalServiceAction } from './extractorRegistry';
+export { extractCardFields, genericExtractor } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';
 export { MAPS_TOOL_NAMES, RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, isMapsToolName } from './mapsToolNames';
 export { provenanceForToolType, requiresNetwork } from './networkRequirements';

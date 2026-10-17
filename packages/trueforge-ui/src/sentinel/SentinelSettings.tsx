@@ -107,6 +107,11 @@ export const SentinelSettings: FC = () => {
               ? 'Run without asking. Searches through the connector you set as your search provider run on their own and show a Searched chip.'
               : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
           </p>
+          <p className="mt-1 text-sm text-text-secondary">
+            {
+              "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode."
+            }
+          </p>
           {searchError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">
               {searchError}

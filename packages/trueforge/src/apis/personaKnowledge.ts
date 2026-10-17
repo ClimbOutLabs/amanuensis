@@ -4,7 +4,12 @@ import { rm } from 'node:fs/promises';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IPersonaStore } from '../db/personaStore';
 import { MAX_UPLOAD_BYTES, type FetchSnapshotOptions } from '../personaKnowledge/documentIngest';
-import { blobPath, getPersonaKnowledgeIndexer, writeKnowledgeBlob } from '../personaKnowledge/knowledgeIndexer';
+import {
+  blobPath,
+  getPersonaKnowledgeIndexer,
+  personaLibraryBytes,
+  writeKnowledgeBlob,
+} from '../personaKnowledge/knowledgeIndexer';
 import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import type { KnowledgeDocumentRecord } from '../personaKnowledge/knowledgeRepository';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
@@ -49,6 +54,9 @@ function toWireDocument(record: KnowledgeDocumentRecord): PersonaKnowledgeDocume
     updated_at: record.updated_at,
   };
 }
+
+/** Disk one user's knowledge libraries may fill, across all of their personas. */
+export const MAX_LIBRARY_BYTES_PER_USER = 512 * 1024 * 1024;
 
 function decodeUploadPayload(contentBase64: string, filename: string): Uint8Array {
   const compact = contentBase64.replace(/\s+/g, '');
@@ -145,15 +153,36 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
     }
   };
 
+  const userLibraryBytes = async (subjectId: string): Promise<number> => {
+    const personas = await deps.personaStore.listPersonas({ tenant_id: TENANT_ID, created_by: subjectId });
+    const sizes = await Promise.all(
+      personas.map(persona =>
+        personaLibraryBytes({ knowledgeDir: deps.knowledgeDir, tenantId: TENANT_ID, personaId: persona.id }),
+      ),
+    );
+    return sizes.reduce((sum, size) => sum + size, 0);
+  };
+
   const createHandler: RouteHandler<typeof createPersonaKnowledgeRoute> = async c => {
     const { persona_id: personaId } = c.req.valid('param');
-    if ((await withPersona(c, personaId)) === undefined) {
+    const owner = await withPersona(c, personaId);
+    if (owner === undefined) {
       return c.json({ error: { message: `Persona not found: ${personaId}` } }, 404);
     }
     const body: CreateKnowledgeDocumentRequest = c.req.valid('json');
     const root = await ensureLibraryRoot();
     if (!root.ok) {
       return c.json({ error: { message: root.message } }, 500);
+    }
+    if ((await userLibraryBytes(owner.subjectId)) >= MAX_LIBRARY_BYTES_PER_USER) {
+      return c.json(
+        {
+          error: {
+            message: `Your knowledge libraries are full (${String(MAX_LIBRARY_BYTES_PER_USER / 1024 / 1024)} MB). Remove a document to add another.`,
+          },
+        },
+        400,
+      );
     }
     const repo = openRepo(personaId);
     try {
