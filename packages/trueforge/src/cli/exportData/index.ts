@@ -5,6 +5,7 @@ import path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
 
+import { AFTER_IMPORT_NOTICE } from '../../dataExport/exportService';
 import type { Command } from '../command';
 import { UsageError } from '../io';
 import type { ExportDataSession } from './session';
@@ -159,7 +160,13 @@ export function createExportData(deps: ExportDataDeps): Command {
         });
       await printJson({
         io,
-        value: { user_id: plan.userId, out: plan.target, bytes: result.bytesWritten, files: result.entries },
+        value: {
+          user_id: plan.userId,
+          out: plan.target,
+          bytes: result.bytesWritten,
+          files: result.entries,
+          after_import: AFTER_IMPORT_NOTICE,
+        },
       });
       return 0;
     } catch (error) {

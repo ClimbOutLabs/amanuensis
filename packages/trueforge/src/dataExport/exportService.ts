@@ -57,6 +57,10 @@ import { ZipStreamWriter } from './zipStreamWriter';
 export const EXPORT_FORMAT = 'aman-export';
 export const EXPORT_SCHEMA_VERSION = 1;
 
+/** What a person must redo after importing; shown in the manifest, README.txt, the CLI output and the docs. */
+export const AFTER_IMPORT_NOTICE =
+  'Model keys and connector sign-ins are not included. After you import, enter your model keys again and sign in to each connector again.';
+
 const PAGE_LIMIT = 200;
 
 /** Same bound the memory vault API uses for one list call. */
@@ -415,8 +419,10 @@ export async function runDataExport<TTransaction>(
     include_uploads: subject.includeUploads,
     sections: context.sections,
     redactions: scrub.redactionCount(),
+    after_import: AFTER_IMPORT_NOTICE,
     memory,
   };
+  await zip.addTextEntry('README.txt', `${AFTER_IMPORT_NOTICE}\n`);
   await zip.addTextEntry('manifest.json', JSON.stringify(scrub.json(manifest), null, 2));
 
   await zip.finish();

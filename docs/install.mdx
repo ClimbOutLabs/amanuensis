@@ -234,14 +234,18 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ### Exporting one person's data
 
-To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
+To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. This is a command for whoever runs the instance; the app itself has no export button yet. The command reads the database and memory files directly, so it needs no sign-in and the instance must be running.
 
 ```bash
-aman export-data --list-users                          # who owns sessions, and how many
-aman export-data --user <id> --out /backup/alice.zip   # one person's archive
+aman export-data --list-users                              # who owns chats, and how many
+aman export-data --user <id> --out ~/aman-export.zip       # one person's archive, written to this machine
 ```
 
-An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. The archive is written whole or not at all and is never overwritten; any failure prints one line and exits non-zero. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds uploaded file bytes, `--no-instance-data` leaves out the shared memory vaults and instance settings, and `--migrate` first updates an older database to this version's schema (back it up first, since it changes the database). Secrets are removed before anything is written, and the archive holds one person's data only, so treat it as private anyway.
+Add `--instance NAME` when the machine runs more than one instance. The archive is written to the path you give on this machine (the folder must exist and the file must not), whole or not at all, and is never overwritten. An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds uploaded file bytes and `--no-instance-data` leaves out the shared memory vaults and instance settings. Secrets are removed before anything is written, and the archive holds one person's data only, so treat it as private anyway.
+
+Model keys and connector sign-ins are not included. After you import, enter your model keys again and sign in to each connector again. The same sentence is in the archive's `README.txt` and `manifest.json` and in the command's output.
+
+An instance not installed with the installer can run the command inside its app image instead, with the same environment and data volumes as the running app: `aman export-data --user <id> --out <file.zip>`. `--migrate` first updates an older database to this version's schema, so back it up first (`aman backup`); it is not needed against the running app.
 
 ## What is off in this version
 

@@ -7,7 +7,12 @@ import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-co
 import { z } from 'zod';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
-import { runDataExport, type DataExportDeps, type MemoryExportSource } from '../../../src/dataExport/exportService';
+import {
+  AFTER_IMPORT_NOTICE,
+  runDataExport,
+  type DataExportDeps,
+  type MemoryExportSource,
+} from '../../../src/dataExport/exportService';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -123,6 +128,24 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
     model_name: 'test-provider/test-model',
   });
 }
+
+describe('runDataExport after-import notice', () => {
+  it('tells the person what to redo, in the manifest and in README.txt', async () => {
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: listing({}).client });
+    try {
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+      const notice =
+        'Model keys and connector sign-ins are not included. After you import, enter your model keys again and sign in to each connector again.';
+      expect(AFTER_IMPORT_NOTICE).toBe(notice);
+      expect(zipEntryText(entries, 'README.txt')).toBe(`${notice}\n`);
+      expect(zipEntryJson(entries, 'manifest.json')).toMatchObject({ after_import: notice });
+    } finally {
+      await close();
+    }
+  });
+});
 
 describe('runDataExport memory backends', () => {
   it('renders a client (hindsight) backend into Markdown files in the vault layout', async () => {

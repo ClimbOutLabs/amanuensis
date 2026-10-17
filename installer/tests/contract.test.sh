@@ -167,7 +167,26 @@ test_in_image_check_ids_match() {
   done
 }
 
+test_host_export_data_brings_the_archive_out() {
+  t_begin "host 'aman export-data' runs in the app container and copies the archive to a host path"
+  sandbox_new
+  install_machine
+  local out rc=0 target="$SB/user/export.zip"
+  out=$(AMANUENSIS_HOME="$AMAN_HOME" PATH="$SB_BIN" bash "$INSTALLER_DIR/doctor/aman" export-data --instance main --user u --out "$target") || rc=$?
+  assert_eq "$rc" 0 "export-data exit code"
+  assert_contains "$out" "\"out\":\"$target\"" "the printed path is the host path"
+  assert_file "$target"
+  assert_log_has "aman export-data --user u --out /tmp/aman-export-"
+  assert_log_has "docker cp c-app:/tmp/aman-export-"
+  rc=0
+  out=$(AMANUENSIS_HOME="$AMAN_HOME" PATH="$SB_BIN" bash "$INSTALLER_DIR/doctor/aman" export-data --instance main --user u --out "$target" 2>&1) || rc=$?
+  assert_eq "$rc" 1 "an existing target is never overwritten"
+  assert_contains "$out" "never overwrites"
+  sandbox_drop
+}
+
 test_token_factory_settings_match_the_server
+test_host_export_data_brings_the_archive_out
 test_sign_in_settings_match_the_server
 test_image_keeps_app_data_on_the_data_volume
 test_in_image_check_ids_match

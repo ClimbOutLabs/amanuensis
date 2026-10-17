@@ -24,7 +24,13 @@ const ListSchema = z.object({
   sign_in_off_user_id: z.string().optional(),
   users: z.array(z.object({ user_id: z.string(), display_name: z.string(), sessions: z.number() })),
 });
-const ResultSchema = z.object({ user_id: z.string(), out: z.string(), bytes: z.number(), files: z.number() });
+const ResultSchema = z.object({
+  user_id: z.string(),
+  out: z.string(),
+  bytes: z.number(),
+  files: z.number(),
+  after_import: z.string(),
+});
 
 let scratch: string;
 
@@ -110,7 +116,12 @@ describe('aman export-data --user', () => {
     const out = path.join(scratch, 'export.zip');
     const io = fakeIo();
     expect(await command(fakeSession())({ args: ['--user', 'alice', '--out', out], io })).toBe(0);
-    expect(ResultSchema.parse(JSON.parse(io.out.join('')))).toMatchObject({ user_id: 'alice', out, bytes: 9 });
+    expect(ResultSchema.parse(JSON.parse(io.out.join('')))).toMatchObject({
+      user_id: 'alice',
+      out,
+      bytes: 9,
+      after_import: expect.stringContaining('enter your model keys again'),
+    });
     expect(await readdir(scratch)).toEqual(['export.zip']);
   });
 

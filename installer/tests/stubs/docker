@@ -201,7 +201,26 @@ case "$cmd" in
     fi
     exit 0
     ;;
+  cp)
+    # `docker cp c-app:/tmp/x.zip /host/x.zip`: the archive an in-image export-data wrote.
+    printf 'zip' >"${2:-/dev/null}"
+    exit 0
+    ;;
   exec)
+    case "$*" in
+      *"aman export-data"*)
+        [ -z "${STUB_EXPORT_FAIL:-}" ] || { echo "No sessions belong to the user." >&2; exit 1; }
+        out=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = --out ]; then out=$a; fi
+          prev=$a
+        done
+        printf '{"user_id":"u","out":"%s","bytes":3,"files":1}\n' "$out"
+        exit 0
+        ;;
+      *"rm -f"*) exit 0 ;;
+    esac
     # `docker exec <container> aman doctor --text`: one tab-separated check per line.
     printf 'service\tok\tstub\t\nrun_code\tok\tstub\t\n'
     exit 0
