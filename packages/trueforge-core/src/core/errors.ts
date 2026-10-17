@@ -7,6 +7,17 @@ export type AgentHarnessErrorCode =
   | 'capability_state_error'
   | 'compaction_summary_invalid';
 
+/** The model provider answered a request with a failure. The message is for logs; the chat gets a plain one. */
+export class ProviderRequestError extends Error {
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, options: { statusCode: number | undefined; cause?: unknown }) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = 'ProviderRequestError';
+    this.statusCode = options.statusCode;
+  }
+}
+
 export class AgentHarnessError extends Error {
   constructor(
     readonly code: AgentHarnessErrorCode,

@@ -30,7 +30,6 @@ import type {
   UserToolResponseMessage,
 } from '../events/schema';
 import type {
-  CompletionUsage,
   InternalEnrichedAssistantMessage,
   LLMSystemMessage,
   LLMToolMessage,
@@ -57,7 +56,6 @@ export const InternalEventType = {
   PASSTHROUGH: 'agent.passthrough',
   MCP_AUTH_REQUIRED: 'internal.mcp.auth_required',
   CAPABILITY_STATE: 'internal.capability.state',
-  MODEL_USAGE: 'internal.agent.model_usage',
 } as const;
 
 /**
@@ -74,20 +72,6 @@ export interface InternalCapabilityStateEvent {
 export interface InternalPassthroughEvent {
   type: typeof InternalEventType.PASSTHROUGH;
   event: RegisteredPassthroughEvent;
-}
-
-/**
- * Cross-turn billable-usage-only signal. Emitted by a context processor when a
- * model request completed (and consumed tokens) but produced no context change
- * worth persisting — e.g. a compaction attempt discarded for a malformed
- * summary. Folds `usage` into thread metrics without touching context, without
- * an `AGENT_CONTEXT_OVERWRITE`/`AGENT_CONTEXT_APPEND` wire event, and without
- * incrementing any success counter ({@link AgentContextProcessorOutput}).
- */
-export interface InternalModelUsageEvent {
-  type: typeof InternalEventType.MODEL_USAGE;
-  thread_id: string;
-  usage: CompletionUsage;
 }
 
 export const InternalPassthroughEventSchema: z.ZodType<InternalPassthroughEvent> = z.object({
