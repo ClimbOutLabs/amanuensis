@@ -9,7 +9,7 @@ export interface McpToolInfo {
     destructiveHint?: boolean;
     /** Server-classified effect of this tool call. */
     effect?: TrueForge.McpToolInfoEffect;
-    /** Host-observed structured-edit target summary shown during approval. */
+    /** Host-observed target the call acts on, such as a file or git repository, shown during approval. */
     hostObservedTargetSummary?: string;
     /** Tool name on the MCP server. */
     name: string;

@@ -9,7 +9,7 @@ export interface TrueFoundrySystemToolInfo {
     destructiveHint?: boolean;
     /** Server-classified effect of this tool call. */
     effect?: TrueForge.TrueFoundrySystemToolInfoEffect;
-    /** Host-observed structured-edit target summary shown during approval. */
+    /** Host-observed target the call acts on, such as a file or git repository, shown during approval. */
     hostObservedTargetSummary?: string;
     /** System tool name. */
     name: string;
