@@ -10,13 +10,15 @@
  * with an overwrite after creation. Turns are terminated immediately after
  * creation, in export order, so the next turn's predecessor is never still
  * running. A turn that was still running at export time cannot resume, so it
- * is imported as cancelled with the `abandoned` reason. The store stamps "now"
+ * is imported as cancelled with the `abandoned` reason, and so is a turn left
+ * waiting on an approval or answer. Approval grants never travel. The store stamps "now"
  * on everything it creates, so each session ends with an import-only write
  * that puts the archived dates and totals back.
  */
 import {
   CancellationReason,
   EventType,
+  MAIN_THREAD_ID,
   abnormalHandoffCauseForCancellation,
   type CreatedBySubject,
   type ISessionStore,
@@ -25,9 +27,14 @@ import {
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
 import { mechanicalAbnormalHandoff, newEventId, type ToolCallMemoSnapshot } from '@truefoundry/trueforge-core/core';
+import { ActionRequiredEventSchema } from '@truefoundry/trueforge-core/core/events/schema';
 
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
+
+/** Shown in the chat for a request that was waiting on the owner when the archive was made. */
+export const EXPIRED_APPROVAL_NOTICE =
+  'This chat was waiting for an answer when it was exported. That request expired during the move and nothing was run.';
 
 type ThreadSnapshot = ImportTurnRecord['snapshot']['threads'][string];
 type ContextMessage = ThreadSnapshot['context'][number];
@@ -182,7 +189,7 @@ async function restoreTurn(
       updated_at: new Date(turn.updated_at),
     },
     sandbox_info: turn.snapshot.sandbox_info ?? null,
-    approval_grants: isFirstTurn ? session.approval_grants : [],
+    approval_grants: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: retainedThreadIds,
     new_threads: newThreads.map(thread => ({
@@ -257,12 +264,27 @@ async function restoreTurn(
 
   const events = entry.events;
   const streamDone = findTurnDoneEvent(events);
-  const replayEvents = events.filter(event => event.type !== 'turn.done');
+  const expiredActions = turn.state.status === 'done' ? turn.state.required_actions : [];
+  const holdsOutstandingAction = expiredActions.length > 0;
+  // An action the archive left waiting is never revived: its card and held marks are archive-written.
+  const replayEvents = events.filter(
+    event =>
+      event.type !== 'turn.done' && !(holdsOutstandingAction && ActionRequiredEventSchema.safeParse(event).success),
+  );
+  if (holdsOutstandingAction) {
+    replayEvents.push({
+      type: EventType.MODEL_MESSAGE,
+      id: newEventId(),
+      created_at: turn.updated_at,
+      thread_id: expiredActions[0]?.thread_id ?? MAIN_THREAD_ID,
+      content: EXPIRED_APPROVAL_NOTICE,
+    });
+  }
   if (replayEvents.length > 0) {
     await store.appendToEvents({ session_id: sessionId, turn_id: turn.turn_id, events: replayEvents });
   }
 
-  if (turn.state.status === 'running') {
+  if (turn.state.status === 'running' || holdsOutstandingAction) {
     const completedAt = turn.updated_at;
     const state: TerminalTurnState = {
       status: 'cancelled',

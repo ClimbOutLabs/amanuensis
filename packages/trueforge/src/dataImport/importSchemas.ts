@@ -23,7 +23,7 @@ import {
   AgentParentSchema,
   ContextMessageSchema,
 } from '@truefoundry/trueforge-core/core/events/schema';
-import { LLMToolMessageSchema } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { InternalToolCallInfoSchema, LLMToolMessageSchema } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
@@ -72,9 +72,45 @@ const ImportCompletionMarkerSchema = z.object({
   send_to_parent: LLMToolMessageSchema,
 });
 
+/**
+ * What an archived tool call may keep of its host-owned info: identity and display facts only.
+ * Everything that decides whether a call needs approval, runs, or is held for the owner is
+ * re-derived by the host when a call is made, never taken from an archive.
+ */
+const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
+  type: true,
+  mcp_server_id: true,
+  mcp_server_name: true,
+  original_tool_name: true,
+  is_deferred: true,
+  is_client_side: true,
+  is_thread_creation: true,
+  description: true,
+  read_only_hint: true,
+  destructive_hint: true,
+  open_world_hint: true,
+  effect: true,
+});
+
+const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx) => {
+  if (!('tool_calls' in message) || message.tool_calls === undefined) {
+    return message;
+  }
+  const toolCalls: typeof message.tool_calls = [];
+  for (const call of message.tool_calls) {
+    const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
+    if (!toolInfo.success) {
+      ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
+      return z.NEVER;
+    }
+    toolCalls.push({ ...call, tool_info: toolInfo.data });
+  }
+  return { ...message, tool_calls: toolCalls };
+});
+
 const ImportThreadSnapshotSchema = z.looseObject({
   thread_id: z.string().min(1),
-  context: z.array(ContextMessageSchema),
+  context: z.array(ImportContextMessageSchema),
   current_context_usage: CurrentContextUsageSchema,
   parent: AgentParentSchema.nullable().optional(),
   agent_info: AgentInfoSchema.nullable().optional(),
@@ -121,7 +157,6 @@ export const ImportSessionRecordSchema = z.object({
   source: SessionSourceSchema.nullable(),
   metadata: SessionMetadataSchema,
   custom: z.unknown(),
-  approval_grants: z.array(z.string()),
   task_checklist: TaskChecklistSchema,
   metrics: SessionMetricsSchema,
   repository_id: z.string().nullable(),
