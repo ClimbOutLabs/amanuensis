@@ -21,6 +21,7 @@ export class TrueFoundryModelProviderStore<TTransaction = never> implements IMod
   readonly #client: TrueFoundryServiceFoundryServerClient;
   readonly #asAgent: ResolveAccessToken;
   readonly #asUser: ResolveAccessToken;
+  readonly #logger: Logger;
 
   constructor(input: {
     client: TrueFoundryServiceFoundryServerClient;
@@ -29,6 +30,7 @@ export class TrueFoundryModelProviderStore<TTransaction = never> implements IMod
     logger: Logger;
   }) {
     this.#client = input.client;
+    this.#logger = input.logger;
     const tokens = accessTokenForRequest({
       client: input.client,
       requestContext: asTrueFoundryRequestContext(input.requestContext),
@@ -104,7 +106,7 @@ export class TrueFoundryModelProviderStore<TTransaction = never> implements IMod
       tenant_id: input.tenant_id,
       gatewayUrl,
       accessToken: userToken,
-      models: mapEnabledModels({ integrations }),
+      models: mapEnabledModels({ integrations, logger: this.#logger }),
     });
   }
 }

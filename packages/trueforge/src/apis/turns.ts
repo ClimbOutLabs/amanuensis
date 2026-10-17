@@ -27,6 +27,7 @@ import {
   rawSandboxId,
   redisKey,
   SandboxError,
+  SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
@@ -137,6 +138,10 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   new Uint8Array(buffer).set(content);
   return buffer;
 }
+
+/** What a person is told when a file was never copied out of a workspace that has since been cleared. */
+const CLEARED_WORKSPACE_MESSAGE =
+  'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.';
 
 /**
  * Builds the Content-Disposition telling the browser to save the file under its sandbox name.
@@ -1464,7 +1469,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
       sandboxId = turn.record.snapshot.sandbox_info?.sandbox_id;
       if (sandboxId === undefined) {
-        return c.json({ error: { message: `Turn has no sandbox: ${turnId}` } }, 412);
+        return c.json({ error: { message: CLEARED_WORKSPACE_MESSAGE } }, 412);
       }
 
       const provider = await (deps.sandboxProviderResolver ?? resolveSandboxProvider)({
@@ -1487,14 +1492,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           'Cache-Control': 'private, no-store',
         });
       } catch (error) {
-        // No persisted copy and the live sandbox is gone: say what happened instead of the raw
-        // provider error, which reads as if the whole session vanished rather than this one file.
-        if (error instanceof SandboxNotAvailableError) {
+        // No persisted copy and the temporary workspace is gone: say what happened to this one file
+        // instead of the raw provider error, which reads as if the whole chat had vanished.
+        if (error instanceof SandboxNotAvailableError || error instanceof SandboxFileNotFoundError) {
           const reason =
             persisted?.status === 'skipped_missing'
-              ? (persisted.skip_reason ?? 'it was not found in the sandbox when this turn finished.')
-              : 'the sandbox was stopped after this turn finished, and no persisted copy was found for this file.';
-          return c.json({ error: { message: `This file was not kept: ${reason}` } }, 410);
+              ? `This file was not kept: ${persisted.skip_reason ?? 'it was not found when this turn finished.'}`
+              : CLEARED_WORKSPACE_MESSAGE;
+          return c.json({ error: { message: reason } }, 410);
         }
         throw error;
       }
