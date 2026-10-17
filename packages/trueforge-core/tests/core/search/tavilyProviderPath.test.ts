@@ -123,6 +123,15 @@ describe('Tavily through the designated search provider path', () => {
     expect(isSearchHoldCardText(info.tier3_card?.plain_what ?? '')).toBe(true);
   });
 
+  it('shows a hidden character in the query as a visible token on the card', async () => {
+    const h = harness({ searchWithoutAsking: false });
+    const hidden = { name: 'tavily_search', arguments: { query: 'doctor\u202Elisbon' } };
+    const card = (await h.toolSet.toolCallInfo(hidden)).tier3_card;
+    expect(card?.plain_what).toContain('doctor\\u{202E}lisbon');
+    expect(card?.plain_what).not.toContain('\u202E');
+    expect(isSearchHoldCardText(card?.plain_what ?? '')).toBe(true);
+  });
+
   it("lets an extract name only links that this turn's search returned", async () => {
     const h = harness({ searchWithoutAsking: true });
     await h.toolSet.callTool(search);
