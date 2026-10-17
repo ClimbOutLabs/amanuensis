@@ -64,9 +64,29 @@ test_a_failed_import_still_starts_the_app_and_fails() {
   assert_rc 1
   assert_flat_contains "$ERR" "already has chats"
   assert_flat_contains "$ERR" "The import failed"
+  # Only the CLI knows whether a failed run left anything behind, so the installer does not claim it.
+  assert_not_contains "$ERR" "Nothing was kept"
   assert_file "$SB_STATE/up/aman-main"
   unset STUB_IMPORT_FAIL
   sandbox_drop
+}
+
+test_an_interrupted_import_still_starts_the_app() {
+  local signal
+  for signal in INT TERM HUP; do
+    t_begin "an import interrupted by SIG$signal still starts the app it stopped"
+    sandbox_new
+    install_with_owner
+    make_export
+    export STUB_IMPORT_SIGNAL=$signal
+    run_install instance import main "$EXPORT_FILE"
+    unset STUB_IMPORT_SIGNAL
+    if [ "$RC" != 0 ]; then t_pass; else t_fail "expected a non-zero exit after SIG$signal"; fi
+    assert_eq "$(import_count)" 1
+    assert_file "$SB_STATE/up/aman-main"
+    assert_flat_contains "$OUT$ERR" "Starting the app of instance main again"
+    sandbox_drop
+  done
 }
 
 test_import_needs_a_name_and_a_file() {
@@ -108,6 +128,7 @@ test_a_fourth_word_belongs_to_import_only() {
 
 test_import_stops_the_app_runs_the_cli_and_starts_it_again
 test_a_failed_import_still_starts_the_app_and_fails
+test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file
 test_import_for_an_unknown_instance_is_refused
 test_a_fourth_word_belongs_to_import_only

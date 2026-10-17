@@ -3,12 +3,24 @@
 # container that has the instance's data volume and no network, then started again whatever the outcome.
 
 OPT_IMPORT_FILE=
+# The instance whose app this run stopped and has not started again yet.
+IMPORT_STOPPED_APP=
 
 # The export file is the fourth word of `instance import NAME FILE` and of no other command.
 check_import_options() {
   if [ -n "$OPT_IMPORT_FILE" ] && [ "$COMMAND:$SUBCOMMAND" != instance:import ]; then
     usage_die "unexpected argument $OPT_IMPORT_FILE"
   fi
+}
+
+# Starts the app this run stopped. The exit handler calls it as well, so an interrupt or hangup never leaves it stopped.
+import_on_exit() {
+  local name=$IMPORT_STOPPED_APP
+  [ -n "$name" ] || return 0
+  IMPORT_STOPPED_APP=
+  say "Starting the app of instance $name again"
+  dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||
+    warn "The app of instance $name did not start healthy. Run: aman doctor instance --fix"
 }
 
 # import_run NAME FILE OWNER IMAGE: the file is streamed in and held on a private tmpfs, because the app user inside the
@@ -20,6 +32,7 @@ import_run() {
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
     say "Stopping the app of instance $name for the import"
+    IMPORT_STOPPED_APP=$name
     dc "$name" stop app >/dev/null || die "could not stop the app of instance $name; nothing was imported"
   fi
   say "Importing $base into instance $name for $owner"
@@ -30,14 +43,12 @@ import_run() {
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\"" import "$owner" \
     <"$file" || rc=$?
   if [ "$was_running" = 1 ]; then
-    say "Starting the app of instance $name again"
-    dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||
-      warn "The app of instance $name did not start healthy. Run: aman doctor instance --fix"
+    import_on_exit
   else
     say "Instance $name was not running, so it was left stopped."
   fi
   if [ "$rc" != 0 ]; then
-    warn "The import failed (see above). Nothing was kept; a failed import leaves the instance as it was."
+    warn "The import failed. The message above says what happened and what to do next."
     return 1
   fi
   log_event "data import into instance $name from $base"

@@ -276,6 +276,17 @@ case "$cmd" in
       *"aman import-data"*)
         # Models the CLI: records the call, and fails on request the way a refused import does.
         echo "$*" >>"$S/import_runs"
+        if [ -n "${STUB_IMPORT_SIGNAL:-}" ]; then
+          # Models Ctrl-C or a hangup during the import: the signal reaches the installer, then the run ends.
+          p=$PPID
+          while [ "$p" -gt 1 ]; do
+            case "$(tr '\0' ' ' <"/proc/$p/cmdline")" in
+              *install.sh*) kill -s "$STUB_IMPORT_SIGNAL" "$p"; break ;;
+            esac
+            p=$(awk '{print $4}' "/proc/$p/stat")
+          done
+          exit 130
+        fi
         [ -n "${STUB_IMPORT_FAIL:-}" ] && { echo "This instance already has chats, so the import was refused and nothing was changed." >&2; exit 1; }
         printf '{"user_id":"stub","chats":1}\n'
         exit 0

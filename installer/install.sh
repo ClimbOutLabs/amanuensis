@@ -316,6 +316,7 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  import_on_exit
   lock_release
   exit "$rc"
 }
@@ -330,6 +331,7 @@ main() {
   check_import_options
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
     if [ "$OPT_TLS" = caddy ]; then
