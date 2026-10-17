@@ -281,6 +281,9 @@ function toUiStreamingEvent(event: TrueForgeApi.TurnStreamingEvent): TurnStreami
  */
 export type { MemoryTurnContext };
 
+/** The event types `listMemoryTurnContext` reads; the server filters to them so a poll stays small. */
+const MEMORY_TURN_CONTEXT_EVENT_TYPES = ['aman.memory.recall', 'aman.profile.learned'];
+
 /**
  * Reads every `aman.memory.recall` / `aman.profile.learned` event this session has recorded, one
  * entry per turn that has either, so the UI can render byte-for-byte what the model received
@@ -290,7 +293,10 @@ export type { MemoryTurnContext };
  *
  * Calls `client.sessions.listEvents` directly: the SDK's own event union already includes both
  * passthrough events with full fidelity (`injected_block`, `stats`, `screen`, `previous`/
- * `current`/`revision`); only the vendor-typed wrapper above narrows them away.
+ * `current`/`revision`); only the vendor-typed wrapper above narrows them away. The server filters
+ * to those two types, and with `afterEventId` to events newer than it, so a steady-state poll
+ * returns no rows. The generated client predates both query parameters, so they ride along as
+ * request query params.
  *
  * Walks every page (newest turn first, oldest last) rather than stopping early: this is the
  * durable audit read backing SPEC.md I5, so it must not silently drop older turns' recorded
@@ -299,10 +305,19 @@ export type { MemoryTurnContext };
  */
 export async function listMemoryTurnContext(
   client: TrueForge,
-  { sessionId }: { sessionId: string },
+  { sessionId, afterEventId }: { sessionId: string; afterEventId?: string | undefined },
 ): Promise<MemoryTurnContext[]> {
   const byTurn = new Map<string, MemoryTurnContext>();
-  const page = await client.sessions.listEvents(sessionId, { limit: 100 });
+  const page = await client.sessions.listEvents(
+    sessionId,
+    { limit: 100 },
+    {
+      queryParams: {
+        types: MEMORY_TURN_CONTEXT_EVENT_TYPES,
+        ...(afterEventId === undefined ? {} : { after_event_id: afterEventId }),
+      },
+    },
+  );
   for await (const item of page) {
     if (item.event.type !== 'aman.memory.recall' && item.event.type !== 'aman.profile.learned') continue;
     const existing = byTurn.get(item.turnId) ?? { turnId: item.turnId };
@@ -381,14 +396,19 @@ function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
  * turn (the later of a file's `started`/`finished`/`failed`/`cancelled` events wins) — so a status
  * line can show which files are still being read ('started' with no later event) without the
  * caller re-deriving that from a raw event list. Mirrors `listMemoryTurnContext` above: a direct
- * `client.sessions.listEvents` read, not the vendor chat pipeline.
+ * `client.sessions.listEvents` read, filtered server-side to this one type, not the vendor chat
+ * pipeline.
  */
 export async function listDocumentIngestionTurnContext(
   client: TrueForge,
   { sessionId }: { sessionId: string },
 ): Promise<DocumentIngestionTurnContext[]> {
   const byTurn = new Map<string, Map<string, DocumentIngestionFileStatus>>();
-  const page = await client.sessions.listEvents(sessionId, { limit: 100 });
+  const page = await client.sessions.listEvents(
+    sessionId,
+    { limit: 100 },
+    { queryParams: { types: ['document.ingestion'] } },
+  );
   for await (const item of page) {
     if (item.event.type !== 'document.ingestion') continue;
     const byFile = byTurn.get(item.turnId) ?? new Map<string, DocumentIngestionFileStatus>();

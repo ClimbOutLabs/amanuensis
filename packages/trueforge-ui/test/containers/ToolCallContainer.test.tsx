@@ -498,7 +498,7 @@ describe('ToolCallContainer', () => {
     expect(screen.getByText('Reviewed result')).toBeInTheDocument();
   });
 
-  it('routes Allow inside a sub-agent to the nested tool approval id', () => {
+  it('routes Approve inside a sub-agent to the nested tool approval id', () => {
     respondToToolApproval.mockClear();
     const SubAgentCard = createSubAgentCardProbe();
     const nestedMessage: ThreadMessage = {
@@ -564,8 +564,8 @@ describe('ToolCallContainer', () => {
       </SlotsProvider>,
     );
 
-    expect(screen.getByRole('radio', { name: 'Allow in this chat' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow once' }));
+    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'nested-approval-1', approved: true }),
     );
@@ -582,7 +582,7 @@ describe('ToolCallContainer', () => {
         approval: { id: 'approval-1', approved: undefined },
       },
     ]);
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: /in this chat/i })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });
@@ -611,11 +611,11 @@ describe('ToolCallContainer', () => {
     expect(
       screen.queryByRole('button', { name: /Expand agent details|Collapse agent details/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });
 
-  it('routes a root Allow through the runtime onRespondToToolApproval callback', () => {
+  it('routes a root Approve through the runtime onRespondToToolApproval callback', () => {
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
       [
@@ -630,13 +630,13 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow once' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
   });
 
-  it('preserves the chat scope option when Allow in this chat is clicked', () => {
+  it('preserves the chat scope option when Approve for this chat is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -652,7 +652,7 @@ describe('ToolCallContainer', () => {
             approved: undefined,
             options: [
               { id: 'allow-once', kind: 'allow-once' },
-              { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+              { id: 'allow-chat', kind: 'allow-always' },
               { id: 'deny', kind: 'reject-once', confirm: {} },
             ],
           },
@@ -661,7 +661,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow `pnpm test` in this chat' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -682,7 +682,7 @@ describe('ToolCallContainer', () => {
           approved: undefined,
           options: [
             { id: 'allow-once', kind: 'allow-once' },
-            { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+            { id: 'allow-chat', kind: 'allow-always' },
             { id: 'deny', kind: 'reject-once', confirm: {} },
           ],
         },
@@ -690,8 +690,8 @@ describe('ToolCallContainer', () => {
     ]);
 
     expect(screen.getByText('pnpm test')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Allow `pnpm test` in this chat' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });
 
@@ -742,7 +742,7 @@ describe('ToolCallContainer', () => {
         },
       },
     ]);
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });
 
@@ -856,7 +856,7 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getByText('This request expired.')).toBeInTheDocument();
-      expect(screen.queryByRole('radio', { name: 'Allow once' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Approve' })).not.toBeInTheDocument();
       expect(screen.queryByRole('radio', { name: 'Deny' })).not.toBeInTheDocument();
     });
 
@@ -868,7 +868,7 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getAllByText('This request expired.')).toHaveLength(1);
-      expect(screen.getAllByRole('radio', { name: 'Allow once' })).toHaveLength(1);
+      expect(screen.getAllByRole('radio', { name: 'Approve' })).toHaveLength(1);
     });
 
     it('expires the older connector card read back from saved history, and keeps the newest one answerable', async () => {

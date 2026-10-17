@@ -2,7 +2,7 @@
   "name": "amanuensis",
   "version": "0.1.0",
   "description": "Amanuensis: agent server and chat UI in one command (npx amanuensis)",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/<your-fork>.git",
@@ -16,12 +16,15 @@
   "bin": "./dist/cli.js",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.14.0"
   },
   "scripts": {
+    "prepack": "node ../../scripts/copy-license-files.mjs",
     "build:clean": "node ../../scripts/rm-path.mjs dist",
     "build:deps": "node scripts/sync-dependencies.mjs",
     "build:server": "pnpm --filter @truefoundry/trueforge build",

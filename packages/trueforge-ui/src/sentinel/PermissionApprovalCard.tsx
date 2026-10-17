@@ -4,6 +4,7 @@ import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
+import { APPROVAL_CHOICES } from './approvalChoices.js';
 import type { SentinelApprovalCard } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
@@ -19,6 +20,8 @@ export type PermissionApprovalCardProps = {
   /** Tier the server sent; it only changes the badge, never the controls. */
   tier: ApprovalCardTier;
   onApprove: () => void;
+  /** Only passed when the server declared a chat-scoped allow for this call. */
+  onApproveForChat?: (() => void) | undefined;
   onDeny: () => void;
   /**
    * Approves every pending Tier 2 call in one step. Only the container passes it, and
@@ -96,6 +99,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   card,
   tier,
   onApprove,
+  onApproveForChat,
   onDeny,
   onApproveAll,
   batchSize,
@@ -150,12 +154,38 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 
-        <div className="flex gap-2">
-          <Button variant="primary" size="small" onClick={onApprove} disabled={disabled} className="flex-1">
-            Approve
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="primary"
+            size="small"
+            title={APPROVAL_CHOICES.approve.hint}
+            onClick={onApprove}
+            disabled={disabled}
+            className="flex-1"
+          >
+            {APPROVAL_CHOICES.approve.label}
           </Button>
-          <Button variant="secondary" size="small" onClick={onDeny} disabled={disabled} className="flex-1">
-            Deny
+          {onApproveForChat !== undefined && (
+            <Button
+              variant="secondary"
+              size="small"
+              title={APPROVAL_CHOICES.approveForChat.hint}
+              onClick={onApproveForChat}
+              disabled={disabled}
+              className="flex-1"
+            >
+              {APPROVAL_CHOICES.approveForChat.label}
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            size="small"
+            title={APPROVAL_CHOICES.deny.hint}
+            onClick={onDeny}
+            disabled={disabled}
+            className="flex-1"
+          >
+            {APPROVAL_CHOICES.deny.label}
           </Button>
         </div>
         {onApproveAll !== undefined && (
