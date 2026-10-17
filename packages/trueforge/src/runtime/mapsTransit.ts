@@ -1,7 +1,7 @@
 /**
  * Public transport planning for `render_route` with mode `transit`, against a MOTIS-compatible
- * planner. The planner returns whole itineraries; this module keeps the first one and reduces it
- * to the plain steps the map card shows.
+ * planner. The planner returns whole itineraries; this module keeps the one that best fits the
+ * requested time and reduces it to the plain steps the map card shows.
  */
 import { resolveLocalTime, type MapsTransitStep, type MapsTransitVehicle } from '@truefoundry/trueforge-core/core';
 import { z } from 'zod';
@@ -18,7 +18,7 @@ export interface MapsTransitRequest {
   time: string | null;
   /** True when `time` is the latest arrival rather than the earliest departure. */
   arrive_by: boolean;
-  /** IANA zone used to print clock times when the planner does not name a stop's zone. */
+  /** Valid IANA zone used to print clock times when the planner does not name a usable stop zone. */
   fallback_timezone: string;
 }
 
@@ -99,7 +99,7 @@ function vehicleFor(mode: string): MapsTransitVehicle {
   }
 }
 
-/** Local 24-hour `HH:MM` for an instant in a zone; falls back to the given zone for an unknown one. */
+/** Local 24-hour `HH:MM` for an instant in a zone; falls back to the already-valid `fallback` zone. */
 function clockTime({
   iso,
   timezone,
@@ -194,10 +194,37 @@ function stepsFor({ legs, fallback }: { legs: Leg[]; fallback: string }): MapsTr
       to_name: leg.to.name ?? '',
       departs: clockTime({ iso: leg.startTime, timezone: leg.from.tz, fallback }),
       arrives: clockTime({ iso: leg.endTime, timezone: leg.to.tz, fallback }),
-      stops_count: (leg.intermediateStops?.length ?? 0) + 1,
+      stops_count: leg.intermediateStops === undefined ? null : leg.intermediateStops.length + 1,
     });
   });
   return steps;
+}
+
+type Itinerary = z.infer<typeof planSchema>['itineraries'][number];
+
+/**
+ * Arriving by a time: the latest arrival that makes it, else the least late one. Otherwise the
+ * earliest arrival. Planner order is not relied on.
+ */
+function chooseItinerary({
+  itineraries,
+  arrive_by,
+}: {
+  itineraries: Itinerary[];
+  arrive_by: string | null;
+}): Itinerary | undefined {
+  const highest = (from: Itinerary[], score: (candidate: Itinerary) => number) =>
+    from.reduce<Itinerary | undefined>(
+      (best, candidate) => (best === undefined || score(candidate) > score(best) ? candidate : best),
+      undefined,
+    );
+  const earliestArrival = highest(itineraries, candidate => -Date.parse(candidate.endTime));
+  if (arrive_by === null) {
+    return earliestArrival;
+  }
+  const deadline = Date.parse(arrive_by);
+  const inTime = itineraries.filter(candidate => Date.parse(candidate.endTime) <= deadline);
+  return highest(inTime, candidate => Date.parse(candidate.endTime)) ?? earliestArrival;
 }
 
 /** MOTIS-compatible planner, e.g. the Transitous public instance. */
@@ -215,6 +242,10 @@ export class MotisTransitProvider implements MapsTransitProvider {
     if (input.time !== null) {
       query.set('time', input.time);
       query.set('arriveBy', String(input.arrive_by));
+      if (input.arrive_by) {
+        // Best journeys arriving by the time, rather than a timetable of departures around it.
+        query.set('timetableView', 'false');
+      }
     }
     let response: Response;
     try {
@@ -236,7 +267,10 @@ export class MotisTransitProvider implements MapsTransitProvider {
     if (!parsed.success) {
       throw new MapsUpstreamError('service_unavailable', 'router', parsed.error);
     }
-    const itinerary = parsed.data.itineraries[0];
+    const itinerary = chooseItinerary({
+      itineraries: parsed.data.itineraries,
+      arrive_by: input.arrive_by ? input.time : null,
+    });
     if (itinerary === undefined || itinerary.legs.length === 0) {
       throw new MapsUpstreamError('no_route');
     }

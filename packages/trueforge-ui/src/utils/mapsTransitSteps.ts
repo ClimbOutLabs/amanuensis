@@ -20,8 +20,9 @@ export function describeTransitStep(step: MapsTransitStep): string {
       : `Walk ${String(step.duration_min)} min to ${step.to_name}`;
   }
   const toward = step.headsign === null ? '' : ` toward ${step.headsign}`;
-  const stops = step.stops_count === 1 ? '1 stop' : `${String(step.stops_count)} stops`;
-  return `${VEHICLE_WORDS[step.vehicle]} ${step.line_name}${toward}, ${stops}, leaves ${step.departs}`;
+  const stops =
+    step.stops_count === null ? '' : step.stops_count === 1 ? ', 1 stop' : `, ${String(step.stops_count)} stops`;
+  return `${VEHICLE_WORDS[step.vehicle]} ${step.line_name}${toward}${stops}, leaves ${step.departs}`;
 }
 
 /** Whole minutes, or hours and minutes from an hour up, for the card subtitle. */

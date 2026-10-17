@@ -179,6 +179,59 @@ describe('MotisTransitProvider', () => {
     expect(plan.steps.map(step => (step.kind === 'ride' ? step.vehicle : 'walk'))).toEqual(['bus', 'metro', 'other']);
   });
 
+  it('leaves the stop count unknown when the planner lists no intermediate stops', async () => {
+    const legs = PLAN.itineraries[0]?.legs.map(({ intermediateStops: _stops, ...leg }) => leg);
+    const bare = { itineraries: [{ ...PLAN.itineraries[0], legs }] };
+    const { provider } = providerFor(() => Promise.resolve(jsonResponse(bare)));
+    const plan = await provider.plan(REQUEST);
+    expect(plan.steps[1]).toMatchObject({ kind: 'ride', stops_count: null });
+  });
+
+  describe('choosing among several itineraries', () => {
+    /** One tram ride per itinerary, so departs and arrives are the ride times. */
+    function itinerary({ start, end }: { start: string; end: string }) {
+      const ride = PLAN.itineraries[0]?.legs[2];
+      if (ride === undefined) {
+        throw new Error('fixture has no ride');
+      }
+      return { startTime: start, endTime: end, transfers: 0, legs: [{ ...ride, startTime: start, endTime: end }] };
+    }
+    const SEVERAL = {
+      itineraries: [
+        itinerary({ start: '2026-10-19T07:55:00Z', end: '2026-10-19T08:15:00Z' }),
+        itinerary({ start: '2026-10-19T08:00:00Z', end: '2026-10-19T08:30:00Z' }),
+        itinerary({ start: '2026-10-19T07:40:00Z', end: '2026-10-19T08:05:00Z' }),
+        itinerary({ start: '2026-10-19T07:50:00Z', end: '2026-10-19T08:10:00Z' }),
+      ],
+    };
+
+    it('asks for journeys arriving by the time and keeps the latest arrival that makes it', async () => {
+      const { provider, seen } = providerFor(() => Promise.resolve(jsonResponse(SEVERAL)));
+      const plan = await provider.plan({ ...REQUEST, time: '2026-10-19T09:12:00+01:00', arrive_by: true });
+      const url = new URL(seen[0] ?? '');
+      expect(url.searchParams.get('arriveBy')).toBe('true');
+      expect(url.searchParams.get('timetableView')).toBe('false');
+      expect(plan.departs).toBe('08:50');
+      expect(plan.arrives).toBe('09:10');
+    });
+
+    it('keeps the least late journey when none arrives in time', async () => {
+      const { provider } = providerFor(() => Promise.resolve(jsonResponse(SEVERAL)));
+      const plan = await provider.plan({ ...REQUEST, time: '2026-10-19T08:00:00+01:00', arrive_by: true });
+      expect(plan.departs).toBe('08:40');
+      expect(plan.arrives).toBe('09:05');
+    });
+
+    it('keeps the earliest arrival when departing at a time or now', async () => {
+      const { provider, seen } = providerFor(() => Promise.resolve(jsonResponse(SEVERAL)));
+      const timed = await provider.plan({ ...REQUEST, time: '2026-10-19T08:30:00+01:00', arrive_by: false });
+      expect(new URL(seen[0] ?? '').searchParams.has('timetableView')).toBe(false);
+      expect(timed.arrives).toBe('09:05');
+      const now = await provider.plan(REQUEST);
+      expect(now.arrives).toBe('09:05');
+    });
+  });
+
   it('reports no_route when the planner finds nothing', async () => {
     const { provider } = providerFor(() => Promise.resolve(jsonResponse({ itineraries: [] })));
     await expect(provider.plan(REQUEST)).rejects.toMatchObject({ code: 'no_route' });

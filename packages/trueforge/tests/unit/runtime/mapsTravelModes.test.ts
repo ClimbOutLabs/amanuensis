@@ -152,6 +152,19 @@ describe('render_route travel modes', () => {
     expect(plan.searchParams.get('toPlace')).toBe('38.7142,-9.1597');
   }, 15_000);
 
+  it('prints clock times in UTC when the user zone is not a real zone', async () => {
+    const legs = TRANSIT_BODY.itineraries[0]?.legs.map(leg => ({
+      ...leg,
+      from: { name: leg.from.name, lat: leg.from.lat, lon: leg.from.lon },
+      to: { name: leg.to.name, lat: leg.to.lat, lon: leg.to.lon },
+    }));
+    const zoneless = { itineraries: [{ ...TRANSIT_BODY.itineraries[0], legs }] };
+    const { call } = harness({ transit: zoneless, timezone: 'Not/AZone' });
+    const { body, isError } = await call({ mode: 'transit' });
+    expect(isError).toBe(false);
+    expect(body).toMatchObject({ mode: 'transit', departs: '08:00', arrives: '08:20' });
+  }, 15_000);
+
   it('reads arrive_by as local time in the user zone', async () => {
     const { call, urls } = harness({});
     await call({ mode: 'transit', arrive_by: '2026-10-19T09:20' });

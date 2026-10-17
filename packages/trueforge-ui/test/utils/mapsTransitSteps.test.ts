@@ -26,6 +26,22 @@ describe('describeTransitStep', () => {
     ).toBe('Tram 28E toward Campo Ourique, 6 stops, leaves 09:02');
   });
 
+  it('leaves out the stop count when it is unknown', () => {
+    expect(
+      describeTransitStep({
+        kind: 'ride',
+        vehicle: 'tram',
+        line_name: '28E',
+        headsign: 'Campo Ourique',
+        from_name: 'Calhariz (Bica)',
+        to_name: 'Estrela',
+        departs: '09:02',
+        arrives: '09:08',
+        stops_count: null,
+      }),
+    ).toBe('Tram 28E toward Campo Ourique, leaves 09:02');
+  });
+
   it('handles a single stop, no direction and other vehicles', () => {
     expect(
       describeTransitStep({

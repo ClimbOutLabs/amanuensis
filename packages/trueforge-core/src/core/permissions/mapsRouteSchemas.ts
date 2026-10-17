@@ -36,7 +36,8 @@ export const MapsTransitStepSchema = z.discriminatedUnion('kind', [
     to_name: z.string(),
     departs: z.string(),
     arrives: z.string(),
-    stops_count: z.number().int().nonnegative(),
+    /** Null when the planner did not list the stops. */
+    stops_count: z.number().int().nonnegative().nullable(),
   }),
 ]);
 export type MapsTransitStep = z.infer<typeof MapsTransitStepSchema>;

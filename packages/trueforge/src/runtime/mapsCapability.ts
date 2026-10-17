@@ -20,6 +20,7 @@ import {
   MapsTravelModeSchema,
   RENDER_MAP_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
+  resolveLocalTime,
   toolResultResponse,
   type MapsRouteResult as MapsRouteResultBody,
   type MapsTravelMode,
@@ -671,6 +672,8 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
     fetch_limited,
   });
   return {
-    systemToolSets: [new MapsTool(service, options.logger, options.timezone ?? 'UTC', options.tracing)],
+    systemToolSets: [
+      new MapsTool(service, options.logger, resolveLocalTime(new Date(), options.timezone).zone, options.tracing),
+    ],
   };
 }
