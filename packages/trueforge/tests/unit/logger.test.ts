@@ -149,16 +149,28 @@ it('shares the credential word list with the data export', () => {
   expectNoPlantedSecret(output());
 });
 
-it('redacts credential fields written into free text by any credential name', () => {
-  // Standalone output prints the message unescaped, so the kept field reads as written.
+it('redacts credential fields written into free text by any credential name, whatever the value type', () => {
   const { logger, output } = captureLogger(true);
-  logger.warn(`upstream said {"private_key":"${PLANTED.loginPass}","max_tokens":1024}`);
-  logger.warn(`retrying /v1/connect?client_assertion=x&session_cookie=${PLANTED.cookie}&limit=5`);
+  logger.warn(`upstream said {"private_key":"${PLANTED.loginPass}","password":731902}`);
+  logger.warn(`retrying /v1/connect?client_assertion=x&session_cookie=${PLANTED.cookie}&token=864213&limit=5`);
 
   const text = output();
   expectNoPlantedSecret(text);
-  expect(text).toContain('"max_tokens":1024');
+  expect(text).not.toContain('731902');
+  expect(text).not.toContain('864213');
   expect(text).toContain('limit=5');
+});
+
+it.each([
+  ['dotted', 'a.'],
+  ['dashed', 'a-'],
+])('logs a 1 MB %s run of parameter-name characters in linear time', (_name, unit) => {
+  const { logger, output } = captureLogger(false);
+  const line = unit.repeat(512 * 1024);
+  const started = performance.now();
+  logger.warn(line);
+  expect(performance.now() - started).toBeLessThan(200);
+  expect(output().length).toBeGreaterThan(line.length);
 });
 
 describe.each([

@@ -52,7 +52,8 @@ const CREDENTIAL_WORDS =
 const CREDENTIAL_SUFFIX = new RegExp(`(?:${CREDENTIAL_WORDS})$`);
 const CREDENTIAL_WORD = new RegExp(CREDENTIAL_WORDS);
 
-function normalizeFieldName(key: string): string {
+/** Lowercase with separators dropped, so `apiKey`, `api_key` and `API-KEY` compare equal. */
+export function normalizeFieldName(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 

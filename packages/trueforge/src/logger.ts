@@ -5,7 +5,7 @@
  * human-readable standalone format to keep local logs terse.
  */
 import winston, { type Logger } from 'winston';
-import { isLogCredentialField, REDACTED, redactSecretShapes } from './dataExport/secretScrub';
+import { isLogCredentialField, normalizeFieldName, REDACTED, redactSecretShapes } from './dataExport/secretScrub';
 
 const STANDALONE_META_SKIP = new Set(['level', 'message', 'timestamp', 'version', 'component', 'stack', 'splat']);
 
@@ -54,7 +54,7 @@ const TEXT_REDACTIONS: readonly (readonly [RegExp, string])[] = [
 
 function isContentField(key: string, value: unknown): boolean {
   const holdsText = typeof value === 'string' || (typeof value === 'object' && value !== null);
-  return holdsText && CONTENT_KEYS.has(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return holdsText && CONTENT_KEYS.has(normalizeFieldName(key));
 }
 
 /** The one name rule for a log field, applied at every depth. */
@@ -64,29 +64,21 @@ function redactField(key: string, value: unknown, seen: WeakSet<object>): unknow
 
 // Quotes are optional on the value: a JSON parse error may quote only part of a value, or a bare one.
 const QUOTED_JSON_FIELD = /("([^"\\]*)"\s*:\s*)("(?:[^"\\]|\\.)*"?|[^\s,}"\]]+)/g;
-const QUERY_PARAMETER = /([?&;]|\b)([A-Za-z0-9_.-]+)=([^&\s"'#]+)/g;
+// The lead is one character outside the name class, so a long run of name characters is scanned once.
+const QUERY_PARAMETER = /(^|[^A-Za-z0-9_.-])([A-Za-z0-9_.-]+)=([^&\s"'#]+)/g;
 
-/** A bare number or flag in free text is judged like the value it spells, so `"max_tokens":1024` stays. */
-function bareValue(raw: string): unknown {
-  if (raw === 'true' || raw === 'false') {
-    return raw === 'true';
-  }
-  return /^-?\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : raw;
-}
-
+/** In free text a value's type is unknown, so any value under a credential name is redacted. */
 function redactText(text: string): string {
   let out = redactSecretShapes(text);
   for (const [pattern, replacement] of TEXT_REDACTIONS) {
     out = out.replace(pattern, replacement);
   }
   out = out.replace(QUOTED_JSON_FIELD, (field: string, prefix: string, name: string, value: string) =>
-    isLogCredentialField(name, bareValue(value)) ? `${prefix}"${REDACTED}"` : field,
+    isLogCredentialField(name, value) ? `${prefix}"${REDACTED}"` : field,
   );
   // A bare `key` parameter is an API key in a query string, though not as a JSON field name.
   return out.replace(QUERY_PARAMETER, (parameter: string, lead: string, name: string, value: string) =>
-    name.toLowerCase() === 'key' || isLogCredentialField(name, bareValue(value))
-      ? `${lead}${name}=${REDACTED}`
-      : parameter,
+    name.toLowerCase() === 'key' || isLogCredentialField(name, value) ? `${lead}${name}=${REDACTED}` : parameter,
   );
 }
 
