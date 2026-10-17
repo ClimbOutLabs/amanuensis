@@ -1352,6 +1352,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
+    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
   });
   if (offline) {
     if (extraction.external_service) {
@@ -1375,6 +1376,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return autoDenyDecision({
       reason: 'destination_unverifiable',
       reason_detail: 'External-service action with no verifiable destination; never carded.',
+      sensitive_read: false,
+    });
+  }
+
+  // A send whose card would hide a recipient or cut its content is refused: approval must cover all of it.
+  if (extraction.incomplete_send !== null) {
+    return autoDenyDecision({
+      reason: 'incomplete_send_card',
+      reason_detail: extraction.incomplete_send.model_message,
+      owner_message: extraction.incomplete_send.owner_message,
       sensitive_read: false,
     });
   }
@@ -1481,6 +1492,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     readOnlyHint &&
     action.mcp_hints.open_world_hint === false &&
+    !extraction.sends &&
     !sensitiveReadHit(action.canonical_params)
   ) {
     if (action.mcp_first_party === true) {
@@ -1523,7 +1535,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const recognized = extraction.connector_what !== null;
   return tier3Decision({
     card,
-    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason: extraction.sends ? 'connector_send' : recognized ? 'connector_outbound' : 'unrecognized_tool',
     reason_detail: recognized
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
