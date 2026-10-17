@@ -443,4 +443,4 @@ export type {
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { createWebSearchTurnState } from './permissions/webSearch';
-export type { WebSearchTurnState } from './permissions/webSearch';
+export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
