@@ -7,6 +7,7 @@ import {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
+import { GRANT_BARRED_TIER_REASONS } from '../permissions/tier';
 import {
   implementationPlanAllowsScope,
   implementationPlanMatchesBinding,
@@ -14,7 +15,7 @@ import {
   type ImplementationPlanGrantScope,
 } from './implementationPlanGrant';
 
-const APPROVAL_GRANT_VERSION = 'v3';
+const APPROVAL_GRANT_VERSION = 'v4';
 
 export interface ImplementationPlanAdmission {
   grant_id: string;
@@ -79,7 +80,15 @@ export function effectiveToolAdmissions(input: {
  * unknown, or repository-mutating run never creates a commit receipt.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
-  return info.implementation_plan_grant !== undefined || info.effect === 'inspect' || info.effect === 'verify';
+  if (info.implementation_plan_grant !== undefined) {
+    return true;
+  }
+  return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
+}
+
+/** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
+function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
+  return info.tier_reason !== undefined && GRANT_BARRED_TIER_REASONS.has(info.tier_reason);
 }
 
 /**
@@ -91,6 +100,7 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   return (
     info.type === 'mcp' &&
     info.effect === 'inspect' &&
+    !tierBarsDurableGrant(info) &&
     info.implementation_plan_grant === undefined &&
     info.search_provider_call !== true
   );
@@ -98,10 +108,20 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
 
 /**
  * Durable identity for a chat-scoped approval. The identity is derived by the
- * server from the enriched tool call, never accepted from the browser.
+ * server from the enriched tool call, never accepted from the browser. The card's
+ * destination and recipient are part of it so a grant never follows a call to a different target.
  */
 export function approvalGrantKey(info: InternalToolCallInfo): string {
-  return JSON.stringify([APPROVAL_GRANT_VERSION, info.type, info.mcp_server_id, info.original_tool_name]);
+  const card = info.tier3_card ?? null;
+  return JSON.stringify([
+    APPROVAL_GRANT_VERSION,
+    info.type,
+    info.mcp_server_id,
+    info.original_tool_name,
+    card?.destination ?? null,
+    card?.recipient ?? null,
+    card?.destination_host ?? null,
+  ]);
 }
 
 export function implementationPlanScopeForCall(

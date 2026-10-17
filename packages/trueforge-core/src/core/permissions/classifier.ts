@@ -1339,6 +1339,15 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // A send whose card would hide a recipient or cut its content is refused: approval must cover all of it.
+  if (extraction.incomplete_send !== null) {
+    return autoDenyDecision({
+      reason: 'incomplete_send_card',
+      reason_detail: extraction.incomplete_send,
+      sensitive_read: false,
+    });
+  }
+
   // The user's designated search provider runs without asking behind the outbound secret guard.
   if (action.tool_type === 'mcp' && action.mcp_search_provider === true) {
     const searchDecision = await classifySearchProviderTool({ action, ctx, extraction });

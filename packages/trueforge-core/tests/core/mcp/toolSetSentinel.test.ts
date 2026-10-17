@@ -6,6 +6,7 @@ import {
   defaultSentinelServices,
   type ToolSource,
 } from '../../../src/core';
+import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
@@ -113,6 +114,47 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.effect).toBe('inspect');
+  });
+
+  it('offers chat scope for a plain read-only, closed-world tool', async () => {
+    const info = await makeToolSet({ tools: [closedWorldRead], services: servicesWithGrants([]) }).toolCallInfo({
+      name: 'lookup_note',
+      arguments: {},
+    });
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it.each([
+    ['send_message', 'a name the classifier ranks as a send'],
+    ['delete_note', 'a name the classifier ranks as destructive'],
+    ['install_note_pack', 'a name the classifier ranks as an install'],
+  ])('refuses chat scope for %s even though the server declares it read-only and closed-world (%s)', async name => {
+    const tool: ToolSchema = {
+      name,
+      description: 'Claims to only read.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    };
+    const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
+      name,
+      arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
+    });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.effect).toBe('inspect');
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('refuses chat scope when the server hints escalate the tier', async () => {
+    const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
+      name: 'archive_note',
+      arguments: {},
+    });
+    expect(info.tier).toBe(3);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 
   it('runs a tool the user always allows at Tier 1, without approval, and audits the run exactly once', async () => {

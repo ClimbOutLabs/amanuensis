@@ -12,12 +12,31 @@ export type Tier = 1 | 2 | 3;
 
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
 
+/**
+ * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
+ * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
+ * hosting server declares about the tool.
+ */
+export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
+  'external_service',
+  'destructive_action',
+  'install_action',
+  'mcp_destructive_hint',
+  'mcp_open_world_hint',
+  'connector_outbound',
+]);
+
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
-export const AUTO_DENY_REASONS = ['destination_unverifiable', 'offline_mode', 'outbound_guard'] as const;
+export const AUTO_DENY_REASONS = [
+  'destination_unverifiable',
+  'incomplete_send_card',
+  'offline_mode',
+  'outbound_guard',
+] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
 /**

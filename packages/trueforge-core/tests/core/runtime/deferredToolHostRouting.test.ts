@@ -128,4 +128,34 @@ describe('DeferredTool call_tool host-tool routing', () => {
     expect(text).toBe('from-server');
     expect(hostTool.callTool).not.toHaveBeenCalled();
   });
+  it('refuses host routing when the call was approved against the named server', async () => {
+    const server = makeMockIMCPServer({
+      name: 'tavily',
+      preload: false,
+      tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
+    });
+    const hostTool = makeMockIMCPServer({
+      name: 'current-datetime',
+      preload: true,
+      tools: [
+        { name: 'get_current_datetime', description: 'datetime', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
+      ],
+    });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      hostToolSets: [hostTool],
+    });
+
+    const response = await deferredTool.callTool(
+      { name: 'call_tool', arguments: { mcp_server: 'tavily', tool_name: 'get_current_datetime', input: {} } },
+      { status: 'allow', scope: 'once' },
+    );
+
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a resolved call_tool response');
+    }
+    expect(response.result.isError).toBe(true);
+    expect(hostTool.callTool).not.toHaveBeenCalled();
+  });
 });

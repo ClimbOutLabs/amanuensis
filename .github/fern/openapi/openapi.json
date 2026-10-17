@@ -395,6 +395,10 @@
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
           },
+          "can_chat_allow": {
+            "description": "Whether the user may approve this tool for the rest of the chat.",
+            "type": "boolean"
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"

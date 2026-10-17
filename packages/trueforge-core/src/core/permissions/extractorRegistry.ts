@@ -53,6 +53,8 @@ const RECIPIENT_KEYS = [
   'members',
   'emails',
   'webhook_url',
+  'forward',
+  'forward_to',
 ];
 
 /** Field names that hold the address inside an object recipient such as `{ email, name }`. */
@@ -222,6 +224,8 @@ export function genericExtractor(params: Record<string, unknown>): ExtractedCard
 
 /** Longest value shown in full; a longer one is cut with a marker. Recipient values are never cut. */
 export const OUTBOUND_VALUE_MAX_CHARS = 2000;
+/** Longest value of a send shown in full; a send with a longer one is refused instead of cut. */
+export const SEND_VALUE_MAX_CHARS = 20_000;
 /** Longest outbound_text before every non-recipient value is cut harder; keys and recipients always stay. */
 export const OUTBOUND_TEXT_MAX_CHARS = 100_000;
 const OUTBOUND_REDUCED_VALUE_MAX_CHARS = 100;
@@ -285,11 +289,14 @@ function renderOutboundLines(
  * so a model-written description can never stand in for what is sent. Every key is always listed
  * and recipient values are never cut; other values are capped, and `truncated` says whether any was.
  */
-export function renderOutboundArguments(params: Record<string, unknown>): { text: string | null; truncated: boolean } {
+export function renderOutboundArguments(
+  params: Record<string, unknown>,
+  options?: { valueMaxChars?: number },
+): { text: string | null; truncated: boolean } {
   if (Object.keys(params).length === 0) {
     return { text: null, truncated: false };
   }
-  let rendered = renderOutboundLines(params, OUTBOUND_VALUE_MAX_CHARS);
+  let rendered = renderOutboundLines(params, options?.valueMaxChars ?? OUTBOUND_VALUE_MAX_CHARS);
   let text = rendered.lines.join('\n');
   if (text.length > OUTBOUND_TEXT_MAX_CHARS) {
     rendered = renderOutboundLines(params, OUTBOUND_REDUCED_VALUE_MAX_CHARS);
@@ -381,10 +388,29 @@ interface ConnectorCallInput {
 }
 
 interface ConnectorFamily {
-  match: (words: string) => boolean;
+  match: (words: string, params: Record<string, unknown>) => boolean;
   describe: (input: ConnectorCallInput) => string;
+  /** The call sends data to someone; its card must show all of it. `recipient` also needs a named recipient. */
+  sends?: 'content' | 'recipient';
   /** Replaces the destination when the params name a more precise one. */
   destination?: (params: Record<string, unknown>) => string | null;
+}
+
+const FORWARD_KEY_SET = new Set(['forward', 'forwardto']);
+
+/** True when any argument, at any depth, sets a forwarding address. */
+function hasForwardAction(value: unknown, depth = 0): boolean {
+  if (Array.isArray(value)) {
+    return depth <= NESTED_RECIPIENT_MAX_DEPTH && value.some(item => hasForwardAction(item, depth + 1));
+  }
+  if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
+    return false;
+  }
+  return Object.entries(value).some(([key, field]) =>
+    FORWARD_KEY_SET.has(normalizeKey(key))
+      ? typeof field === 'string' && field.trim() !== ''
+      : hasForwardAction(field, depth + 1),
+  );
 }
 
 function repositoryLabel(params: Record<string, unknown>): string | null {
@@ -410,10 +436,12 @@ const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 
 const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'gist'),
+    sends: 'content',
     describe: ({ tool_name, where }) => `Publish a gist with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
+    sends: 'content',
     describe: ({ tool_name, where, params }) => {
       const repo = repositoryLabel(params);
       return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with ${tool_name}${where}.`;
@@ -422,14 +450,23 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: words => hasPhrase(words, 'send_draft'),
+    sends: 'recipient',
     describe: ({ tool_name, where, fields }) => `Send a saved draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
+    match: (words, params) => hasPhrase(words, 'create_filter') && hasForwardAction(params),
+    sends: 'recipient',
+    describe: ({ tool_name, where, fields }) =>
+      `Forward every matching message${toRecipient(fields)}, now and from here on, with ${tool_name}${where}.`,
+  },
+  {
     match: words => hasPhrase(words, 'forward'),
+    sends: 'recipient',
     describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
+    sends: 'recipient',
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -488,6 +525,30 @@ export interface ExtractionResult {
   external_service: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
+  /** Why a send cannot be shown to the user in full, or null. Such a send is refused, never carded. */
+  incomplete_send: string | null;
+}
+
+/** Mail tools that build their own recipients or content from stored state, which a card cannot show. */
+const HIDDEN_SEND_PHRASES = ['reply_all', 'send_draft'];
+
+function incompleteSend(input: {
+  sends: boolean;
+  words: string;
+  needs_recipient: boolean;
+  fields: ExtractedCardFields;
+  truncated: boolean;
+}): string | null {
+  if (hasPhrase(input.words, ...HIDDEN_SEND_PHRASES)) {
+    return 'This tool sends to recipients or content that are filled in after approval, so the card cannot show them.';
+  }
+  if (input.sends && input.truncated) {
+    return 'The message is too long to show in full, so it cannot be approved.';
+  }
+  if (input.needs_recipient && input.fields.recipient === null) {
+    return 'The card cannot name who receives this.';
+  }
+  return null;
 }
 
 /**
@@ -515,16 +576,20 @@ export function extractCardFields(input: {
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
       connector_what: null,
+      incomplete_send: null,
     };
   }
   const words = nameWords(input.tool_name);
   // Deleting or installing is described by the classifier's own destructive and install cards.
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
     ? undefined
-    : CONNECTOR_FAMILIES.find(f => f.match(words));
+    : CONNECTOR_FAMILIES.find(f => f.match(words, input.canonical_params));
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
-  const outbound = renderOutboundArguments(input.canonical_params);
+  const sends = externalService || family?.sends !== undefined;
+  const outbound = renderOutboundArguments(input.canonical_params, {
+    valueMaxChars: sends ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
+  });
   const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
   const fields: ExtractedCardFields = {
     ...base,
@@ -540,6 +605,13 @@ export function extractCardFields(input: {
     fields,
     destination_unverifiable: destinationUnverifiable,
     external_service: externalService,
+    incomplete_send: incompleteSend({
+      sends,
+      words,
+      needs_recipient: family?.sends === 'recipient',
+      fields,
+      truncated: outbound.truncated,
+    }),
     connector_what:
       family === undefined
         ? null

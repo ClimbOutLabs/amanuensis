@@ -210,6 +210,45 @@ describe('chat approval grants', () => {
   });
 });
 
+describe('chat grant key', () => {
+  it('differs by destination and recipient so one grant never covers a different target', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = (destination: string | null, recipient: string | null) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination,
+      recipient,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    });
+    const keyA = approvalGrantKey({ ...base, tier3_card: card('https://a.example', null) });
+    const keyB = approvalGrantKey({ ...base, tier3_card: card('https://b.example', null) });
+    const keyC = approvalGrantKey({ ...base, tier3_card: card(null, 'a@example.com') });
+    expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
+
+  it('never admits a Tier 3 send-class call from a chat grant, even a forged one', () => {
+    const info: InternalToolCallInfo = {
+      ...toolInfo('notes', 'send_note'),
+      effect: 'inspect',
+      tier: 3,
+      tier_reason: 'external_service',
+    };
+    const effective = effectiveApprovalDecisions({
+      calls: [toolCall('call', info)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.has('call')).toBe(false);
+  });
+});
+
 describe('always-allow grant eligibility', () => {
   it('admits only a connector tool the host classified as inspection', () => {
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);
