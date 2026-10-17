@@ -75,8 +75,7 @@ function McpServerChip({
                 </span>
               </span>
               <span className="text-text-secondary text-xs leading-snug">
-                Load MCP tool definitions in the agent context upfront. When off, the agent discovers tools dynamically
-                (uses less context upfront).
+                Load tool details up front. When off, the agent fetches them as needed (uses less context upfront).
               </span>
             </span>
           }
@@ -155,7 +154,7 @@ function SkillChip({
                 </span>
               </span>
               <span className="text-text-secondary text-xs leading-snug">
-                Inline SKILL.md in the agent context upfront. When off, the agent loads the skill dynamically.
+                Load the full skill up front. When off, the agent loads it as needed.
               </span>
             </span>
           }
@@ -466,8 +465,8 @@ export function AgentConfigPanel({
         </Section>
 
         <Section
-          title="Runtime Config"
-          description="Control execution and context behavior."
+          title="Run settings"
+          description="Control how the agent runs and uses context."
           actionIcon="sliders"
           onEdit={disabled ? undefined : () => onOpenEditor('runtime')}
         >

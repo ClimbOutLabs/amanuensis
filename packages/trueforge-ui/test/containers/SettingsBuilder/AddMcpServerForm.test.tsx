@@ -86,7 +86,7 @@ describe('AddMcpServerForm', () => {
     expect(screen.getByLabelText(/Description/)).not.toHaveAttribute('readonly');
     expect(screen.getByLabelText(/URL/)).not.toHaveAttribute('readonly');
     expect(screen.getByLabelText(/URL/)).toHaveClass('cursor-text');
-    expect(screen.getByRole('radio', { name: 'API Key' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'API key' })).toBeChecked();
     expect(screen.getByLabelText(/Header name/)).toHaveValue('X-API-Key');
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
 
@@ -106,7 +106,7 @@ describe('AddMcpServerForm', () => {
     });
   });
 
-  it('requires a key when changing a connector to API Key auth', () => {
+  it('requires a key when changing a connector to API key auth', () => {
     const connector: ConnectorBase = {
       id: 'custom-mcp',
       name: 'Custom MCP',
@@ -119,10 +119,10 @@ describe('AddMcpServerForm', () => {
 
     render(<AddMcpServerForm open connector={connector} onOpenChange={() => undefined} onSubmit={() => undefined} />);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'API Key' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'API key' }));
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText(/^API key/), { target: { value: 'new-secret' } });
+    fireEvent.change(screen.getByPlaceholderText('Paste the server token'), { target: { value: 'new-secret' } });
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 });
