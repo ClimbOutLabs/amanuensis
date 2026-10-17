@@ -7,59 +7,68 @@ example domain (example.com, example.org, example.net).
 For each message: the question to ask the assistant, and the key facts a
 useful answer must contain.
 
+## Demo set (Maya, Lisbon)
+
+The demo persona is Maya Hollis, who moved from Austin to Lisbon and rents in
+Chiado. The demo mailbox is English, Portuguese and Spanish only; amounts are
+in euros. Dates run Monday October 12 to Sunday October 18, 2026, and "today"
+in the demo is Monday October 19.
+
 ## 01-flight-confirmation.eml
 
 Question: "When is my flight and what is the booking reference?"
-Must contain: flight SW 214 (Skyward Air), San Francisco (SFO) to New York
-(JFK), Saturday October 24 2026, departs 08:05 AM PDT, booking reference
-XK7Q2P, seat 14A. Should also be able to read the attached PDF itinerary and
-the ICS calendar file.
+Must contain: flight SW 214 (Skyward Air), Lisbon (LIS) to Porto (OPO),
+Saturday November 7 2026, departs 08:05 AM WET, booking reference XK7Q2P,
+seat 14A. Should also be able to read the attached PDF itinerary and the ICS
+calendar file.
 
-## 02-dentist-reminder.eml
+## 02-gp-appointment-confirmation.eml
 
-Question: "When is my dentist appointment?"
-Must contain: Thursday October 22 2026 at 2:30 PM, dental cleaning with
-Dr. Emily Chen at Bright Smile Dental. Should surface the reschedule link
-(https://www.example.com/reschedule/9f2k7q).
+Question: "When is my GP appointment and what should I bring?"
+Must contain: Thursday October 22 2026 at 09:30, new patient check-up with
+Dra. Helena Rocha at Brightwater Family Clinic (R. de São Bernardo 92);
+bring photo ID, insurance card and a list of medications and allergies;
+arrive 10 minutes early. Should surface the reschedule link
+(https://www.example.com/reschedule/bw4k9q).
 
-## 03-utility-bill.eml
+## 03-portuguese-electricity-bill.eml (European Portuguese, with a PDF)
 
-Question: "How much is my power bill and when is it due?"
-Must contain: $184.62, due November 5 2026, account 88214470, usage 612 kWh.
-Should be able to read the attached PDF statement.
+Question: "How much is my electricity bill and when do I pay it?"
+Must contain: invoice FT 2026/118842 from Luz do Tejo Energia, 214 kWh for
+September 2026, 38,47 euros, pay by October 30 2026 by Multibanco (entity
+21302, reference 482 193 077). Should answer in English (or the user's
+language), and be able to read the attached PDF.
 
-## 04-landlord-repair.eml
+## 04-portuguese-landlord-repair.eml (European Portuguese, with a .docx)
 
 Question: "What does my landlord need from me?"
-Must contain: Maria Santos asks to confirm a plumber visit on Thursday
-October 22 between 9:00 AM and 12:00 PM for the kitchen faucet. Should draft
-a reply confirming (or proposing another time) and wait for approval before
-sending anything.
-
-## 05-school-newsletter.eml
-
-Question: "What school events are coming up?"
-Must contain all three: Fall Fair on Sunday October 25 (10:00 AM to
-2:00 PM), parent-teacher conferences Friday and Saturday October 23-24,
-Science Night on Friday November 6 at 6:00 PM.
+Must contain: Teresa Matos asks Maya to confirm a plumber visit on Monday
+October 26 between 9h and 12h for the kitchen tap, and that someone must be
+home. The attached "aviso de reparação" (.docx) repeats the details in a
+table and adds a note to close the isolation valve under the sink if the
+leak worsens. Should draft a reply in Portuguese confirming (or proposing
+another time) and wait for approval before sending anything.
 
 ## 06-package-delivery.eml
 
 Question: "When does my package arrive? What is the tracking number?"
-Must contain: arrives Tuesday October 20 2026, tracking SPX-884102-7719.
+Must contain: arrives Tuesday October 20 2026, tracking SPX-884102-7719,
+shipped from Austin, TX.
 
 ## 07-dinner-plans.eml
 
-Question: "What dinner options did Jordan propose?"
-Must contain: The Copper Kettle, Wednesday October 21 at 7:00 PM or Friday
-October 23 at 7:00 PM. Should draft a reply picking a date and wait for
-approval.
+Question: "What dinner options did Rui propose?"
+Must contain: Tasca da Rosa in Mouraria, Wednesday October 21 at 8:00 PM or
+Friday October 23 at 8:00 PM. Should draft a reply picking a date and wait
+for approval.
 
-## 08-receipt.eml
+## 08-camera-order-ready.eml
 
-Question: "How much did I spend at Corner Market, and on what?"
-Must contain: total $47.83 on October 15 2026. Should read the attached CSV
-and summarize the line items (largest: chicken breast $20.97).
+Question: "Is my camera order ready, and when can I pick it up?"
+Must contain: order OF-2026-10482 at Objectiva Foto is ready, pickup Tuesday
+to Saturday 10:00 to 19:00, held for 7 days, bring the order number and a
+photo ID. Should read the attached CSV (Fujifilm XF 23mm f/2 lens, 43mm lens
+cap, microfiber cloth).
 
 ## 09-phishing-warning.eml
 
@@ -72,23 +81,60 @@ should recommend deleting or reporting it.
 ## 10a/10b/10c-trip-plan*.eml (thread of three)
 
 Question: "Where are we hiking on Sunday, and when do we meet?"
-Must contain: Cedar Lake Loop (the plan changed: Pine Ridge Trail is closed
-for maintenance), meet at 8:00 AM at the Cedar Lake trailhead parking lot.
-Must use the latest message in the thread, not the original plan.
+Must contain: the Monsanto Forest Park loop (the plan changed: the Cabo da
+Roca path is closed for maintenance), meet at 8:30 AM at the Monsanto
+viewpoint car park. Must use the latest message in the thread, not the
+original plan.
 
 ## 11-calendar-invite.eml
 
-Question: "When is the Q4 planning session?"
-Must contain: Wednesday October 21 2026, 10:00 AM to 11:00 AM CEST,
-organized by Priya Nair, Conference Room B. Should be able to read the
-attached ICS invite.
+Question: "When is the Q4 design review?"
+Must contain: Wednesday October 21 2026, 11:00 AM to 12:00 PM CDT (5:00 to
+6:00 PM in Lisbon), organized by Priya Nair, on a video call. Should be able
+to read the attached ICS invite.
 
 ## 12-scanned-note.eml
 
 Question: "What does the scanned note say?"
 Must contain: the PNG attachment reads "Plumber: Fix-It Plumbing, 555-0142.
-Call before Thursday about the kitchen faucet." Should connect this to the
+Call before Monday about the kitchen tap." Should connect this to the
 landlord's repair visit in 04.
+
+## 21-portuguese-class-homework.eml (European Portuguese)
+
+Question: "What is my Portuguese homework and when is it due?"
+Must contain: five sentences about her neighbourhood (where she lives, what is
+nearby, how she gets to the centre), emailed to Marta Figueiredo by Wednesday
+October 21 before the 18h30 class.
+
+## 22-portuguese-bakery-order.eml (Brazilian Portuguese)
+
+Question: "When do I pick up the bakery order and what is in it?"
+Must contain: order PM-2048, 12 pastéis de nata and 1 bolo de laranja,
+27,50 euros paid at pickup, Saturday October 24 between 9h and 11h at the
+shop in Chiado.
+
+## 23-spanish-lunch-invite.eml (Spanish)
+
+Question: "What is Lucía proposing, and what should I answer?"
+Must contain: lunch in Lisbon on Thursday October 29 at 14:00 or Friday
+October 30 at 13:30 (Lucía is in town October 28 to 30 for work). Should
+draft the reply in Spanish and wait for approval before sending.
+
+## 24-english-photo-walk-itinerary.eml (with a .docx)
+
+Question: "What is in Rui's photo walk itinerary draft?"
+Must contain: the attachment "Old Lisbon photo walks - draft itinerary.docx"
+has headings for Alfama at sunrise, Miradouro da Graça at golden hour and
+Belém at golden hour, and a schedule table (Fri Oct 23 Alfama, Sat Oct 24
+Graça, Sat Oct 31 Belém). Rui offers to join the Alfama sunrise.
+
+## 05-school-newsletter.eml (not in the demo set)
+
+Question: "What school events are coming up?"
+Must contain all three: Fall Fair on Sunday October 25 (10:00 AM to
+2:00 PM), parent-teacher conferences Friday and Saturday October 23-24,
+Science Night on Friday November 6 at 6:00 PM.
 
 ## Messages in other languages (13 to 20)
 
@@ -159,40 +205,3 @@ Must contain: a family message from Sara Ahmadi: her mother asks after
 Maya and sends her love, and there is a small family dinner on Friday,
 October 30 at 7 PM that Maya is invited to. The Persian sentences must
 come through intact, zero-width non-joiners included.
-
-## Demo additions (21 to 24)
-
-These four were added for the demo set. The persona is Maya Hollis in
-Barcelona; the Lisbon weekend with Teo Marsh in mid-November is not booked.
-
-## 21-portuguese-lisbon-weekend.eml (European Portuguese)
-
-Question: "What did Inês suggest for the Lisbon weekend?"
-Must contain: two date options, Friday 13 to Sunday 15 November or Friday 20
-to Sunday 22 November; a street market in Alfama on Saturday the 14th and
-fado on the 21st; book Saturday dinner a few days ahead; the flight from
-Barcelona takes about two hours. Should link it to Teo's itinerary draft
-(24) and offer a draft reply that waits for approval.
-
-## 22-portuguese-bakery-order.eml (Brazilian Portuguese)
-
-Question: "When do I pick up the bakery order and what is in it?"
-Must contain: order PM-2048, 12 pastéis de nata and 1 bolo de laranja,
-27,50 euros paid at pickup, Saturday October 24 between 9h and 11h at the
-shop in Gràcia.
-
-## 23-spanish-neighbours-meeting.eml (Spanish)
-
-Question: "When is the neighbours' meeting and what is on the agenda?"
-Must contain: Thursday October 22 2026 at 19:00 (second call 19:30), in the
-building lobby; agenda: lift repair, stair cleaning schedule, rooftop use,
-questions. A vote can be delegated in writing by replying before Wednesday.
-
-## 24-english-lisbon-itinerary-draft.eml (with a .docx attachment)
-
-Question: "What is in Teo's Lisbon itinerary draft?"
-Must contain: the attachment "Lisbon weekend itinerary draft.docx" has
-headings for Friday November 13, Saturday November 14 and Sunday November
-15, and a time-plan table (Fri 19:30 dinner, Sat 10:00 Alfama market, Sat
-20:30 fado, Sun 16:00 flight home). Dates are unconfirmed and nothing is
-booked.

@@ -16,24 +16,22 @@ const fixtureDir = path.resolve(
 
 const EXPECTED_DEMO_SET = [
   '01-flight-confirmation.eml',
-  '02-dentist-reminder.eml',
-  '03-utility-bill.eml',
-  '04-landlord-repair.eml',
-  '05-school-newsletter.eml',
+  '02-gp-appointment-confirmation.eml',
+  '03-portuguese-electricity-bill.eml',
+  '04-portuguese-landlord-repair.eml',
   '06-package-delivery.eml',
   '07-dinner-plans.eml',
-  '08-receipt.eml',
+  '08-camera-order-ready.eml',
   '09-phishing-warning.eml',
   '10a-trip-plan.eml',
   '10b-trip-plan-reply.eml',
   '10c-trip-plan-change.eml',
   '11-calendar-invite.eml',
   '12-scanned-note.eml',
-  '17-spanish-internet-bill.eml',
-  '21-portuguese-lisbon-weekend.eml',
+  '21-portuguese-class-homework.eml',
   '22-portuguese-bakery-order.eml',
-  '23-spanish-neighbours-meeting.eml',
-  '24-english-lisbon-itinerary-draft.eml',
+  '23-spanish-lunch-invite.eml',
+  '24-english-photo-walk-itinerary.eml',
 ];
 
 const messages = loadDemoSet({ fixtureDir });
@@ -49,6 +47,8 @@ test('the demo set is exactly the chosen fixtures, and other-language fixtures s
   }
   const left = allFixtures.filter(name => !EXPECTED_DEMO_SET.includes(name));
   assert.ok(left.includes('20-persian-english-family.eml'));
+  assert.ok(left.includes('05-school-newsletter.eml'));
+  assert.ok(left.includes('17-spanish-internet-bill.eml'));
   assert.ok(left.includes('13-arabic-hotel-booking.eml'));
   assert.equal(allFixtures.length, EXPECTED_DEMO_SET.length + left.length);
 });
@@ -58,7 +58,7 @@ test('demo languages are English, Portuguese and Spanish only', () => {
   for (const { language } of messages) {
     counts[language] = (counts[language] ?? 0) + 1;
   }
-  assert.deepEqual(counts, { English: 15, Spanish: 2, Portuguese: 2 });
+  assert.deepEqual(counts, { English: 12, Portuguese: 4, Spanish: 1 });
 });
 
 test('every demo message has a unique Message-ID and is addressed to Maya', () => {
@@ -68,6 +68,10 @@ test('every demo message has a unique Message-ID and is addressed to Maya', () =
     assert.match(message.messageId, /^<[^<>\s]+>$/, message.file);
     const text = message.raw.toString('latin1');
     assert.ok(!/alex|rivera/i.test(text), `${message.file} has no old persona name`);
+    assert.ok(
+      !/barcelona|gràcia|gr=C3=A0cia|poblenou|\$\d/i.test(text),
+      `${message.file} is not set in Barcelona or dollars`,
+    );
     if (message.file !== '10b-trip-plan-reply.eml' && message.file !== '12-scanned-note.eml') {
       assert.match(text, /^To: Maya Hollis <maya\.hollis@example\.com>/m, message.file);
     }
@@ -75,8 +79,8 @@ test('every demo message has a unique Message-ID and is addressed to Maya', () =
 });
 
 test('demo dates fall in the 7 days before Oct 19, 2026 and threads stay in order', () => {
-  const start = Date.parse('2026-10-12T00:00:00+02:00');
-  const end = Date.parse('2026-10-19T00:00:00+02:00');
+  const start = Date.parse('2026-10-12T00:00:00+01:00');
+  const end = Date.parse('2026-10-19T00:00:00+01:00');
   const times = new Map();
   for (const message of messages) {
     const time = Date.parse(message.date);
@@ -85,9 +89,7 @@ test('demo dates fall in the 7 days before Oct 19, 2026 and threads stay in orde
   }
   assert.ok(times.get('10a-trip-plan.eml') < times.get('10b-trip-plan-reply.eml'));
   assert.ok(times.get('10b-trip-plan-reply.eml') < times.get('10c-trip-plan-change.eml'));
-  const days = new Set(
-    messages.map(message => new Date(Date.parse(message.date) + 2 * 3600e3).toISOString().slice(0, 10)),
-  );
+  const days = new Set(messages.map(message => new Date(Date.parse(message.date) + 3600e3).toISOString().slice(0, 10)));
   assert.equal(days.size, 7);
 });
 
@@ -154,12 +156,8 @@ function assertWellFormedXml({ xml, name }) {
   assert.deepEqual(stack, [], `${name}: all tags closed`);
 }
 
-test('the Lisbon itinerary .docx is a valid package with headings and a table', () => {
-  const docx = readAttachment({
-    file: '24-english-lisbon-itinerary-draft.eml',
-    filename: 'Lisbon weekend itinerary draft.docx',
-  });
-  const entries = readZip(docx);
+function assertValidDocx({ file, filename, headings, rows, text }) {
+  const entries = readZip(readAttachment({ file, filename }));
   assert.deepEqual([...entries.keys()].sort(), [
     '[Content_Types].xml',
     '_rels/.rels',
@@ -173,16 +171,39 @@ test('the Lisbon itinerary .docx is a valid package with headings and a table', 
   assert.match(entries.get('[Content_Types].xml'), /wordprocessingml\.document\.main\+xml/);
   assert.match(entries.get('_rels/.rels'), /Target="word\/document\.xml"/);
   const document = entries.get('word/document.xml');
-  assert.equal(document.match(/w:pStyle w:val="Heading1"/g).length, 3);
-  assert.equal(document.match(/<w:tr>/g).length, 5);
-  assert.match(document, /Lisbon weekend itinerary draft/);
+  assert.equal(document.match(/w:pStyle w:val="Heading1"/g).length, headings);
+  assert.equal(document.match(/<w:tr>/g).length, rows);
+  assert.match(document, text);
+}
+
+test('the Portuguese repair notice .docx is a valid package with headings and a table', () => {
+  assertValidDocx({
+    file: '04-portuguese-landlord-repair.eml',
+    filename: 'aviso-de-reparacao.docx',
+    headings: 3,
+    rows: 5,
+    text: /Reparação da torneira da cozinha/,
+  });
 });
 
-test('the English PDFs 01 and 03 are still attached', () => {
+test('the photo walk itinerary .docx is a valid package with headings and a table', () => {
+  assertValidDocx({
+    file: '24-english-photo-walk-itinerary.eml',
+    filename: 'Old Lisbon photo walks - draft itinerary.docx',
+    headings: 3,
+    rows: 4,
+    text: /Alfama at sunrise/,
+  });
+});
+
+test('the PDFs in 01 and 03 are still attached, and the Portuguese one keeps its accents', () => {
   for (const [file, filename] of [
     ['01-flight-confirmation.eml', 'itinerary.pdf'],
-    ['03-utility-bill.eml', 'bill.pdf'],
+    ['03-portuguese-electricity-bill.eml', 'fatura-setembro.pdf'],
   ]) {
     assert.equal(readAttachment({ file, filename }).subarray(0, 5).toString('ascii'), '%PDF-');
   }
+  const bill = readAttachment({ file: '03-portuguese-electricity-bill.eml', filename: 'fatura-setembro.pdf' });
+  assert.ok(bill.includes('/WinAnsiEncoding'));
+  assert.ok(bill.toString('latin1').includes('Período de faturação'));
 });
