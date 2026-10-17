@@ -1,6 +1,6 @@
 import type { ExecResult, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 
-const PINNED_PROGRAM_PREFIX = /'\/usr\/bin\/env' 'PATH=[^']*' (?:'(?:[^']*\/)?([^'\/]+)'|([\w.-]+))/gu;
+const PINNED_PROGRAM_PREFIX = /'\/usr\/bin\/env' 'PATH=[^']*' (?:'(?:[^']*\/)?([^'/]+)'|([\w.-]+))/gu;
 const GIT_HARDENING_ARGS = / --no-pager --no-optional-locks(?: -c (?:'[^']*'|\S+))+/gu;
 const REPOSITORY_CONFIG_PROBE = 'git config --local --no-includes --list --name-only';
 

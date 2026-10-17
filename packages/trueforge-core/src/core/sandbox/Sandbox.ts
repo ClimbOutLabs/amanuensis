@@ -4030,7 +4030,7 @@ export class Sandbox extends LocalToolMCP {
         (await this.repositoryConfigRefusal({
           sandboxId,
           cwd: input.cwd,
-          workspaceRoot: this.boundRepository?.workspace_cwd ?? lease.workspaceRoot,
+          workspaceRoot: this.boundRepository.workspace_cwd,
         }));
       if (earlyRefusal !== undefined) {
         return { status: 'blocked', reason: earlyRefusal };
