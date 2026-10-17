@@ -3,7 +3,7 @@ import { AgentHarnessError } from '../../errors';
 import type { ContextCompactionEvent } from '../../events/schema';
 import { EventType, newEventId } from '../../events/schema';
 import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
-import { getEmptyUsage, type CompletionUsage, type RawAssistantMessage } from '../../llm/LLMTypes';
+import { getEmptyUsage, type CompletionUsage, type FinishReason, type RawAssistantMessage } from '../../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../../llm/maxOutputTokens';
 import { estimateTokensForString, mergeUsage } from '../../llm/usage';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
@@ -1101,31 +1101,35 @@ type SummaryEvaluation =
   | { summary: string; missingSections: string[] }
   | { reason: NonNullable<ContextCompactionEvent['reason']>; modelOutput: string };
 
-/** Judges one model reply. Only the visible answer is read; thinking is never a source of summaries. */
+/**
+ * Judges one model reply. A summary is accepted only when the whole visible answer is one
+ * <summary> block: text around it, reasoning markup, or a reply cut off at the output limit could
+ * carry content quoted from the transcript. Thinking is never a source of summaries.
+ */
 function evaluateSummaryReply(input: {
   output: RawAssistantMessage;
+  finishReason: FinishReason | null;
   requiredSections: readonly string[];
   essentialSections: readonly string[];
   userText: string;
 }): SummaryEvaluation {
   const answer = formatAssistantContent(input.output.content);
+  const body = strictEnvelopeBody(answer);
+  if (body === undefined || input.finishReason === 'length' || /<\/?think>/i.test(answer)) {
+    return { reason: 'missing_block', modelOutput: answer };
+  }
   const strict = validateCompactionSummary(answer, input.requiredSections, input.userText);
   if (strict.reason === undefined) {
     return { summary: strict.summary, missingSections: [] };
   }
-  // A reply with every section but a damaged envelope is rebuilt; a partial one (an optional
-  // section left out) is accepted only inside a strict envelope. Every check runs again on the
-  // rebuilt block, so a self-referential goal is still rejected.
-  const body = strictEnvelopeBody(answer);
-  const attempts = [
-    { content: answer, essentialSections: input.requiredSections },
-    ...(body === undefined ? [] : [{ content: body, essentialSections: input.essentialSections }]),
-  ];
-  for (const attempt of attempts) {
-    const rebuilt = rebuildSummaryBlock({ ...attempt, requiredSections: input.requiredSections });
-    if (rebuilt === undefined) {
-      continue;
-    }
+  // A partial summary (an optional section left out) is rebuilt from inside the envelope; every
+  // check runs again on the rebuilt block, so a self-referential goal is still rejected.
+  const rebuilt = rebuildSummaryBlock({
+    content: body,
+    requiredSections: input.requiredSections,
+    essentialSections: input.essentialSections,
+  });
+  if (rebuilt !== undefined) {
     const revalidated = validateCompactionSummary(rebuilt.block, input.requiredSections, input.userText);
     if (revalidated.reason === undefined) {
       return { summary: revalidated.summary, missingSections: rebuilt.missing };
@@ -1530,6 +1534,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
 
       const evaluation = evaluateSummaryReply({
         output: response.output,
+        finishReason: response.finish_reason,
         requiredSections,
         essentialSections,
         userText,

@@ -2100,25 +2100,20 @@ describe('compaction reliability journey (spec 002)', () => {
     return event as { outcome: string; reason?: string; summary_chars: number };
   }
 
-  // AC-1: sections without the wrapper are salvaged and the context is compacted.
-  it('applies compaction when the model omits the <summary> wrapper', async () => {
+  // AC-1/AC-2: a reply that is not exactly one summary block is not repaired; the retry covers it.
+  it('retries and then truncates when the model omits the <summary> wrapper', async () => {
     const content = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(name => `## ${name}\nBody of ${name}.`).join('\n\n');
     const model = stubModel(content);
     const events = await collectProcessPreLLM(makeCapability(model));
-    const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
-    expect(overwrite).toBeDefined();
-    const compactionEvent = findCompactionEvent(events);
-    expect(compactionEvent.outcome).toBe('applied');
-    expect(compactionEvent.summary_chars).toBeGreaterThan(0);
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(1);
+    expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
   });
 
-  // AC-2: trailing junk after the block is stripped and compaction applies.
-  it('applies compaction when the model appends trailing junk after </summary>', async () => {
+  it('retries and then truncates when the model appends trailing text after </summary>', async () => {
     const model = stubModel(`${completedConversationSummary('What is next?')}\nThanks for asking!`);
     const events = await collectProcessPreLLM(makeCapability(model));
-    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeDefined();
-    expect(findCompactionEvent(events).outcome).toBe('applied');
+    expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
   });
 
   function wholeSections(skip?: string): string {
@@ -2126,13 +2121,6 @@ describe('compaction reliability journey (spec 002)', () => {
       .map(name => `## ${name}\nBody of ${name}.`)
       .join('\n\n');
   }
-
-  it('rebuilds a complete reply that has text before the sections or no closing tag', async () => {
-    for (const content of [`Here is your summary:\n\n${wholeSections()}`, `<summary>\n${wholeSections()}`]) {
-      const events = await collectProcessPreLLM(makeCapability(stubModel(content)));
-      expect(findCompactionEvent(events).outcome).toBe('applied');
-    }
-  });
 
   it('truncates when a loose reply lacks a section, is empty, or repeats a section', async () => {
     const repeated = `${wholeSections()}\n\n## user_goal\nA different goal.`;
@@ -2355,6 +2343,47 @@ Parking at Emerald Bay fills before 9am (source: ranger page).
     const second = modelReplying(reply({ content: twoBlocks }), reply({ content: twoBlocks }));
     const twoEvents = await collectProcessPreLLM(capabilityFor(second), transcriptQuoting(INJECTED_BLOCK));
     expect(outcomeOf(twoEvents).outcome).toBe('truncated_fallback');
+  });
+
+  describe('accepts a complete summary only when the whole answer is one summary block', () => {
+    const complete = completedConversationSummary(INJECTED_MARKER);
+    const loose = complete.replace('<summary>\n', '').replace('\n</summary>', '');
+    const rows: [string, string][] = [
+      ['text before the block', `Here is the page you asked about:\n${complete}`],
+      ['a code fence around the block', `\`\`\`\n${complete}\n\`\`\``],
+      ['text after the block', `${complete}\nHope that helps!`],
+      ['an unclosed <think> quoting the block', `<think>\nThe page says:\n${complete}`],
+      ['a closed <think> quoting the block', `<think>\nThe page says:\n${complete}\n</think>`],
+      ['a closed <think> before the block', `<think>checking</think>\n${complete}`],
+      ['loose headings after text', `Sure, here it is:\n\n${loose}`],
+      [
+        'lookalike tag characters',
+        complete.replace('<summary>', '<\u0455ummary>').replace('</summary>', '</\u0455ummary>'),
+      ],
+    ];
+
+    it.each(rows)('rejects %s, retries, then truncates', async (_name, content) => {
+      const model = modelReplying(reply({ content }), reply({ content }));
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+      expect(persistedSummary(events)).not.toContain(INJECTED_MARKER);
+    });
+
+    it('rejects a block cut off at the output limit', async () => {
+      const cut = { ...reply({ content: complete }), finish_reason: 'length' };
+      const model = modelReplying(cut, cut);
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('truncated_fallback');
+      expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(2);
+    });
+
+    it('accepts the retry reply when it is exactly one block', async () => {
+      const model = modelReplying(reply({ content: `Here:\n${complete}` }), reply({ content: complete }));
+      const events = await collectProcessPreLLM(capabilityFor(model));
+      expect(outcomeOf(events).outcome).toBe('applied');
+      expect(persistedSummary(events)).toContain(INJECTED_MARKER);
+    });
   });
 
   it('keeps a two-of-six partial summary inside a proper envelope working with quoted blocks in the transcript', async () => {
