@@ -6,6 +6,7 @@ import {
   executeToolCalls,
   prepareSideEffectToolCalls,
 } from '../../../src/core/mcp/executeToolCalls';
+import { DEFAULT_PINNED_PATH } from '../../../src/core/permissions/context';
 import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_REPLACE_TEXT_TOOL_NAME } from '../../../src/core/sandbox/Sandbox';
@@ -17,6 +18,7 @@ import {
 } from '../../../src/core/sandbox/structuredEditPrecondition';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { unpinHostCommand } from './unpinnedExec';
 
 function makeProvider(input: {
   stale: boolean;
@@ -30,7 +32,7 @@ function makeProvider(input: {
   let observationCount = 0;
   const mutationCalls: string[] = [];
   const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-    if (params.command.startsWith('python3 -c ')) {
+    if (unpinHostCommand(params.command).startsWith('python3 -c ')) {
       observationCount += 1;
       if (
         input.observationFailure !== undefined &&
@@ -50,11 +52,14 @@ function makeProvider(input: {
         },
       });
     }
-    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+    if (
+      unpinHostCommand(params.command).startsWith('python3 ') &&
+      !unpinHostCommand(params.command).startsWith('python3 -c ')
+    ) {
       mutationCalls.push(params.command);
       return Promise.resolve({ success: true, response: { exitCode: 0, result: input.observation } });
     }
-    if (params.command === 'git rev-parse --show-toplevel') {
+    if (unpinHostCommand(params.command) === 'git rev-parse --show-toplevel') {
       return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo\n' } });
     }
     return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -119,11 +124,13 @@ function makeRootSensitiveProvider(input: {
   toplevel: string;
 }): { provider: SandboxProvider; mutationCalls: string[] } {
   const correctCommand = buildStructuredEditObservationCommand({
+    pinnedPath: DEFAULT_PINNED_PATH,
     kind: input.kind,
     workspaceRoot: input.correctRoot,
     paths: input.paths,
   });
   const wrongCommand = buildStructuredEditObservationCommand({
+    pinnedPath: DEFAULT_PINNED_PATH,
     kind: input.kind,
     workspaceRoot: input.wrongRoot,
     paths: input.paths,
@@ -159,11 +166,14 @@ function makeRootSensitiveProvider(input: {
         },
       });
     }
-    if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+    if (
+      unpinHostCommand(params.command).startsWith('python3 ') &&
+      !unpinHostCommand(params.command).startsWith('python3 -c ')
+    ) {
       mutationCalls.push(params.command);
       return Promise.resolve({ success: true, response: { exitCode: 0, result: 'replaced' } });
     }
-    if (params.command === 'git rev-parse --show-toplevel') {
+    if (unpinHostCommand(params.command) === 'git rev-parse --show-toplevel') {
       return Promise.resolve({ success: true, response: { exitCode: 0, result: `${input.toplevel}\n` } });
     }
     return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -230,11 +240,13 @@ function makeAssistant(
 describe('structured edit preconditions', () => {
   it('builds a deterministic host observation command from repository-relative paths', () => {
     const first = buildStructuredEditObservationCommand({
+      pinnedPath: DEFAULT_PINNED_PATH,
       kind: 'replace_text',
       workspaceRoot: '/repo',
       paths: ['src/z.ts', 'src/a.ts'],
     });
     const second = buildStructuredEditObservationCommand({
+      pinnedPath: DEFAULT_PINNED_PATH,
       kind: 'replace_text',
       workspaceRoot: '/repo',
       paths: ['src/a.ts', 'src/z.ts'],
@@ -532,6 +544,7 @@ describe('structured edit preconditions', () => {
     const cwd = '/repo/nested';
     const unrelatedToplevel = '/some/other/checkout';
     const correctCommand = buildStructuredEditObservationCommand({
+      pinnedPath: DEFAULT_PINNED_PATH,
       kind: 'replace_text',
       workspaceRoot: boundRepository.workspace_cwd,
       paths: ['nested/b.ts'],
@@ -549,7 +562,7 @@ describe('structured edit preconditions', () => {
           },
         });
       }
-      if (params.command === 'git rev-parse --show-toplevel') {
+      if (unpinHostCommand(params.command) === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: `${unrelatedToplevel}\n` } });
       }
       return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });

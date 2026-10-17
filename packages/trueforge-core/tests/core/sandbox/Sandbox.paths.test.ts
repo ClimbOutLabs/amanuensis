@@ -49,6 +49,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { CLEAN_REPOSITORY_CONFIG, isRepositoryConfigProbe, unpinHostCommand } from './unpinnedExec';
 
 function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -113,7 +114,11 @@ function makeVerificationExec(input: {
 
 function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider {
   const { exec: overrideExec, ...providerOverrides } = overrides;
-  const exec = async (params: SandboxExecParams): Promise<ExecResult> => {
+  const exec = async (pinnedParams: SandboxExecParams): Promise<ExecResult> => {
+    const params = { ...pinnedParams, command: unpinHostCommand(pinnedParams.command) };
+    if (isRepositoryConfigProbe(params.command)) {
+      return CLEAN_REPOSITORY_CONFIG;
+    }
     const result = overrideExec === undefined ? await readyExec() : await overrideExec(params);
     if (
       params.command === BOUND_REPOSITORY_STATE_COMMAND &&

@@ -13,6 +13,7 @@ import {
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { withUnpinnedCommands } from './unpinnedExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result } });
@@ -25,13 +26,12 @@ function boundWorkspaceExec(params: SandboxExecParams): Promise<ExecResult> {
 }
 
 function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider {
-  const exec = overrides.exec ?? (() => readyExec());
+  const exec = withUnpinnedCommands(overrides.exec ?? (() => readyExec()));
   return {
     type: 'test',
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -55,6 +55,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     uploadFile: jest.fn().mockResolvedValue(undefined),
     createCodeModeTransport: jest.fn(),
     ...overrides,
+    exec,
   };
 }
 

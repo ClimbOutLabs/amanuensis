@@ -1,6 +1,6 @@
 import { z } from '@hono/zod-openapi';
 import { createHash } from 'node:crypto';
-import { shellEscape } from './provider/Provider';
+import { pinnedProgramCommand } from './pinnedProgram';
 
 const HEX_SHA256 = /^[0-9a-f]{64}$/;
 
@@ -64,13 +64,17 @@ function buildSummary(kind: StructuredEditPrecondition['kind'], targets: readonl
 }
 
 export function buildStructuredEditObservationCommand(input: {
+  pinnedPath: string;
   kind: StructuredEditPrecondition['kind'];
   workspaceRoot: string;
   paths: readonly string[];
 }): string {
   const kind = input.kind;
   const paths = [...new Set(input.paths)].sort(comparePaths);
-  return `python3 -c ${shellEscape(STRUCTURED_EDIT_OBSERVATION_SCRIPT)} ${shellEscape(kind)} ${shellEscape(input.workspaceRoot)} ${shellEscape(JSON.stringify(paths))}`;
+  return pinnedProgramCommand({
+    pinnedPath: input.pinnedPath,
+    argv: ['python3', '-c', STRUCTURED_EDIT_OBSERVATION_SCRIPT, kind, input.workspaceRoot, JSON.stringify(paths)],
+  });
 }
 
 export function parseStructuredEditObservation(

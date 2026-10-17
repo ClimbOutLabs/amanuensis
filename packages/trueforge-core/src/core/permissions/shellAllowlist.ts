@@ -471,7 +471,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
 }
 
 /** Global git options that disable the known code-running config keys, as defence in depth. */
-function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
+export function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
   return [
     '--no-pager',
     '--no-optional-locks',

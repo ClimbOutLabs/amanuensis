@@ -16,6 +16,7 @@
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
+import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import type { ConnectorBinding, ShellApprovalBinding } from './approvalTokens';
 import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
 import { canonicalShellFormFor } from './classifier';
@@ -140,15 +141,28 @@ function verifyTier2Containment(input: {
   const insideRoot = (identity: string): boolean => isUnderRoot({ identity, root: containingRoot, separator });
 
   if (call.tool_name === 'write_file' || call.tool_name === 'apply_patch' || call.tool_name === 'replace_text') {
-    const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
-    if (target !== null) {
-      const cwd = callCwd({ params: call.canonical_params, workspace_root, resolution });
+    const callDirectory = callCwd({ params: call.canonical_params, workspace_root, resolution });
+    // An apply_patch changes the files its patch names; a path argument on it is not a target.
+    const patchTargets =
+      call.tool_name === 'apply_patch'
+        ? applyPatchTargets({ params: call.canonical_params, workspace_root, cwd: callDirectory })
+        : undefined;
+    if (patchTargets?.status === 'invalid') {
+      return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
+    }
+    const targets =
+      patchTargets === undefined
+        ? [stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target')].filter(
+            (target): target is string => target !== null,
+          )
+        : patchTargets.paths.map(relative_path => absolutePatchTarget({ workspace_root, relative_path, resolution }));
+    for (const target of targets) {
       // The target may not exist yet: resolve via its parent directory.
-      const identity = canonicalWriteTarget({ p: target, cwd, resolution });
+      const identity = canonicalWriteTarget({ p: target, cwd: callDirectory, resolution });
       if (identity === null || !insideRoot(identity)) {
         return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
       }
-      if (writeTargetTouchesGitControl({ p: target, cwd, resolution })) {
+      if (writeTargetTouchesGitControl({ p: target, cwd: callDirectory, resolution })) {
         return 'Tier 2 write target is Git control state at dispatch; request approval again.';
       }
     }

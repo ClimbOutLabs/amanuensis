@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { DEFAULT_PINNED_PATH } from '../../../src/core/permissions/context';
 import { commandWithWorkspaceLock } from '../../../src/core/sandbox/provider/Provider';
 import {
   buildStructuredEditObservationCommand,
@@ -29,6 +30,7 @@ describe('structured-edit observation in non-git workspaces', () => {
     const wrapped = commandWithWorkspaceLock({
       sandboxId: 'test',
       command: buildStructuredEditObservationCommand({
+        pinnedPath: DEFAULT_PINNED_PATH,
         kind: 'replace_text',
         workspaceRoot,
         paths: ['src/App.tsx'],

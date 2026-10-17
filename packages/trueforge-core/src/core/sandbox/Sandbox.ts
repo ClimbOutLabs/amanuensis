@@ -46,7 +46,14 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
+import { DEFAULT_PINNED_PATH } from '../permissions/context';
+import { GIT_HARDENING_ENV } from '../permissions/gitHardening';
+import {
+  gitHardeningGlobalArgs,
+  gitLocalConfigIsSafe,
+  pinAllowlistedExec,
+  resolveOnPinnedPath,
+} from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -89,6 +96,7 @@ import {
   isGitNetworkCommand,
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
+import { pinnedProgramCommand, shellWord } from './pinnedProgram';
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
@@ -159,14 +167,6 @@ export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scri
     `chmod a-w ${scriptPath}`,
     `python3 ${scriptPath}`,
   ].join(' && ');
-}
-
-/**
- * Deletes the credential-store file that earlier releases wrote into persisted sandboxes.
- * Credentials are never written to the sandbox any more; this keeps old sandboxes clean.
- */
-function buildScrubLegacyGitCredentialsCommand(credentialsPath: string): string {
-  return `rm -f ${shellEscape(credentialsPath)}`;
 }
 
 export interface SandboxStoredFile {
@@ -287,10 +287,17 @@ function structuredEditToolNameFor(toolName: string): StructuredEditToolName | u
   }
   return undefined;
 }
-const BOUND_REPOSITORY_STATE_COMMAND =
-  'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
-const GIT_REFS_COMMAND =
-  "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+const BOUND_REPOSITORY_STATE_ARGVS: readonly (readonly string[])[] = [
+  ['git', 'rev-parse', '--show-toplevel'],
+  ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+  ['git', 'rev-parse', 'HEAD'],
+];
+const GIT_REFS_ARGS: readonly string[] = [
+  'for-each-ref',
+  '--include-root-refs',
+  '--sort=refname',
+  '--format=%(refname)%00%(objectname)%00%(symref)%00',
+];
 
 export type RegisteredRepositoryCommandPurpose = 'build' | 'test' | 'verify';
 
@@ -757,9 +764,23 @@ function normalizedRepositoryPath(value: string): string {
   return /^[A-Za-z]:\//u.test(withoutTrailingSlash) ? withoutTrailingSlash.toLowerCase() : withoutTrailingSlash;
 }
 
-function buildAbnormalHandoffCaptureCommand(input: { artifactPath: string; expectedWorkspaceRoot: string }): string {
+function buildAbnormalHandoffCaptureCommand(input: {
+  artifactPath: string;
+  expectedWorkspaceRoot: string;
+  pinnedPath: string;
+}): string {
   return [
-    'env -i PATH="$PATH" HOME=/nonexistent python3 -I -S -E -c',
+    ...[
+      ENV_BINARY,
+      '-i',
+      `PATH=${input.pinnedPath}`,
+      'HOME=/nonexistent',
+      resolveOnPinnedPath('python3', input.pinnedPath) ?? 'python3',
+      '-I',
+      '-S',
+      '-E',
+      '-c',
+    ].map(shellWord),
     shellEscape(ABNORMAL_HANDOFF_CAPTURE_SCRIPT),
     shellEscape(input.artifactPath),
     shellEscape(input.expectedWorkspaceRoot),
@@ -938,6 +959,8 @@ export const sandboxApplyPatchSchema = z
         `The diff as line array, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} patch, not both. Preferred: single strings with escaped newlines can mangle hunk headers.`,
       ),
   })
+  // The targets are the patch's own; a path or target argument would only mislead the approval card.
+  .strict()
   .transform((value, ctx) => {
     const { patch_lines: patchLines, ...rest } = value;
     const patch = resolveOrFailLineArrayField({
@@ -1748,6 +1771,8 @@ const HOST_GIT_CONFIG_UNSAFE_REFUSAL =
   "This repository's git settings could run programs, so the host did not authenticate this git command and it was not run. Remove the unsafe settings from .git/config or use a fresh clone.";
 const HOST_GIT_CONFIG_UNREADABLE_REFUSAL =
   "Could not read this repository's git settings, so the host did not authenticate this git command and it was not run.";
+const GIT_CAPTURE_CONFIG_REFUSAL =
+  "This repository's git settings could run programs, so its state could not be captured and the command was not run. Remove the unsafe settings from .git/config or use a fresh clone.";
 const GIT_CONFIG_UNREADABLE_REFUSAL =
   "Could not read this repository's git settings, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
 
@@ -2383,14 +2408,14 @@ export class Sandbox extends LocalToolMCP {
       this.execWorkspaceExclusive({
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
-        command: BOUND_REPOSITORY_STATE_COMMAND,
+        command: BOUND_REPOSITORY_STATE_ARGVS.map(argv => this.pinnedHostCommand(argv)).join(' && '),
         cwd: binding.workspace_cwd,
         signal,
       }),
       this.execWorkspaceExclusive({
         sandboxId,
         workspaceRoot: binding.workspace_cwd,
-        command: 'git rev-parse --absolute-git-dir',
+        command: this.pinnedHostCommand(['git', 'rev-parse', '--absolute-git-dir']),
         cwd: binding.workspace_cwd,
         signal,
       }),
@@ -2424,7 +2449,7 @@ export class Sandbox extends LocalToolMCP {
     const checkoutNodesResult = await this.execWorkspaceExclusive({
       sandboxId,
       workspaceRoot: binding.workspace_cwd,
-      command: `ls -di -- .git ${shellEscape(gitDir)}`,
+      command: this.pinnedHostCommand(['ls', '-di', '--', '.git', gitDir]),
       cwd: binding.workspace_cwd,
       signal,
     });
@@ -3162,11 +3187,11 @@ export class Sandbox extends LocalToolMCP {
       [workspaceResult, cwdResult] = await Promise.all([
         this.provider.exec({
           sandboxId,
-          command: `realpath -e -- ${shellEscape(scope.workspaceCwd)}`,
+          command: this.pinnedHostCommand(['realpath', '-e', '--', scope.workspaceCwd]),
         }),
         this.provider.exec({
           sandboxId,
-          command: `realpath -e -- ${shellEscape(scope.cwd)}`,
+          command: this.pinnedHostCommand(['realpath', '-e', '--', scope.cwd]),
         }),
       ]);
     } catch (error) {
@@ -3195,7 +3220,7 @@ export class Sandbox extends LocalToolMCP {
   private async resolveWorkspaceRoot(sandboxId: string, cwd: string | undefined): Promise<string | undefined> {
     const result = await this.provider.exec({
       sandboxId,
-      command: 'git rev-parse --show-toplevel',
+      command: this.pinnedHostCommand(['git', 'rev-parse', '--show-toplevel']),
       cwd,
       ...(cwd === undefined ? {} : { workspaceLock: { workspaceRoot: cwd } }),
     });
@@ -3437,6 +3462,7 @@ export class Sandbox extends LocalToolMCP {
       workspaceRoot: input.lockRoot,
       cwd: input.cwd,
       command: buildStructuredEditObservationCommand({
+        pinnedPath: this.pinnedPath(),
         kind: input.kind,
         workspaceRoot: input.observationRoot,
         paths: input.paths,
@@ -3519,39 +3545,100 @@ export class Sandbox extends LocalToolMCP {
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
   }
 
+  private pinnedPath(): string {
+    return this.sentinelContext?.services.shell_allowlist.pinned_path ?? DEFAULT_PINNED_PATH;
+  }
+
+  /** Host bookkeeping program, run by resolved absolute path under the pinned PATH. */
+  private pinnedHostCommand(argv: readonly string[]): string {
+    return pinnedProgramCommand({ argv, pinnedPath: this.pinnedPath() });
+  }
+
+  /**
+   * Git for host state capture: config from system/global/env is dropped and the known
+   * program-running keys are neutralised. The local config is separately required to be
+   * safe, since a filter would still run when the worktree diff is computed.
+   */
+  private hardenedGitRead(input: { workspaceRoot: string; args: readonly string[] }): {
+    command: string;
+    env: Record<string, string>;
+  } {
+    return {
+      command: this.pinnedHostCommand(['git', ...gitHardeningGlobalArgs(input.workspaceRoot), ...input.args]),
+      env: { ...GIT_HARDENING_ENV, LC_ALL: 'C' },
+    };
+  }
+
+  /** The refusal to give when the repository's local git config could make git run a program. */
+  private async repositoryConfigRefusal(input: {
+    sandboxId: string;
+    cwd: string | undefined;
+    workspaceRoot: string;
+  }): Promise<string | undefined> {
+    const probe = this.hardenedGitRead({
+      workspaceRoot: input.workspaceRoot,
+      args: ['config', '--local', '--no-includes', '--list', '--name-only'],
+    });
+    const result = await this.provider.exec({
+      sandboxId: input.sandboxId,
+      command: probe.command,
+      cwd: input.cwd,
+      env: probe.env,
+      ...(input.cwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.cwd } }),
+    });
+    if (!successfulExec(result)) {
+      return GIT_CONFIG_UNREADABLE_REFUSAL;
+    }
+    return gitLocalConfigIsSafe(result.response.result) ? undefined : GIT_CAPTURE_CONFIG_REFUSAL;
+  }
+
   private async captureWorkspaceVerificationIdentity(
     sandboxId: string,
     cwd: string | undefined,
   ): Promise<WorkspaceVerificationIdentity | undefined> {
-    const read = async (input: { command: string; commandCwd: string | undefined }): Promise<string | undefined> => {
+    const hardeningRoot = this.boundRepository?.workspace_cwd ?? cwd;
+    if (hardeningRoot === undefined) {
+      return undefined;
+    }
+    const read = async (input: {
+      args: readonly string[];
+      commandCwd: string | undefined;
+    }): Promise<string | undefined> => {
+      const git = this.hardenedGitRead({ workspaceRoot: hardeningRoot, args: input.args });
       const result = await this.provider.exec({
         sandboxId,
-        command: input.command,
+        command: git.command,
         cwd: input.commandCwd,
+        env: git.env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
       return successfulExec(result) ? result.response.result : undefined;
     };
 
     try {
-      const workspaceRoot = (await read({ command: 'git rev-parse --show-toplevel', commandCwd: cwd }))?.trim();
+      // Computing the worktree diff runs clean filters, so nothing is read from a repository
+      // whose config could run a program.
+      if ((await this.repositoryConfigRefusal({ sandboxId, cwd, workspaceRoot: hardeningRoot })) !== undefined) {
+        return undefined;
+      }
+      const workspaceRoot = (await read({ args: ['rev-parse', '--show-toplevel'], commandCwd: cwd }))?.trim();
       if (!workspaceRoot) {
         return undefined;
       }
-      const branch = (await read({ command: 'git rev-parse --abbrev-ref HEAD', commandCwd: workspaceRoot }))?.trim();
-      const head = (await read({ command: 'git rev-parse HEAD', commandCwd: workspaceRoot }))?.trim();
-      const refs = await read({ command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
-      const taggedTrackedPaths = await read({ command: 'git ls-files -v -z', commandCwd: workspaceRoot });
+      const branch = (await read({ args: ['rev-parse', '--abbrev-ref', 'HEAD'], commandCwd: workspaceRoot }))?.trim();
+      const head = (await read({ args: ['rev-parse', 'HEAD'], commandCwd: workspaceRoot }))?.trim();
+      const refs = await read({ args: GIT_REFS_ARGS, commandCwd: workspaceRoot });
+      const taggedTrackedPaths = await read({ args: ['ls-files', '-v', '-z'], commandCwd: workspaceRoot });
       const indexDiff = await read({
-        command: 'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --',
+        args: ['diff', '--cached', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', 'HEAD', '--'],
         commandCwd: workspaceRoot,
       });
       const trackedWorktreeDiff = await read({
-        command: 'git diff --binary --no-ext-diff --no-textconv --no-color --',
+        args: ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--'],
         commandCwd: workspaceRoot,
       });
       const untrackedPathList = await read({
-        command: 'git ls-files --others --exclude-standard -z',
+        args: ['ls-files', '--others', '--exclude-standard', '-z'],
         commandCwd: workspaceRoot,
       });
       if (
@@ -3574,7 +3661,7 @@ export class Sandbox extends LocalToolMCP {
       for (const path of untrackedPaths) {
         const objectSha = (
           await read({
-            command: `git hash-object --no-filters -- ${shellEscape(path)}`,
+            args: ['hash-object', '--no-filters', '--', path],
             commandCwd: workspaceRoot,
           })
         )?.trim();
@@ -3762,6 +3849,7 @@ export class Sandbox extends LocalToolMCP {
           const command = buildAbnormalHandoffCaptureCommand({
             artifactPath,
             expectedWorkspaceRoot: binding.workspace_cwd,
+            pinnedPath: this.pinnedPath(),
           });
           const operationId = randomUUID();
           const providerWork = this.provider.exec({
@@ -3921,6 +4009,18 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Durable workspace coordinator disappeared while a lease was held');
     }
     try {
+      // The refusals come first: capturing state reads the repository through git, and a
+      // repository whose config can run a program must not get that far on any command.
+      const earlyRefusal =
+        (await preflight?.()) ??
+        (await this.repositoryConfigRefusal({
+          sandboxId,
+          cwd: input.cwd,
+          workspaceRoot: this.boundRepository?.workspace_cwd ?? lease.workspaceRoot,
+        }));
+      if (earlyRefusal !== undefined) {
+        return { status: 'blocked', reason: earlyRefusal };
+      }
       const before = await this.captureWorkspaceVerificationIdentity(sandboxId, input.cwd);
       if (before === undefined) {
         return {
@@ -4427,7 +4527,7 @@ export class Sandbox extends LocalToolMCP {
       return { exec: input.exec, env: {}, preflight: undefined };
     }
     const pinnedCommand = (argv: readonly string[]): string =>
-      [ENV_BINARY, `PATH=${pinned.pinned_path}`, ...argv].map(shellEscape).join(' ');
+      pinnedProgramCommand({ argv, pinnedPath: pinned.pinned_path });
     const probeArgv = pinned.probe_argv;
     const preflight: ExecPreflight | undefined =
       probeArgv === null
@@ -4835,7 +4935,7 @@ export class Sandbox extends LocalToolMCP {
           this.execWorkspaceExclusive({
             sandboxId: rawId,
             workspaceRoot: workspaceLockRoot,
-            command: `python3 ${shellEscape(scriptPath)} ${shellEscape(payloadPath)}`,
+            command: this.pinnedHostCommand(['python3', scriptPath, payloadPath]),
             cwd: undefined,
           }),
         );
@@ -4967,7 +5067,13 @@ export class Sandbox extends LocalToolMCP {
     const result = await this.execWorkspaceExclusive({
       sandboxId: input.sandboxId,
       workspaceRoot: input.workspaceRoot,
-      command: `python3 -c ${shellEscape(OPENAI_PATCH_CONTENT_READ_SCRIPT)} ${shellEscape(input.workspaceRoot)} ${shellEscape(JSON.stringify([...repositoryRelativeByRawPath.values()]))}`,
+      command: this.pinnedHostCommand([
+        'python3',
+        '-c',
+        OPENAI_PATCH_CONTENT_READ_SCRIPT,
+        input.workspaceRoot,
+        JSON.stringify([...repositoryRelativeByRawPath.values()]),
+      ]),
       cwd: input.cwd,
     });
     if (!successfulExec(result)) {
@@ -5146,7 +5252,7 @@ export class Sandbox extends LocalToolMCP {
           // OpenAI-format apply_patch hunk with no removed/context lines) declares a zero-length
           // old side. Without this flag `git apply` silently mis-locates such a hunk — it applies
           // without error, but at the wrong offset — instead of honoring the declared position.
-          command: `git apply --recount --unidiff-zero --check -- ${shellEscape(patchPath)}`,
+          command: this.pinnedHostCommand(['git', 'apply', '--recount', '--unidiff-zero', '--check', '--', patchPath]),
           cwd: input.cwd,
         });
         if (!successfulExec(check)) {
@@ -5173,7 +5279,7 @@ export class Sandbox extends LocalToolMCP {
           this.execWorkspaceExclusive({
             sandboxId: rawId,
             workspaceRoot,
-            command: `git apply --recount --unidiff-zero -- ${shellEscape(patchPath)}`,
+            command: this.pinnedHostCommand(['git', 'apply', '--recount', '--unidiff-zero', '--', patchPath]),
             cwd: input.cwd,
           }),
         );
@@ -5384,7 +5490,7 @@ export class Sandbox extends LocalToolMCP {
             const exec = await this.execWorkspaceExclusive({
               sandboxId: rawId,
               workspaceRoot,
-              command: `python3 ${shellEscape(scriptPath)} ${shellEscape(payloadPath)}`,
+              command: this.pinnedHostCommand(['python3', scriptPath, payloadPath]),
               cwd: input.cwd,
             });
             return { kind: 'dispatched', exec, payloadDigest };
@@ -5748,7 +5854,7 @@ export class Sandbox extends LocalToolMCP {
   private async removeSandboxFile(input: { sandboxId: string; filePath: string }): Promise<void> {
     const result = await this.provider.exec({
       sandboxId: input.sandboxId,
-      command: `rm -f -- ${shellEscape(input.filePath)}`,
+      command: this.pinnedHostCommand(['rm', '-f', '--', input.filePath]),
     });
     ensureExecSuccess(result);
   }
@@ -5765,7 +5871,10 @@ export class Sandbox extends LocalToolMCP {
       throw new Error(`Document path must refer to a staged upload: ${filePath}`);
     }
     const canonicalize = async (path: string): Promise<string> => {
-      const result = await this.provider.exec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+      const result = await this.provider.exec({
+        sandboxId,
+        command: this.pinnedHostCommand(['realpath', '-e', '--', path]),
+      });
       ensureExecSuccess(result);
       if (!result.success) {
         throw new Error('Unreachable: canonical path result was not successful');
@@ -5961,7 +6070,8 @@ export class Sandbox extends LocalToolMCP {
     const result = await awaitWithAbort({
       operation: this.provider.exec({
         sandboxId,
-        command: buildScrubLegacyGitCredentialsCommand(this.provider.getGitCredentialsPath(sandboxId)),
+        // Credentials are never written to the sandbox any more; this keeps persisted sandboxes from earlier releases clean.
+        command: this.pinnedHostCommand(['rm', '-f', this.provider.getGitCredentialsPath(sandboxId)]),
         ...(signal === undefined ? {} : { signal }),
       }),
       signal,
@@ -5982,23 +6092,23 @@ export class Sandbox extends LocalToolMCP {
     this.mcpClientInstall = this.codeModeTransport?.getClientInstall({ sandboxId });
     const install = this.mcpClientInstall;
 
-    const dirs = [shellEscape(fileUploadsDir), shellEscape(toolResultDumpDir), shellEscape(skillsDir)];
+    const dirs = [fileUploadsDir, toolResultDumpDir, skillsDir];
     if (workspaceDir !== undefined) {
-      dirs.push(shellEscape(workspaceDir));
+      dirs.push(workspaceDir);
     }
     if (install !== undefined) {
       const { pythonPath, binDir } = mcpClientLayout(install.remotePath);
-      dirs.push(shellEscape(pythonPath));
+      dirs.push(pythonPath);
       // Layout bin is only for providers that put that dir on PATH (no image-PATH symlink).
       if (install.pathBinSymlink === undefined) {
-        dirs.push(shellEscape(binDir));
+        dirs.push(binDir);
       }
     }
     ensureExecSuccess(
       await awaitWithAbort({
         operation: this.provider.exec({
           sandboxId,
-          command: `mkdir -p ${dirs.join(' ')}`,
+          command: this.pinnedHostCommand(['mkdir', '-p', ...dirs]),
           ...(signal === undefined ? {} : { signal }),
         }),
         signal,
