@@ -254,6 +254,31 @@ describe('outbound guard over the secrets this server holds', () => {
     expect(search({ query: `login ${basicPassword}`, secrets, earlier: '' }).rule).toBe('server_secret');
   });
 
+  it('holds a token split across searches when its Basic credential has an empty user id', async () => {
+    const token = ['3f9a1c2e', '7b4d', '4e8a', '9c01', '5d6e7f8a9b0c'].join('-');
+    const emptyUser = mcpRecord('srv-empty-user', {
+      type: 'remote',
+      name: 'empty-user-mcp',
+      url: 'https://empty-user.example/mcp',
+      description: 'd',
+      auth: { type: 'header', headers: { Authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` } },
+    });
+    const secrets = await createOutboundSecretSource(
+      sources({
+        mcpServers: { listServers: () => Promise.resolve([emptyUser]), getClient: () => Promise.resolve(undefined) },
+      }),
+    )(alice);
+    const pieces = [token.slice(0, 12), token.slice(12, 24), token.slice(24)];
+    let earlier = '';
+    const rules: (OutboundGuardRule | undefined)[] = [];
+    for (const piece of pieces) {
+      const result = search({ query: piece, secrets, earlier });
+      rules.push(result.rule);
+      earlier = result.earlier;
+    }
+    expect(rules).toEqual([undefined, undefined, 'server_secret']);
+  });
+
   it('lets an ordinary search through', async () => {
     const secrets = await createOutboundSecretSource(sources())(alice);
     expect(search({ query: 'how to rotate a connector key', secrets, earlier: '' }).rule).toBeUndefined();

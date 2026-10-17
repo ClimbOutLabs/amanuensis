@@ -50,8 +50,10 @@ function headerCredentialForms(value: string): string[] {
   if (scheme === 'basic' && BASE64.test(credential)) {
     const decoded = Buffer.from(credential, 'base64').toString('utf8');
     const separator = decoded.indexOf(':');
-    if (separator > 0 && !decoded.includes('\uFFFD')) {
-      forms.push(decoded, decoded.slice(0, separator), decoded.slice(separator + 1));
+    if (separator >= 0 && !decoded.includes('\uFFFD')) {
+      // RFC 7617 allows an empty user id (`:<token>`), so each half is kept only when present.
+      const halves = [decoded.slice(0, separator), decoded.slice(separator + 1)].filter(half => half !== '');
+      forms.push(decoded, ...halves);
     }
   }
   return forms;
