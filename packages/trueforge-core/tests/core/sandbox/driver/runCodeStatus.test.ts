@@ -16,6 +16,12 @@ describe('runCodeStatusFromReadiness', () => {
     });
   });
 
+  it('maps a disabled sandbox to the disabled state without the driver text', () => {
+    expect(runCodeStatusFromReadiness({ ready: false, error_code: 'sandbox_disabled', error: 'off' })).toEqual({
+      state: 'disabled',
+    });
+  });
+
   it('separates a signature failure from other image problems', () => {
     const signature: DriverReadiness = {
       ready: false,
