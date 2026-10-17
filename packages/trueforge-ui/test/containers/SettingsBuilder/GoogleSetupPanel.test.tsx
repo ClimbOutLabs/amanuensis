@@ -66,7 +66,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
       { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
     ],
     hasSavedClient: false,
-    available: true,
+    locked: false,
     setup: PASTE_SETUP,
     ...overrides,
   };

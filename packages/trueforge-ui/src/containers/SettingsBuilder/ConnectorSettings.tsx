@@ -611,6 +611,7 @@ const ConnectorSettings = () => {
   const renderGoogle = () => {
     const connected = googleStatus?.state === 'connected';
     const needsReconnect = googleStatus?.state === 'needs_reconnect';
+    const locked = googleStatus?.locked === true;
     const label = googleStatusFailed
       ? "Couldn't check Google right now"
       : needsReconnect
@@ -629,8 +630,9 @@ const ConnectorSettings = () => {
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own
-            Google account.
+            {locked
+              ? "This demo uses a sample Google account. Aman can only send to the demo's own addresses."
+              : 'Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own Google account.'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -642,20 +644,22 @@ const ConnectorSettings = () => {
           >
             {label}
           </span>
-          <Button
-            variant="secondary"
-            size="small"
-            type="button"
-            onClick={() => {
-              if (googleStatusFailed) {
-                void refresh();
-              } else {
-                setGooglePanelOpen(true);
-              }
-            }}
-          >
-            {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
-          </Button>
+          {locked && !googleStatusFailed ? null : (
+            <Button
+              variant="secondary"
+              size="small"
+              type="button"
+              onClick={() => {
+                if (googleStatusFailed) {
+                  void refresh();
+                } else {
+                  setGooglePanelOpen(true);
+                }
+              }}
+            >
+              {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
+            </Button>
+          )}
         </div>
       </article>
     );
@@ -812,7 +816,7 @@ const ConnectorSettings = () => {
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
             {!loading &&
-            (googleStatus?.available === true || googleStatusFailed) &&
+            (googleStatus !== null || googleStatusFailed) &&
             googleMatchesQuery &&
             hasGoogleSetup(connectorCatalog) ? (
               <section aria-labelledby="google-connector-heading">

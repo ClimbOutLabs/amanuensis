@@ -63,6 +63,7 @@ import {
   searchHoldCardText,
   SERVER_SECRET_REASON,
 } from './searchHoldText';
+import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
@@ -1526,6 +1527,22 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   };
 }
 
+function demoRefusal(reason_detail: string): TierDecision {
+  return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
+}
+
+/**
+ * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance
+ * refuses every connector call that is not declared read-only. Only Aman's own Gmail tools check recipients.
+ */
+function demoRefusesConnector(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+  return (
+    input.ctx.services.demoSendAllowlist !== null &&
+    input.action.tool_type === 'mcp' &&
+    input.action.mcp_hints.read_only_hint !== true
+  );
+}
+
 /**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
@@ -1555,6 +1572,18 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
       reason_detail: 'Scheduled runs can read your email but never draft or send it.',
       sensitive_read: false,
     });
+  }
+  const draft = action.mail_draft;
+  if (
+    action.tool_name === SEND_DRAFT_TOOL_NAME &&
+    ctx.services.demoSendAllowlist !== null &&
+    (draft === undefined ||
+      !recipientsAllowed({
+        allowlist: ctx.services.demoSendAllowlist,
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+      }))
+  ) {
+    return demoRefusal(DEMO_SEND_REFUSAL);
   }
   const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
   if (card === null) {
@@ -1641,6 +1670,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   // A send whose card would hide a recipient, hidden characters or cut content is refused: approval must cover all of it.
   if (extraction.incomplete_send !== null) {
+    // A demo refuses the call whatever the message holds, so it says so rather than ask for a fuller one.
+    if (demoRefusesConnector({ action, ctx })) {
+      return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+    }
     return autoDenyDecision({
       reason: 'incomplete_send_card',
       reason_detail: extraction.incomplete_send.model_message,
@@ -1655,6 +1688,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     if (searchDecision !== undefined) {
       return searchDecision;
     }
+  }
+
+  if (demoRefusesConnector({ action, ctx })) {
+    return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.

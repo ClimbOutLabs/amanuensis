@@ -3269,10 +3269,6 @@
               "null"
             ]
           },
-          "available": {
-            "description": "False on a demo instance, where Google cannot be connected.",
-            "type": "boolean"
-          },
           "features": {
             "items": {
               "$ref": "#/components/schemas/GoogleFeatureStatus"
@@ -3281,6 +3277,10 @@
           },
           "has_saved_client": {
             "description": "Whether a Google client is already saved, so adding a feature needs no retyping.",
+            "type": "boolean"
+          },
+          "locked": {
+            "description": "True on a demo instance when the connection cannot be changed from Settings right now.",
             "type": "boolean"
           },
           "setup": {
@@ -3301,7 +3301,7 @@
           "account_email",
           "features",
           "has_saved_client",
-          "available",
+          "locked",
           "setup"
         ],
         "type": "object"

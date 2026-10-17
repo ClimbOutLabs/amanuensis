@@ -34,6 +34,8 @@ export interface SentinelServices {
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
+  /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
+  demoSendAllowlist: readonly string[] | null;
 }
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
@@ -66,6 +68,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     searchWithoutAsking: () => Promise.resolve(true),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
+    demoSendAllowlist: null,
   };
 }
 
