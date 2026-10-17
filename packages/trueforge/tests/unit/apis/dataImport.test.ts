@@ -2,6 +2,7 @@ import { HTTPException } from 'hono/http-exception';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 
 import type { Transaction } from 'kysely';
 import type { Authenticator } from '../../../src/auth/authenticator';
@@ -20,14 +21,18 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { ImportDataResponseSchema } from '../../../src/schemas/dataImport';
 import { resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import { SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
+import { parseJson, recordAt, recordsAt } from '../../fixtures/jsonGuards';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
 const IMPORT_PATH = '/api/v1/data/import';
+
+const ErrorBodySchema = z.object({ error: z.object({ message: z.string() }) });
 
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
@@ -112,11 +117,9 @@ describe('Data import route', () => {
     });
     // The embedding model is not available to unit tests; the service tests cover knowledge.
     archive = await repack(exported, entries => {
-      const personas = JSON.parse(entries.get('personas.json')?.toString('utf8') ?? '[]') as {
-        knowledge: { documents: unknown[] };
-      }[];
+      const personas = recordsAt(parseJson(entries.get('personas.json'), 'personas.json'), 'personas.json');
       for (const entry of personas) {
-        entry.knowledge.documents = [];
+        recordAt(entry['knowledge'], 'knowledge')['documents'] = [];
       }
       entries.set('personas.json', Buffer.from(JSON.stringify(personas)));
     });
@@ -174,17 +177,7 @@ describe('Data import route', () => {
   it('imports the archive for the signed-in user and reports the summary', async () => {
     const response = await postImport('bob', archive);
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        chats: number;
-        memories: number;
-        personas: number;
-        spaces: number;
-        schedules: number;
-        schedules_off: boolean;
-        summary: string;
-      };
-    };
+    const body = ImportDataResponseSchema.parse(await response.json());
     expect(body.data.chats).toBe(3);
     expect(body.data.memories).toBe(3);
     expect(body.data.personas).toBe(2);
@@ -217,7 +210,7 @@ describe('Data import route', () => {
   it('refuses a second import into the now non-empty instance', async () => {
     const response = await postImport('bob', archive);
     expect(response.status).toBe(409);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = ErrorBodySchema.parse(await response.json());
     expect(body.error.message).toContain('already has');
   });
 
@@ -228,13 +221,13 @@ describe('Data import route', () => {
 
   it('refuses an export made by a newer version', async () => {
     const newer = await repack(archive, entries => {
-      const manifest = JSON.parse(entries.get('manifest.json')?.toString('utf8') ?? '{}') as Record<string, unknown>;
+      const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
       manifest['schema_version'] = 2;
       entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
     });
     const response = await postImport('carol', newer);
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = ErrorBodySchema.parse(await response.json());
     expect(body.error.message).toContain('newer version of Aman');
   });
 

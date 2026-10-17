@@ -46,6 +46,7 @@ import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel
 import { createPostgresTestDatabase } from '../../db/postgres/testDatabase';
 import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import { SEED_HISTORY, SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
+import { isRecord, parseJson, recordAt, recordsAt, stringAt, type JsonRecord } from '../../fixtures/jsonGuards';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 const TENANT = 'default';
@@ -136,6 +137,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     spaceStore: instance.stores.spaceStore,
     scheduleStore: instance.stores.scheduleStore,
     globalSettingsStore: instance.stores.globalSettingsStore,
+    auditStore: instance.stores.auditStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
@@ -187,10 +189,6 @@ const DATE_KEYS = new Set([
   'time',
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function normalizeValue(value: unknown, key: string | undefined): unknown {
   if (key !== undefined && DATE_KEYS.has(key) && (typeof value === 'string' || typeof value === 'number')) {
     return '<date>';
@@ -202,7 +200,7 @@ function normalizeValue(value: unknown, key: string | undefined): unknown {
     return value.map(item => normalizeValue(item, undefined));
   }
   if (isRecord(value)) {
-    const out: Record<string, unknown> = {};
+    const out: JsonRecord = {};
     for (const [childKey, childValue] of Object.entries(value)) {
       out[childKey] = normalizeValue(childValue, childKey);
     }
@@ -217,47 +215,41 @@ function sortBy<T>(items: T[], key: (item: T) => string): T[] {
 
 function normalizeSection(name: string, parsed: unknown): unknown {
   const normalized = normalizeValue(parsed, undefined);
-  if (name === 'sessions.json' && Array.isArray(normalized)) {
-    const entries = sortBy(normalized as Record<string, unknown>[], entry =>
-      String((entry['session'] as Record<string, unknown>)['session_id']),
+  if (name === 'sessions.json') {
+    const entries = sortBy(recordsAt(normalized, name), entry =>
+      stringAt(recordAt(entry['session'], 'session')['session_id'], 'session_id'),
     );
     for (const entry of entries) {
-      const session = entry['session'] as Record<string, unknown>;
-      const artifacts = entry['artifacts'];
-      if (Array.isArray(artifacts)) {
-        entry['artifacts'] = sortBy(artifacts as Record<string, unknown>[], artifact => String(artifact['path']));
-      }
+      const session = recordAt(entry['session'], 'session');
+      entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
+        stringAt(artifact['path'], 'path'),
+      );
       if (session['session_id'] === SEED_IDS.sessionRunning) {
         // The turn that was running at export time lands cancelled on import:
         // its state changes and its stream gains the closing turn.done event.
-        const turns = entry['turns'] as Record<string, unknown>[];
-        for (const turnEntry of turns) {
-          const turn = turnEntry['turn'] as Record<string, unknown>;
-          turn['state'] = '<terminal-state>';
-          const events = turnEntry['events'] as Record<string, unknown>[];
-          turnEntry['events'] = events.filter(event => event['type'] !== 'turn.done');
+        for (const turnEntry of recordsAt(entry['turns'], 'turns')) {
+          recordAt(turnEntry['turn'], 'turn')['state'] = '<terminal-state>';
+          turnEntry['events'] = recordsAt(turnEntry['events'], 'events').filter(event => event['type'] !== 'turn.done');
         }
       }
     }
     return entries;
   }
-  if (name === 'schedules.json' && Array.isArray(normalized)) {
-    const schedules = sortBy(normalized as Record<string, unknown>[], schedule => String(schedule['id']));
+  if (name === 'schedules.json') {
+    const schedules = sortBy(recordsAt(normalized, name), schedule => stringAt(schedule['id'], 'id'));
     for (const schedule of schedules) {
       schedule['status'] = '<status>';
-      const manifest = schedule['manifest'] as Record<string, unknown>;
-      manifest['status'] = '<status>';
+      recordAt(schedule['manifest'], 'manifest')['status'] = '<status>';
     }
     return schedules;
   }
-  if (name === 'personas.json' && Array.isArray(normalized)) {
-    const personas = sortBy(normalized as Record<string, unknown>[], entry =>
-      String((entry['persona'] as Record<string, unknown>)['id']),
+  if (name === 'personas.json') {
+    const personas = sortBy(recordsAt(normalized, name), entry =>
+      stringAt(recordAt(entry['persona'], 'persona')['id'], 'id'),
     );
     for (const entry of personas) {
-      const knowledge = entry['knowledge'] as Record<string, unknown>;
-      const documents = knowledge['documents'] as Record<string, unknown>[];
-      const sorted = sortBy(documents, doc => String(doc['title']));
+      const knowledge = recordAt(entry['knowledge'], 'knowledge');
+      const sorted = sortBy(recordsAt(knowledge['documents'], 'documents'), doc => stringAt(doc['title'], 'title'));
       for (const doc of sorted) {
         doc['id'] = '<doc-id>';
       }
@@ -265,16 +257,14 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     }
     return personas;
   }
-  if (name === 'settings.json' && typeof normalized === 'object' && normalized !== null) {
+  if (name === 'settings.json') {
     // Import never carries safety settings over, so only the other instance settings can match.
-    const instance: unknown = Reflect.get(normalized, 'instance');
-    const kept = Array.isArray(instance)
-      ? instance.filter(setting => !String(Reflect.get(setting, 'key')).endsWith('_screen_enabled'))
-      : [];
-    return { instance: kept };
+    const instance = recordsAt(recordAt(normalized, name)['instance'], 'instance');
+    const kept = instance.filter(setting => !stringAt(setting['key'], 'key').endsWith('_screen_enabled'));
+    return { instance: sortBy(kept, setting => stringAt(setting['key'], 'key')) };
   }
-  if (name === 'connectors.json' && Array.isArray(normalized)) {
-    const connectors = sortBy(normalized as Record<string, unknown>[], connector => String(connector['name']));
+  if (name === 'connectors.json') {
+    const connectors = sortBy(recordsAt(normalized, name), connector => stringAt(connector['name'], 'name'));
     for (const connector of connectors) {
       connector['id'] = '<connector-id>';
       // Import never carries the trust mark over, so the re-export always reads false.
@@ -282,52 +272,56 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     }
     return connectors;
   }
-  if (name === 'folders.json' && Array.isArray(normalized)) {
-    return sortBy(normalized as Record<string, unknown>[], folder => String(folder['folder_id']));
+  if (name === 'folders.json') {
+    return sortBy(recordsAt(normalized, name), folder => stringAt(folder['folder_id'], 'folder_id'));
   }
-  if (name === 'spaces.json' && Array.isArray(normalized)) {
-    return sortBy(normalized as Record<string, unknown>[], entry =>
-      String((entry['space'] as Record<string, unknown>)['id']),
-    );
+  if (name === 'spaces.json') {
+    return sortBy(recordsAt(normalized, name), entry => stringAt(recordAt(entry['space'], 'space')['id'], 'id'));
   }
-  if (name === 'settings.json' && isRecord(normalized)) {
-    const instanceSettings = normalized['instance'] as Record<string, unknown>[];
-    normalized['instance'] = sortBy(instanceSettings, setting => String(setting['key']));
-    return normalized;
-  }
-  if (name === 'agents.json' && Array.isArray(normalized)) {
+  if (name === 'agents.json') {
     // Ids are kept on import, so they are compared as they are.
-    return sortBy(normalized as Record<string, unknown>[], agent => String(agent['name']));
+    return sortBy(recordsAt(normalized, name), agent => stringAt(agent['name'], 'name'));
   }
-  if (name === 'manifest.json' && isRecord(normalized)) {
+  if (name === 'manifest.json') {
+    const manifest = recordAt(normalized, name);
     return {
-      format: normalized['format'],
-      schema_version: normalized['schema_version'],
-      tenant_id: normalized['tenant_id'],
-      include_uploads: normalized['include_uploads'],
+      format: manifest['format'],
+      schema_version: manifest['schema_version'],
+      tenant_id: manifest['tenant_id'],
+      include_uploads: manifest['include_uploads'],
     };
   }
-  if (name === 'chats.json' && isRecord(normalized)) {
-    const chats = normalized['chats'] as Record<string, unknown>[];
-    normalized['chats'] = sortBy(chats, chat => String(chat['id']));
-    return normalized;
+  if (name === 'chats.json') {
+    const chats = recordAt(normalized, name);
+    chats['chats'] = sortBy(recordsAt(chats['chats'], 'chats'), chat => stringAt(chat['id'], 'id'));
+    return chats;
   }
   return normalized;
+}
+
+/** Audit rows get new ids on import; everything else, dates included, must come back as exported. */
+function auditRowsWithoutIds(archive: Map<string, Buffer>): JsonRecord[] {
+  return recordsAt(parseJson(archive.get('audit.json'), 'audit.json'), 'audit.json').map(row => {
+    const { id: _id, ...rest } = row;
+    return rest;
+  });
 }
 
 function expectExportsToMatch(first: Buffer, second: Buffer): void {
   const firstEntries = new Map(readZipEntries(first).map(entry => [entry.name, entry.data]));
   const secondEntries = new Map(readZipEntries(second).map(entry => [entry.name, entry.data]));
   expect([...secondEntries.keys()].sort()).toEqual([...firstEntries.keys()].sort());
+  expect(auditRowsWithoutIds(secondEntries)).toEqual(auditRowsWithoutIds(firstEntries));
   for (const [name, data] of firstEntries) {
     const other = secondEntries.get(name);
     expect(other).toBeDefined();
+    if (name === 'audit.json') {
+      continue;
+    }
     if (name.endsWith('.json')) {
-      const a = normalizeSection(name, JSON.parse(data.toString('utf8')) as unknown);
-      const b = normalizeSection(name, JSON.parse((other as Buffer).toString('utf8')) as unknown);
-      expect(b).toEqual(a);
+      expect(normalizeSection(name, parseJson(other, name))).toEqual(normalizeSection(name, parseJson(data, name)));
     } else {
-      expect((other as Buffer).equals(data)).toBe(true);
+      expect(other?.equals(data)).toBe(true);
     }
   }
 }
