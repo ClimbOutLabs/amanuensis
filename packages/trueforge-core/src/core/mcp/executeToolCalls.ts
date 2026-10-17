@@ -533,12 +533,26 @@ async function verifySentinelPreDispatch(input: {
       canonicalParams = wrapper.input;
     }
   }
-  // Where mint recorded its exact identity (sandbox: invoked name and
-  // normalized args, while original_tool_name is remapped for display), the
-  // wire arguments are re-derived the way mint derived them and must equal what
-  // was approved. Verifying the recorded values alone would let arguments edited
-  // after classification run under the earlier decision.
-  if (info.mint_canonical_params !== undefined) {
+  // Host-observed state an approval also binds (a Gmail draft as shown on the card) cannot be re-derived
+  // from the wire alone, so the tool set re-reads it here from the wire arguments; the token check below
+  // then compares that whole re-derivation with what was approved.
+  let live: Record<string, unknown> | undefined;
+  try {
+    live = await input.toolInfo.toolSet.liveMintParams?.({
+      name: input.toolInfo.originalToolName,
+      arguments: wireArguments,
+    });
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
+  if (live !== undefined) {
+    canonicalParams = live;
+  } else if (info.mint_canonical_params !== undefined) {
+    // Where mint recorded its exact identity (sandbox: invoked name and
+    // normalized args, while original_tool_name is remapped for display), the
+    // wire arguments are re-derived the way mint derived them and must equal what
+    // was approved. Verifying the recorded values alone would let arguments edited
+    // after classification run under the earlier decision.
     const rederived = toJsonSafeParams(
       input.toolInfo.toolSet.mintCanonicalParams?.({
         name: input.toolInfo.originalToolName,
@@ -549,17 +563,6 @@ async function verifySentinelPreDispatch(input: {
       return 'Tool arguments changed since approval; request approval again.';
     }
     canonicalParams = rederived;
-  }
-  try {
-    const live = await input.toolInfo.toolSet.liveMintParams?.({
-      name: input.toolInfo.originalToolName,
-      arguments: wireArguments,
-    });
-    if (live !== undefined) {
-      canonicalParams = live;
-    }
-  } catch {
-    return 'The approved action could not be re-checked; request approval again.';
   }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
