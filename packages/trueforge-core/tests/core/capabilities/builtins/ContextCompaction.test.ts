@@ -670,8 +670,9 @@ describe('contextCompaction model role', () => {
     }
 
     const metrics = thread.getAgentThreadMetrics();
-    expect(metrics.total_input_tokens).toBe(11);
-    expect(metrics.total_output_tokens).toBe(7);
+    // The first try and the retry are each billed once.
+    expect(metrics.total_input_tokens).toBe(22);
+    expect(metrics.total_output_tokens).toBe(14);
     expect(metrics.total_summarizations).toBe(1);
     expect(JSON.stringify(thread.toSnapshot().context)).not.toContain('not a valid summary block');
   });
