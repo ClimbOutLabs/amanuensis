@@ -1,6 +1,7 @@
 'use client';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
+import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalAmanSetup, type MemoryBankStatus } from './AmanSetupContext.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 
@@ -55,6 +56,7 @@ export function amanSetupItems(setup: {
 export function AmanWelcome(props: WelcomeScreenProps) {
   const profile = useOptionalPersonalization()?.profile;
   const setup = useOptionalAmanSetup();
+  const shell = useOptionalShellMode();
   const heading = props.heading ?? amanWelcomeHeading(profile?.assistant_name);
   const items = setup === null ? [] : amanSetupItems(setup);
   return (
@@ -72,7 +74,17 @@ export function AmanWelcome(props: WelcomeScreenProps) {
               className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-border bg-card-bg px-3 py-2"
             >
               <span>{item.text}</span>
-              {setup?.settingsHref === undefined ? (
+              {item.key === 'memory' && shell !== null ? (
+                // Memory setup lives on the Settings sub-tab of the Memory section; open it
+                // directly rather than sending the user to the settings landing page.
+                <button
+                  type="button"
+                  className="text-text-primary underline underline-offset-2"
+                  onClick={() => shell.setSettingsOpen(true, 'memory', 'settings')}
+                >
+                  {item.action}
+                </button>
+              ) : setup?.settingsHref === undefined ? (
                 <span className="text-text-primary">{item.action}</span>
               ) : (
                 <a className="text-text-primary underline underline-offset-2" href={setup.settingsHref}>

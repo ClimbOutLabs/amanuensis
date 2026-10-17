@@ -4,7 +4,7 @@ import * as TrueForge from "../index.js";
 
 export interface Session {
     agent: TrueForge.SessionAgent;
-    /** Server-derived exact-tool grants created by "Allow for this chat" (server:tool pairs). */
+    /** Server-derived exact-tool grants created by "Approve for this chat" (server:tool pairs). */
     approvalGrants: string[];
     /** ISO 8601 creation timestamp. */
     createdAt: string;
