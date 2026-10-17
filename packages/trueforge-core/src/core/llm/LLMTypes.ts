@@ -14,6 +14,7 @@ import {
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
 import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
   ChatCompletionAssistantMessageParamSchema,
@@ -142,6 +143,9 @@ export const InternalToolCallInfoSchema = z.object({
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
   ),
+  git_remote_precondition: GitRemotePreconditionSchema.optional().describe(
+    'Host-observed git remotes captured before approval. Never model-authored or client supplied.',
+  ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
   ),
@@ -195,7 +199,7 @@ export const TrueFoundrySystemToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('TrueFoundrySystemToolInfo');
@@ -209,7 +213,7 @@ export const MCPToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     silent_search_query: z
       .string()
       .optional()

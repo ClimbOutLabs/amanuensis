@@ -30,7 +30,11 @@ export class LocalGuest implements BridgeGuest {
     return text.split('/workspace').join(this.root);
   }
 
-  exec(input: { command: string; cwd: string | undefined }): Promise<ExecResult> {
+  exec(input: {
+    command: string;
+    env: Record<string, string> | undefined;
+    cwd: string | undefined;
+  }): Promise<ExecResult> {
     this.commands.push(input.command);
     return new Promise(resolve => {
       execFile(
@@ -38,7 +42,7 @@ export class LocalGuest implements BridgeGuest {
         ['-c', this.map(input.command)],
         {
           cwd: this.map(input.cwd ?? '/workspace'),
-          env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', ...GIT_IDENTITY },
+          env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', ...GIT_IDENTITY, ...input.env },
           maxBuffer: 64 * 1024 * 1024,
         },
         (error, stdout, stderr) => {
