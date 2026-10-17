@@ -1,8 +1,9 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import { addDays, isoDay, weekdayOf, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import type { PersonaContent } from '../../personas/persona';
 import { ScheduleManifestSchema, type ScheduleManifest } from '../../schemas/schedule';
-import { addDays, clockLabel, dayInZone, isoDay, longDayLabel, weekdayOf, type CalendarDay } from './calendar';
+import { clockLabel, dayInZone, longDayLabel } from './calendar';
 import { encodePolyline, type LatLng } from './polyline';
 
 /** Provenance stamped on every seeded record; reset removes exactly the records that carry it. */

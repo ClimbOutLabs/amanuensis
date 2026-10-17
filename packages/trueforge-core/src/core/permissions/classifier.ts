@@ -13,6 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
+import { CALENDAR_SERVER_ID, isCalendarReadToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
 import {
   GMAIL_SERVER_ID,
@@ -1341,7 +1342,10 @@ async function classifySearchProviderTool(input: {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }
   if (hasReadPrivateData(ctx.web_search)) {
-    return held('mcp_search_after_private_read', 'this chat read your email, and a search could carry it out');
+    return held(
+      'mcp_search_after_private_read',
+      'this chat read your email or calendar, and a search could carry it out',
+    );
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
@@ -1491,6 +1495,30 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
     sensitive_read: false,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Calendar tools are the host's own, named by server. They only read: a read is silent but flagged as sensitive
+ * (so a session that read the calendar can no longer search silently), in a chat and in a scheduled run alike,
+ * and any other name fails closed.
+ */
+async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Google Calendar needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (!isCalendarReadToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: 'calendar_read',
+    reason_detail: 'Read your calendar.',
+    sensitive_read: true,
   });
 }
 
@@ -1764,6 +1792,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
     return classifyGmailTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
+    return classifyCalendarTool(action, ctx);
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
