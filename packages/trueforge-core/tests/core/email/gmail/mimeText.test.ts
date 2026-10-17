@@ -4,6 +4,8 @@ import {
   contentTypeCharset,
   decodeBytes,
   decodeEncodedWords,
+  hasAnyHiddenCharacter,
+  hasHiddenCharacters,
   stripInvisible,
 } from '../../../../src/core/email/gmail/mimeText';
 import { addressesIn, listThreadsResult, readEmailResult } from '../../../../src/core/email/gmail/results';
@@ -244,6 +246,33 @@ describe('hidden characters', () => {
   it('bounds a header that is far longer than any subject', () => {
     const mail = message({ id: 'm1', subject: 'x'.repeat(50_000), body: 'hi' });
     expect(headerOf({ message: mail, name: 'Subject' }).length).toBeLessThan(1100);
+  });
+});
+
+describe('the strict hidden-character test for field names and addresses', () => {
+  const HIDDEN = [
+    0x0000, 0x007f, 0x0085, 0x00ad, 0x034f, 0x0600, 0x061c, 0x115f, 0x1160, 0x180e, 0x200b, 0x200c, 0x200d, 0x2028,
+    0x2029, 0x202e, 0x2060, 0x2800, 0x3164, 0xfe00, 0xfe0e, 0xfe0f, 0xfeff, 0xffa0, 0xfff9, 0xfffb, 0xe000, 0xd800,
+    0x1d173, 0x1d17a, 0xe0001, 0xe0067, 0xe007f, 0xe0100, 0xe01ef,
+  ];
+
+  it.each(HIDDEN)('code point %i is hidden', codePoint => {
+    expect(hasAnyHiddenCharacter(`a${String.fromCodePoint(codePoint)}b`)).toBe(true);
+  });
+
+  it.each([0x20, 0x41, 0xe9, 0x4f60, 0x1f600, 0xa0])('code point %i is shown', codePoint => {
+    expect(hasAnyHiddenCharacter(String.fromCodePoint(codePoint))).toBe(false);
+  });
+
+  it('allows only tab, newline and carriage return', () => {
+    expect(hasAnyHiddenCharacter('a\tb\r\nc\n')).toBe(false);
+  });
+
+  it('gives none of the allowances real writing gets', () => {
+    for (const text of ['\u{1F468}\u200D\u{1F469}', '\u0645\u06CC\u200C\u062E', '\u2764\uFE0F', '\u845B\u{E0100}']) {
+      expect(hasHiddenCharacters(text)).toBe(false);
+      expect(hasAnyHiddenCharacter(text)).toBe(true);
+    }
   });
 });
 

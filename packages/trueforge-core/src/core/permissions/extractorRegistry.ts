@@ -1,4 +1,4 @@
-import { replaceHiddenCharacters } from '../email/gmail/mimeText';
+import { hasAnyHiddenCharacter, hasHiddenCharacters, replaceHiddenCharacters } from '../email/gmail/mimeText';
 
 /**
  * Server-side extractor registry for Tier 3 approval cards.
@@ -60,6 +60,9 @@ const RECIPIENT_KEYS = [
   'members',
   'emails',
   'webhook_url',
+  'reply_to',
+  'from',
+  'sender',
   ...FORWARD_KEYS,
   'to_recipients',
   'participants',
@@ -161,16 +164,18 @@ function recipientValues(params: Record<string, unknown>): string[] {
 
 const NESTED_RECIPIENT_MAX_DEPTH = 4;
 
-/** Recipients at any depth, so one tucked inside a nested argument still reaches the card. */
-function nestedRecipientValues(value: unknown, depth = 0): string[] {
+/** Recipients at any depth under the given normalized keys, so one tucked inside a nested argument still reaches the card. */
+function nestedRecipientValues(value: unknown, keys: Set<string> = RECIPIENT_KEY_SET, depth = 0): string[] {
   if (Array.isArray(value)) {
-    return depth > NESTED_RECIPIENT_MAX_DEPTH ? [] : value.flatMap(item => nestedRecipientValues(item, depth + 1));
+    return depth > NESTED_RECIPIENT_MAX_DEPTH
+      ? []
+      : value.flatMap(item => nestedRecipientValues(item, keys, depth + 1));
   }
   if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
     return [];
   }
   return Object.entries(value).flatMap(([key, field]) =>
-    isRecipientKey(key) ? recipientItems(field) : nestedRecipientValues(field, depth + 1),
+    keys.has(normalizeKey(key)) ? recipientItems(field) : nestedRecipientValues(field, keys, depth + 1),
   );
 }
 
@@ -250,11 +255,12 @@ function leadingCodePoints(text: string, count: number): { head: string; rest: n
   return { head: points.slice(0, count).join(''), rest: Math.max(0, points.length - count) };
 }
 
-function keyDisplay(key: string): string {
+function keyDisplay(key: string): { text: string; cut: boolean } {
   const { head, rest } = leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS);
   const shown = `${head}${rest > 0 ? '...' : ''}`;
   // A key that is not plain is quoted, so it can never pass for a gutter or a separate line.
-  return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
+  const text = PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
+  return { text, cut: rest > 0 };
 }
 
 const DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
@@ -357,7 +363,9 @@ function renderOutboundLines(
     // Continuation lines carry a fixed gutter, so a value can never begin a line that reads like `key: value`.
     const [first = '', ...more] = `${shown}${marker}`.split('\n');
     const hint = typeHint(value);
-    const label = `${keyDisplay(key)}${hint === null ? '' : ` (${hint})`}`;
+    const keyShown = keyDisplay(key);
+    truncated ||= keyShown.cut;
+    const label = `${keyShown.text}${hint === null ? '' : ` (${hint})`}`;
     return [`${label}: ${first}`, ...more.map(line => `${OUTBOUND_GUTTER}${line}`)].join('\n');
   });
   return { lines, truncated };
@@ -366,7 +374,7 @@ function renderOutboundLines(
 /**
  * Every argument the connector will receive, one line each, built from the server's canonical params
  * so a model-written description can never stand in for what is sent. Every key is always listed
- * and recipient values are never cut; other values are capped, and `truncated` says whether any was.
+ * and recipient values are never cut; other values and over-long keys are capped, and `truncated` says whether any was.
  */
 export function renderOutboundArguments(
   params: Record<string, unknown>,
@@ -398,6 +406,8 @@ interface ExtractorEntry {
   match: (toolName: string) => boolean;
   extract: CardFieldExtractor;
   external_service: boolean;
+  /** Delivers a message to a person, so every part of its arguments must be fully visible. */
+  delivers_message: boolean;
 }
 
 function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
@@ -414,29 +424,34 @@ function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
  */
 const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
   {
-    match: nameIncludes('send_email', 'sendemail', 'email_send'),
+    match: nameIncludes('send_email', 'sendemail', 'email_send', 'emails_send'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: true,
   },
   {
-    match: nameIncludes('send_message', 'sendmessage', 'message_send', 'send_sms', 'sendsms'),
+    match: nameIncludes('send_message', 'sendmessage', 'message_send', 'messages_send', 'send_sms', 'sendsms'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: true,
   },
   {
     match: nameIncludes('post_message', 'publish_post', 'create_post', 'post_tweet', 'share_post'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
   {
     match: nameIncludes('payment', 'pay_invoice', 'spend', 'transfer_funds', 'charge_card', 'create_charge'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
   {
     match: nameIncludes('share', 'webhook'),
     extract: genericExtractor,
     external_service: true,
+    delivers_message: false,
   },
 ];
 
@@ -469,10 +484,15 @@ interface ConnectorCallInput {
 interface ConnectorFamily {
   match: (words: string, params: Record<string, unknown>) => boolean;
   describe: (input: ConnectorCallInput) => string;
-  /** The call sends data out and is never trusted by a hint or grant. A `message` also has to be shown in full. */
+  /**
+   * The call sends data out and is never trusted by a hint or grant. A `message` sends or stages a
+   * message to a person, so it also has to be shown in full and carry no hidden characters.
+   */
   sends?: 'message' | 'content';
   /** The card has to name a recipient. */
   needs_recipient?: boolean;
+  /** Replaces the recipient when only some addresses in the params receive anything, such as a filter's sender match. */
+  recipient?: (params: Record<string, unknown>) => string | null;
   /** Replaces the destination when the params name a more precise one. */
   destination?: (params: Record<string, unknown>) => string | null;
 }
@@ -526,6 +546,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     match: (words, params) => hasPhrase(words, 'create_filter') && hasForwardAction(params),
     sends: 'message',
     needs_recipient: true,
+    recipient: params => joinOrNull([...new Set(nestedRecipientValues(params, FORWARD_KEY_SET))]),
     describe: ({ tool_name, where, fields }) =>
       `Forward every matching message${toRecipient(fields)}, now and from here on, with ${tool_name}${where}.`,
   },
@@ -541,6 +562,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
+    sends: 'message',
     describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
@@ -675,11 +697,14 @@ function hiddenSendKind({
   return null;
 }
 
-const BLANK = /[\p{Cf}\s]/gu;
+/** True when nothing in the text would show: only whitespace and hidden characters. */
+function isBlank(text: string): boolean {
+  return Array.from(text).every(char => /\s/u.test(char) || hasAnyHiddenCharacter(char));
+}
 
 function addressStrings(value: unknown): string[] {
   if (typeof value === 'string') {
-    return value.replace(BLANK, '') === '' ? [] : [value];
+    return isBlank(value) ? [] : [value];
   }
   if (Array.isArray(value)) {
     return value.flatMap(addressStrings);
@@ -719,7 +744,7 @@ interface IncompleteSend {
   owner_message: string;
 }
 
-const REFUSALS: Record<HiddenSend | 'too_long' | 'no_recipient', IncompleteSend> = {
+const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient', IncompleteSend> = {
   reply_all: {
     model_message:
       'Replying to everyone fills in the recipients after approval, so it cannot be shown. Reply on the same message with every person who should get it named in `to`.',
@@ -732,6 +757,18 @@ const REFUSALS: Record<HiddenSend | 'too_long' | 'no_recipient', IncompleteSend>
     owner_message:
       'Nothing was sent: a saved draft hides who gets it and what it says. The assistant must write it out in full.',
   },
+  hidden_characters: {
+    model_message:
+      'This contains hidden characters that would not show on the approval card, so it cannot be approved. Remove them and try again.',
+    owner_message:
+      'Nothing was sent: it contains hidden characters you could not see. The assistant needs to remove them.',
+  },
+  long_key: {
+    model_message:
+      'An argument name is too long to show in full, so this cannot be approved. Use shorter argument names.',
+    owner_message:
+      'Nothing was sent: a field name was too long to show you in full. The assistant needs to shorten it.',
+  },
   too_long: {
     model_message:
       'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller messages.',
@@ -743,12 +780,48 @@ const REFUSALS: Record<HiddenSend | 'too_long' | 'no_recipient', IncompleteSend>
   },
 };
 
+/** True when any string value passes `test` or any key holds a hidden character, at any depth. */
+function containsHidden(value: unknown, test: (text: string) => boolean): boolean {
+  if (typeof value === 'string') {
+    return test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some(item => containsHidden(item, test));
+  }
+  // Keys always take the strict check: a field name never needs an emoji or script joiner.
+  return (
+    isRecord(value) &&
+    Object.entries(value).some(([key, field]) => hasAnyHiddenCharacter(key) || containsHidden(field, test))
+  );
+}
+
+/** True when a recipient value, at any depth, holds a hidden character; recipients never get an allowance. */
+function hasHiddenRecipient(params: Record<string, unknown>): boolean {
+  return someArgument(
+    params,
+    (key, field) => RECIPIENT_KEY_SET.has(key) && containsHidden(field, hasAnyHiddenCharacter),
+  );
+}
+
+/** Message text gets the writing allowances; attachment text is checked as decoded, since that is what is received. */
+function hasHiddenMessageText(params: Record<string, unknown>): boolean {
+  return (
+    containsHidden(params, hasHiddenCharacters) || containsHidden(summarizeAttachments(params), hasHiddenCharacters)
+  );
+}
+
 /**
  * Why a send cannot be shown to the owner in full, or null. The reply-to-everyone and saved-draft rule
- * holds for every tool that is not declared read-only and closed-world, whatever it is called.
+ * holds for every tool that is not declared read-only and closed-world, whatever it is called. A message
+ * to a person is refused on any hidden character outside a well-formed emoji or script sequence; other
+ * sends only on a hidden recipient, since the card shows other hidden text as codes.
  */
 function incompleteSend(input: {
   hidden: HiddenSend | null;
+  sends: boolean;
+  delivers_message: boolean;
+  /** The card lists every argument, so a key it would cut hides part of the send. */
+  shows_arguments: boolean;
   message_send: boolean;
   truncated: boolean;
   needs_recipient: boolean;
@@ -758,6 +831,19 @@ function incompleteSend(input: {
 }): IncompleteSend | null {
   if (input.hidden !== null) {
     return REFUSALS[input.hidden];
+  }
+  if (
+    input.sends &&
+    (hasHiddenRecipient(input.params) || (input.delivers_message && hasHiddenMessageText(input.params)))
+  ) {
+    return REFUSALS.hidden_characters;
+  }
+  if (
+    input.sends &&
+    input.shows_arguments &&
+    Object.keys(input.params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0)
+  ) {
+    return REFUSALS.long_key;
   }
   if (input.message_send && input.truncated) {
     return REFUSALS.too_long;
@@ -799,7 +885,18 @@ export function extractCardFields(input: {
       external_service: externalService,
       connector_what: null,
       sends: externalService,
-      incomplete_send: null,
+      incomplete_send: incompleteSend({
+        hidden: null,
+        sends: externalService,
+        delivers_message: entry?.delivers_message === true,
+        shows_arguments: false,
+        message_send: false,
+        truncated: false,
+        needs_recipient: false,
+        needs_to: false,
+        params: input.canonical_params,
+        fields: base,
+      }),
     };
   }
   const readOnly = input.read_only_closed_world === true;
@@ -828,7 +925,7 @@ export function extractCardFields(input: {
     ...base,
     destination: family?.destination?.(input.canonical_params) ?? base.destination,
     // Includes recipients nested inside other arguments; the unverifiable check above stays top-level.
-    recipient: joinOrNull(recipients),
+    recipient: family?.recipient === undefined ? joinOrNull(recipients) : family.recipient(input.canonical_params),
     outbound_text: outbound.text,
     outbound_truncated: outbound.truncated,
     // Only the connector's own configured URL: a host read from the arguments is the model's claim.
@@ -841,6 +938,9 @@ export function extractCardFields(input: {
     sends,
     incomplete_send: incompleteSend({
       hidden,
+      sends,
+      delivers_message: entry?.delivers_message === true || family?.sends === 'message',
+      shows_arguments: true,
       message_send: messageSend,
       truncated: outbound.truncated,
       needs_recipient: family?.needs_recipient === true,
@@ -859,13 +959,4 @@ export function extractCardFields(input: {
             params: input.canonical_params,
           }),
   };
-}
-
-/** True when the tool name denotes an external-service action. */
-export function isExternalServiceAction(toolName: string): boolean {
-  const entry = EXTRACTOR_REGISTRY.find(e => e.match(toolName));
-  if (entry !== undefined) {
-    return entry.external_service;
-  }
-  return EXTERNAL_SERVICE_FRAGMENTS.some(f => toolName.toLowerCase().includes(f));
 }
