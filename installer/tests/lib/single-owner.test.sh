@@ -60,7 +60,7 @@ test_user_commands_and_options_are_gone() {
   for command in add-user remove-user list-users; do
     run_install instance "$command" judge1 --email judge1@demo.invalid
     assert_rc 2
-    assert_flat_contains "$ERR" "usage: install.sh instance add|list|remove|demo-seed|refresh"
+    assert_flat_contains "$ERR" "usage: install.sh instance add|list|remove|demo-seed|import|refresh"
   done
   run_install instance add second --role member
   assert_rc 2

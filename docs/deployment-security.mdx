@@ -45,7 +45,7 @@ Leaving both off does not remove the structural defenses described below, which 
 Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
 
 - **Sandbox network policy**: every sandbox (local or Daytona) is restricted to a fixed outbound domain allowlist covering PyPI and GitHub hosts only. Everything else is denied by default, which also denies access to private networks and cloud metadata endpoints (for example `169.254.169.254`) from inside a sandbox.
-- **HTML Spaces render without scripts**: a `format: 'html'` Space body renders in a sandboxed iframe with no `allow-scripts`, so nothing in the rendered HTML can execute. An allow-list sanitizer strips `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `javascript:` URLs, and `@import` before the HTML reaches the iframe, as a second layer behind the sandbox attribute itself.
+- **HTML Spaces render without scripts**: a `format: 'html'` Space body renders in a sandboxed iframe with no `allow-scripts`, so nothing in the rendered HTML can execute. An allow-list sanitizer strips `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `javascript:` URLs, and `@import` before the HTML reaches the iframe, as a second layer behind the sandbox attribute itself. Elements outside the allow-list lose their tag but keep their text, except scripts, frames, embedded documents and similar, which are removed with their contents.
 
 ## Supply chain: package release age
 

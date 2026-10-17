@@ -227,6 +227,7 @@ export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } 
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
+export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
 export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
@@ -293,6 +294,7 @@ export type {
   TurnAttachment,
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
+export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
@@ -302,6 +304,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
 export type {
@@ -442,4 +445,4 @@ export type {
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { createWebSearchTurnState } from './permissions/webSearch';
-export type { WebSearchTurnState } from './permissions/webSearch';
+export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';

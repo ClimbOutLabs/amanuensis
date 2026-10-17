@@ -312,7 +312,7 @@ const ConnectorDetails = ({
               Always allowed <span className="font-normal text-text-secondary">· {grantedTools.length}</span>
             </h5>
             <p className="mb-2 text-xs text-text-secondary">
-              These tools run without asking first. Safety checks can still ask before a call.
+              These tools run without asking. Risky calls can still ask first.
             </p>
             <ul className="overflow-hidden rounded-xl border border-border bg-card-bg">
               {grantedTools.map(toolName => (
@@ -352,7 +352,7 @@ const ConnectorDetails = ({
             <div className="rounded-xl border border-failure-bg/30 bg-failure-bg/10 p-6 text-center text-sm text-failure-bg">
               {toolsError}
               {connector.auth.type === 'dcr' && !connector.authenticated && (
-                <div className="font-bold mt-1">Click Connect and authenticate successfully to view tools.</div>
+                <div className="font-bold mt-1">Connect to see this connector&apos;s tools.</div>
               )}
             </div>
           ) : tools.length > 0 ? (

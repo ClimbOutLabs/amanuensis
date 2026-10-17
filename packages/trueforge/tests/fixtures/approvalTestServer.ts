@@ -82,6 +82,8 @@ export interface ApprovalTestServer {
   mcpServerStore: () => IMcpServerStore;
   /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
   sessionStore: () => SqliteSessionStore;
+  /** The database itself, so a test can construct any other store over the same data. */
+  db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
@@ -109,18 +111,19 @@ function buildApp(input: {
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
@@ -155,6 +158,7 @@ function buildApp(input: {
     oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
+    outboundSecrets,
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,
@@ -276,6 +280,7 @@ export async function startApprovalTestServer(options?: {
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
     sessionStore: () => new SqliteSessionStore(db),
+    db: () => db,
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },

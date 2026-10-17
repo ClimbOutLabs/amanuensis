@@ -120,6 +120,10 @@ export const InternalToolCallInfoSchema = z.object({
     .object({
       kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
       message: z.string(),
+      owner_message: z
+        .string()
+        .optional()
+        .describe('One plain line shown to the owner instead of the generic message.'),
     })
     .optional()
     .describe('Host-only failure captured while preparing the call, before provider dispatch.'),
@@ -144,6 +148,10 @@ export const InternalToolCallInfoSchema = z.object({
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
+  tier_reason: z
+    .string()
+    .optional()
+    .describe('Server-owned classifier reason code behind the tier. Never model-authored.'),
   tier3_card: Tier3CardSchema.nullable()
     .optional()
     .describe('Server-rendered approval card for Tier 2 and Tier 3 actions, or null.'),

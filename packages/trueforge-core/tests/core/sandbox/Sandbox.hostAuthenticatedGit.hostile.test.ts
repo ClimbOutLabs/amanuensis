@@ -224,7 +224,7 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
     }
     const provider = makeRealProvider({ root, writablePathDirs: dirs, gitReplacement: fakeGit });
 
-    // Control: the lock wrapper runs PATH-resolved tools, so a token in its env would leak to them.
+    // The lock wrapper runs its helpers by fixed path, so a shim on the sandbox PATH never sees an env token.
     await provider.exec({
       sandboxId: root,
       command: 'true',
@@ -232,8 +232,7 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       env: { TRUEFORGE_GIT_TOKEN: TOKEN },
       workspaceLock: { workspaceRoot: repo },
     });
-    expect(existsSync(seen)).toBe(true);
-    rmSync(seen);
+    expect(existsSync(seen)).toBe(false);
 
     const sandbox = makeSandbox(provider, root);
     for (const command of [
