@@ -6,6 +6,7 @@ import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { checkHeldReplay, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
+import { DEMO_SEND_REFUSAL } from '../../../src/core/permissions/sendAllowlist';
 import type { Route } from '../email/gmail/harness';
 import { scriptedGoogle } from '../email/gmail/harness';
 import { build, EVENTS_PATH, json, text } from './harness';
@@ -522,6 +523,81 @@ describe('a held event the owner approves later', () => {
   it('never writes it once the hold has expired', async () => {
     const { check, google } = await holdThenAnswer({ expired: true });
     expect(check).toEqual({ ok: false, reason: 'expired' });
+    expect(writes(google.urls)).toEqual([]);
+  });
+});
+
+describe('on a demo instance', () => {
+  const ALLOWED = 'guest@demo.example';
+
+  function demoServices(): SentinelServices {
+    return { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), demoSendAllowlist: [ALLOWED] };
+  }
+
+  async function demoBuild(routes: Route[] = [insertRoute]) {
+    return await build({ routes, features: [...WRITE], timeZone: 'America/New_York', services: demoServices() });
+  }
+
+  it('refuses a new event with a guest off the send list even when Google would not email them', async () => {
+    const built = await demoBuild();
+    const info = await built.tools.toolCallInfo({
+      name: 'create_event',
+      arguments: { ...DENTIST, attendees: [ALLOWED, 'stranger@example.com'], send_updates: 'none' },
+    });
+    expect(info.pre_dispatch_failure?.message).toContain(DEMO_SEND_REFUSAL);
+    expect(info.is_approval_required).not.toBe(true);
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('asks as usual for guests on the send list, and for an event with no guests', async () => {
+    const built = await demoBuild();
+    for (const args of [{ ...DENTIST, attendees: [ALLOWED.toUpperCase()], send_updates: 'all' }, DENTIST]) {
+      const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: args });
+      expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+      expect(info.pre_dispatch_failure).toBeUndefined();
+    }
+  });
+
+  it('cannot add a guest through a change: update_event takes no attendees', async () => {
+    const built = await demoBuild([eventRoutes(() => ({ ...STANDUP, attendees: [] }))]);
+    const response = await built.tools.callTool({
+      name: 'update_event',
+      arguments: { event_id: 'ev1', title: 'x', attendees: ['stranger@example.com'], send_updates: 'all' },
+    });
+    expect(text(response)).toContain('Validation failed');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('refuses a change to an event that already has a guest off the send list, whatever send_updates is', async () => {
+    const built = await demoBuild([eventRoutes(() => STANDUP)]);
+    for (const send_updates of ['none', 'all']) {
+      const info = await built.tools.toolCallInfo({
+        name: 'update_event',
+        arguments: { event_id: 'ev1', title: 'x', send_updates },
+      });
+      expect(info.pre_dispatch_failure?.message).toContain(DEMO_SEND_REFUSAL);
+    }
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('refuses at dispatch a write approved before the send list was set, and writes nothing', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const google = scriptedGoogle([insertRoute]);
+    const before = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York', services, google });
+    const args = { ...DENTIST, attendees: ['stranger@example.com'], send_updates: 'none' };
+    const approvedInfo = await before.tools.toolCallInfo({ name: 'create_event', arguments: args });
+    const demo = await build({
+      routes: [],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services: { ...services, demoSendAllowlist: [ALLOWED] },
+      google,
+    });
+    const response = await demo.tools.callTool({ name: 'create_event', arguments: args }, undefined, {
+      admission_provenance: { source: 'user_approval', decision: 'allow' },
+      approved_params: approvedInfo.mint_canonical_params,
+    });
+    expect(text(response)).toContain(DEMO_SEND_REFUSAL);
     expect(writes(google.urls)).toEqual([]);
   });
 });

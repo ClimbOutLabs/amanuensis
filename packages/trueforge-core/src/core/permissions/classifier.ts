@@ -1687,6 +1687,14 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
       });
     }
     const review = action.calendar_write;
+    // A guest is reached even without an email (Google adds invites to their calendar), so on a demo every guest
+    // must be on the send list. An event with no guests reaches no one.
+    if (
+      review.attendees.length > 0 &&
+      !recipientsAllowed({ allowlist: ctx.services.demoSendAllowlist, recipients: review.attendees })
+    ) {
+      return demoRefusal(DEMO_SEND_REFUSAL);
+    }
     if (review.incomplete_reason !== null) {
       return autoDenyDecision({
         reason: 'incomplete_send_card',

@@ -10,6 +10,7 @@ import { stampSentinelDecision } from '../mcp/ToolSet';
 import { stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
+import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { CalendarApi } from './CalendarApi';
@@ -343,6 +344,13 @@ export class CalendarToolSet extends LocalToolMCP {
       );
     }
     const { review } = resolved;
+    // Checked again here so the demo send list holds even for a write approved before it was set.
+    if (
+      review.attendees.length > 0 &&
+      !recipientsAllowed({ allowlist: this.#options.sentinel.services.demoSendAllowlist, recipients: review.attendees })
+    ) {
+      return await refuse(DEMO_SEND_REFUSAL);
+    }
     const what = `"${review.title}" on ${review.when} (${review.time_zone})${review.guests_emailed ? `, guests emailed: ${review.attendees.join(', ')}` : ''}`;
     try {
       const saved = await input.send(resolved.request);
