@@ -198,6 +198,8 @@ export const ImportArtifactRecordSchema = z.object({
   mime: z.string().nullable(),
   skip_reason: z.string().nullable(),
   created_at: z.string(),
+  /** Where the file's bytes are in the archive; absent when they were not exported. */
+  archive_entry: z.string().startsWith('files/').optional(),
 });
 export type ImportArtifactRecord = z.infer<typeof ImportArtifactRecordSchema>;
 

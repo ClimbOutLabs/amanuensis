@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { sql, type Transaction } from 'kysely';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
-import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
+import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DataImportError } from '../../../src/dataImport/importError';
 import { IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
@@ -493,11 +494,14 @@ describe('runDataImport', () => {
     }
   });
 
-  it('imports artifacts as skipped when the files were not included in the export', async () => {
+  it('imports artifacts as skipped when the files were not included in the export, and counts them', async () => {
     const { source, archive } = await seededArchive(false);
     const target = await makeInstance('target-artifacts');
     try {
-      await runDataImport(importDeps(target), importRequest(archive));
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.summary).toContain(
+        '1 uploaded file was left behind because the export did not include it; the chats still show its name.',
+      );
       const artifacts = await target.stores.turnArtifactStore.listArtifacts({
         tenant_id: TENANT,
         session_id: SEED_IDS.sessionMain,
@@ -505,6 +509,129 @@ describe('runDataImport', () => {
       });
       expect(artifacts).toHaveLength(1);
       expect(artifacts[0]).toMatchObject({ path: 'notes.txt', status: 'skipped_missing' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('export and import round trip', () => {
+  it('restores each upload with its own bytes when two turns used the same path', async () => {
+    const source = await makeInstance('source-uploads');
+    const target = await makeInstance('target-uploads');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      // The seed stores notes.txt in turn 1; turn 2 reuses the path, and turn 1 holds a case twin.
+      const uploads = [
+        { turn_id: 'session-1-turn-1', path: 'notes.txt', data: Buffer.from('hello artifact') },
+        { turn_id: 'session-1-turn-2', path: 'notes.txt', data: Buffer.from('second turn, other bytes') },
+        { turn_id: 'session-1-turn-1', path: 'NOTES.txt', data: Buffer.from([0x00, 0xff, 0x9f]) },
+      ];
+      for (const upload of uploads.slice(1)) {
+        await source.stores.turnArtifactStore.recordStoredArtifact({
+          tenant_id: TENANT,
+          session_id: SEED_IDS.sessionMain,
+          turn_id: upload.turn_id,
+          path: upload.path,
+          name: upload.path,
+          data: upload.data,
+          mime: 'application/octet-stream',
+        });
+      }
+      const archive = await exportArchive(source);
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.summary).not.toContain('left behind');
+      for (const upload of uploads) {
+        const restored = (
+          await target.stores.turnArtifactStore.listArtifacts({
+            tenant_id: TENANT,
+            session_id: SEED_IDS.sessionMain,
+            turn_id: upload.turn_id,
+          })
+        ).find(artifact => artifact.path === upload.path);
+        expect(restored?.status).toBe('stored');
+        const bytes =
+          restored?.digest === null || restored?.digest === undefined
+            ? undefined
+            : await target.stores.turnArtifactStore.getBlob({ tenant_id: TENANT, digest: restored.digest });
+        expect(bytes?.equals(upload.data)).toBe(true);
+      }
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('keeps an agent and chat text that contain the compose default database password', async () => {
+    const source = await makeInstance('source-dbpass');
+    const target = await makeInstance('target-dbpass');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      const spec = AgentSpecSchema.parse({
+        model: { name: 'test-provider/test-model' },
+        instructions: 'Use trueforge.',
+      });
+      const owner = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+      await source.stores.agentStore.createAgent({
+        tenant_id: TENANT,
+        created_by_subject: owner,
+        name: 'trueforge-helper',
+        description: 'Checks the trueforge logs.',
+        manifest: spec,
+        external_id: null,
+      });
+      const question = 'Ask trueforge-helper to check the trueforge logs';
+      await source.stores.sessionStore.createSession({
+        tenant_id: TENANT,
+        session_id: 'session-dbpass',
+        created_by_subject: owner,
+        agent: { type: 'inline', spec },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      await source.stores.sessionStore.createTurn(
+        makeCreateTurnInput({
+          sessionId: 'session-dbpass',
+          turnId: 'session-dbpass-turn-1',
+          new_context_appends: [
+            { thread_id: MAIN_THREAD_ID, context: [{ role: 'user', content: question }], current_context_usage: null },
+          ],
+        }),
+      );
+      // What the runtime hands the export when the compose stack runs with POSTGRES_PASSWORD=trueforge.
+      const secrets = normalizeSecrets(['trueforge', 'postgres://trueforge:trueforge@postgres:5432/trueforge']);
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice', secrets });
+      const entries = readZipEntries(archive);
+      expect(entries.find(entry => entry.name === 'chats.json')?.data.toString('utf8')).toContain(question);
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      const agents = await target.stores.agentStore.listAgents({
+        tenant_id: TENANT,
+        agent_name: undefined,
+        limit: undefined,
+        page_token: undefined,
+      });
+      expect(agents.data.map(agent => agent.name)).toContain('trueforge-helper');
+      const turn = await target.stores.sessionStore.getTurn({
+        session_id: 'session-dbpass',
+        turn_id: 'session-dbpass-turn-1',
+      });
+      expect(JSON.stringify(turn)).toContain(question);
     } finally {
       await source.close();
       await target.close();

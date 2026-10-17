@@ -1,20 +1,21 @@
 # Move from the old compose stacks to installer instances
 
-This is a step-by-step guide for moving each person from an old docker compose stack (Postgres, Redis, sign-in with OIDC) to a new installer instance (SQLite, one account). It assumes a Linux server where the old stacks live under `~/aman-prod/<person>/`, with compose project names like `aman-prod-<person>` and an app container named `aman-prod-<person>-aman-1`.
+This is a step-by-step guide for moving each person from an old docker compose stack (Postgres, Redis, sign-in through a separate login service) to a new installer instance (SQLite). Each person gets a new instance. It assumes a Linux server where the old stacks live under `~/aman-prod/<person>/`, with compose project names like `aman-prod-<person>` and an app container named `aman-prod-<person>-aman-1`.
 
 Nothing here touches the old stacks except to read from them. They keep running the whole time, so going back is always possible.
 
-Do one person at a time, from step 1 to step 6. Where a command says `<person>`, use the same short name the old project uses. Every value you need is read from the old app container, so there is nothing to look up by hand.
+Do one person at a time, from step 1 to step 7. Step 8 is only for going back. Where a command says `<person>`, use the same short name the old project uses. Every value you need is read from the old app container, so there is nothing to look up by hand.
 
 ## What moves and what does not
 
-Moves: chats with their original dates, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Approve for this chat" choices start over.
+Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Approve for this chat" choices start over.
 
 Does not move: model keys, connector sign-ins and saved credentials, your own skills and registered repositories, and safety settings (Settings, Permissions: offline mode, Always allow and web search; Settings, Memory: the recall and tool-output checks). A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
 Good to know:
 
-- Each new instance has exactly one account, the owner's email. Everything that person owned is re-owned to it. The old sign-in subject is not used any more.
+- Each person gets a new instance. Everything that person owned now belongs to the owner of the new instance, who signs in with their email. The old sign-in id is not used any more.
+- Only import a file you exported yourself.
 - Personas, spaces, folders and schedules show the import time as their date. Chats keep their own dates.
 - Connectors were shared by the whole old instance, so a connector list carries every connector of that stack. With one stack per person this is the person's own list.
 
@@ -119,14 +120,16 @@ aman_copy() {
 }
 ```
 
-List the people who own chats in the copy, then export the owner. Use the id exactly as the list shows it (the OIDC subject). A line named `trueforge-default` with 0 sessions is always listed; ignore it.
+List the people who own chats in the copy, then export the owner. Use the id exactly as the list shows it (the old sign-in id). A line named `trueforge-default` with 0 sessions is always listed; ignore it.
 
 ```bash
 aman_copy export-data --migrate --list-users
-aman_copy export-data --migrate --user '<oidc-subject>' --out /out/$PERSON.zip
+aman_copy export-data --migrate --include-uploads --user '<user-id>' --out /out/$PERSON.zip
 ```
 
-`--migrate` brings the old database forward to the new schema. It changes only the temporary copy. The export prints one line of JSON and exits 0. Exit codes are 0 for success, 1 for a failure (one plain line says why) and 2 for a bad command line.
+`--migrate` brings the old database forward to the new schema. It changes only the temporary copy. `--include-uploads` brings the files uploaded to chats; they are kept in the database, so nothing more needs to be mounted. The export prints one line of JSON and exits 0.
+
+Shared memories (what the assistant remembered outside any persona) are left out by default, because on a stack that more than one person used they mix everyone's memories. If `--list-users` shows only this person, export again with `--include-instance-data` added to bring them too. The export also leaves out a persona's memory when another person on the stack has a persona with the same name, and says so. Exit codes are 0 for success, 1 for a failure (one plain line says why) and 2 for a bad command line.
 
 The helper runs as you, so the file is written into your private folder as a file you own. Check it:
 
@@ -189,7 +192,7 @@ A failed import leaves the instance as it was and always starts the app again. T
 
 ## 6. Check the result
 
-1. Compare the counts in the import summary with what you wrote down: chats, personas, spaces, agents, schedules. The chat count must equal the session count from `--list-users`.
+1. Compare the counts in the import summary with what you wrote down: chats, personas, spaces, agents, schedules. The chat count must equal the session count from `--list-users`. If the summary says uploaded files were left behind, the export was made without `--include-uploads`; export again with it.
 2. Sign in as the owner. Open the chat list and check that the oldest and newest chats are there, with their original dates and in the same order, and open one that used a tool and one that asked for approval.
 3. Open Settings and check agents (their instructions), personas (and their knowledge), spaces (and their history), and memory. Ask the assistant something only a memory would know; recall should find it.
 4. Check that schedules are listed and switched off.
@@ -200,7 +203,7 @@ Only that person's data should be there. If the old stack held more than one per
 ## 7. What to redo by hand
 
 - Model keys and the model server address: Settings, Models. Keys are never exported.
-- Connector sign-ins: a connector that signs in with OAuth arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
+- Connector sign-ins: a connector that signs in through its own website arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
 - Safety settings: in Settings, open Permissions and Memory and set offline mode, web search and the recall and tool-output checks on the new instance.
 - "Always allow" choices: each tool asks again the first time and you can pick Always allow once more.

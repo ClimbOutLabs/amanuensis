@@ -11,17 +11,19 @@ import type { ExportDataSession } from './session';
 import { looksLikeOldSchema } from './stores';
 
 const USAGE = `Usage: aman export-data --list-users
-       aman export-data --user <id> --out <file.zip> [--include-uploads] [--no-instance-data] [--migrate]
+       aman export-data --user <id> --out <file.zip> [--include-uploads] [--include-instance-data] [--migrate]
 
-Exports one user's data (chats, sessions, agents, personas, spaces, schedules, connectors without
-credentials, settings and memory) from this instance's database and memory files, with no sign-in.
+Exports one person's data (chats, sessions, agents, personas, spaces, schedules, connectors without
+their keys, settings and memory) from this instance's database and memory files. This is run by
+whoever operates the instance, from a terminal on the machine that runs it; there is no button in the app.
 
-  --list-users          Print the user ids that own sessions, with their session counts
-  --user <id>           The user id from --list-users
-  --out <file.zip>      Where to write the archive; it is written whole or not at all, and never overwritten
-  --include-uploads     Also include uploaded file bytes
-  --no-instance-data    Leave out the shared memory vaults and instance settings
-  --migrate             First update an older database to this version's schema (changes the database; back it up)
+  --list-users              Print the user ids that own sessions, with their session counts
+  --user <id>               The user id from --list-users
+  --out <file.zip>          Where to write the archive; it is written whole or not at all, and never overwritten
+  --include-uploads         Also include the files people uploaded to their chats
+  --include-instance-data   Also include the shared memories and instance settings; they can hold other
+                            people's data, so use it only when nobody else used this instance
+  --migrate                 First update an older database to this version's schema (changes the database; back it up)
 
 Without sign-in, all data belongs to one user id, which --list-users always shows.
 `;
@@ -51,7 +53,7 @@ function parseOptions(args: readonly string[]) {
         user: { type: 'string' },
         out: { type: 'string' },
         'include-uploads': { type: 'boolean', default: false },
-        'no-instance-data': { type: 'boolean', default: false },
+        'include-instance-data': { type: 'boolean', default: false },
         migrate: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -94,7 +96,7 @@ export function createExportData(deps: ExportDataDeps): Command {
     if (listing === (options.user !== undefined)) {
       throw new UsageError('Use either --list-users, or --user <id> with --out <file.zip>.');
     }
-    if (listing && (options.out !== undefined || options['include-uploads'] || options['no-instance-data'])) {
+    if (listing && (options.out !== undefined || options['include-uploads'] || options['include-instance-data'])) {
       throw new UsageError('--list-users takes no other options except --migrate.');
     }
     const userId = options.user?.trim();
@@ -159,8 +161,27 @@ export function createExportData(deps: ExportDataDeps): Command {
         });
       await printJson({
         io,
-        value: { user_id: plan.userId, out: plan.target, bytes: result.bytesWritten, files: result.entries },
+        value: {
+          user_id: plan.userId,
+          out: plan.target,
+          bytes: result.bytesWritten,
+          files: result.entries,
+          redactions: result.redactions,
+          uploads_included: options['include-uploads'],
+          instance_data_included: options['include-instance-data'],
+          persona_memory_left_out: result.personaVaultsLeftOut,
+        },
       });
+      if (!options['include-instance-data']) {
+        await io.stderr(
+          'Shared memories and instance settings were left out. If nobody else used this instance, export again with --include-instance-data.\n',
+        );
+      }
+      if (result.personaVaultsLeftOut > 0) {
+        await io.stderr(
+          `Memory of ${String(result.personaVaultsLeftOut)} persona(s) was left out: another person here has a persona with the same name, so that memory is shared.\n`,
+        );
+      }
       return 0;
     } catch (error) {
       if (error instanceof UsageError) {
@@ -183,7 +204,7 @@ async function writeArchive({
   session: ExportDataSession;
   userId: string;
   target: string;
-  options: { 'include-uploads': boolean; 'no-instance-data': boolean };
+  options: { 'include-uploads': boolean; 'include-instance-data': boolean };
 }) {
   const partial = path.join(
     path.dirname(target),
@@ -198,7 +219,7 @@ async function writeArchive({
     const result = await session.exportUser({
       userId,
       includeUploads: options['include-uploads'],
-      includeInstanceData: !options['no-instance-data'],
+      includeInstanceData: options['include-instance-data'],
       out: file,
     });
     file.end();

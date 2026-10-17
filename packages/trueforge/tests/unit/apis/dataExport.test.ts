@@ -708,20 +708,22 @@ describe('Data export route', () => {
     expect(settings.instance).toEqual([]);
   });
 
-  it('keeps every planted secret out of the archive', async () => {
+  it('keeps every planted secret out of the archive, except inside the files the owner uploaded', async () => {
     const zipBytes = await exportZip('alice', { uploads: true, admin: true });
-    for (const secret of [
-      PROVIDER_API_KEY,
-      CONNECTOR_HEADER_SECRET,
-      OAUTH_ACCESS_TOKEN,
-      PASTED_GITHUB_TOKEN,
-      CONNECTOR_PATH_TOKEN,
-      CONNECTOR_QUERY_SECRET,
-    ]) {
-      expect(zipBytes.includes(Buffer.from(secret))).toBe(false);
+    const entries = readZipEntries(zipBytes);
+    for (const entry of entries.filter(item => !item.name.startsWith('files/'))) {
+      for (const secret of [
+        PROVIDER_API_KEY,
+        CONNECTOR_HEADER_SECRET,
+        OAUTH_ACCESS_TOKEN,
+        PASTED_GITHUB_TOKEN,
+        CONNECTOR_PATH_TOKEN,
+        CONNECTOR_QUERY_SECRET,
+      ]) {
+        expect(entry.data.includes(Buffer.from(secret))).toBe(false);
+      }
     }
     // The scrubbed content itself still ships, around the redactions.
-    const entries = readZipEntries(zipBytes);
     const chats = zipEntryText(entries, 'chats.json');
     expect(chats).toContain('please use it');
     expect(chats).toContain('[redacted]');
@@ -772,18 +774,28 @@ describe('Data export route', () => {
     expect(bobMemory.every(name => name.startsWith(`memory/${BOB_VAULT}/`))).toBe(true);
   });
 
-  it('includes uploaded files only when requested, scrubbing text and normalizing names', async () => {
+  it('includes uploaded files only when requested, byte-exact, under normalized names the index records', async () => {
     const withUploads = readZipEntries(await exportZip('alice', { uploads: true }));
     const names = withUploads.map(entry => entry.name);
-    expect(names).toContain('files/alice-session-1/notes.txt');
-    expect(names).toContain('files/alice-session-1/blob.bin');
-    expect(names).toContain('files/alice-session-1/escape.txt');
+    const turnDir = 'files/alice-session-1/alice-session-1-turn-1';
+    expect(names).toContain(`${turnDir}/notes.txt`);
+    expect(names).toContain(`${turnDir}/blob.bin`);
+    expect(names).toContain(`${turnDir}/escape.txt`);
     expect(names.every(name => !name.includes('..') && !name.includes('\\') && !name.startsWith('/'))).toBe(true);
-    const notes = zipEntryText(withUploads, 'files/alice-session-1/notes.txt');
-    expect(notes).toContain('remember the token');
-    expect(notes).not.toContain(OAUTH_ACCESS_TOKEN);
-    const blob = withUploads.find(entry => entry.name === 'files/alice-session-1/blob.bin');
+    // The owner's own file ships as uploaded; the export never rewrites its bytes.
+    expect(zipEntryText(withUploads, `${turnDir}/notes.txt`)).toBe(`remember the token ${OAUTH_ACCESS_TOKEN}`);
+    const blob = withUploads.find(entry => entry.name === `${turnDir}/blob.bin`);
     expect(blob?.data.equals(Buffer.from([0x00, 0x9f, 0xff, 0x10, 0x42]))).toBe(true);
+    const [entry] = z
+      .array(z.object({ artifacts: z.array(z.object({ path: z.string(), archive_entry: z.string() })) }))
+      .parse(zipEntryJson(withUploads, 'sessions.json'));
+    expect(
+      Object.fromEntries((entry?.artifacts ?? []).map(artifact => [artifact.path, artifact.archive_entry])),
+    ).toEqual({
+      'notes.txt': `${turnDir}/notes.txt`,
+      'blob.bin': `${turnDir}/blob.bin`,
+      '..\\..\\C:\\escape.txt': `${turnDir}/escape.txt`,
+    });
   });
 
   it('fails the download, not just truncates it, when the size cap is hit', async () => {

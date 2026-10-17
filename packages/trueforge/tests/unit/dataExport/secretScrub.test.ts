@@ -14,10 +14,9 @@ const sample = {
 
 describe('export secret scrubbing', () => {
   it('normalizeSecrets drops short values, adds the parts of a header value, and sorts longest first', () => {
-    expect(normalizeSecrets(['short', 'a-much-longer-secret', 'mid-length-1', null, undefined])).toEqual([
-      'a-much-longer-secret',
-      'mid-length-1',
-    ]);
+    expect(
+      normalizeSecrets(['short', 'a-much-longer-secret', 'sixteen-chars-ok', 'mid-length-1', null, undefined]),
+    ).toEqual(['a-much-longer-secret', 'sixteen-chars-ok']);
     expect(normalizeSecrets(['Bearer abcdefgh12345678'])).toEqual(['Bearer abcdefgh12345678', 'abcdefgh12345678']);
   });
 
@@ -70,5 +69,45 @@ describe('export secret scrubbing', () => {
     expect(scrubber.url(`https://host.example.com/${sample.github}`)).toBe('https://host.example.com/[redacted]');
     expect(scrubber.url('https://host.example.com/mcp')).toBe('https://host.example.com/mcp');
     expect(scrubber.url('not a url')).toBe(REDACTED);
+  });
+
+  it('leaves the compose default database password alone, so names and chat text that contain it survive', () => {
+    const scrubber = createExportScrubber(normalizeSecrets(['trueforge', 'postgres://trueforge:trueforge@db/aman']));
+    expect(scrubber.json({ name: 'trueforge-helper', text: 'ask trueforge-helper about the trueforge setup' })).toEqual(
+      {
+        name: 'trueforge-helper',
+        text: 'ask trueforge-helper about the trueforge setup',
+      },
+    );
+    expect(scrubber.redactionCount()).toBe(0);
+  });
+
+  it('never rewrites identity fields, even when they hold a stored secret or a credential shape', () => {
+    const secret = 'stored-secret-value-1234';
+    const scrubber = createExportScrubber([secret]);
+    const record = {
+      id: secret,
+      session_id: secret,
+      name: `agent ${sample.github}`,
+      display_name: secret,
+      path: `files/${secret}.txt`,
+      archive_entry: `files/s/t/${secret}.txt`,
+      instructions: `use ${secret}`,
+    };
+    expect(scrubber.json(record)).toEqual({ ...record, instructions: 'use [redacted]' });
+    expect(scrubber.redactionCount()).toBe(1);
+  });
+
+  it('removes the body of a PEM private key through its END line, keeping the text around it', () => {
+    const body = 'MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun';
+    // Banners are assembled so no literal in this file looks like a real key.
+    const banner = (edge: string, kind: string) =>
+      `-----${[edge, kind, 'PRIVATE', 'KEY'].filter(Boolean).join(' ')}-----`;
+    const scrubber = createExportScrubber([]);
+    expect(scrubber.text(`key:\n${banner('BEGIN', 'RSA')}\n${body}\n${banner('END', 'RSA')}\nthanks`)).toBe(
+      'key:\n[redacted]\nthanks',
+    );
+    expect(scrubber.text(`${banner('BEGIN', '')}\n${body}`)).toBe(REDACTED);
+    expect(scrubber.redactionCount()).toBe(2);
   });
 });

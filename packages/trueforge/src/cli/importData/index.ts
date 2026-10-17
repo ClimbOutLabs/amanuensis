@@ -10,9 +10,11 @@ import type { ImportDataSession } from './session';
 
 const USAGE = `Usage: aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]
 
-Restores a data export (made by aman export-data) into this instance. The
-instance has one account, its owner, and everything imported belongs to it. The instance must be
-fresh (no chats, personas, agents or other data yet); stop the app before running this by hand.
+Restores a data export (made by aman export-data) into this instance. Each person gets a new
+instance. Everything imported belongs to this instance's owner. Only import a file you exported
+yourself. The instance must be fresh (no chats, personas, agents or other data yet); stop the app
+before running this by hand. This is run by whoever operates the instance, from a terminal on the
+machine that runs it; there is no button in the app.
 
   --in <file.zip>         The export archive
   --user <owner>          The owner's user id (default: the owner); any other id is refused
@@ -109,7 +111,7 @@ export function createImportData(deps: ImportDataDeps): Command {
       const userId = options.user?.trim() ?? session.owner;
       if (userId !== session.owner) {
         throw new UsageError(
-          `--user must be this instance's owner (${session.owner}). The instance has one account, so an import is only made for its owner.`,
+          `--user must be this instance's owner (${session.owner}). Each person gets a new instance, so an import is only made for its owner.`,
         );
       }
       const named = options['display-name']?.trim();

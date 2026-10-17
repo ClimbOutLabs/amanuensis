@@ -32,11 +32,14 @@ export async function exportInstanceArchive<TTransaction>({
   tenantId,
   subjectId,
   includeUploads = true,
+  secrets = [],
 }: {
   instance: ExportableInstance<TTransaction>;
   tenantId: string;
   subjectId: string;
   includeUploads?: boolean;
+  /** Normalized exact-match secrets, as the entry points pass them. */
+  secrets?: readonly string[];
 }): Promise<Buffer> {
   const { stores } = instance;
   const deps: DataExportDeps<TTransaction> = {
@@ -67,7 +70,7 @@ export async function exportInstanceArchive<TTransaction>({
     deps,
     {
       subject: { tenantId, subjectId, includeUploads, includeInstanceData: true },
-      secrets: [],
+      secrets,
       exportedAt: EXPORT_TEST_TIME,
       appVersion: '0.0.0-test',
       maxBytes: 1024 * 1024 * 1024,

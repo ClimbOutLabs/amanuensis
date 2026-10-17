@@ -1,8 +1,9 @@
 /**
  * Secret scrubbing for every byte the data export writes, in two layers:
  *
- * 1. Exact match: each secret value this server holds is removed wherever it
- *    appears, in any section, including inside chat text and memory files.
+ * 1. Exact match: each secret value this server holds is removed from text,
+ *    including chat text and memory files. Identity fields (ids, names, paths)
+ *    and uploaded files are never rewritten.
  * 2. Shape match: credential-shaped substrings and secret-named JSON keys are
  *    redacted even when they are not stored secrets (a key pasted into a chat).
  *
@@ -12,8 +13,19 @@
 
 export const REDACTED = '[redacted]';
 
-/** Stored values shorter than this are not treated as secrets: exact-matching them would redact ordinary words. */
-export const MIN_SECRET_LENGTH = 8;
+/**
+ * Stored values shorter than this are not matched in content. A short value (a compose default
+ * database password such as `trueforge`) is also an ordinary word, and redacting it rewrites the
+ * owner's names and chat text; issued keys and tokens are longer.
+ */
+export const MIN_SECRET_LENGTH = 16;
+
+const STRUCTURAL_KEYS: ReadonlySet<string> = new Set(['key', 'path', 'digest', 'archive_entry']);
+
+/** Identity fields an import keys on; they are never rewritten, or the restored data no longer fits together. */
+function isStructuralKey(key: string): boolean {
+  return key === 'id' || key.endsWith('_id') || key === 'name' || key.endsWith('_name') || STRUCTURAL_KEYS.has(key);
+}
 
 /** JSON keys whose values are always secrets. */
 const SECRET_KEYS = new Set([
@@ -52,7 +64,8 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key ids
   /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWTs
   /\bBearer\s+[A-Za-z0-9\-._~+/=]{20,}/g, // Bearer <token>
-  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g, // PEM blocks
+  // PEM private key through its END line; a block cut off before END is redacted to the end of the text.
+  /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----[\s\S]*?(?:-----END \1PRIVATE KEY-----|$)/g,
   // Password inside a connection URL (`postgres://user:password@host`); the user and host stay.
   new RegExp(`(?<=\\b(?:${CREDENTIAL_SCHEMES})://[^\\s:@/]+:)[^\\s@/]+(?=@)`, 'g'),
 ];
@@ -76,9 +89,9 @@ export function normalizeSecrets(values: Iterable<string | null | undefined>): s
 }
 
 export interface ExportScrubber {
-  /** Scrubs every string in a JSON value and the value of every secret-named key. */
+  /** Scrubs every string in a JSON value except identity fields, and the value of every secret-named key. */
   json(value: unknown): unknown;
-  /** Scrubs free text (Markdown, file contents). */
+  /** Scrubs free text (Markdown, memory files). Uploaded files are the owner's own and are never passed here. */
   text(text: string): string;
   /**
    * A connector URL without credentials: userinfo, query and fragment are dropped, and any
@@ -162,6 +175,8 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
         if (SECRET_KEYS.has(key.toLowerCase()) && entry !== null && entry !== '') {
           redactions += 1;
           out[key] = REDACTED;
+        } else if (isStructuralKey(key)) {
+          out[key] = entry;
         } else {
           out[key] = scrubJson(entry);
         }

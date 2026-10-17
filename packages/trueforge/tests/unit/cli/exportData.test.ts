@@ -16,6 +16,7 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { sanitizeNamespace, vaultWriteNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 import { fakeIo } from './fakeIo';
 
@@ -24,7 +25,16 @@ const ListSchema = z.object({
   sign_in_off_user_id: z.string().optional(),
   users: z.array(z.object({ user_id: z.string(), display_name: z.string(), sessions: z.number() })),
 });
-const ResultSchema = z.object({ user_id: z.string(), out: z.string(), bytes: z.number(), files: z.number() });
+const ResultSchema = z.object({
+  user_id: z.string(),
+  out: z.string(),
+  bytes: z.number(),
+  files: z.number(),
+  redactions: z.number(),
+  uploads_included: z.boolean(),
+  instance_data_included: z.boolean(),
+  persona_memory_left_out: z.number(),
+});
 
 let scratch: string;
 
@@ -42,7 +52,7 @@ function fakeSession(overrides: Partial<ExportDataSession> = {}): ExportDataSess
     listOwners: () => Promise.resolve([{ user_id: 'alice', display_name: 'Alice', sessions: 3 }]),
     exportUser: ({ out }) => {
       out.write('zip-bytes');
-      return Promise.resolve({ bytesWritten: 9, entries: 1, redactions: 0 });
+      return Promise.resolve({ bytesWritten: 9, entries: 1, redactions: 2, personaVaultsLeftOut: 0 });
     },
     recordAudit: () => Promise.resolve(),
     close: () => Promise.resolve(),
@@ -110,8 +120,35 @@ describe('aman export-data --user', () => {
     const out = path.join(scratch, 'export.zip');
     const io = fakeIo();
     expect(await command(fakeSession())({ args: ['--user', 'alice', '--out', out], io })).toBe(0);
-    expect(ResultSchema.parse(JSON.parse(io.out.join('')))).toMatchObject({ user_id: 'alice', out, bytes: 9 });
+    expect(ResultSchema.parse(JSON.parse(io.out.join('')))).toMatchObject({
+      user_id: 'alice',
+      out,
+      bytes: 9,
+      redactions: 2,
+      uploads_included: false,
+      instance_data_included: false,
+    });
     expect(await readdir(scratch)).toEqual(['export.zip']);
+  });
+
+  it('leaves the shared memories out unless asked, and says how to bring them', async () => {
+    const asked: boolean[] = [];
+    const session = fakeSession({
+      exportUser: ({ includeInstanceData }) => {
+        asked.push(includeInstanceData);
+        return Promise.resolve({ bytesWritten: 0, entries: 0, redactions: 0, personaVaultsLeftOut: 0 });
+      },
+    });
+    const io = fakeIo();
+    await command(session)({ args: ['--user', 'alice', '--out', path.join(scratch, 'a.zip')], io });
+    expect(io.err.join('')).toContain('--include-instance-data');
+    const withShared = fakeIo();
+    await command(session)({
+      args: ['--user', 'alice', '--out', path.join(scratch, 'b.zip'), '--include-instance-data'],
+      io: withShared,
+    });
+    expect(asked).toEqual([false, true]);
+    expect(withShared.err.join('')).toBe('');
   });
 
   it('never leaves a partial file when the export fails midway', async () => {
@@ -292,7 +329,7 @@ describe('aman export-data against a real database', () => {
 
     const out = path.join(scratch, 'out.zip');
     const io = fakeIo();
-    expect(await real({ args: ['--user', 'trueforge-default', '--out', out], io })).toBe(0);
+    expect(await real({ args: ['--user', 'trueforge-default', '--out', out, '--include-instance-data'], io })).toBe(0);
     expect(ResultSchema.parse(JSON.parse(io.out.join(''))).out).toBe(out);
 
     const { readFile } = await import('node:fs/promises');
@@ -327,6 +364,54 @@ describe('aman export-data against a real database', () => {
         expect.stringMatching(/^Exported data of user trueforge-default from the command line \(\d+ bytes\)\.$/),
       ],
     ]);
+  });
+
+  it("keeps another person's memories out: the shared vault by default, and a persona vault that shares a name", async () => {
+    const zara = (user: string, id: string) => ({
+      tenant_id: 'default',
+      created_by: user,
+      id,
+      display_name: 'Zara',
+      updated_by: user,
+      aliases: [],
+      instructions: 'Help.',
+      model_name: 'test-provider/test-model',
+    });
+    await database(async db => {
+      await seedSession(db, 'alice', 'a1');
+      await seedSession(db, 'bob', 'b1');
+      const personas = new SqlitePersonaStore(db);
+      await personas.createPersona(zara('alice', 'p-alice'));
+      await personas.createPersona(zara('bob', 'p-bob'));
+      await personas.createPersona({ ...zara('alice', 'p-alice-2'), display_name: 'Coach' });
+    });
+    const vaultDir = (name: string) =>
+      path.join(
+        scratch,
+        'memory',
+        sanitizeNamespace(
+          vaultWriteNamespace({ tenantNamespace: 'default', scope: { personaName: name, personaId: '' } }),
+        ),
+      );
+    await mkdir(path.join(scratch, 'memory', 'default'), { recursive: true });
+    await writeFile(path.join(scratch, 'memory', 'default', 'MEMORY.md'), '# Shared\n\nBob: my locker code is 4471\n');
+    await mkdir(vaultDir('Zara'), { recursive: true });
+    await writeFile(path.join(vaultDir('Zara'), 'MEMORY.md'), '# Zara\n\nBob told Zara his bank pin\n');
+    await mkdir(vaultDir('Coach'), { recursive: true });
+    await writeFile(path.join(vaultDir('Coach'), 'MEMORY.md'), '# Coach\n\nAlice runs on Sundays\n');
+
+    const out = path.join(scratch, 'alice.zip');
+    const io = fakeIo();
+    expect(await real({ args: ['--user', 'alice', '--out', out], io })).toBe(0);
+    expect(ResultSchema.parse(JSON.parse(io.out.join('')))).toMatchObject({
+      instance_data_included: false,
+      persona_memory_left_out: 1,
+    });
+    const { readFile } = await import('node:fs/promises');
+    const archive = await readFile(out);
+    expect(archive.includes(Buffer.from('locker code'))).toBe(false);
+    expect(archive.includes(Buffer.from('bank pin'))).toBe(false);
+    expect(archive.includes(Buffer.from('Alice runs on Sundays'))).toBe(true);
   });
 
   it('fails with one plain line, and writes nothing, when the database does not exist', async () => {

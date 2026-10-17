@@ -7,9 +7,10 @@
  * user owns. The owner's own permission history (audit rows) and each chat's
  * persona choices do travel.
  *
- * Every JSON value and every text file passes both secret layers before it
- * is written. Sections are produced item by item, so peak memory is bounded
- * by the largest single item, not by the size of the instance.
+ * Every JSON value (except identity fields) and every memory file passes both
+ * secret layers before it is written; uploaded files ship byte-exact.
+ * Sections are produced item by item, so peak memory is bounded by the
+ * largest single item, not by the size of the instance.
  */
 import { existsSync } from 'node:fs';
 import { lstat, readFile, readdir } from 'node:fs/promises';
@@ -133,6 +134,8 @@ export interface DataExportResult {
   bytesWritten: number;
   entries: number;
   redactions: number;
+  /** Persona memory left out because another person's persona shares its name, and so its memory. */
+  personaVaultsLeftOut: number;
 }
 
 interface MemoryReport {
@@ -142,6 +145,7 @@ interface MemoryReport {
   vaults: number;
   /** Instance-wide vaults were left out because the caller is not an administrator. */
   shared_vaults_included: boolean;
+  persona_vaults_left_out: number;
   note?: string;
 }
 
@@ -266,8 +270,12 @@ export async function runDataExport<TTransaction>(
   }
   await writeJsonArrayEntry(context, 'chats.json', chats());
 
+  // Uploaded bytes go first so the artifact index can record the name each file was stored under.
+  const uploadEntries = subject.includeUploads
+    ? await writeUploadedFiles(context, sessionStream())
+    : new Map<string, string>();
+
   // sessions.json: full fidelity (turns with snapshots, per-turn events, artifact index).
-  const uploadedBlobs: { sessionId: string; artifact: TurnArtifactRecord }[] = [];
   async function* sessions(): AsyncIterable<unknown> {
     for await (const session of sessionStream()) {
       const turns = await listAllTurns(deps, session.session_id);
@@ -297,7 +305,14 @@ export async function runDataExport<TTransaction>(
         );
       }
       // Artifact rows are write-once, so their last change is their creation.
-      const artifactRows = artifacts.map(artifact => ({ ...artifact, updated_at: artifact.created_at }));
+      const artifactRows = artifacts.map(artifact => {
+        const archiveEntry = uploadEntries.get(artifactKey(artifact));
+        return {
+          ...artifact,
+          updated_at: artifact.created_at,
+          ...(archiveEntry === undefined ? {} : { archive_entry: archiveEntry }),
+        };
+      });
       // Newest first in the store; the archive keeps them oldest first so a replay lands in order.
       const personaActivations = (
         await deps.personaStore.listSessionPersonaActivations({
@@ -314,9 +329,6 @@ export async function runDataExport<TTransaction>(
           persona_activations: personaActivations,
         }),
       );
-      if (subject.includeUploads) {
-        uploadedBlobs.push(...artifacts.map(artifact => ({ sessionId: session.session_id, artifact })));
-      }
     }
   }
   await writeJsonArrayEntry(context, 'sessions.json', sessions());
@@ -439,13 +451,13 @@ export async function runDataExport<TTransaction>(
   }
   await writeJsonArrayEntry(context, 'audit.json', auditEntries());
 
-  const memory = await writeMemoryEntries(context, personas);
-
-  if (subject.includeUploads) {
-    for (const { sessionId, artifact } of uploadedBlobs) {
-      await writeUploadedFile(context, { sessionId, artifact });
-    }
-  }
+  // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
+  const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });
+  const vaultPersonas = personas.filter(persona => !othersPersonaNames.has(persona.display_name));
+  const memory = await writeMemoryEntries(context, {
+    personas: vaultPersonas,
+    leftOut: personas.length - vaultPersonas.length,
+  });
 
   // Last, so the redaction count covers every section.
   const manifest = {
@@ -462,7 +474,12 @@ export async function runDataExport<TTransaction>(
   await zip.addTextEntry('manifest.json', JSON.stringify(scrub.json(manifest), null, 2));
 
   await zip.finish();
-  return { bytesWritten: zip.bytesWritten, entries: zip.entryCount, redactions: scrub.redactionCount() };
+  return {
+    bytesWritten: zip.bytesWritten,
+    entries: zip.entryCount,
+    redactions: scrub.redactionCount(),
+    personaVaultsLeftOut: memory.persona_vaults_left_out,
+  };
 }
 
 function readPersonaKnowledge<TTransaction>(
@@ -492,61 +509,130 @@ function readPersonaKnowledge<TTransaction>(
   }
 }
 
-async function writeUploadedFile<TTransaction>(
+/** One artifact in one turn; the store keys artifacts the same way. */
+function artifactKey(artifact: Pick<TurnArtifactRecord, 'session_id' | 'turn_id' | 'path'>): string {
+  return JSON.stringify([artifact.session_id, artifact.turn_id, artifact.path]);
+}
+
+/** Requested archive name of an uploaded file; the writer may still change it, so the stored name is what gets recorded. */
+function uploadEntryName(artifact: Pick<TurnArtifactRecord, 'session_id' | 'turn_id' | 'path'>): string {
+  return `files/${artifact.session_id}/${artifact.turn_id}/${artifact.path}`;
+}
+
+/**
+ * Writes every stored upload byte-exact (they are the owner's own files) and returns the archive
+ * name of each, keyed by artifact. Skipped artifacts have an index row but no bytes.
+ */
+async function writeUploadedFiles<TTransaction>(
   context: ExportContext<TTransaction>,
-  input: { sessionId: string; artifact: TurnArtifactRecord },
-): Promise<void> {
-  const { deps, zip, scrub, request } = context;
-  if (input.artifact.digest === null) {
-    return; // Skipped artifacts have an index row but no stored bytes.
+  sessions: AsyncIterable<SessionRecord<SessionCustom>>,
+): Promise<Map<string, string>> {
+  const { deps, zip, request } = context;
+  const tenantId = request.subject.tenantId;
+  const stored = new Map<string, string>();
+  for await (const session of sessions) {
+    const turns = paged(pageToken =>
+      deps.sessionStore.listTurns({ session_id: session.session_id, limit: PAGE_LIMIT, page_token: pageToken }),
+    );
+    for await (const turn of turns) {
+      const artifacts = await deps.turnArtifactStore.listArtifacts({
+        tenant_id: tenantId,
+        session_id: session.session_id,
+        turn_id: turn.turn_id,
+      });
+      for (const artifact of artifacts) {
+        if (artifact.digest === null) {
+          continue;
+        }
+        const blob = await deps.turnArtifactStore.getBlob({ tenant_id: tenantId, digest: artifact.digest });
+        if (blob !== undefined) {
+          stored.set(artifactKey(artifact), await zip.addBufferedEntry(uploadEntryName(artifact), blob));
+        }
+      }
+    }
   }
-  const blob = await deps.turnArtifactStore.getBlob({
-    tenant_id: request.subject.tenantId,
-    digest: input.artifact.digest,
-  });
-  if (blob === undefined) {
-    return;
-  }
-  // The writer normalizes and de-duplicates the name.
-  const entryName = `files/${input.sessionId}/${input.artifact.path}`;
-  // Text payloads pass both scrub layers; binary payloads ship byte-exact
-  // (they are the caller's own uploaded files, behind include_uploads).
-  let text: string | undefined;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(blob);
-  } catch {
-    text = undefined;
-  }
-  if (text !== undefined) {
-    await zip.addTextEntry(entryName, scrub.text(text));
-  } else {
-    await zip.addBufferedEntry(entryName, blob);
-  }
+  return stored;
 }
 
 const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE] as const;
 
+/** Persona names held by everyone else who has chats on this instance. */
+async function personaNamesOfOthers<TTransaction>(
+  deps: DataExportDeps<TTransaction>,
+  { tenantId, subjectId }: { tenantId: string; subjectId: string },
+): Promise<Set<string>> {
+  const others = new Set<string>();
+  const sessions = paged(pageToken =>
+    deps.sessionStore.listSessions({
+      tenant_id: tenantId,
+      limit: PAGE_LIMIT,
+      page_token: pageToken,
+      order: 'asc',
+      start_timestamp: undefined,
+      end_timestamp: undefined,
+      agent_id: undefined,
+      created_by_or_agent_ids: undefined,
+      metadata: undefined,
+      source_type: undefined,
+      source_id: undefined,
+    }),
+  );
+  for await (const session of sessions) {
+    if (session.created_by_subject.subject_id !== subjectId) {
+      others.add(session.created_by_subject.subject_id);
+    }
+  }
+  const names = new Set<string>();
+  for (const other of others) {
+    for (const persona of await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: other })) {
+      names.add(persona.display_name);
+    }
+  }
+  return names;
+}
+
 async function writeMemoryEntries<TTransaction>(
   context: ExportContext<TTransaction>,
-  personas: readonly Persona[],
+  { personas, leftOut }: { personas: readonly Persona[]; leftOut: number },
 ): Promise<MemoryReport> {
   const { memorySource } = context.deps;
   const sharedIncluded = context.request.subject.includeInstanceData;
+  const leftOutNote =
+    leftOut === 0
+      ? {}
+      : {
+          note: `Memory of ${String(leftOut)} persona(s) was left out: another person here has a persona with the same name, so that memory is shared and cannot be split.`,
+        };
   if (memorySource.kind === 'unavailable') {
     return {
       backend: memorySource.backend,
       status: 'skipped',
       vaults: 0,
       shared_vaults_included: false,
+      persona_vaults_left_out: 0,
       note: memorySource.reason,
     };
   }
   if (memorySource.kind === 'markdown') {
     const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: memorySource.markdownDir, personas });
-    return { backend: 'markdown', status: 'included', vaults, shared_vaults_included: sharedIncluded };
+    return {
+      backend: 'markdown',
+      status: 'included',
+      vaults,
+      shared_vaults_included: sharedIncluded,
+      persona_vaults_left_out: leftOut,
+      ...leftOutNote,
+    };
   }
   const vaults = await writeClientMemoryFiles(context, { client: memorySource.client, personas });
-  return { backend: memorySource.backend, status: 'included', vaults, shared_vaults_included: sharedIncluded };
+  return {
+    backend: memorySource.backend,
+    status: 'included',
+    vaults,
+    shared_vaults_included: sharedIncluded,
+    persona_vaults_left_out: leftOut,
+    ...leftOutNote,
+  };
 }
 
 /**

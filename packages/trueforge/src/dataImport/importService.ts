@@ -35,7 +35,6 @@ import type { z } from 'zod';
 
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
-import { normalizeZipEntryName } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
@@ -50,6 +49,7 @@ import {
   dailyLogFileAt,
   latestTombstonesByEntry,
   parseVaultTombstones,
+  personaVaultNamespace,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
@@ -569,11 +569,13 @@ function buildSummary({
   connectorNames,
   auditEntries,
   standInAgentNames,
+  filesLeftBehind,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
+  filesLeftBehind: number;
 }): string {
   const counts = [
     pluralize(result.chats, 'chat', 'chats'),
@@ -591,6 +593,9 @@ function buildSummary({
     auditEntries === 0
       ? ''
       : `${pluralize(auditEntries, 'permission history entry', 'permission history entries')} came along.`,
+    filesLeftBehind === 0
+      ? ''
+      : `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
     standInAgentNames.length === 0
       ? ''
       : `Also created ${pluralize(standInAgentNames.length, 'stand-in agent', 'stand-in agents')} (${standInAgentNames.join(', ')}) because a chat or schedule refers to an agent the export does not include. Open the Agents page and give each one a model before you use it.`,
@@ -892,7 +897,7 @@ async function importArchive<TTransaction>(
   const personaSegBySource = new Map<string, string>();
   const personaWireBySourceSeg = new Map<string, string>();
   for (const { persona } of personas) {
-    const wire = `persona:${persona.display_name}`;
+    const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
     personaWireBySourceSeg.set(sourceSeg, wire);
@@ -1053,6 +1058,7 @@ async function importArchive<TTransaction>(
 
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
+    let filesLeftBehind = 0;
     await deps.withTransaction(async tx => {
       for (const { persona } of personas) {
         await deps.personaStore.createPersona(
@@ -1195,14 +1201,14 @@ async function importArchive<TTransaction>(
             path: artifact.path,
           };
           if (artifact.status === 'stored') {
-            const blobName = normalizeZipEntryName(`files/${artifact.session_id}/${artifact.path}`);
-            const blob = contents.files.get(blobName);
+            const blob = artifact.archive_entry === undefined ? undefined : contents.files.get(artifact.archive_entry);
             if (blob !== undefined) {
               await deps.turnArtifactStore.recordStoredArtifact(
                 { ...identity, name: artifact.name, data: blob, mime: artifact.mime ?? 'application/octet-stream' },
                 tx,
               );
             } else {
+              filesLeftBehind += 1;
               await deps.turnArtifactStore.recordSkippedArtifact(
                 {
                   ...identity,
@@ -1251,6 +1257,7 @@ async function importArchive<TTransaction>(
         connectorNames: connectors.map(connector => connector.name),
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
+        filesLeftBehind,
       }),
     };
   } catch (cause) {
