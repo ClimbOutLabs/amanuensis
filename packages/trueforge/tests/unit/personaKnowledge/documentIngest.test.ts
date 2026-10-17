@@ -2,11 +2,8 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Response as UndiciResponse } from 'undici';
 
-import {
-  extractTextFromUpload,
-  fetchUrlSnapshot,
-  pinnedDispatcher,
-} from '../../../src/personaKnowledge/documentIngest';
+import { extractTextFromUpload, fetchUrlSnapshot } from '../../../src/personaKnowledge/documentIngest';
+import { pinnedDispatcher } from '../../../src/runtime/publicFetch';
 
 const textBytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
