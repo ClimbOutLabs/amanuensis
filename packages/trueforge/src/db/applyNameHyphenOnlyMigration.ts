@@ -40,7 +40,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * Postgres often gives an object; SQLite may give a JSON string. Always SELECT with
  * readJson — do not read raw binary JSON.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value === 'string') {
     try {
       const parsed: unknown = JSON.parse(value);

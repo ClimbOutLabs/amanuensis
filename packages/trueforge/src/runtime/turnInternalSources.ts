@@ -6,11 +6,13 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { createKnowledgeRelevanceJudge } from '../personaKnowledge/knowledgeRelevanceJudge';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { extractKnowledgeQuery, resolvePersonaKnowledgeBlock } from '../personaKnowledge/knowledgeTurnContext';
+import { routeHelperModel } from './helperModelRouting';
 import {
   createInternalSourceState,
   PERSONA_LIBRARY_NEAR_MISS_MARKER,
   type InternalSourceState,
 } from './internalSourceGuard';
+import type { TurnModelUsage } from './modelUsage';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
 
 /** Internal-source facts for one turn, resolved before the turn exists. */
@@ -87,6 +89,9 @@ export async function resolveTurnInternalSources(input: {
   modelDir: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
+  /** The small model for helper jobs; see `routeHelperModel`. */
+  helperFqn?: string | undefined;
   logger: Logger;
 }): Promise<TurnInternalSources> {
   const internalSourceState = createInternalSourceState();
@@ -119,9 +124,10 @@ export async function resolveTurnInternalSources(input: {
     logger: input.logger,
     judge: createKnowledgeRelevanceJudge({
       tenantId,
-      modelName: input.persona.modelName,
+      modelName: routeHelperModel({ modelFqn: input.persona.modelName, helperFqn: input.helperFqn }),
       modelProviderStore: input.modelProviderStore,
       tokenFactoryBudget: input.tokenFactoryBudget,
+      modelUsage: input.modelUsage,
       logger: input.logger,
     }),
     sourceState: internalSourceState,

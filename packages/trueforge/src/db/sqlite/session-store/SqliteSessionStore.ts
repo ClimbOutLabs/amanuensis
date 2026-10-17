@@ -47,6 +47,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
   UpdateSessionInput,
@@ -98,6 +99,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
 import {
@@ -149,6 +151,10 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   createSession(input: CreateSessionInput<SessionCustom>): Promise<void> {
     return createSessionQuery(this.db, input);
+  }
+
+  stampImportedSession(input: StampImportedSessionInput): Promise<void> {
+    return stampImportedSessionQuery(this.db, input);
   }
 
   deleteSession(input: DeleteSessionInput): Promise<void> {

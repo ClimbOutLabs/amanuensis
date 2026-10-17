@@ -6,6 +6,7 @@ import { createLogger } from 'winston';
 import { createTurnsRouter, toContentDisposition } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -25,6 +26,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { buildRunCodeHarvestSink } from '../../../src/runtime/artifacts/persistRunCodeHarvests';
+import { submitArtifactPersistence } from '../../../src/runtime/artifacts/persistTurnArtifacts';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
@@ -50,6 +52,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
   app.route(
     '/',
     createTurnsRouter({
+      mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
@@ -302,7 +305,7 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
     });
   });
 
-  it('says what happened, not "sandbox unavailable", when no persisted copy exists and the sandbox is gone', async () => {
+  it('says in plain words that the workspace was cleared when no persisted copy exists and it is gone', async () => {
     const provider = new FakeSandboxProvider(new Map([['/tmp/gone.txt', new SandboxNotAvailableError('sbx-1')]]));
     const { app, sessions, sessionStore } = await buildApp({ sandboxProvider: provider });
     await createSessionWithSandboxTurn({
@@ -319,8 +322,7 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
     const body: unknown = await response.json();
     expect(body).toEqual({
       error: {
-        message:
-          'This file was not kept: the sandbox was stopped after this turn finished, and no persisted copy was found for this file.',
+        message: 'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.',
       },
     });
   });
@@ -352,6 +354,84 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
     expect(response.status).toBe(410);
     const body: unknown = await response.json();
     expect(body).toEqual({ error: { message: 'This file was not kept: File not found: /tmp/never-there.txt' } });
+  });
+
+  it('uses the same plain words when the file is missing from a workspace that no longer holds it', async () => {
+    const provider = new FakeSandboxProvider(new Map());
+    const { app, sessions, sessionStore } = await buildApp({ sandboxProvider: provider });
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-1',
+    });
+
+    const response = await app.request(downloadUrl({ sessionId: 's1', path: '/workspace/swept.pdf' }));
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual({
+      error: { message: 'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.' },
+    });
+  });
+
+  it('tells a turn with no workspace the same plain words', async () => {
+    const { app, sessions, sessionStore } = await buildApp({ sandboxProvider: new FakeSandboxProvider(new Map()) });
+    await createSessionWithSandboxTurn({ sessionStore, sessions, sessionId: 's1', turnId: 'turn-1', sandboxId: null });
+
+    const response = await app.request(downloadUrl({ sessionId: 's1', path: '/workspace/report.pdf' }));
+
+    expect(response.status).toBe(412);
+    expect(await response.json()).toEqual({
+      error: { message: 'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.' },
+    });
+  });
+});
+
+describe('a file produced in a run, after the run ends', () => {
+  const REPORT = Buffer.from('invented quarterly figures');
+  const declaredReport = ['Done.', '', '```sandbox_artifacts', '[report.pdf](/workspace/report.pdf)', '```'].join('\n');
+
+  it('stays downloadable once the run workspace is cleared, and no other session can download it', async () => {
+    const files = new Map<string, Buffer | Error>([['/workspace/report.pdf', REPORT]]);
+    const provider = new FakeSandboxProvider(files);
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp({ sandboxProvider: provider });
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-1',
+    });
+
+    // The run ends: the turn's declared files are copied out before the workspace goes away.
+    await submitArtifactPersistence({
+      store: turnArtifactStore,
+      provider,
+      sandboxId: 'sbx-1',
+      tenantId: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      assistantText: declaredReport,
+      logger: createLogger({ silent: true }),
+    });
+    files.set('/workspace/report.pdf', new SandboxNotAvailableError('sbx-1'));
+
+    const mine = await app.request(downloadUrl({ sessionId: 's1', path: '/workspace/report.pdf' }));
+    expect(mine.status).toBe(200);
+    expect(Buffer.from(await mine.arrayBuffer())).toEqual(REPORT);
+
+    // Another chat asking for the same path and turn id reaches only its own copy, which does not exist.
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's2',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-2',
+    });
+    const theirs = await app.request(downloadUrl({ sessionId: 's2', path: '/workspace/report.pdf' }));
+    expect(theirs.status).toBe(410);
+    expect(await theirs.text()).not.toContain('invented quarterly figures');
   });
 });
 

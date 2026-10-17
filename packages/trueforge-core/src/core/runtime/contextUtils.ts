@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { ApprovalDecision } from '../events/schema';
 import {
   EventType,
+  newEventId,
   type AgentApprovalDecisionMessage,
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
@@ -397,14 +398,84 @@ export function isInternalThreadDoneError(
   return event.status === 'error';
 }
 
+/** What a recorded decision is bound to, taken from the call it was issued for. */
+export function approvalDecisionBinding(
+  call: Pick<InternalEnrichedToolCall, 'function' | 'tool_info'>,
+): Pick<AgentApprovalDecisionMessage, 'approval_token_id' | 'arguments_hash'> {
+  return {
+    approval_token_id: call.tool_info.approval_token_id ?? null,
+    arguments_hash: createHash('sha256').update(call.function.arguments).digest('hex'),
+  };
+}
+
+/**
+ * Decisions that stand for the calls now in context. A decision counts only when it was recorded after the
+ * latest call carrying its id and is bound to that call's approval token and arguments, so a later call that
+ * reuses an approved id, or the same id with other arguments, is a new request and asks again.
+ */
 export function scanApprovalDecisions(context: ContextMessage[]): Map<string, ApprovalDecision> {
+  const latestCalls = new Map<string, InternalEnrichedToolCall>();
   const decisions = new Map<string, ApprovalDecision>();
   for (const msg of context) {
-    if (isUserToolApprovalDecisionMessage(msg)) {
+    if (isLLMContextMessage(msg)) {
+      if (msg.role === 'assistant') {
+        for (const call of msg.tool_calls ?? []) {
+          latestCalls.set(call.id, call);
+          decisions.delete(call.id);
+        }
+      }
+      continue;
+    }
+    if (!isUserToolApprovalDecisionMessage(msg)) {
+      continue;
+    }
+    const call = latestCalls.get(msg.tool_call_id);
+    if (call === undefined) {
+      continue;
+    }
+    const binding = approvalDecisionBinding(call);
+    if (msg.arguments_hash === binding.arguments_hash && msg.approval_token_id === binding.approval_token_id) {
       decisions.set(msg.tool_call_id, msg.approval);
     }
   }
   return decisions;
+}
+
+/** Tool call ids the context has already used, in calls, results and decisions. */
+function usedToolCallIds(context: readonly ContextMessage[]): Set<string> {
+  const used = new Set<string>();
+  for (const msg of context) {
+    if (isLLMContextMessage(msg)) {
+      if (msg.role === 'assistant') {
+        msg.tool_calls?.forEach(call => used.add(call.id));
+      } else if (msg.role === 'tool') {
+        used.add(msg.tool_call_id);
+      }
+    } else if (isUserToolApprovalDecisionMessage(msg)) {
+      used.add(msg.tool_call_id);
+    }
+  }
+  return used;
+}
+
+/**
+ * Providers that let the model choose tool call ids can repeat one. An id the context already used, or one
+ * repeated within the batch, is replaced with a host-generated id so every call is addressed uniquely.
+ */
+export function withHostUniqueToolCallIds<T extends { id: string }>(input: {
+  calls: readonly T[];
+  context: readonly ContextMessage[];
+}): T[] {
+  const used = usedToolCallIds(input.context);
+  return input.calls.map(call => {
+    if (call.id !== '' && !used.has(call.id)) {
+      used.add(call.id);
+      return call;
+    }
+    const id = `call_${newEventId()}`;
+    used.add(id);
+    return { ...call, id };
+  });
 }
 
 /** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */

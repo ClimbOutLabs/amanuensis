@@ -77,3 +77,31 @@ describe('Markdown sandbox_artifacts fence', () => {
     expect(screen.getByText('demo.js')).toBeInTheDocument();
   });
 });
+
+describe('SandboxArtifactDownload html preview', () => {
+  it('fetches the file for display without saving it, and saves only on the download click', async () => {
+    const onDownload = vi.fn(async () => {});
+    const onFetchFile = vi.fn(async () => new Blob(['<html><body>hi</body></html>'], { type: 'text/html' }));
+    render(
+      <ThemeProvider>
+        <SlotsProvider>
+          <SandboxArtifactDownload
+            code={'[page.html](/tmp/page.html)'}
+            onDownloadArtifact={onDownload}
+            onFetchFile={onFetchFile}
+          />
+        </SlotsProvider>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByTestId('aui-html-preview-iframe')).toBeInTheDocument();
+    expect(onFetchFile).toHaveBeenCalledWith('/tmp/page.html');
+    expect(onDownload).not.toHaveBeenCalled();
+
+    await act(async () => {
+      screen.getByLabelText(/Download page\.html/).click();
+    });
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onDownload).toHaveBeenCalledWith('/tmp/page.html', 'page.html');
+  });
+});

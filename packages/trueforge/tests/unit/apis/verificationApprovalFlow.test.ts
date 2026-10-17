@@ -7,6 +7,7 @@ import type {
   VerifiedWorkspaceCommitParams,
   VerifiedWorkspaceCommitResult,
 } from '@truefoundry/trueforge-core/core';
+import { realCommand } from '../../../../trueforge-core/tests/core/sandbox/realCommandExec';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -57,7 +58,8 @@ class VerificationSandboxProvider implements SandboxProvider {
   }
 
   exec(params: SandboxExecParams): Promise<ExecResult> {
-    if (params.command === VERIFY_COMMAND) {
+    const command = realCommand(params.command);
+    if (command === VERIFY_COMMAND) {
       this.verifyInvocations += 1;
       return successfulResult('verification passed');
     }
@@ -75,7 +77,7 @@ class VerificationSandboxProvider implements SandboxProvider {
       'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/verified.ts b/src/verified.ts',
       'git ls-files --others --exclude-standard -z': '',
     };
-    return successfulResult(gitResults[params.command] ?? 'ok');
+    return successfulResult(gitResults[command] ?? 'ok');
   }
 
   executeVerifiedWorkspaceCommit(params: VerifiedWorkspaceCommitParams): Promise<VerifiedWorkspaceCommitResult> {

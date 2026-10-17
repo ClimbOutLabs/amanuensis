@@ -3,15 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   gitLocalConfigIsSafe,
-  hardenAllowlistedGit,
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
   parseSimpleCommand,
+  pinAllowlistedExec,
   resolveOnPinnedPath,
   seedShellAllowlist,
   validateOfflineSubset,
-  type HardenedGitInvocation,
+  type PinnedExecInvocation,
   type ShellAllowlistConfig,
 } from '../../../src/core/permissions/shellAllowlist';
 
@@ -190,6 +190,7 @@ describe('matchAllowlist', () => {
     // it never reaches allowlist matching.
     expect(parseSimpleCommand('sh -c "mycmd"')).toBeUndefined();
     const { config, cleanup } = tempConfig();
+    writeFileSync(join(config.pinned_path, 'nice'), '#!/bin/sh\n');
     try {
       const parsed = parseSimpleCommand('nice mycmd -l');
       expect(parsed).toBeDefined();
@@ -291,7 +292,7 @@ describe('matchAllowlist for seeded git', () => {
   });
 });
 
-describe('hardenAllowlistedGit', () => {
+describe('pinAllowlistedExec', () => {
   const hardening = [
     '--no-pager',
     '--no-optional-locks',
@@ -313,25 +314,47 @@ describe('hardenAllowlistedGit', () => {
     'status.submoduleSummary=false',
   ];
 
-  function harden(command: string): HardenedGitInvocation | undefined {
+  /** Pinned dir holding fake `git`, `ls` and `nice`; the invocation must name them by absolute path. */
+  function harden(
+    command: string,
+    { workspaceRoot }: { workspaceRoot: string | undefined } = { workspaceRoot: '/ws' },
+  ): { pinned: PinnedExecInvocation | undefined; dir: string } {
     const { dir, cleanup } = tempBin('git');
+    for (const name of ['ls', 'nice']) {
+      writeFileSync(join(dir, name), '#!/bin/sh\n');
+    }
     try {
-      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir), workspace_root: '/ws' });
+      return {
+        pinned: pinAllowlistedExec({ command, config: seedShellAllowlist(dir), workspace_root: workspaceRoot }),
+        dir,
+      };
     } finally {
       cleanup();
     }
   }
 
+  test('pins a non-git command by absolute path even without a workspace root', () => {
+    const ls = harden('ls hello.txt', { workspaceRoot: undefined });
+    expect(ls.pinned?.argv).toEqual([join(ls.dir, 'ls'), 'hello.txt']);
+    expect(ls.pinned?.git_needs_workspace_root).toBe(false);
+  });
+
+  test('git without a workspace root is flagged so it is refused rather than run unhardened', () => {
+    expect(harden('git status', { workspaceRoot: undefined }).pinned?.git_needs_workspace_root).toBe(true);
+  });
+
   test('prepends global overrides and the subcommand forced flags', () => {
-    expect(harden('git status --short')?.argv).toEqual([
-      'git',
+    const status = harden('git status --short');
+    expect(status.pinned?.argv).toEqual([
+      join(status.dir, 'git'),
       ...hardening,
       'status',
       '--ignore-submodules=all',
       '--short',
     ]);
-    expect(harden('git diff --cached src')?.argv).toEqual([
-      'git',
+    const diff = harden('git diff --cached src');
+    expect(diff.pinned?.argv).toEqual([
+      join(diff.dir, 'git'),
       ...hardening,
       'diff',
       '--no-ext-diff',
@@ -340,20 +363,21 @@ describe('hardenAllowlistedGit', () => {
       '--cached',
       'src',
     ]);
-    expect(harden('git blame f.txt')?.argv).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+    const blame = harden('git blame f.txt');
+    expect(blame.pinned?.argv).toEqual([join(blame.dir, 'git'), ...hardening, 'blame', '--no-textconv', 'f.txt']);
   });
 
   test('isolates system and global config and builds a local-config probe', () => {
-    const hardened = harden('git status');
-    expect(hardened?.env).toEqual({
+    const { pinned, dir } = harden('git status');
+    expect(pinned?.env).toEqual({
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_COUNT: '0',
       GIT_CONFIG_PARAMETERS: '',
       GIT_ATTR_NOSYSTEM: '1',
     });
-    expect(hardened?.probe_argv).toEqual([
-      'git',
+    expect(pinned?.probe_argv).toEqual([
+      join(dir, 'git'),
       ...hardening,
       'config',
       '--local',
@@ -361,16 +385,46 @@ describe('hardenAllowlistedGit', () => {
       '--list',
       '--name-only',
     ]);
+    expect(pinned?.pinned_path).toBe(dir);
   });
 
-  test('keeps the nice wrapper in front', () => {
-    expect(harden('nice git status')?.argv.slice(0, 2)).toEqual(['nice', 'git']);
+  test('keeps the nice wrapper in front, by absolute path', () => {
+    const { pinned, dir } = harden('nice git status');
+    expect(pinned?.argv.slice(0, 2)).toEqual([join(dir, 'nice'), join(dir, 'git')]);
   });
 
-  test('leaves non-allowlisted and non-git commands alone', () => {
-    expect(harden('git push origin main')).toBeUndefined();
-    expect(harden('git -c core.fsmonitor=x status')).toBeUndefined();
-    expect(harden('ls -l')).toBeUndefined();
+  test('runs other allowlisted commands by absolute path with no probe', () => {
+    const { pinned, dir } = harden('ls -l src');
+    expect(pinned).toEqual({
+      argv: [join(dir, 'ls'), '-l', 'src'],
+      probe_argv: null,
+      env: {},
+      pinned_path: dir,
+      git_needs_workspace_root: false,
+    });
+  });
+
+  test('leaves non-allowlisted commands alone', () => {
+    expect(harden('git push origin main').pinned).toBeUndefined();
+    expect(harden('git -c core.fsmonitor=x status').pinned).toBeUndefined();
+    expect(harden('rm -rf x').pinned).toBeUndefined();
+  });
+
+  test('a wrapper that does not resolve on the pinned path is not allowlisted', () => {
+    const { dir, cleanup } = tempBin('ls');
+    try {
+      const config = seedShellAllowlist(dir);
+      const parsed = parseSimpleCommand('nice ls');
+      expect(parsed === undefined ? undefined : matchAllowlist(parsed, config)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('glob and brace operands are not allowlisted, since argv is passed literally', () => {
+    for (const operand of ['*.ts', 'a?', 'a[0]', 'a{b,c}']) {
+      expect(harden(`ls ${operand}`).pinned).toBeUndefined();
+    }
   });
 });
 

@@ -985,6 +985,88 @@ export function runStoreContractSuite<
     });
   });
 
+  describe('stampImportedSession', () => {
+    const archivedSession = {
+      created_at: new Date('2025-03-04T05:06:07.000Z'),
+      updated_at: new Date('2025-03-04T09:10:11.000Z'),
+      last_activity_timestamp_ms: Date.parse('2025-03-04T09:10:11.000Z'),
+      metrics: { total_duration_ms: 123_456, total_turns: 2, total_cost_in_usd: 0.25 },
+    };
+
+    it('overwrites the session and turn clocks and the metrics with the archived values', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1' }));
+      await finishTurn(store, 'turn-2');
+
+      const turns = [
+        {
+          turn_id: 'turn-1',
+          created_at: new Date('2025-03-04T05:06:08.000Z'),
+          updated_at: new Date('2025-03-04T05:07:00.000Z'),
+        },
+        {
+          turn_id: 'turn-2',
+          created_at: new Date('2025-03-04T09:00:00.000Z'),
+          updated_at: new Date('2025-03-04T09:10:11.000Z'),
+        },
+      ];
+      await store.stampImportedSession({ tenant_id: tenant, session_id: sessionId, ...archivedSession, turns });
+
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(session.created_at).toEqual(archivedSession.created_at);
+      expect(session.updated_at).toEqual(archivedSession.updated_at);
+      expect(session.last_activity_timestamp_ms).toBe(archivedSession.last_activity_timestamp_ms);
+      expect(session.metrics).toEqual(archivedSession.metrics);
+      expect(session.last_turn_id).toBe('turn-2');
+
+      for (const expected of turns) {
+        const turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: expected.turn_id }));
+        expect(turn.created_at).toEqual(expected.created_at);
+        expect(turn.updated_at).toEqual(expected.updated_at);
+        expect(turn.state.status).toBe('done');
+      }
+    });
+
+    it('rejects a missing session or turn and leaves the session untouched', async () => {
+      const store = createStore();
+      await expect(
+        store.stampImportedSession({
+          tenant_id: tenant,
+          session_id: missingSessionId,
+          ...archivedSession,
+          turns: [],
+        }),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+      await seedSession(store);
+      const before = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      await expect(
+        store.stampImportedSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          ...archivedSession,
+          turns: [
+            { turn_id: missingTurnId, created_at: archivedSession.created_at, updated_at: archivedSession.updated_at },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(TurnNotFoundError);
+      await expect(
+        store.stampImportedSession({
+          tenant_id: 'other-tenant',
+          session_id: sessionId,
+          ...archivedSession,
+          turns: [],
+        }),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+      const after = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(after).toEqual(before);
+    });
+  });
+
   describe('missing session / turn', () => {
     it('rejects session mutations for a missing session', async () => {
       const store = createStore();
