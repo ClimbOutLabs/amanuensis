@@ -3,7 +3,17 @@ import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/ap
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
-import { approvalProblem, build, json, route, sentDraft, text, threadRoute, type Route } from './harness';
+import {
+  approvalProblem,
+  approvedContext,
+  build,
+  json,
+  route,
+  sentDraft,
+  text,
+  threadRoute,
+  type Route,
+} from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 
@@ -294,11 +304,36 @@ describe('send_draft', () => {
 
   it('sends the reviewed draft', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    const response = await tools.callTool(call, undefined, approvedContext(info));
     expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', message_id: 'sent-1', status: 'sent' });
     expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
     expect(google.bodies.at(-1)).toEqual({ id: 'd1' });
+  });
+
+  it('will not send a draft nobody approved, by whatever route the call arrives', async () => {
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(), sendRoute] });
+    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(text(response)).toContain('was not approved');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('will not send when the draft no longer matches the card that was approved', async () => {
+    let live: GmailMessage = ORIGINAL;
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+        sendRoute,
+      ],
+    });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    live = plainDraft({ id: 'd-m1', threadId: 't9', to: 'mallory@example.com', subject: 'Lease', body: 'Other text.' });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(text(response)).toContain('changed after you approved it');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
   it('says the send may have gone through, and does not send again, when Gmail does not answer', async () => {
@@ -309,8 +344,9 @@ describe('send_draft', () => {
       return undefined;
     };
     const { tools, google, sleeps } = await build({ features: [...COMPOSE], routes: [draftRoute(), dropped] });
-    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    const response = await tools.callTool(call, undefined, approvedContext(info));
     expect(text(response)).toContain('The send may have gone through. Check your Sent folder before trying again.');
     expect(text(response)).not.toContain('busy');
     expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
@@ -396,7 +432,7 @@ describe('send_draft', () => {
       const second = await tools.toolCallInfo(call);
       expect(second.tier3_card?.email?.body).toBe('Friday works better.');
       expect(await approvalProblem({ tools, sentinel, info: second, call })).toBeUndefined();
-      const response = await tools.callTool(call);
+      const response = await tools.callTool(call, undefined, approvedContext(second));
       expect(JSON.parse(text(response))).toMatchObject({ status: 'sent' });
       expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
     });

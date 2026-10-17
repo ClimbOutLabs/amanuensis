@@ -22,6 +22,8 @@ export interface ToolInvocationContext {
   dispatch_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
+  /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
+  approved_params?: Record<string, unknown> | undefined;
   /**
    * the turn's abort signal. Tools with bounded multi-phase work (e.g.
    * run_code's explicit image-provisioning step) observe it so a cancelled

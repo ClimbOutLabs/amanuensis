@@ -1,6 +1,16 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { message, plainDraft } from './fixtures';
-import { approvalProblem, build, json, route, sentDraft, text, threadRoute, type Route } from './harness';
+import {
+  approvalProblem,
+  approvedContext,
+  build,
+  json,
+  route,
+  sentDraft,
+  text,
+  threadRoute,
+  type Route,
+} from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 const header = (name: string, value: string) => ({ name, value });
@@ -117,7 +127,7 @@ describe('a reply with valid threading', () => {
       reply_in_thread: { subject: 'Invitation to the lease signing', from: 'grace@example.com' },
     });
     expect(info.tier3_card?.plain_what).toContain('Sent as "Ada"');
-    const sent = await tools.callTool({ name: 'send_draft', arguments: sendArgs });
+    const sent = await tools.callTool({ name: 'send_draft', arguments: sendArgs }, undefined, approvedContext(info));
     expect(JSON.parse(text(sent))).toMatchObject({ status: 'sent', thread_id: 't9' });
     expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
   });
@@ -345,7 +355,7 @@ describe('after a refusal', () => {
     expect(card).toMatchObject({ tier: 3, is_approval_required: true });
     expect(card.tier3_card?.email?.body).toBe('A different text.');
     expect(await approvalProblem({ tools, sentinel, info: card, call: otherCall })).toBeUndefined();
-    const sent = await tools.callTool(otherCall);
+    const sent = await tools.callTool(otherCall, undefined, approvedContext(card));
     expect(JSON.parse(text(sent))).toMatchObject({ status: 'sent' });
   });
 
@@ -364,8 +374,10 @@ describe('after a refusal', () => {
     live = replyDraft();
     const card = await tools.toolCallInfo({ name: 'send_draft', arguments: sendArgs });
     expect(card).toMatchObject({ tier: 3, is_approval_required: true });
-    expect(JSON.parse(text(await tools.callTool({ name: 'send_draft', arguments: sendArgs })))).toMatchObject({
-      status: 'sent',
-    });
+    expect(
+      JSON.parse(
+        text(await tools.callTool({ name: 'send_draft', arguments: sendArgs }, undefined, approvedContext(card))),
+      ),
+    ).toMatchObject({ status: 'sent' });
   });
 });
