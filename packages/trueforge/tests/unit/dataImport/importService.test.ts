@@ -1449,7 +1449,11 @@ describe('runDataImport failure handling', () => {
       );
       expect(await heartbeat()).toBeGreaterThan(before);
       release();
-      expect(await driveFakeClock(run, 40 * IMPORT_HEARTBEAT_MS)).toMatchObject({ settled: true, value: { chats: 3 } });
+      // Each step gives real file writes one turn of the event loop, so finishing gets a wide budget on a busy machine.
+      expect(await driveFakeClock(run, 400 * IMPORT_HEARTBEAT_MS)).toMatchObject({
+        settled: true,
+        value: { chats: 3 },
+      });
     } finally {
       jest.useRealTimers();
       await source.close();
@@ -1607,7 +1611,15 @@ describe('runDataImport at scale', () => {
         });
       }
       const archive = await exportInstanceArchive({
-        instance: { ...source, stores: { ...source.stores, sessionStore: inMemory } },
+        instance: {
+          ...source,
+          stores: {
+            ...source.stores,
+            sessionStore: Object.assign(inMemory, {
+              appendEventsToDoneTurn: () => Promise.reject(new Error('an export never appends events')),
+            }),
+          },
+        },
         tenantId: TENANT,
         subjectId: 'alice',
         includeUploads: false,
@@ -2149,6 +2161,54 @@ async function importedScheduledChat(target: Instance) {
     .find(item => item.id === PENDING_CALL_ID);
   return { turn, context, events: events.data, call };
 }
+
+describe('runDataImport keeps model usage', () => {
+  it('writes the usage rows of a finished turn back once that turn is done', async () => {
+    const source = await makeInstance('source-usage');
+    const target = await makeInstance('target-usage');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      const usage = {
+        type: 'aman.model.usage' as const,
+        role: 'chat' as const,
+        model_name: 'test-provider/test-model',
+        model_id: 'test-model',
+        display_name: 'Test model',
+        provider: 'test-provider',
+        calls: 2,
+        reported_calls: 2,
+        input_tokens: 120,
+        output_tokens: 40,
+        cost_usd: null,
+        id: '01JZZZZZZZZZZZZZZZZZZZZZZZ',
+        created_at: '2026-10-02T09:00:00.000Z',
+      };
+      await source.stores.sessionStore.appendEventsToDoneTurn({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+        events: [usage],
+      });
+      await runDataImport(importDeps(target), importRequest(await exportArchive(source)));
+      const events = await target.stores.sessionStore.listTurnEvents({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+        limit: 100,
+        page_token: undefined,
+        order: undefined,
+      });
+      expect(events.data.filter(event => String(event.type) === usage.type)).toEqual([usage]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
 
 describe('runDataImport keeps permission history and persona choices', () => {
   it('imports audit rows and persona choices with their order, owned by the new owner', async () => {

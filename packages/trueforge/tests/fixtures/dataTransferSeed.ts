@@ -19,6 +19,7 @@ import {
 
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../src/db/agentStore';
+import type { ICompletedTurnEventStore } from '../../src/db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
@@ -150,7 +151,7 @@ export const SEED_MEMORY = {
 } as const;
 
 export interface DataTransferSeedStores<TTransaction> {
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   agentStore: IAgentStore<TTransaction>;
   personaStore: IPersonaStore<TTransaction>;
   personalizationStore: IPersonalizationStore<TTransaction>;

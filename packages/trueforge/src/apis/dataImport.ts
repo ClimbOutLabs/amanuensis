@@ -6,7 +6,6 @@
  * never content).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
-import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
@@ -18,6 +17,7 @@ import configuration from '../config';
 import { DataImportError } from '../dataImport/importError';
 import type { MemoryImportTarget } from '../dataImport/importPreflight';
 import { runDataImport } from '../dataImport/importService';
+import type { RestoreSessionStore } from '../dataImport/sessionRestore';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
@@ -25,7 +25,7 @@ import type { IPersonaStore } from '../db/personaStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
-import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+
 import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
@@ -38,7 +38,7 @@ import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { resolveManagedAgentIds } from './agentAccess';
 
 export interface DataImportRouterDeps<TTransaction> {
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: RestoreSessionStore;
   personaStore: IPersonaStore<TTransaction>;
   personalizationStore: IPersonalizationStore<TTransaction>;
   spaceStore: ISpaceStore<TTransaction>;

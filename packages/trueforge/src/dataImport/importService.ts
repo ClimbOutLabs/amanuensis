@@ -25,7 +25,6 @@ import {
   AgentSpecSchema,
   InMemorySessionStore,
   type CreatedBySubject,
-  type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
 import { createHash } from 'node:crypto';
@@ -37,6 +36,7 @@ import type { z } from 'zod';
 
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
+import { assertPassthroughAuditEvents, type AppendPassthroughEventsInput } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
@@ -108,11 +108,11 @@ import {
   type ImportSpacesFile,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
-import { restoreSessions, type SessionRestoreContext } from './sessionRestore';
+import { restoreSessions, type RestoreSessionStore, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
 
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: RestoreSessionStore;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Permission history is imported with the same commit as the rest, and never removed again. */
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
@@ -964,7 +964,13 @@ async function importArchive<TTransaction>(
     }
   }
   try {
-    const replayStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
+    // The proof run checks usage rows the way a real store does before it would write them.
+    const replayStore = Object.assign(new InMemorySessionStore<SessionCustom, TurnCustom>(), {
+      appendEventsToDoneTurn: (input: AppendPassthroughEventsInput) => {
+        assertPassthroughAuditEvents(input.events);
+        return Promise.resolve();
+      },
+    });
     for (const folder of folders) {
       await replayStore.createSessionFolder({
         tenant_id: tenantId,

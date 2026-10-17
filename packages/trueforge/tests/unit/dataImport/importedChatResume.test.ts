@@ -282,12 +282,13 @@ describe('an imported chat never runs a tool without a fresh approval from the o
     return source.mcp.writeInvocations() + target.mcp.writeInvocations();
   }
 
-  it('asks again for a new write in an imported chat, under the archived call id', async () => {
+  // The model repeats the archived call id; the host gives the repeat a fresh id, and the write asks again either way.
+  it('asks again for a new write in an imported chat that repeats the archived call id', async () => {
     const target = await importIntoFreshTarget(baseArchive, 'control');
     const fresh = await postTurn(target, pausedSessionId, [
       { type: 'user.message', content: `run:${INERT_WRITE_TOOL} please` },
     ]);
-    expect(askedCallIds(fresh.state)).toEqual([pausedCallId]);
+    expect(askedCallIds(fresh.state)).toHaveLength(1);
     expect(writes(target)).toBe(0);
   });
 
@@ -304,7 +305,7 @@ describe('an imported chat never runs a tool without a fresh approval from the o
       const fresh = await postTurn(target, pausedSessionId, [
         { type: 'user.message', content: `run:${INERT_WRITE_TOOL} please` },
       ]);
-      expect(askedCallIds(fresh.state)).toEqual([pausedCallId]);
+      expect(askedCallIds(fresh.state)).toHaveLength(1);
       expect(writes(target)).toBe(0);
     },
   );

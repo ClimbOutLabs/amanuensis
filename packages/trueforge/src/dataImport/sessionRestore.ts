@@ -29,13 +29,22 @@ import {
 import { mechanicalAbnormalHandoff, newEventId } from '@truefoundry/trueforge-core/core';
 import { ActionRequiredEventSchema } from '@truefoundry/trueforge-core/core/events/schema';
 
+import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import { MODEL_USAGE_EVENT_TYPE, type ModelUsagePersistedEvent } from '../schemas/modelUsageEvents';
 import { detachConnectors } from './connectorImport';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
 
 /** Shown in the chat for a request that was waiting on the owner when the archive was made. */
 export const EXPIRED_APPROVAL_NOTICE =
   'This chat was waiting for an answer when it was exported. That request expired during the move and nothing was run.';
+
+/** Model usage rows are written once a turn is done, the way the server writes them, so restore needs that append too. */
+export type RestoreSessionStore = ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
+
+function isModelUsageEvent(event: ImportEvent): event is ModelUsagePersistedEvent {
+  return event.type === MODEL_USAGE_EVENT_TYPE;
+}
 
 type ThreadSnapshot = ImportTurnRecord['snapshot']['threads'][string];
 type ContextMessage = ThreadSnapshot['context'][number];
@@ -102,7 +111,7 @@ function synthesizedTurnDoneEvent(state: TerminalTurnState): TurnDoneEvent {
 }
 
 async function restoreTurn(
-  store: ISessionStore<SessionCustom, TurnCustom>,
+  store: RestoreSessionStore,
   session: ImportSessionEntry['session'],
   entry: ImportSessionEntry['turns'][number],
   previous: { threads: ReadonlyMap<string, ThreadSnapshot>; isFirstTurn: boolean; answered: boolean },
@@ -234,8 +243,10 @@ async function restoreTurn(
   const expiredActions = turn.state.status === 'done' && !answered ? turn.state.required_actions : [];
   const holdsOutstandingAction = expiredActions.length > 0;
   // Action cards and held marks are archive-written, so none is replayed whatever the turn's state.
+  const usageEvents = events.filter(isModelUsageEvent);
   const replayEvents = events.filter(
-    event => event.type !== 'turn.done' && !ActionRequiredEventSchema.safeParse(event).success,
+    (event): event is Exclude<ImportEvent, ModelUsagePersistedEvent> =>
+      !isModelUsageEvent(event) && event.type !== 'turn.done' && !ActionRequiredEventSchema.safeParse(event).success,
   );
   if (holdsOutstandingAction) {
     replayEvents.push({
@@ -273,6 +284,10 @@ async function restoreTurn(
   const state: TerminalTurnState = turn.state;
   const doneEvent = streamDone?.state.status === state.status ? streamDone : synthesizedTurnDoneEvent(state);
   await store.updateTurnState({ session_id: sessionId, turn_id: turn.turn_id, state, turn_done_event: doneEvent });
+  // A completed turn's log takes usage rows only when it ended done; the server never writes them on other endings.
+  if (state.status === 'done' && usageEvents.length > 0) {
+    await store.appendEventsToDoneTurn({ session_id: sessionId, turn_id: turn.turn_id, events: usageEvents });
+  }
 }
 
 /**
@@ -280,7 +295,7 @@ async function restoreTurn(
  * exist in the store; artifacts are restored separately by the caller.
  */
 export async function restoreSessions(
-  store: ISessionStore<SessionCustom, TurnCustom>,
+  store: RestoreSessionStore,
   context: SessionRestoreContext,
   sessions: readonly ImportSessionEntry[],
 ): Promise<void> {
