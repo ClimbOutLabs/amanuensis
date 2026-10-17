@@ -2747,6 +2747,7 @@
                 "enum": [
                   "ready",
                   "not_configured",
+                  "disabled",
                   "docker_unavailable",
                   "daemon_unavailable",
                   "image_missing",
