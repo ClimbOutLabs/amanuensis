@@ -255,12 +255,13 @@ describe('parseGithubRepository', () => {
     ['o/my.repo', 'o/my.repo'],
     ['o/.github', 'o/.github'],
     ['my-org/under_score', 'my-org/under_score'],
+    ['jdoe_acme/r', 'jdoe_acme/r'],
   ])('accepts %s', (path, slug) => {
     expect(parseGithubRepository(`https://github.com/${path}`)?.slug).toBe(slug);
   });
 
   // git normalizes dot segments, so a credential scoped to one would cover a whole owner or all of github.com.
-  test.each(['o/.', 'o/..', 'o/...', 'o/..git', './r', '../r', '-o/r', 'o/.git', 'o_o/r', 'o/r%2F..', 'o/r/x'])(
+  test.each(['o/.', 'o/..', 'o/...', 'o/..git', './r', '../r', '-o/r', '_o/r', 'o/.git', 'o/r%2F..', 'o/r/x'])(
     'rejects %s',
     path => {
       expect(parseGithubRepository(`https://github.com/${path}`)).toBeUndefined();

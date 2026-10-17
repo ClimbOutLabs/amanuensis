@@ -95,7 +95,8 @@ interface SubcommandPolicy {
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
 export const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
 const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/u;
-const GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/u;
+/** Underscores appear in Enterprise Managed User accounts (`jdoe_acme`). */
+const GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/u;
 const GITHUB_REPOSITORY_NAME = /^[A-Za-z0-9._-]{1,100}$/u;
 export const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
