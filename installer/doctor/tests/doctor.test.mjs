@@ -402,7 +402,10 @@ describe('unsupported runtimes', () => {
     world.set('info', info('27.5.1', 'Ubuntu 24.04'));
     const check = machine(world.json(), 'runtime');
     assert.equal(check.state, 'fail');
-    assert.match(check.detail, /Docker Engine 27\.5\.1 lets other devices on your network reach ports meant for this computer only/);
+    assert.match(
+      check.detail,
+      /Docker Engine 27\.5\.1 lets other devices on your network reach ports meant for this computer only/,
+    );
     assertFixed(check);
     world.set('info', info('28.0.0', 'Ubuntu 24.04'));
     assert.equal(machine(world.json(), 'runtime').state, 'ok');
