@@ -530,6 +530,9 @@ async function writeMemoryEntries<TTransaction>(
 ): Promise<MemoryReport> {
   const { memorySource } = context.deps;
   const sharedIncluded = context.request.subject.includeInstanceData;
+  const sharedNote = sharedIncluded
+    ? { note: "The shared vault holds every member's memories, not only this person's." }
+    : {};
   if (memorySource.kind === 'unavailable') {
     return {
       backend: memorySource.backend,
@@ -541,10 +544,16 @@ async function writeMemoryEntries<TTransaction>(
   }
   if (memorySource.kind === 'markdown') {
     const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: memorySource.markdownDir, personas });
-    return { backend: 'markdown', status: 'included', vaults, shared_vaults_included: sharedIncluded };
+    return { backend: 'markdown', status: 'included', vaults, shared_vaults_included: sharedIncluded, ...sharedNote };
   }
   const vaults = await writeClientMemoryFiles(context, { client: memorySource.client, personas });
-  return { backend: memorySource.backend, status: 'included', vaults, shared_vaults_included: sharedIncluded };
+  return {
+    backend: memorySource.backend,
+    status: 'included',
+    vaults,
+    shared_vaults_included: sharedIncluded,
+    ...sharedNote,
+  };
 }
 
 /**

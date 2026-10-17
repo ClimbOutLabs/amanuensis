@@ -112,6 +112,36 @@ describe('aman export-data --list-users', () => {
 });
 
 describe('aman export-data --user', () => {
+  describe('the shared vaults and instance settings', () => {
+    async function includedFor(input: { signInOffUserId?: string; args: string[] }): Promise<boolean> {
+      const seen: boolean[] = [];
+      const session = fakeSession({
+        signInOffUserId: input.signInOffUserId,
+        exportUser: ({ out, includeInstanceData }) => {
+          seen.push(includeInstanceData);
+          out.write('zip');
+          return Promise.resolve({ bytesWritten: 3, entries: 1, redactions: 0 });
+        },
+      });
+      const out = path.join(scratch, `export-${String(Math.random())}.zip`);
+      expect(await command(session)({ args: ['--user', 'alice', '--out', out, ...input.args], io: fakeIo() })).toBe(0);
+      return seen[0] ?? false;
+    }
+
+    it("are left out of a member of a sign-in instance, because they hold every member's memories", async () => {
+      expect(await includedFor({ args: [] })).toBe(false);
+    });
+
+    it('are included when the operator asks', async () => {
+      expect(await includedFor({ args: ['--include-instance-data'] })).toBe(true);
+    });
+
+    it('are included for the one user of an instance without sign-in, unless left out', async () => {
+      expect(await includedFor({ signInOffUserId: 'alice', args: [] })).toBe(true);
+      expect(await includedFor({ signInOffUserId: 'alice', args: ['--no-instance-data'] })).toBe(false);
+    });
+  });
+
   it('writes the archive whole and leaves no temporary file', async () => {
     const out = path.join(scratch, 'export.zip');
     const io = fakeIo();

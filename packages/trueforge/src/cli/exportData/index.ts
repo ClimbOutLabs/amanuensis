@@ -21,10 +21,11 @@ credentials, settings and memory) from this instance's database and memory files
   --user <id>           The user id from --list-users
   --out <file.zip>      Where to write the archive; it is written whole or not at all, and never overwritten
   --include-uploads     Also include uploaded file bytes
-  --no-instance-data    Leave out the shared memory vaults and instance settings
+  --include-instance-data  Also include the shared memory vaults and instance settings; the shared vault holds every member's memories, so use it only for the owner
+  --no-instance-data    Leave them out even when sign-in is off
   --migrate             First update an older database to this version's schema (changes the database; back it up)
 
-Without sign-in, all data belongs to one user id, which --list-users always shows.
+Without sign-in, all data belongs to one user id, which --list-users always shows, and the shared vaults and instance settings are included for it.
 `;
 
 export interface ExportDataDeps {
@@ -52,6 +53,7 @@ function parseOptions(args: readonly string[]) {
         user: { type: 'string' },
         out: { type: 'string' },
         'include-uploads': { type: 'boolean', default: false },
+        'include-instance-data': { type: 'boolean', default: false },
         'no-instance-data': { type: 'boolean', default: false },
         migrate: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
@@ -190,7 +192,7 @@ async function writeArchive({
   session: ExportDataSession;
   userId: string;
   target: string;
-  options: { 'include-uploads': boolean; 'no-instance-data': boolean };
+  options: { 'include-uploads': boolean; 'include-instance-data': boolean; 'no-instance-data': boolean };
 }) {
   const partial = path.join(
     path.dirname(target),
@@ -205,7 +207,10 @@ async function writeArchive({
     const result = await session.exportUser({
       userId,
       includeUploads: options['include-uploads'],
-      includeInstanceData: !options['no-instance-data'],
+      // The shared vault holds every member's memories: only the sole user of a sign-in-free instance, or an
+      // operator who asks, gets it.
+      includeInstanceData:
+        !options['no-instance-data'] && (options['include-instance-data'] || session.signInOffUserId === userId),
       out: file,
     });
     file.end();

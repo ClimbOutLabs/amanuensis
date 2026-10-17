@@ -173,6 +173,23 @@ describe('runDataExport persona history', () => {
   });
 });
 
+describe('runDataExport shared vault note', () => {
+  it("says the shared vault holds every member's memories, only when it is included", async () => {
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: listing({}).client });
+    try {
+      const noteWith = async (includeInstanceData: boolean) => {
+        const sink = new CollectingWritable();
+        await runDataExport(deps, exportRequest({ includeInstanceData }), sink);
+        return ManifestSchema.parse(zipEntryJson(readZipEntries(sink.buffer()), 'manifest.json')).memory.note;
+      };
+      expect(await noteWith(true)).toContain("every member's memories");
+      expect(await noteWith(false)).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('runDataExport audit rows', () => {
   const decision = (input: { created_by: string; conversation_id: string; description: string }): AuditRecordInput => ({
     tenant_id: TENANT_ID,

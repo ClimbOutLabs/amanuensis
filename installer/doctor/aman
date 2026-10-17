@@ -9,7 +9,7 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
-#   aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--no-instance-data]
+#   aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--include-instance-data]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -82,7 +82,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
-       aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--no-instance-data]
+       aman export-data [--instance NAME] --list-users | --user ID --out FILE [--include-uploads] [--include-instance-data]
 USAGE
 }
 
