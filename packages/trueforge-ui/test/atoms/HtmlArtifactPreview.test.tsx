@@ -75,6 +75,31 @@ describe('HtmlArtifactPreview', () => {
     });
   });
 
+  it('inlines related files literally, without expanding replacement patterns', async () => {
+    const htmlBlob = new Blob(['<html><head><link rel="stylesheet" href="style.css"></head></html>'], {
+      type: 'text/html',
+    });
+    const cssBlob = new Blob(["a::after { content: '$&$`$' }"], { type: 'text/css' });
+    render(
+      <HtmlArtifactPreview
+        content={htmlBlob}
+        filename="test.html"
+        onFetchRelatedFile={vi.fn().mockResolvedValue(cssBlob)}
+      />,
+    );
+    await waitFor(() => {
+      expect(innerFrame(screen.getByTestId('aui-html-preview-iframe')).getAttribute('srcdoc')).toContain(
+        "<style>a::after { content: '$&$`$' }</style>",
+      );
+    });
+  });
+
+  it('does not show a download button without onDownload', async () => {
+    render(<HtmlArtifactPreview content={new Blob(['<p>x</p>'], { type: 'text/html' })} filename="test.html" />);
+    await screen.findByTestId('aui-html-preview-iframe');
+    expect(screen.queryByLabelText(/Download test.html/)).not.toBeInTheDocument();
+  });
+
   it('does not fetch non-existent asset files', async () => {
     const htmlBlob = new Blob(['<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>'], {
       type: 'text/html',
@@ -144,8 +169,8 @@ describe('HtmlArtifactPreview', () => {
     const htmlBlob = new Blob(['<html><body>Hello World</body></html>'], { type: 'text/html' });
     const mockOpen = vi.fn();
     const createObjectURL = vi.fn();
-    window.open = mockOpen;
-    URL.createObjectURL = createObjectURL;
+    vi.stubGlobal('open', mockOpen);
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }));
 
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={false} />);
 
@@ -155,6 +180,7 @@ describe('HtmlArtifactPreview', () => {
     expect(mockOpen).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(screen.getByTestId('aui-html-preview-iframe')).toHaveAttribute('sandbox', '');
+    vi.unstubAllGlobals();
   });
 
   it('calls onDownload only when the download button is clicked', async () => {
@@ -175,7 +201,7 @@ describe('HtmlArtifactPreview', () => {
     render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={true} />);
 
     await waitFor(() => {
-      expect(screen.queryByLabelText(/new tab/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Download test.html/)).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/Expand test.html/)).not.toBeInTheDocument();
     });
   });
@@ -254,7 +280,7 @@ describe('HtmlArtifactPreview CSP placement', () => {
 
   it('puts the app CSP ahead of content that has no head tag', async () => {
     const srcdoc = await renderedSrcdoc(`${CSP_META} content="font-src https:"><p>x</p>`);
-    expect(srcdoc.trimStart().startsWith(CSP_META)).toBe(true);
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
     expect(srcdoc).not.toContain('font-src https:');
   });
 
@@ -265,39 +291,45 @@ describe('HtmlArtifactPreview CSP placement', () => {
     expect(srcdoc).not.toContain('default-src *');
   });
 
-  it('keeps the doctype first so the page does not fall into quirks mode', async () => {
+  it('always starts with a doctype and the app CSP, before any content', async () => {
     const srcdoc = await renderedSrcdoc('<!DOCTYPE html><html><head></head><body>x</body></html>');
-    expect(srcdoc.trimStart().toLowerCase().startsWith('<!doctype html>')).toBe(true);
-    expect(srcdoc.toLowerCase().indexOf('<!doctype')).toBeLessThan(srcdoc.indexOf(CSP_META));
-    expect(srcdoc.indexOf(CSP_META)).toBeLessThan(srcdoc.indexOf('<html'));
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+    expect(srcdoc.endsWith('<!DOCTYPE html><html><head></head><body>x</body></html>')).toBe(true);
+  });
+
+  it.each([['<!-->'], ['<!--->'], ['<!-- a --!>'], ['<!----!>']])(
+    'puts the CSP before content that opens with %s',
+    async prefix => {
+      const content = `${prefix}<script>fetch('https://example.invalid')</script>--><!doctype html><html><head></head></html>`;
+      const srcdoc = await renderedSrcdoc(content);
+      expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+      expect(srcdoc.endsWith(content)).toBe(true);
+    },
+  );
+
+  it('handles many leading comments without a doctype quickly', async () => {
+    const start = performance.now();
+    const srcdoc = await renderedSrcdoc('<!---->'.repeat(5000));
+    expect(srcdoc.startsWith(`<!doctype html>${CSP_META}`)).toBe(true);
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 });
 
 describe('HtmlArtifactPreview egress containment', () => {
   const html = '<html><head></head><body>x<script>1</script></body></html>';
 
-  it('keeps scripts off until the person clicks Run this page', async () => {
+  it('never runs scripts: both frames are fully sandboxed and there is no Run control', async () => {
     render(<HtmlArtifactPreview content={new Blob([html], { type: 'text/html' })} filename="t.html" />);
-    const before = await screen.findByTestId('aui-html-preview-iframe');
-    expect(before).toHaveAttribute('sandbox', '');
-    expect(innerFrame(before).getAttribute('sandbox')).toBe('');
-
-    fireEvent.click(screen.getByText('Run this page'));
-
-    const after = screen.getByTestId('aui-html-preview-iframe');
-    expect(after).toHaveAttribute('sandbox', 'allow-scripts');
-    expect(innerFrame(after).getAttribute('sandbox')).toBe('allow-scripts');
-    expect(screen.queryByText('Run this page')).not.toBeInTheDocument();
+    const outer = await screen.findByTestId('aui-html-preview-iframe');
+    expect(outer).toHaveAttribute('sandbox', '');
+    expect(innerFrame(outer).getAttribute('sandbox')).toBe('');
+    expect(screen.queryByText(/run this page/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Run /)).not.toBeInTheDocument();
   });
 
-  it('never grants navigation, forms, popups or same-origin access, even once running', async () => {
-    render(<HtmlArtifactPreview content={new Blob([html], { type: 'text/html' })} filename="t.html" />);
-    await screen.findByTestId('aui-html-preview-iframe');
-    fireEvent.click(screen.getByText('Run this page'));
-    const outer = screen.getByTestId('aui-html-preview-iframe');
-    for (const frame of [outer, innerFrame(outer)]) {
-      expect(frame.getAttribute('sandbox')).not.toMatch(/top-navigation|forms|popups|same-origin|modals/);
-    }
+  it('does not allow script in the page policy', async () => {
+    const srcdoc = await renderedSrcdoc(html);
+    expect(srcdoc).not.toContain('script-src');
   });
 
   it('lets the wrapper admit only srcdoc frames, so the page cannot load a URL', async () => {
@@ -336,5 +368,22 @@ describe('HtmlArtifactPreview egress containment', () => {
       '<html><head><meta name="viewport" content="width=device-width"></head></html>',
     );
     expect(srcdoc).toContain('<meta name="viewport" content="width=device-width">');
+  });
+
+  it.each([
+    ['unclosed tags', '<meta a'.repeat(20000)],
+    ['unclosed double quotes', '<meta a="'.repeat(20000)],
+    ['unclosed single quotes', "<meta a='".repeat(20000)],
+    ['closed tags', '<meta a>'.repeat(20000)],
+  ])('strips metas in linear time on %s', async (_name, input) => {
+    const start = performance.now();
+    await renderedSrcdoc(input);
+    expect(performance.now() - start).toBeLessThan(3000);
+  });
+
+  it('strips an http-equiv meta whose attributes hold stray angle brackets', async () => {
+    const srcdoc = await renderedSrcdoc('<meta http-equiv=refresh a<b content="0;url=https://evil.example/">after');
+    expect(srcdoc).not.toContain('evil.example');
+    expect(srcdoc).toContain('after');
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Icon } from '../icons/Icon.js';
 import { cn } from './lib/cn.js';
@@ -16,7 +16,7 @@ export type HtmlArtifactPreviewProps = {
   maxInliningBytes?: number;
   /** Saves the file to the user's device; only ever called from the download button. */
   onDownload?: () => void;
-  /** When true, only the download link is shown (no preview). */
+  /** When true, the download and expand controls are hidden. */
   readOnly?: boolean;
 };
 
@@ -24,13 +24,13 @@ const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
 
 /**
  * CSP meta tag policy for the sandboxed iframe.
- * - Allows inline scripts and styles from the document itself
+ * - Allows inline styles from the document itself; scripts never run (the frame is sandboxed)
  * - Allows images and fonts from data: URIs only; nothing here can reach the network
  * - Blocks all network connections (connect-src falls back to default-src 'none')
  * - Blocks form posts and a rewritten base URL
  */
 const CSP_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'";
 
 /**
  * The wrapper frame carries the same policy plus a frame-src that only admits srcdoc frames. The
@@ -151,7 +151,7 @@ async function inlineAssets(
         const escapedUrl = escapeRegex(asset.originalUrl);
         const linkPattern = new RegExp(`<link\\s+[^>]*href=["']([^"']*/)?${escapedUrl}["'][^>]*\\s*/?>`, 'gi');
         const styleTag = `<style>${assetText}</style>`;
-        modifiedHtml = modifiedHtml.replace(linkPattern, styleTag);
+        modifiedHtml = modifiedHtml.replace(linkPattern, () => styleTag);
       } else if (asset.type === 'script') {
         // Replace <script src="..."></script> with <script>...</script>
         const escapedUrl = escapeRegex(asset.originalUrl);
@@ -160,13 +160,13 @@ async function inlineAssets(
           'gi',
         );
         const scriptTag = `<script>${assetText}</script>`;
-        modifiedHtml = modifiedHtml.replace(scriptPattern, scriptTag);
+        modifiedHtml = modifiedHtml.replace(scriptPattern, () => scriptTag);
       } else if (asset.type === 'image') {
         // Convert image to data URI
         const dataUri = await blobToDataUri(assetBlob);
         const escapedUrl = escapeRegex(asset.originalUrl);
         const imgPattern = new RegExp(`src=["']([^"']*/)?${escapedUrl}["']`, 'gi');
-        modifiedHtml = modifiedHtml.replace(imgPattern, `src="${dataUri}"`);
+        modifiedHtml = modifiedHtml.replace(imgPattern, () => `src="${dataUri}"`);
       }
     } catch (error) {
       // Skip assets that fail to load
@@ -201,42 +201,65 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => map[char] || char);
 }
 
-// Quote-aware so a ">" inside an attribute value cannot end the tag early.
-const META_TAG_RE = /<meta(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const META_START_RE = /<meta/gi;
 const HTTP_EQUIV_ATTR_RE = /[\s/]http-equiv\b/i;
 
 /**
  * Removes every `<meta http-equiv>` from the content: refresh would navigate the frame away on its
  * own, and attribute values can be entity-encoded, so matching on "refresh" is not reliable.
+ * Single pass: each tag is walked once, honoring quotes so a ">" in a value cannot end it early,
+ * and an unterminated tag ends the scan.
  */
 function stripHttpEquivMetas(htmlText: string): string {
-  return htmlText.replace(META_TAG_RE, tag => (HTTP_EQUIV_ATTR_RE.test(tag) ? '' : tag));
+  let out = '';
+  let copied = 0;
+  META_START_RE.lastIndex = 0;
+  for (let start = META_START_RE.exec(htmlText); start !== null; start = META_START_RE.exec(htmlText)) {
+    let quote: string | null = null;
+    let end = start.index + '<meta'.length;
+    for (; end < htmlText.length; end++) {
+      const char = htmlText[end];
+      if (quote !== null) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        break;
+      }
+    }
+    if (end >= htmlText.length) break;
+    const tag = htmlText.slice(start.index, end + 1);
+    if (HTTP_EQUIV_ATTR_RE.test(tag)) {
+      out += htmlText.slice(copied, start.index);
+      copied = end + 1;
+    }
+    META_START_RE.lastIndex = end + 1;
+  }
+  return out + htmlText.slice(copied);
 }
 
-const LEADING_DOCTYPE_RE = /^(?:\s*<!--[\s\S]*?-->)*\s*<!doctype[^>]*>/i;
+const POLICY_PREFIX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
 
 /**
- * Puts the app's CSP meta ahead of everything the content can say, after only a leading doctype
- * (anything before it would push the page into quirks mode). Policies in later metas can only
- * tighten this one, so content cannot widen it however it spells its own tag.
+ * Puts a doctype and the app's CSP meta ahead of the content, which is appended unchanged.
+ * The content is never scanned: comment-like prefixes can hide script from any marker search.
+ * A later doctype is ignored, and later metas can only tighten this policy.
  */
 function insertPolicyFirst(htmlText: string): string {
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
-  const doctype = LEADING_DOCTYPE_RE.exec(htmlText)?.[0] ?? '';
-  return `${doctype}${cspMeta}${htmlText.slice(doctype.length)}`;
+  return `${POLICY_PREFIX}${htmlText}`;
 }
 
 /**
- * Wraps the page in a script-free frame whose CSP only admits srcdoc children, so the page cannot
- * navigate its own frame to a URL. `running` decides whether the page may execute scripts.
+ * Wraps the page in a frame whose CSP only admits srcdoc children, so the page cannot navigate
+ * its own frame to a URL. Both frames are fully sandboxed: scripts never run, because nothing in a
+ * CSP stops a running script from sending data out over WebRTC.
  */
-function wrapInContainmentFrame(options: { html: string; running: boolean }): string {
-  const sandbox = options.running ? 'allow-scripts' : '';
+function wrapInContainmentFrame(html: string): string {
   return [
     '<!doctype html>',
     `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(WRAPPER_CSP_POLICY)}">`,
     '<style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style>',
-    `<iframe sandbox="${sandbox}" referrerpolicy="no-referrer" srcdoc="${escapeHtml(options.html)}"></iframe>`,
+    `<iframe sandbox="" referrerpolicy="no-referrer" srcdoc="${escapeHtml(html)}"></iframe>`,
   ].join('');
 }
 
@@ -253,12 +276,10 @@ export function HtmlArtifactPreview({
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [bytesInlined, setBytesInlined] = useState(0);
-  const [running, setRunning] = useState(false);
 
   // Convert blob to string and inline assets
   useEffect(() => {
     let isMounted = true;
-    setRunning(false);
 
     async function prepare() {
       try {
@@ -296,6 +317,8 @@ export function HtmlArtifactPreview({
     };
   }, [content, filename, onFetchRelatedFile, maxInliningBytes]);
 
+  const framedSrcdoc = useMemo(() => (srcdoc == null ? null : wrapInContainmentFrame(srcdoc)), [srcdoc]);
+
   if (error) {
     return (
       <div
@@ -307,7 +330,7 @@ export function HtmlArtifactPreview({
     );
   }
 
-  if (srcdoc == null) {
+  if (framedSrcdoc == null) {
     return (
       <div
         className="aui-html-preview my-2 rounded-lg border border-border bg-card-bg p-3 text-sm text-text-secondary"
@@ -332,19 +355,6 @@ export function HtmlArtifactPreview({
           <span className="truncate leading-none">{filename}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {!running && (
-            <button
-              onClick={() => setRunning(true)}
-              className={cn(
-                'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
-                'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
-              )}
-              title="Scripts in this page stay off until you run it"
-              aria-label={`Run ${filename}`}
-            >
-              Run this page
-            </button>
-          )}
           {!readOnly && (
             <>
               {onDownload && (
@@ -379,12 +389,11 @@ export function HtmlArtifactPreview({
       {/* Preview iframe */}
       <div className="relative min-h-96 bg-card-bg" style={{ height: previewHeight, overflow: 'auto' }}>
         <iframe
-          key={running ? 'running' : 'static'}
           ref={iframeRef}
-          srcDoc={wrapInContainmentFrame({ html: srcdoc, running })}
+          srcDoc={framedSrcdoc}
           title={`Preview of ${filename}`}
           className="h-full w-full border-0"
-          sandbox={running ? 'allow-scripts' : ''}
+          sandbox=""
           referrerPolicy="no-referrer"
           data-testid="aui-html-preview-iframe"
         />
