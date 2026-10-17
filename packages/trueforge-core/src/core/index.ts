@@ -32,7 +32,12 @@ export type {
 } from './runtime/AgentThread.types';
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
-export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
+export {
+  extractBase64,
+  isAgentInputUserMessage,
+  isEmptyMessageContent,
+  isFileContentPart,
+} from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
 
 // Deterministic local document extraction/report capability.

@@ -24,6 +24,7 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import { PostgresAgentStore } from '../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresApprovalTokenStore } from '../../src/db/postgres/approval-token-store/PostgresApprovalTokenStore';
+import { PostgresChatImageStore } from '../../src/db/postgres/chat-image-store/PostgresChatImageStore';
 import { PostgresGlobalSettingsStore } from '../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresMcpServerStore } from '../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
 import { PostgresMcpToolGrantStore } from '../../src/db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore';
@@ -43,6 +44,7 @@ import { PostgresTurnArtifactStore } from '../../src/db/postgres/turn-artifact-s
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -61,6 +63,8 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
+import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
+import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -260,6 +264,14 @@ async function startSqlite(): Promise<OwnershipServer> {
     scheduleStore: new SqliteScheduleStore(db),
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new SqliteChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new SqliteTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sessionStore,
     sentinelAuditStore,
@@ -335,6 +347,14 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     scheduleStore: new PostgresScheduleStore(db),
     sessionMetricsStore: new PostgresSessionMetricsStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new PostgresChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new PostgresTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sessionStore,
     sentinelAuditStore,

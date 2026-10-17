@@ -14,6 +14,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import type { KnowledgeDocumentStatus } from '../../../src/schemas/personaKnowledge';
+import { EXAMPLE_COM_ADDRESS } from '../../fixtures/exampleComAddress';
 
 const mockModel = {
   currentPhase: 'ready' as 'ready' | 'unavailable',
@@ -112,7 +113,7 @@ async function setup(overrides?: { resolveAddresses?: (hostname: string) => Prom
       modelDir: path.join(knowledgeDir, 'models'),
       logger: createLogger({ silent: true }),
       fetchImpl,
-      resolveAddresses: overrides?.resolveAddresses ?? (async () => ['93.184.216.34']),
+      resolveAddresses: overrides?.resolveAddresses ?? (async () => [EXAMPLE_COM_ADDRESS]),
     }),
   );
   app.onError(createAppErrorHandler({ logger: createLogger({ silent: true }) }));
