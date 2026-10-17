@@ -5,5 +5,6 @@ import * as TrueForge from "../index.js";
 export interface TestGoogleConnectionResult {
     /** The connected address when the test passed. */
     accountEmail: string | null;
+    /** calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off. */
     result: TrueForge.TestGoogleConnectionResultResult;
 }
