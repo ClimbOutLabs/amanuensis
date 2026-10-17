@@ -156,6 +156,7 @@ function validateDocumentPageLimit(value: number): number {
 const NATS_REQUEST_TIMEOUT_BUFFER_SECONDS = 30;
 
 // Write a script (base64-encoded, never interpolated raw) to a path and run it. Skill mounters reuse it.
+// Isolated mode keeps the script's folder and site-packages, both workspace-writable, off the import path.
 export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scriptContent: string }): string {
   const b64 = Buffer.from(params.scriptContent, 'utf-8').toString('base64');
   const scriptPath = shellEscape(params.scriptPath);
@@ -164,7 +165,7 @@ export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scri
     `rm -f ${scriptPath}`,
     `echo ${shellEscape(b64)} | base64 -d > ${scriptPath}`,
     `chmod a-w ${scriptPath}`,
-    `python3 ${scriptPath}`,
+    `python3 -I -S ${scriptPath}`,
   ].join(' && ');
 }
 
@@ -3503,9 +3504,17 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
-  /** Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH. */
+  /**
+   * Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH.
+   * Every host-authored exec goes through here; only sandboxPathExec may reach the sandbox PATH.
+   */
   private hostExec(params: SandboxExecParams): Promise<ExecResult> {
     return this.provider.exec({ ...params, command: withTrustedPath(params.command) });
+  }
+
+  /** Runs the model's own command, or a builtin-only lookup of what that command's PATH resolves. */
+  private sandboxPathExec(params: SandboxExecParams): Promise<ExecResult> {
+    return this.provider.exec(params);
   }
 
   private async execWorkspaceExclusive(input: {
@@ -3519,13 +3528,12 @@ export class Sandbox extends LocalToolMCP {
     timeoutSeconds?: number | undefined;
     signal?: AbortSignal | undefined;
   }): Promise<ExecResult> {
-    // The in-sandbox lock wrapper resolves mkdir, flock, sh and others through PATH, which a
-    // model can shadow; a command carrying the token never runs inside it. The host-side
-    // workspace mutation lock already serialises it.
+    // A command carrying the token never runs inside the in-sandbox lock wrapper, so the token reaches
+    // only the pinned git process. The host-side workspace mutation lock already serialises it.
     const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
-    const operation = this.provider.exec({
+    const params: SandboxExecParams = {
       sandboxId: input.sandboxId,
-      command: input.hostAuthored ? withTrustedPath(input.command) : input.command,
+      command: input.command,
       cwd: input.cwd,
       ...(input.env === undefined ? {} : { env: input.env }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
@@ -3533,7 +3541,8 @@ export class Sandbox extends LocalToolMCP {
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
-    });
+    };
+    const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
   }
 
@@ -3884,7 +3893,7 @@ export class Sandbox extends LocalToolMCP {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
       const run = (): Promise<ExecResult> =>
         workspaceRoot === undefined
-          ? this.provider.exec({
+          ? this.sandboxPathExec({
               sandboxId,
               command: input.command,
               cwd: input.cwd,
@@ -4270,7 +4279,8 @@ export class Sandbox extends LocalToolMCP {
         .map(bin => `command -v ${shellEscape(bin)} || echo MISSING ${shellEscape(bin)}`)
         .join('; ');
 
-      const result = await this.provider.exec({
+      // `command -v` and `echo` are builtins: this resolves names on the model's PATH without running them.
+      const result = await this.sandboxPathExec({
         sandboxId: input.sandboxId,
         command: checkCommands,
         cwd: '/',
@@ -4460,7 +4470,7 @@ export class Sandbox extends LocalToolMCP {
       probeArgv === null
         ? undefined
         : async () => {
-            const probe = await this.provider.exec({
+            const probe = await this.hostExec({
               sandboxId: input.sandboxId,
               command: pinnedCommand(probeArgv),
               cwd: input.exec.cwd,
@@ -4513,7 +4523,7 @@ export class Sandbox extends LocalToolMCP {
     const preflight: ExecPreflight | undefined = plan.readsRepositoryConfig
       ? async () => {
           const probeExec = buildHostAuthenticatedGitConfigProbe({ workspaceRoot });
-          const probe = await this.provider.exec({
+          const probe = await this.hostExec({
             sandboxId: input.sandboxId,
             command: probeExec.command,
             cwd: input.exec.cwd,
@@ -6090,7 +6100,7 @@ export class Sandbox extends LocalToolMCP {
     if (initSteps.length > 0) {
       ensureExecSuccess(
         await awaitWithAbort({
-          operation: this.provider.exec({
+          operation: this.hostExec({
             sandboxId,
             command: initSteps.join(' && '),
             env: skillInit?.env,

@@ -1067,9 +1067,10 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   ) {
     return tier3Decision({
       card: {
-        plain_what: `Write \`${target}\`, in a folder the sandbox uses for its own tools.`,
+        plain_what: `Save \`${target}\` in a folder where this workspace keeps programs it can run.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'A file saved there can run in place of a trusted program.',
+        cannot_be_undone:
+          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
         why_asked_again: null,
         destination: null,
         recipient: null,

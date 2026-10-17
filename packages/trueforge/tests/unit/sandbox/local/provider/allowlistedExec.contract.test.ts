@@ -17,7 +17,9 @@ import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../../../../../../trueforge-core/src/core/sandbox/Sandbox';
+import { SkillMounter } from '../../../../../../trueforge-core/src/core/sandbox/skills/SkillMounter';
 import { NOOP_AGENT_TRACING } from '../../../../../../trueforge-core/src/core/tracing/NoopAgentTracing';
+import { makeMockIMCPServer } from '../../../../../../trueforge-core/tests/core/harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../../../../../../trueforge-core/tests/core/sandbox/durableWorkspaceCoordinator';
 import { LocalSandboxProvider } from '../../../../../src/sandbox/local/provider/LocalSandboxProvider';
 
@@ -186,6 +188,107 @@ describe('allowlisted commands run the program that was classified (real LocalSa
       expect(outcome.text).not.toContain(PLANTED_OUTPUT);
     }
     expect(await readFile(marker, 'utf8')).toBe('');
+  });
+
+  const PASS_THROUGH_NAMES = [
+    'python3',
+    'python',
+    'git',
+    'mkdir',
+    'rm',
+    'sh',
+    'bash',
+    'env',
+    'flock',
+    'realpath',
+    'chmod',
+    'mv',
+    'ln',
+    'base64',
+    'cat',
+    'dirname',
+    'readlink',
+    'sleep',
+    'setsid',
+  ];
+
+  /** Logs each run to `marker`, then runs the system program, so a run that reaches one still succeeds. */
+  async function plantPassThrough(marker: string): Promise<void> {
+    await writeFile(marker, '');
+    for (const dir of ['.venv/bin', 'mcp-client/bin']) {
+      const binDir = join(sandboxId, dir);
+      await mkdir(binDir, { recursive: true });
+      expect((await lstat(binDir)).isSymbolicLink()).toBe(false);
+      for (const name of PASS_THROUGH_NAMES) {
+        const target = join(binDir, name);
+        // Replace the entry itself: the venv's python entries are links to the host interpreter.
+        await rm(target, { force: true });
+        await writeFile(
+          target,
+          `#!/bin/sh\necho "${dir}/${name} $*" >> '${marker}'\nfor d in /usr/bin /bin; do [ -x "$d/${name}" ] && exec "$d/${name}" "$@"; done\nexit 127\n`,
+        );
+        await chmod(target, 0o755);
+      }
+    }
+  }
+
+  test('sandbox setup with skills never runs a planted program', async () => {
+    const marker = join(sandboxId, 'planted-ran');
+    await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
+    await plantPassThrough(marker);
+    sandbox = makeSandbox({ skillMounter: new SkillMounter([]) });
+    const outcome = await run('ls hello.txt');
+    expect(outcome.text).toContain('hello.txt');
+    expect(await readFile(marker, 'utf8')).toBe('');
+  });
+
+  test('sandbox setup with code mode never runs a planted program', async () => {
+    const marker = join(sandboxId, 'planted-ran');
+    await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
+    await plantPassThrough(marker);
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+    const outcome = await run('ls hello.txt');
+    expect(outcome.text).toContain('hello.txt');
+    expect(await readFile(marker, 'utf8')).toBe('');
+  });
+
+  test('the verified commit check never runs a planted program', async () => {
+    const marker = join(sandboxId, 'planted-ran');
+    await bindRepository();
+    await plantPassThrough(marker);
+    const result = await provider.executeVerifiedWorkspaceCommit({
+      sandboxId,
+      workspaceRoot: sandboxId,
+      cwd: sandboxId,
+      env: {},
+      timeoutSeconds: 60,
+      command: 'true',
+      receipt: {
+        branch: 'x',
+        head: 'x',
+        refsSha256: 'x',
+        indexSha256: 'x',
+        trackedWorktreeSha256: 'x',
+        untrackedSha256: 'x',
+      },
+    });
+    // A stale receipt never dispatches the command.
+    expect(result.status).toBe('blocked');
+    expect(await readFile(marker, 'utf8')).toBe('');
+  });
+
+  test('reading a file never imports a planted Python module', async () => {
+    const marker = join(sandboxId, 'module-ran');
+    await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
+    for (const name of ['json', 'base64']) {
+      await writeFile(
+        join(sandboxId, `${name}.py`),
+        `open(${JSON.stringify(marker)}, 'a').write(${JSON.stringify(name)})\n`,
+      );
+    }
+    const content = await provider.downloadFile({ sandboxId, path: 'hello.txt' });
+    expect(content.toString('utf8')).toBe('hello\n');
+    expect(await exists(marker)).toBe(false);
   });
 
   test('a write outside the tool folders is an ordinary tier 2 edit', async () => {

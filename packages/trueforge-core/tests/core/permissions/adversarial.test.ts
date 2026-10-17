@@ -506,6 +506,12 @@ describe('Suite B - workspace containment escapes', () => {
           const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
           expect(decision.tier).toBe(3);
           expect(decision.reason).toBe('sandbox_tool_write');
+          expect(decision.card?.plain_what).toBe(
+            `Save \`${path}\` in a folder where this workspace keeps programs it can run.`,
+          );
+          expect(decision.card?.cannot_be_undone).toBe(
+            'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+          );
         }
         expect((await classifyTier(action(tool, { path: 'src/x.py', content: 'x' }), ctx)).tier).toBe(2);
       }
@@ -1069,6 +1075,30 @@ describe('Suite G - dispatch time-of-check', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
       cleanup();
+    }
+  });
+
+  test('G3 GAP: repointing a symlinked parent at .venv/bin between classification and dispatch asks again', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(ws, 'harmless'));
+      mkdirSync(join(ws, '.venv', 'bin'), { recursive: true });
+      symlinkSync(join(ws, 'harmless'), join(ws, 'linkdir'));
+      const ctx = makeCtx({ workspace_cwd: ws });
+      const params = { path: 'linkdir/flock', content: 'x' };
+      const decision = await classifyTier(action('write_file', params), ctx);
+      expect(decision.tier).toBe(2); // classified while the link pointed at an ordinary folder
+
+      rmSync(join(ws, 'linkdir'));
+      symlinkSync(join(ws, '.venv', 'bin'), join(ws, 'linkdir')); // repointed at a tool folder after classification
+
+      const result = await verifyPreDispatch({
+        call: verifiableCall({ tool_name: 'write_file', canonical_params: params, tier: 2 }),
+        ctx: { ...ctx, offline: false },
+      });
+      expect(result).toMatch(/tool folder at dispatch; request approval again/i);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });

@@ -60,7 +60,7 @@ const PINNED_HOME_ENV: Readonly<Record<string, string>> = {
   PATH: '/usr/bin:/bin',
 };
 
-/** True when an exec env carries the token, so callers can keep it out of any PATH-resolving wrapper. */
+/** True when an exec env carries the token, so callers can keep it out of the in-sandbox lock wrapper. */
 export function carriesHostAuthenticatedGitToken(env: Readonly<Record<string, string>> | undefined): boolean {
   return env?.[TOKEN_ENV_KEY] !== undefined;
 }
@@ -406,7 +406,7 @@ export interface HostAuthenticatedGitExec {
  * Network git is the one place a token must reach the sandbox: providers offer
  * no stdin or secret channel. It appears only in this process env, scoped by git
  * to credential requests for https://github.com (every other helper is reset),
- * and callers must run the command without a PATH-resolving wrapper.
+ * and callers must run the command outside the in-sandbox lock wrapper.
  */
 export function buildHostAuthenticatedGit(input: {
   plan: HostAuthenticatedGitPlan;

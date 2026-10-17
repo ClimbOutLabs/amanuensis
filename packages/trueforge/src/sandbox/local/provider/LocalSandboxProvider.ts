@@ -25,6 +25,7 @@ import {
   SandboxPathIsDirectoryError,
   shellEscape,
   validateNoPathTraversal,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from '@truefoundry/trueforge-core/core';
 import { throwIfSignalAborted } from '@truefoundry/trueforge-core/core/util/abort';
@@ -255,15 +256,18 @@ export function localSandboxExecResult(session: SessionResult): ExecResult {
 
 /**
  * In-sandbox upload: create parent, re-open a 0555 file from a prior init, write with
- * `/bin/cat` (jail PATH prefers Homebrew; a stale Cellar `cat` is ENOENT).
+ * `/bin/cat` (jail PATH prefers Homebrew; a stale Cellar `cat` is ENOENT). Runs on the
+ * trusted PATH so a program saved in the workspace's tool folders never stands in.
  */
 export function localSandboxUploadCommand(remotePath: string): string {
   const parent = dirname(remotePath);
-  return [
-    `mkdir -p ${shellEscape(parent)}`,
-    `{ chmod u+w ${shellEscape(remotePath)} 2>/dev/null || true; }`,
-    `/bin/cat > ${shellEscape(remotePath)}`,
-  ].join(' && ');
+  return withTrustedPath(
+    [
+      `mkdir -p ${shellEscape(parent)}`,
+      `{ chmod u+w ${shellEscape(remotePath)} 2>/dev/null || true; }`,
+      `/bin/cat > ${shellEscape(remotePath)}`,
+    ].join(' && '),
+  );
 }
 
 export class LocalSandboxProvider implements SandboxProvider {
@@ -486,8 +490,9 @@ export class LocalSandboxProvider implements SandboxProvider {
     this.logger = options.logger.child({ module: 'LocalSandboxProvider' });
   }
 
+  /** Isolated mode keeps the workspace (the working directory) off the import path. */
   private pythonC(code: string, relPath: string): string {
-    return `${this.support.python} -c ${shellEscape(code)} ${shellEscape(relPath)}`;
+    return `${shellEscape(this.support.python)} -I -S -c ${shellEscape(code)} ${shellEscape(relPath)}`;
   }
 
   private statCommand(relPath: string): string {

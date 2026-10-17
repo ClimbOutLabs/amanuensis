@@ -273,12 +273,18 @@ export function workspaceTerminationCommand(input: { workspaceRoot: string; oper
 }
 
 const VERIFIED_WORKSPACE_COMMIT_SCRIPT = String.raw`
-import hashlib, json, os, re, subprocess, sys
+import hashlib, json, os, re, shutil, subprocess, sys
 
 request = json.loads(sys.argv[1])
+# Resolved once on the trusted PATH this script starts with; the command alone gets the caller's PATH back.
+GIT = shutil.which("git")
+COMMAND_ENV = {key: value for key, value in os.environ.items() if key != "tf_command_path"}
+COMMAND_ENV["PATH"] = os.environ.get("tf_command_path", "")
 
 def git(*args):
-    return subprocess.run(["git", *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+    if GIT is None:
+        raise RuntimeError("git is not installed")
+    return subprocess.run([GIT, *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -318,23 +324,25 @@ expected = request["receipt"]
 if actual is None or any(actual[key] != expected[key] for key in expected):
     print(json.dumps({"status": "blocked", "reason": "The workspace changed after its last successful verification. Re-run verification before committing."}))
 else:
-    completed = subprocess.run(request["command"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    completed = subprocess.run(request["command"], shell=True, env=COMMAND_ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print(json.dumps({"status": "completed", "exit_code": completed.returncode, "result": completed.stdout.decode(errors="replace")}))
 `;
 
 /**
  * A single provider command for the verification-to-commit critical section.
  * The caller applies the normal workspace lock, so every Git read and the
- * commit dispatch share the same remote `flock` lease.
+ * commit dispatch share the same remote `flock` lease. Python and git run on
+ * the trusted PATH; only the commit command sees the caller's PATH.
  */
 export function verifiedWorkspaceCommitCommand(input: {
   command: string;
   workspaceRoot: string;
   receipt: WorkspaceVerificationReceipt;
 }): string {
-  return `python3 -I -S -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
+  const check = `python3 -I -S -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
     JSON.stringify({ command: input.command, workspace_root: input.workspaceRoot, receipt: input.receipt }),
   )}`;
+  return `tf_command_path="$PATH"; export tf_command_path; ${withTrustedPath(check)}`;
 }
 
 function isVerifiedWorkspaceCommitPayload(

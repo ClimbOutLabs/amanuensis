@@ -303,6 +303,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
 export type {

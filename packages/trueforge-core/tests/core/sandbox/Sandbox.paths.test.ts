@@ -24,9 +24,15 @@ import {
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
-import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
+import {
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from '../../../src/core/sandbox/provider/Provider';
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
+  buildWriteAndRunScriptCommand,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -4057,5 +4063,43 @@ describe('Sandbox provider-owned paths', () => {
     expect(portableCommand).toContain("mv -f 'mcp-client/mcp_client.py.new' 'mcp-client/mcp_client.py'");
     expect(portableCommand).toContain("ln -sf '../mcp_client.py'");
     expect(portableCommand).toContain('mcp-client/bin/mcp-client');
+  });
+});
+
+describe('Sandbox host bookkeeping', () => {
+  it('runs every host-authored command on the trusted PATH and only the model command on the sandbox PATH', async () => {
+    const commands: string[] = [];
+    const transport: CodeModeTransport = {
+      getClientInstall: () => ({ content: 'print("mock")\n', remotePath: 'mcp-client/mcp_client.py' }),
+      start: () =>
+        Promise.resolve({
+          env: { TFY_NATS_URL: 'ws://localhost:4223', TFY_NATS_SUBJECT_PREFIX: 'sandbox.bridge.test' },
+        }),
+      stop: () => Promise.resolve(),
+    };
+    const provider: SandboxProvider = {
+      ...makeProvider({ createCodeModeTransport: () => transport }),
+      exec: (params): Promise<ExecResult> => {
+        commands.push(params.command);
+        return readyExec();
+      },
+    };
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter([]) });
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+    await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Run command', purpose: 'execute', command: 'true' } },
+      { status: 'allow', scope: 'once' },
+    );
+    const trustedPrefix = withTrustedPath('');
+    expect(commands).toContain('true');
+    expect(commands.some(command => command.includes('skill_downloader.py'))).toBe(true);
+    expect(commands.some(command => command.includes('mcp_client.py'))).toBe(true);
+    expect(commands.filter(command => command !== 'true' && !command.startsWith(trustedPrefix))).toEqual([]);
+  });
+
+  it('runs setup scripts in isolated mode so the workspace stays off the import path', () => {
+    expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
+      / && python3 -I -S 'skill_downloader\.py'$/u,
+    );
   });
 });
