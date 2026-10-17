@@ -74,6 +74,7 @@ export type DriverReadiness =
         | 'image_unavailable'
         | 'image_missing'
         | 'kvm_unavailable'
+        | 'sandbox_disabled'
         | 'slots_unavailable'
         | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */

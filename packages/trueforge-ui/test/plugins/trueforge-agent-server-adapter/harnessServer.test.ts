@@ -530,3 +530,25 @@ describe('deleteSession', () => {
     assert.equal(deletedId, 'ses_1');
   });
 });
+
+describe('downloadSandboxFile', () => {
+  it('fetches a turn file without a sandbox id, which the server never needs', async () => {
+    const requested: string[] = [];
+    const fetchDownload: typeof fetch = async input => {
+      requested.push(input instanceof Request ? input.url : String(input));
+      return new Response('invented figures', { status: 200 });
+    };
+
+    const server = createHarnessChatServer({ fetch: fetchDownload });
+    const blob = await server.downloadSandboxFile!({
+      sessionId: 'ses_1',
+      turnId: 'turn_1',
+      sandboxId: undefined,
+      path: '/workspace/report.pdf',
+    });
+
+    assert.equal(await blob.text(), 'invented figures');
+    assert.equal(requested.length, 1);
+    assert.match(requested[0] ?? '', /\/ses_1\/turns\/turn_1\/download-sandbox-file\?path=/);
+  });
+});
