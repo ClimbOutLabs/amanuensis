@@ -1,0 +1,85 @@
+import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
+import { groundPlace, type PlaceClaim } from '../../../src/core/search/groundPlace';
+import { GARDEN_TEXT, GARDEN_URL, HARBOUR_TEXT, HARBOUR_URL } from './tavilyFixtures';
+
+function storeWithPages(): FetchedPageStore {
+  const store = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+  store.remember({ url: HARBOUR_URL, text: HARBOUR_TEXT });
+  store.remember({ url: GARDEN_URL, text: GARDEN_TEXT });
+  return store;
+}
+
+const harbour: PlaceClaim = {
+  name: 'Harbour Family Clinic',
+  address: '12 Example Street, Lisbon 1100-000',
+  languages: 'English, Portuguese',
+  hours: 'Mon-Fri 9:00-18:00',
+  price: 'Consultation 60 EUR',
+  phone: '+351 210 000 111',
+  source_url: HARBOUR_URL,
+};
+
+describe('groundPlace', () => {
+  it('keeps every field the page really contains and stamps the server time and site', () => {
+    const result = groundPlace({ claim: harbour, pages: storeWithPages() });
+    expect(result).toEqual({
+      ok: true,
+      place: {
+        ...harbour,
+        source_site: 'harbour-clinic.example',
+        fetched_at: '2026-10-17T10:00:00.000Z',
+      },
+    });
+  });
+
+  it('drops a field the page does not contain and keeps the rest', () => {
+    const result = groundPlace({
+      claim: { ...harbour, price: 'Free for everyone', languages: 'English, Klingon' },
+      pages: storeWithPages(),
+    });
+    expect(result).toMatchObject({ ok: true, place: { price: null, languages: null, hours: 'Mon-Fri 9:00-18:00' } });
+  });
+
+  it('matches a phone number whatever its spacing', () => {
+    const result = groundPlace({ claim: { ...harbour, phone: '351210000111' }, pages: storeWithPages() });
+    expect(result).toMatchObject({ ok: true, place: { phone: '351210000111' } });
+  });
+
+  it('does not match a phone number that only appears across separate numbers', () => {
+    const result = groundPlace({ claim: { ...harbour, phone: '0000111210' }, pages: storeWithPages() });
+    expect(result).toMatchObject({ ok: true, place: { phone: null } });
+  });
+
+  it('refuses a source page that was never fetched', () => {
+    const result = groundPlace({
+      claim: { ...harbour, source_url: 'https://elsewhere.example/' },
+      pages: storeWithPages(),
+    });
+    expect(result).toEqual({ ok: false, reason: 'source_not_fetched' });
+  });
+
+  it('refuses a place whose name or address is not on the source page', () => {
+    expect(groundPlace({ claim: { ...harbour, name: 'Invented Clinic' }, pages: storeWithPages() })).toEqual({
+      ok: false,
+      reason: 'name_not_found',
+    });
+    expect(groundPlace({ claim: { ...harbour, address: '99 Nowhere Road' }, pages: storeWithPages() })).toEqual({
+      ok: false,
+      reason: 'address_not_found',
+    });
+  });
+
+  it('does not let a value borrow another page', () => {
+    const result = groundPlace({ claim: { ...harbour, hours: 'Open daily 8:00-20:00' }, pages: storeWithPages() });
+    expect(result).toMatchObject({ ok: true, place: { hours: null } });
+  });
+
+  it('ignores case, accents and punctuation but not whole words', () => {
+    const pages = storeWithPages();
+    expect(groundPlace({ claim: { ...harbour, name: 'HARBOUR family clinic' }, pages })).toMatchObject({ ok: true });
+    expect(groundPlace({ claim: { ...harbour, name: 'Harbou' }, pages })).toEqual({
+      ok: false,
+      reason: 'name_not_found',
+    });
+  });
+});

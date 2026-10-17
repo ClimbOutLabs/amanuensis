@@ -14,6 +14,7 @@
 import { realpathSync } from 'fs';
 import path from 'path';
 import type { MapsHosts } from '../llm/LLMTypes';
+import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import {
   actionIdFor,
   approvalTokenExpiry,
@@ -1212,9 +1213,15 @@ async function holdSearchCall(input: {
       ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
       : input.queryText;
   const server = action.mcp_server_name ?? 'the search provider';
+  const tavily = tavilyApprovalWhat({
+    server_host: action.mcp_server_host,
+    tool_name: action.tool_name,
+    canonical_params: action.canonical_params,
+    max_chars: SEARCH_CARD_TEXT_MAX,
+  });
   return tier3Decision({
     card: {
-      plain_what: `Search the web through ${server} for: ${shown}`,
+      plain_what: tavily ?? `Search the web through ${server} for: ${shown}`,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: input.why === '' ? null : `Held for approval: ${input.why}.`,
