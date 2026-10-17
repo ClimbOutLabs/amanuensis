@@ -1,6 +1,7 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../db/agentStore';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
 import type { IMcpServerStore } from '../../db/mcpServerStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
@@ -29,6 +30,7 @@ export interface ExportStores<TTransaction> {
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  googleConnectionStore: IGoogleConnectionStore;
   auditStore: ISentinelAuditStore;
   close(): Promise<void>;
 }

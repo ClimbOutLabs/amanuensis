@@ -52,7 +52,11 @@ case "$cmd" in
     if [ "$1" = inspect ]; then
       for ref in "$@"; do :; done
       if grep -Fxq "$ref" "$S/images"; then
-        case "$*" in *Architecture*) echo amd64 ;; esac
+        case "$*" in
+          *Architecture*) echo amd64 ;;
+          # A rebuild that changed an image changes its id; tests write the new id to $S/image_id.
+          *'{{.Id}}'*) echo "sha256:$(cat "$S/image_id" 2>/dev/null || echo first)" ;;
+        esac
         exit 0
       fi
       exit 1
@@ -89,12 +93,17 @@ case "$cmd" in
     exit 0
     ;;
   inspect)
-    # The old compose containers the migrate step reads: whether Postgres runs, its image, and the app's mounts.
+    # The old compose containers the migrate step reads (whether Postgres runs, its image, the app's mounts),
+    # and for a slot container the id of the image it was started from.
     case "$*" in
       *State.Running*) [ -n "${STUB_OLD_PG_STOPPED:-}" ] && echo false || echo true; exit 0 ;;
       *Config.Image*) echo postgres:17; exit 0 ;;
       *'"/data/memory"'*) echo trueforge_memory-data; exit 0 ;;
       *'"/data/persona-knowledge"'*) echo trueforge_persona-knowledge-data; exit 0 ;;
+      *'{{.Image}}'*)
+        for a in "$@"; do case "$a" in c[0-9]*) echo "sha256:$(cat "$S/slots_run_image_id" 2>/dev/null || echo first)" ;; esac; done
+        exit 0
+        ;;
     esac
     echo "stub exit 1 oom false"
     exit 0

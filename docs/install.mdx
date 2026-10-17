@@ -223,7 +223,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)
@@ -290,7 +290,7 @@ installer/install.sh instance add main --email <your-email>
 
 ## What is off in this version
 
-Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.
+After a normal install the assistant can run code (Python and shell, in a sandbox with no network) and read PDFs and images you attach in a chat, including scanned pages and text in many languages (English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi, Marathi, Arabic, Russian, Chinese, Japanese and Korean). Settings → Sandbox shows whether the sandbox is ready, `aman doctor` reports code and attachments separately, and new chats have the sandbox enabled. Gmail attachments are read the same way: ask Aman to open a PDF or image from an email and it is read in the sandbox. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` can do neither. An install from before this release gets PDF and image reading with `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger) and starts it again.
 
 ## Troubleshooting
 

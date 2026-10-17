@@ -6,6 +6,7 @@ import { SentinelAuditStore } from '../../db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteModelProviderStore } from '../../db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../db/sqlite/persona-store/SqlitePersonaStore';
@@ -51,6 +52,7 @@ export async function openSqliteStores(options: {
     sandboxProviderStore: new SqliteSandboxProviderStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     tokenStore: new SqliteOAuthTokenStore(db),
+    googleConnectionStore: new SqliteGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     close: () => db.destroy(),
   };

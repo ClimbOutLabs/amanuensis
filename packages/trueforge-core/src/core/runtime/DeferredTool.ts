@@ -278,6 +278,19 @@ export class DeferredTool extends LocalToolMCP {
         isError: true,
       });
     }
+    // Only a call that needs no approval is routed. Anything else must be called directly, so the host classifies
+    // it, shows its own card and checks its own approval; a connector's generic card would not cover it.
+    const info = await hostSet.toolCallInfo({ name: toolName, arguments: args });
+    if (
+      (info.tier !== undefined && info.tier > 1) ||
+      info.is_approval_required === true ||
+      info.pre_dispatch_failure !== undefined
+    ) {
+      return toolResultResponse({
+        text: JSON.stringify({ error: `'${toolName}' is a built-in tool, so call ${toolName} directly.` }),
+        isError: true,
+      });
+    }
     const response = await hostSet.callTool({ name: toolName, arguments: args });
     return this.withHostRoutingNote(response, toolName);
   }

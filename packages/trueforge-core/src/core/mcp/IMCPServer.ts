@@ -23,6 +23,8 @@ export interface ToolInvocationContext {
   dispatch_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
+  /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
+  approved_params?: Record<string, unknown> | undefined;
   /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
   git_remote_precondition?: GitRemotePrecondition | undefined;
   /**
@@ -163,6 +165,13 @@ export interface IToolSet {
    * server cannot read that sandbox's disk. Null when the file cannot be read. Absent for tool sets without one.
    */
   fileDigest?(absolutePath: string): Promise<string | null>;
+
+  /**
+   * The params an approval is re-checked against at dispatch, rebuilt from state the call does not carry, such as a
+   * draft held by Gmail, so an approval ends when that state changes. Absent for tool sets whose approvals bind only
+   * to the call's own arguments. A rejection fails the check closed.
+   */
+  liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
 
   // Existing synchronous Code Mode allow-list. Optional implementations fall
   // back to the current unrestricted envelope; callTool still enforces policy.

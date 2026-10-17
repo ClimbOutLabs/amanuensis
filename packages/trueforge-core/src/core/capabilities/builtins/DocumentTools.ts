@@ -333,7 +333,7 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
-        'Extract page- and line-addressable text from PDF/image attachments. Native PDF text first, pinned local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
+        'Extract page- and line-addressable text from PDF/image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
       handler: input => this.extractText(input),
     }),

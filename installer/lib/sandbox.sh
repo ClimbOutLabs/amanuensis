@@ -208,7 +208,8 @@ plan_sandbox() {
   plan_image "$SLOT_IMAGE" "The sandbox is built" "Build the sandbox" slot-image
   for name in $(reg_names); do
     instance_sandbox_wanted "$name" || continue
-    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name"; then
+    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name" &&
+      sandbox_slots_use_current_image "$name"; then
       plan_add have "The $SLOT_COUNT sandboxes of instance $name are running"
       if [ "$OPT_NO_SANDBOX" = 1 ] && [ "$name" = "${OPT_NAME:-}" ]; then
         plan_add have "Instance $name keeps its sandbox" "--no-sandbox only applies to a new instance."
@@ -299,6 +300,24 @@ sandbox_print_root_steps() {
   ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
 }
 
+# The id Docker has for the slot image now; changes only when a rebuild changed the image.
+sandbox_image_id() {
+  D image inspect --format '{{.Id}}' "$SLOT_IMAGE" 2>/dev/null | head -n 1 || true
+}
+
+# Whether every running slot of an instance was started from the slot image as it is now. True when that cannot be told.
+sandbox_slots_use_current_image() {
+  local name=$1 current running id
+  current=$(sandbox_image_id)
+  [ -n "$current" ] || return 0
+  running=$(D ps -q --filter "label=com.docker.compose.project=$name-slots" 2>/dev/null || true)
+  [ -n "$running" ] || return 0
+  # shellcheck disable=SC2086 # one argument per container id
+  for id in $(D inspect --format '{{.Image}}' $running 2>/dev/null); do
+    [ "$id" = "$current" ] || return 1
+  done
+}
+
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because
 # the app mounts the slots' control volumes. "refresh" starts them even when healthy, so a rebuilt image replaces
 # the running slots (an upgrade).
@@ -308,7 +327,9 @@ sandbox_ensure() {
   [ -f "$(sandbox_bundle)" ] || sandbox_install_bundle
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
-    if [ "$refresh" != refresh ]; then
+    # Healthy slots still run the image they started with, so a rebuilt image (new tools, new languages)
+    # needs them started again; a run that built nothing new leaves them alone.
+    if [ "$refresh" != refresh ] && sandbox_slots_use_current_image "$name"; then
       ui_skip "The sandboxes of instance $name are already healthy"
       return 0
     fi

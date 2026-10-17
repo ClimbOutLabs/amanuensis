@@ -4,6 +4,8 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+slot_starts() { grep -c "aman-sandbox.mjs --instance main --repo-root" "$STUB_LOG" || true; }
+
 first_line_of() { grep -Fn -- "$1" "$STUB_LOG" | head -n 1 | cut -d: -f1; }
 
 test_dry_run_plans_the_sandbox() {
@@ -18,7 +20,7 @@ test_dry_run_plans_the_sandbox() {
   assert_flat_contains "$OUT" "Needs admin. Adds a security rule for the sandbox and sets up 4 disks of up to 16 GB that use space only as they fill."
   assert_flat_contains "$OUT" "Each part is skipped if it is already in place."
   assert_flat_contains "$OUT" "--sandbox-root"
-  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
+  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
   run_install --dry-run --verbose --email owner@example.invalid
   assert_flat_contains "$OUT" "The sandbox: base images, Ubuntu packages"
   assert_log_lacks "aman-sandbox.mjs"
@@ -239,7 +241,7 @@ test_install_builds_then_starts_slots_then_the_instance() {
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
   assert_not_contains "$OUT" "Sandbox check for instance main:" "the check is quiet when the sandbox answers"
   assert_log_has "doctor sandbox --instance main"
-  assert_flat_contains "$OUT" "Run code on, in a sandbox"
+  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c 'run_code')" 0 "the sandbox row is not printed twice"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
@@ -370,6 +372,25 @@ test_healthy_slots_need_no_root() {
   install_machine
   assert_contains "$OUT" "The sandboxes of instance main are already healthy"
   assert_log_lacks "--fix"
+  sandbox_drop
+}
+
+test_rerun_restarts_healthy_slots_when_the_image_changed() {
+  t_begin "a plain re-run starts running slots again when the slot image was rebuilt, and leaves them alone when it was not"
+  sandbox_new
+  install_machine
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 1 "the first install starts the slots once"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 1 "a re-run with the same image leaves the slots alone"
+  printf 'rebuilt\n' >"$SB_STATE/image_id"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 2 "a rebuilt image starts the slots again"
+  run_install --yes
+  assert_eq "$(slot_starts)" 2 "and the next re-run leaves them alone"
   sandbox_drop
 }
 
@@ -655,6 +676,7 @@ test_root_steps_with_the_flag
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
 test_healthy_slots_need_no_root
+test_rerun_restarts_healthy_slots_when_the_image_changed
 test_slot_image_failure_stops_before_anything_runs
 test_image_without_the_setup_is_explained
 test_failed_verification_fails_the_install_with_the_repair

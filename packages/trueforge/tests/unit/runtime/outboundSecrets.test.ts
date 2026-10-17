@@ -90,6 +90,26 @@ function sources(overrides: Partial<OutboundSecretSources> = {}): OutboundSecret
           ),
         ),
     },
+    googleConnections: {
+      get: ({ created_by }) =>
+        Promise.resolve(
+          created_by === 'alice'
+            ? {
+                tenant_id: 't1',
+                created_by,
+                client_id: 'cid.apps.googleusercontent.com',
+                client_secret: 'synthetic-google-secret-0009',
+                client_type: 'desktop',
+                refresh_token: 'synthetic-google-refresh-0010',
+                granted_scopes: [],
+                account_email: null,
+                status: 'connected',
+                created_at: '2026-10-01T00:00:00.000Z',
+                updated_at: '2026-10-01T00:00:00.000Z',
+              }
+            : null,
+        ),
+    },
     ...overrides,
   };
 }
@@ -106,6 +126,8 @@ describe('createOutboundSecretSource', () => {
         'synthetic-access-0006',
         'synthetic-refresh-0007',
         'synthetic-dcr-secret-0005',
+        'synthetic-google-secret-0009',
+        'synthetic-google-refresh-0010',
       ]),
     );
   });
@@ -113,6 +135,7 @@ describe('createOutboundSecretSource', () => {
   it('holds another user’s OAuth tokens out of this user’s list', async () => {
     const secrets = await createOutboundSecretSource(sources())({ tenant_id: 't1', created_by: 'bob' });
     expect(secrets).not.toContain('synthetic-access-0006');
+    expect(secrets).not.toContain('synthetic-google-refresh-0010');
     expect(secrets).toContain('synthetic-provider-key-0001');
   });
 

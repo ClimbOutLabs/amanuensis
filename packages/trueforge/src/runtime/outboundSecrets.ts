@@ -1,3 +1,4 @@
+import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -14,6 +15,8 @@ export interface OutboundSecretSources {
   sandboxProviders: Pick<ISandboxProviderStore, 'getSandboxProvider'>;
   mcpServers: Pick<IMcpServerStore, 'listServers' | 'getClient'>;
   tokens: Pick<IOAuthTokenStore, 'getTokens'>;
+  /** The user's own Google login: its client secret and refresh token must never ride out in a call. */
+  googleConnections: Pick<GoogleConnectionStore, 'get'>;
 }
 
 /** A stored value that is a `${env:...}` or `${file:...}` pointer stands for the value it resolves to. */
@@ -35,12 +38,16 @@ async function collectSecrets(input: {
   created_by: string;
 }): Promise<string[]> {
   const { sources, tenant_id, created_by } = input;
-  const [providers, sandbox, servers] = await Promise.all([
+  const [providers, sandbox, servers, google] = await Promise.all([
     sources.modelProviders.listProviders({ tenant_id }),
     sources.sandboxProviders.getSandboxProvider(tenant_id),
     sources.mcpServers.listServers({ tenant_id, names: undefined }),
+    sources.googleConnections.get({ tenant_id, created_by }),
   ]);
   const raw: string[] = [...sources.configured()];
+  if (google !== null) {
+    raw.push(google.client_secret, google.refresh_token);
+  }
   for (const provider of providers) {
     const apiKey = provider.manifest.auth?.api_key;
     if (apiKey !== undefined) {
@@ -79,7 +86,7 @@ async function collectSecrets(input: {
 
 /**
  * The exact secret values this server holds that a user's outbound call must never carry: model and
- * sandbox provider keys, connector headers, client secrets and OAuth tokens, and configured
+ * sandbox provider keys, connector headers, client secrets and OAuth tokens, the user's Google login, and configured
  * credentials. Read fresh from the stores (briefly cached per user), so a rotated key is covered
  * without a restart. A failing store rejects, so the caller treats the call as unchecked.
  */

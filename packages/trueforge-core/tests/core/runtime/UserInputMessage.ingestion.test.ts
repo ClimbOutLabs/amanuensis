@@ -5,6 +5,7 @@ import {
   type AgentInputUserMessage,
   type FileContentPart,
 } from '../../../src/core/runtime/UserInputMessage';
+import { syntheticBytesFor } from '../documents/syntheticFiles';
 import '../harnessMocks';
 import { makeStubPublicSandbox } from '../harnessMocks';
 
@@ -41,7 +42,7 @@ describe('processAgentUserInput document ingestion', () => {
     return jest.spyOn(sandbox, 'createDocumentSnapshot').mockImplementation(input =>
       Promise.resolve({
         filePath: input.filePath,
-        content: Buffer.from('staged-bytes'),
+        content: syntheticBytesFor(input.filePath),
         verify: () => Promise.resolve(),
         cleanup: () => Promise.resolve(),
       }),
