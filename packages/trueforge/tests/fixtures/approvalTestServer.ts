@@ -82,6 +82,8 @@ export interface ApprovalTestServer {
   mcpServerStore: () => IMcpServerStore;
   /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
   sessionStore: () => SqliteSessionStore;
+  /** Same contract as `mcpServerStore`: writes audit entries the way a turn would. */
+  sentinelAuditStore: () => SentinelAuditStore;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
@@ -276,6 +278,7 @@ export async function startApprovalTestServer(options?: {
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
     sessionStore: () => new SqliteSessionStore(db),
+    sentinelAuditStore: () => new SentinelAuditStore(db),
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },

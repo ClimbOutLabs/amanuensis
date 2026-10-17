@@ -348,6 +348,7 @@ export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
+export { AuditLogSettings } from './sentinel/AuditLogSettings.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
 export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
 export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
@@ -367,6 +368,7 @@ export {
   extractSentinelSessionContext,
   parseAuditEntries,
   parseToolTier,
+  parseUserAuditPage,
   parseUserSettings,
 } from './sentinel/types.js';
 export type {
@@ -376,6 +378,8 @@ export type {
   SentinelAuditEntry,
   SentinelAuditOutcome,
   SentinelSessionContext,
+  SentinelUserAuditEntry,
+  SentinelUserAuditPage,
   SentinelUserSettings,
   ToolTier,
 } from './sentinel/types.js';

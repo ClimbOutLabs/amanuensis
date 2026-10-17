@@ -14,6 +14,7 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),

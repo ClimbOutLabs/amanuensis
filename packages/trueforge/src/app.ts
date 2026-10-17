@@ -11,6 +11,7 @@ import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 import { createAgentImportRouter } from './apis/agentImport';
 import { createAgentsRouter } from './apis/agents';
+import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
@@ -566,6 +567,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createPersonalizationRouter({
         personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/audit-log',
+    withAuth(
+      createAuditLogRouter({
+        sentinelAuditStore: deps.sentinelAuditStore,
         resolveRequestContext,
       }),
       authMiddleware,

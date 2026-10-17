@@ -9,6 +9,7 @@ import { handleNonStatusCodeError } from "../../../../errors/handleNonStatusCode
 import * as errors from "../../../../errors/index.js";
 import * as serializers from "../../../../serialization/index.js";
 import * as TrueForge from "../../../index.js";
+import { AuditLogClient } from "../resources/auditLog/client/Client.js";
 
 export declare namespace PersonalizationClient {
     export type Options = BaseClientOptions;
@@ -19,10 +20,15 @@ export declare namespace PersonalizationClient {
 
 export class PersonalizationClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<PersonalizationClient.Options>;
+    protected _auditLog: AuditLogClient | undefined;
 
     constructor(options: PersonalizationClient.Options) {
 
         this._options = normalizeClientOptionsWithAuth(options);
+    }
+
+    public get auditLog(): AuditLogClient {
+        return (this._auditLog ??= new AuditLogClient(this._options));
     }
 
     /**

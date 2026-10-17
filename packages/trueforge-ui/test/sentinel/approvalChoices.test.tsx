@@ -68,6 +68,7 @@ describe('approval choices', () => {
     const settings = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => settings),
       updateUserSettings: vi.fn(async patch => ({ ...settings, ...patch })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
