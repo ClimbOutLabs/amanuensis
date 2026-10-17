@@ -437,10 +437,11 @@ describe('sanitizeSpaceHtml XSS corpus', () => {
     expect(out).toContain('<rect');
   });
 
-  it('removes elements that are not on the allow-list, with their contents', () => {
+  it('removes the tag of an element that is not on the allow-list and keeps its text', () => {
     const out = sanitizeSpaceHtml('<marquee behavior="alternate">scrolling text</marquee><p>ok</p>');
     expect(out).not.toContain('<marquee');
-    expect(out).not.toContain('scrolling text');
+    expect(out).not.toContain('behavior');
+    expect(out).toContain('scrolling text');
     expect(out).toContain('<p>ok</p>');
   });
 });
@@ -698,5 +699,80 @@ describe('sanitizeSpaceHtml reparse stability', () => {
     const once = sanitizeSpaceHtml(html);
     expect(once).not.toBeNull();
     expect(sanitizeSpaceHtml(once ?? '')).toBe(once);
+  });
+  describe('elements outside the allow-list', () => {
+    it('keeps the text of struck and inserted prices', () => {
+      const out = sanitizeSpaceHtml('<p><del>€310,000</del> <ins>€295,000</ins></p>');
+      expect(out).toContain('€310,000');
+      expect(out).toContain('€295,000');
+      expect(out).not.toContain('<del');
+      expect(out).not.toContain('<ins');
+    });
+
+    it('keeps to-do wording written as a label around a checkbox', () => {
+      const out = sanitizeSpaceHtml(
+        '<ul><li><label><input type="checkbox" checked> Book the viewing</label></li></ul>',
+      );
+      expect(out).toContain('Book the viewing');
+      expect(out).not.toContain('<label');
+      expect(out).not.toContain('<input');
+    });
+
+    it('keeps the fallback text of meter and progress', () => {
+      const out = sanitizeSpaceHtml(
+        '<meter value="0.6">60% saved</meter><progress value="3" max="5">3 of 5</progress>',
+      );
+      expect(out).toContain('60% saved');
+      expect(out).toContain('3 of 5');
+      expect(out).not.toContain('<meter');
+      expect(out).not.toContain('<progress');
+    });
+
+    it.each(['center', 'font', 'big', 'tt', 'strike', 'fieldset', 'legend', 'button'])(
+      'keeps the text inside <%s>',
+      tag => {
+        const out = sanitizeSpaceHtml(`<${tag} onclick="alert(1)">kept words</${tag}>`);
+        expect(out).toContain('kept words');
+        expect(out).not.toContain(`<${tag}`);
+        expect(out).not.toContain('alert(1)');
+      },
+    );
+
+    it('still sanitises what an unwrapped element carried', () => {
+      const out = sanitizeSpaceHtml(
+        '<label>hello<script>alert(1)</script><img src="https://evil.example/x.png"><a href="javascript:alert(2)">link</a></label>',
+      );
+      expect(out).toContain('hello');
+      expect(out).toContain('link');
+      expect(out).not.toContain('alert');
+      expect(out).not.toContain('evil.example');
+      expect(out).not.toContain('javascript:');
+    });
+
+    it('still removes code, frames and hidden payloads together with their contents', () => {
+      const out = sanitizeSpaceHtml(
+        '<p>shown</p><noscript>hidden one</noscript><iframe>hidden two</iframe><object>hidden three</object>' +
+          '<embed><template>hidden four</template>',
+      );
+      expect(out).toContain('shown');
+      for (const word of ['hidden one', 'hidden two', 'hidden three', 'hidden four']) {
+        expect(out).not.toContain(word);
+      }
+    });
+
+    it('removes unlisted SVG and MathML elements together with their contents', () => {
+      const out = sanitizeSpaceHtml(
+        '<svg><foreignObject><p>inside</p></foreignObject></svg><math><mi>x</mi></math><p>after</p>',
+      );
+      expect(out).toContain('after');
+      expect(out).not.toContain('inside');
+      expect(out).not.toContain('<math');
+    });
+  });
+
+  it('checks a long fallback paint tail in linear time', () => {
+    const started = performance.now();
+    sanitizeSpaceHtml(`<svg><rect fill="url(#a)${' '.repeat(50_000)}!"/></svg>`);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });

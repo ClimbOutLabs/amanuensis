@@ -35,6 +35,11 @@ export function slotsBackendEnabled(): boolean {
   return configuration.SANDBOX_BACKEND === 'slots';
 }
 
+/** An installer instance set up without the sandbox: no slots and no image, off by choice rather than misconfigured. */
+export function sandboxDisabledByInstaller(): boolean {
+  return configuration.INSTALLER_INSTANCE !== '' && !slotsBackendEnabled() && configuration.SANDBOX_IMAGE.trim() === '';
+}
+
 /** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..SANDBOX_SLOTS. */
 export function slotSocketPaths(): string[] {
   return slotSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });

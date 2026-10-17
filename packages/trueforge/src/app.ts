@@ -290,6 +290,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     managedByTrueFoundry: isTrueFoundryModeEnabled(),
   });
   const scheduleTurnDeps = {
+    mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
@@ -748,6 +749,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        mcpCatalog: deps.mcpCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,

@@ -110,6 +110,8 @@ export interface SentinelAction {
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
   mcp_search_tool?: boolean | undefined;
+  /** Top-level argument names the catalog declares as the designated provider's plumbing (session id, model name). Never from tool metadata. */
+  mcp_search_plumbing_fields?: readonly string[] | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -1188,7 +1190,7 @@ const INSTALL_FRAGMENTS = ['install'];
 const SEARCH_CARD_TEXT_MAX = 1000;
 
 function searchQueryText(strings: OutboundStrings): string {
-  return strings.values
+  return [...strings.values, ...strings.plumbing]
     .map(value => value.trim())
     .filter(value => value !== '')
     .join(' | ');
@@ -1266,7 +1268,7 @@ async function classifySearchProviderTool(input: {
     return undefined;
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
-  const strings = collectOutboundStrings(action.canonical_params);
+  const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
     holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields });
@@ -1288,7 +1290,10 @@ async function classifySearchProviderTool(input: {
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
-  if (strings !== undefined && unreturnedUrls({ values: strings.values, state: ctx.web_search }).length > 0) {
+  if (
+    strings !== undefined &&
+    unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
+  ) {
     return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
   }
   return tier1Decision({
