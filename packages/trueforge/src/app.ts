@@ -534,7 +534,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       spaceStore: deps.spaceStore,
       scheduleStore: deps.scheduleStore,
       globalSettingsStore: deps.globalSettingsStore,
-      sentinelSettingsStore: deps.sentinelSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
       turnArtifactStore: deps.turnArtifactStore,
       tokenStore: deps.tokenStore,

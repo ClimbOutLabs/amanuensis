@@ -24,7 +24,6 @@ import type { IPersonaStore } from '../db/personaStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
@@ -44,7 +43,6 @@ export interface DataImportRouterDeps<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
-  sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
@@ -154,7 +152,6 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           spaceStore: deps.spaceStore,
           scheduleStore: deps.scheduleStore,
           globalSettingsStore: deps.globalSettingsStore,
-          sentinelSettingsStore: deps.sentinelSettingsStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
           agentStore,

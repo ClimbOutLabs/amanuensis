@@ -2,8 +2,8 @@
  * Cross-store round trips: seed the rich fixture on one store backend, export,
  * import into an empty instance on the other backend for a new owner, export
  * again, and prove the two exports match apart from dates, the new owner, the
- * schedules-off rule, store-minted connector and knowledge-document ids, and
- * the turn that was running at export time landing cancelled.
+ * schedules-off rule, store-minted connector and knowledge-document ids, the
+ * trust mark and safety settings import never carries over, and the turn that was running at export time landing cancelled.
  *
  * The Postgres side engages when PG_STORE_TESTS_ADMIN_URL is set (the local
  * test Postgres); without it the suite skips.
@@ -133,7 +133,6 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     spaceStore: instance.stores.spaceStore,
     scheduleStore: instance.stores.scheduleStore,
     globalSettingsStore: instance.stores.globalSettingsStore,
-    sentinelSettingsStore: instance.stores.sentinelSettingsStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
@@ -263,10 +262,20 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     }
     return personas;
   }
+  if (name === 'settings.json' && typeof normalized === 'object' && normalized !== null) {
+    // Import never carries safety settings over, so only the other instance settings can match.
+    const instance: unknown = Reflect.get(normalized, 'instance');
+    const kept = Array.isArray(instance)
+      ? instance.filter(setting => !String(Reflect.get(setting, 'key')).endsWith('_screen_enabled'))
+      : [];
+    return { instance: kept };
+  }
   if (name === 'connectors.json' && Array.isArray(normalized)) {
     const connectors = sortBy(normalized as Record<string, unknown>[], connector => String(connector['name']));
     for (const connector of connectors) {
       connector['id'] = '<connector-id>';
+      // Import never carries the trust mark over, so the re-export always reads false.
+      connector['first_party'] = false;
     }
     return connectors;
   }

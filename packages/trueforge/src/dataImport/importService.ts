@@ -16,7 +16,8 @@
  *
  * Every imported record belongs to the importing user. Ids are kept, so
  * links inside chats keep working. Schedules arrive switched off. Connectors
- * arrive without credentials, so ones that need sign-in show that state.
+ * arrive unattached, without credentials, trust marks or search and memory roles.
+ * Safety settings are never taken from an archive.
  */
 import {
   AgentSpecSchema,
@@ -32,17 +33,19 @@ import type { Logger } from 'winston';
 import type { z } from 'zod';
 
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
-import { EXPORT_SCHEMA_VERSION, EXPORTED_GLOBAL_SETTING_KEYS } from '../dataExport/exportService';
+import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
 import { normalizeZipEntryName } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import { splitEntries, vaultEntryTimestamp, vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
+import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
+import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { newId } from '../utils/id';
+import { detachConnectors, normalizeImportedConnectors } from './connectorImport';
 import { DataImportError } from './importError';
 import {
   clearImportMarker,
@@ -83,7 +86,6 @@ import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArch
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
-  sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -125,8 +127,11 @@ const MAX_ENTRIES = 100_000;
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 
-/** Instance-wide settings an import may fill in; any other key in an archive is ignored. */
-const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>(EXPORTED_GLOBAL_SETTING_KEYS);
+/** Instance-wide settings an import may fill in. Safety settings (the injection screens) are never taken from an archive. */
+const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
+  DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_SUMMARIZE_SETTING_KEY,
+]);
 
 const REQUIRED_SECTIONS = [
   'manifest.json',
@@ -593,7 +598,7 @@ function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
 
-function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'>): string {
+function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'>, connectorNames: string[]): string {
   const counts = [
     pluralize(result.chats, 'chat', 'chats'),
     pluralize(result.memories, 'memory', 'memories'),
@@ -607,7 +612,10 @@ function buildSummary(result: Omit<DataImportResult, 'summary' | 'schedules_off'
   return (
     `Imported ${counts.join(', ')}. ` +
     'Chats keep their dates and totals; personas, spaces, folders and schedules show the import time. ' +
-    'Not imported: model keys, connector sign-ins, Always allow choices. Set those up in Settings.'
+    (connectorNames.length === 0
+      ? ''
+      : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent in Settings when you want it. `) +
+    'Not imported: model keys, connector sign-ins and keys, and safety settings (the prompt-injection screens, Always allow choices, search and offline settings). Set those up in Settings.'
   );
 }
 
@@ -773,7 +781,9 @@ async function importArchive<TTransaction>(
 ): Promise<DataImportResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
-  const { manifest, sessions, folders, personas, personalization, spaces, schedules, connectors, settings } = contents;
+  const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings } = contents;
+  const connectors = normalizeImportedConnectors(contents.connectors);
+  const connectorNames = new Set(connectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
     subject_type: 'user',
@@ -928,7 +938,7 @@ async function importArchive<TTransaction>(
         tenant_id: tenantId,
         name: agent.name,
         description: agent.description,
-        manifest: agent.manifest,
+        manifest: detachConnectors({ spec: agent.manifest, names: connectorNames }),
         external_id: agent.external_id,
         created_by_subject: importerSubject,
       });
@@ -1102,7 +1112,7 @@ async function importArchive<TTransaction>(
             tenant_id: tenantId,
             name: connector.name,
             manifest: connector.manifest,
-            first_party: connector.first_party,
+            first_party: false,
           },
           tx,
         );
@@ -1118,16 +1128,6 @@ async function importArchive<TTransaction>(
           await deps.globalSettingsStore.setSetting({ key: setting.key, value: setting.value }, tx);
         }
       }
-      await deps.sentinelSettingsStore.patch(
-        {
-          tenant_id: tenantId,
-          created_by: subjectId,
-          offline_mode: settings.permission_settings.offline_mode,
-          tier2_auto_allow: settings.permission_settings.tier2_auto_allow,
-          search_without_asking: settings.permission_settings.search_without_asking,
-        },
-        tx,
-      );
 
       for (const entry of sessions) {
         for (const artifact of entry.artifacts) {
@@ -1186,7 +1186,13 @@ async function importArchive<TTransaction>(
       connectors: connectorsImported,
       schedules_off: schedules.length > 0,
     };
-    return { ...result, summary: buildSummary(result) };
+    return {
+      ...result,
+      summary: buildSummary(
+        result,
+        connectors.map(connector => connector.name),
+      ),
+    };
   } catch (cause) {
     // Files are removed by their planned paths (checked absent beforehand); ids only by what this run created.
     const failures = await compensate(deps, {

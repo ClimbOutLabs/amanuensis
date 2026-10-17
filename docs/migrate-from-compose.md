@@ -8,9 +8,9 @@ Do one person at a time, from step 1 to step 6. Where a command says `<person>`,
 
 ## What moves and what does not
 
-Moves: chats with their original dates, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries, and your permission settings.
+Moves: chats with their original dates, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), and connector entries (unused: no agent is attached to them).
 
-Does not move: model keys, connector sign-ins and saved credentials, and "Always allow" choices. Step 7 lists what to redo by hand.
+Does not move: model keys, connector sign-ins and saved credentials, and safety settings (the prompt-injection screens, "Always allow" choices, search and offline settings). A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
 Good to know:
 
@@ -32,8 +32,10 @@ export PERSON=<person>
 export OLD=aman-prod-$PERSON
 export APP=$OLD-aman-1
 export WORK=$HOME/aman-migration/$PERSON
-mkdir -p "$WORK/out"
+mkdir -p -m 700 "$WORK" "$WORK/out"
 ```
+
+The folder is private to you (mode 0700). The export holds every chat and memory of that person, so keep it that way and do not loosen it.
 
 ## 1. Make a safety copy (the old stack keeps running)
 
@@ -112,9 +114,9 @@ aman_copy() {
     -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB="$PGDB" \
     -e MEMORY_BACKEND=markdown -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
     -v "mig-$PERSON-memory":/data/memory -v "mig-$PERSON-knowledge":/data/persona-knowledge \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$WORK/out":/out aman-migrate:new aman "$@"
 }
-chmod 777 "$WORK/out"
 ```
 
 List the people who own chats in the copy, then export the owner. Use the id exactly as the list shows it (the OIDC subject). A line named `trueforge-default` with 0 sessions is always listed; ignore it.
@@ -126,11 +128,10 @@ aman_copy export-data --migrate --user '<oidc-subject>' --out /out/$PERSON.zip
 
 `--migrate` brings the old database forward to the new schema. It changes only the temporary copy. The export prints one line of JSON and exits 0. Exit codes are 0 for success, 1 for a failure (one plain line says why) and 2 for a bad command line.
 
-The export writes the file as a private file of the container's user. Give it back to yourself:
+The helper runs as you, so the file is written into your private folder as a file you own. Check it:
 
 ```bash
-docker run --rm -v "$WORK/out":/out alpine:3.21 chown "$(id -u):$(id -g)" "/out/$PERSON.zip"
-chmod 700 "$WORK/out"
+ls -ld "$WORK/out"
 ls -l "$WORK/out"
 ```
 
@@ -200,6 +201,8 @@ Only that person's data should be there. If the old stack held more than one per
 
 - Model keys and the model server address: Settings, Models. Keys are never exported.
 - Connector sign-ins: a connector that signs in with OAuth arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
+- Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
+- Safety settings: check the prompt-injection screens, search and offline settings on the new instance.
 - "Always allow" choices: each tool asks again the first time and you can pick Always allow once more.
 - Schedules: they arrive switched off. Review each one and switch on the ones you want.
 

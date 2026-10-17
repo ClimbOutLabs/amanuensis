@@ -192,7 +192,7 @@ describe('Data import route', () => {
     expect(body.data.summary).toContain(
       'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
     );
-    expect(body.data.summary).toContain('Not imported: model keys, connector sign-ins, Always allow choices.');
+    expect(body.data.summary).toContain('Not imported: model keys, connector sign-ins and keys, and safety settings');
 
     // Everything landed owned by bob with ids kept, schedules off, and the
     // dcr connector reading "needs credentials".
