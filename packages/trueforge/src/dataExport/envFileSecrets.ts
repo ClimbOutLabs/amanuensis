@@ -1,4 +1,4 @@
-import { SECRET_SETTING_NAMES, SECRET_URL_SETTING_NAMES, secretSettingValues, urlPassword } from '../secretSettings';
+import { SECRET_SETTING_NAMES, SECRET_URL_SETTING_NAMES, secretSettingValues, urlPassword } from '../config';
 
 const SECRET_NAMES: ReadonlySet<string> = new Set([...SECRET_SETTING_NAMES, ...SECRET_URL_SETTING_NAMES]);
 const DOUBLE_QUOTE_ESCAPES: Readonly<Record<string, string>> = { n: '\n', r: '\r', t: '\t' };
