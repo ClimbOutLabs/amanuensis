@@ -173,7 +173,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     // Params travel with the model that was selected, as they do for the
     // delegation role: a temperature or reasoning effort tuned for the chat's
     // own model can be meaningless, or wrong, for the persona's.
-    const personaModel = await this.deps.llm(persona.model_name);
+    const personaModel = await this.deps.llm(persona.model_name, 'chat');
     const knowledgeCapability =
       this.#personaKnowledgeBlock === undefined ? [] : [personaKnowledgeCapability(this.#personaKnowledgeBlock)];
 
@@ -215,7 +215,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     if (resolved.compactionModel !== undefined || !spec.config.context_management.compaction.enabled) {
       return resolved.compactionModel;
     }
-    const chatModel = await this.deps.llm(spec.model.name);
+    const chatModel = await this.deps.llm(spec.model.name, 'compaction');
     return {
       modelClient: chatModel.modelClient,
       modelParams: { ...chatModel.defaultModelParams, ...spec.model.params },

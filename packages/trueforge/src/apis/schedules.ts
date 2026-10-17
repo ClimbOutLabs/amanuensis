@@ -27,7 +27,9 @@ import {
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
@@ -97,8 +99,10 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
    */
   tokenStore: IOAuthTokenStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Same override point as `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -156,6 +160,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
+      googleConnectionStore: deps.googleConnectionStore,
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,

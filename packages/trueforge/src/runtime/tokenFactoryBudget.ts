@@ -11,7 +11,9 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 
-import type { ITokenFactoryUsageStore } from '../db/tokenFactoryUsageStore';
+import type { ITokenFactoryUsageStore, TokenFactoryModelUsageRecord } from '../db/tokenFactoryUsageStore';
+import type { ModelUsageRole } from '../schemas/modelUsageEvents';
+import { closeStream, UsageRecordingLLM, type ModelIdentity, type TurnModelUsage } from './modelUsage';
 
 /** Machine-readable `error.code` on the 429 returned once the daily budget is used up. */
 export const TOKEN_FACTORY_DAILY_CAP_CODE = 'token_factory_daily_cap_reached';
@@ -31,18 +33,28 @@ export function utcUsageDate(instant: Date): string {
   return instant.toISOString().slice(0, 10);
 }
 
+/** One UTC day of Token Factory traffic: the cap, what was counted, and where it went. */
+export interface TokenFactoryDay {
+  usage_date: string;
+  cap_tokens: number | undefined;
+  used_tokens: number;
+  models: TokenFactoryModelUsageRecord[];
+}
+
 export interface TokenFactoryBudget {
   /** True once today's counted tokens reach the cap; never true without a cap. */
   isExhausted(): Promise<boolean>;
   /** Throws {@link TokenFactoryDailyCapError} once today's counted tokens reach the cap. */
   assertWithinCap(): Promise<void>;
-  /** Adds provider-reported tokens to today's UTC counter. */
-  record(tokens: number): Promise<void>;
+  /** Adds one call's provider-reported tokens to today's UTC counters. */
+  record(call: { model_id: string; input_tokens: number; output_tokens: number }): Promise<void>;
+  /** Today's counters, for the Settings daily view. */
+  today(): Promise<TokenFactoryDay>;
 }
 
 /**
- * Counts Token Factory tokens per UTC day against `cap`. With no cap every call is a no-op, so an
- * instance without `TOKEN_FACTORY_DAILY_TOKEN_CAP` never touches the store.
+ * Counts Token Factory tokens per UTC day and enforces the cap, when there is one. Usage is always
+ * counted, per model, so the daily view works without a cap; only the refusal needs `cap`.
  */
 export function createTokenFactoryBudget({
   store,
@@ -67,11 +79,16 @@ export function createTokenFactoryBudget({
         throw new TokenFactoryDailyCapError();
       }
     },
-    async record(tokens) {
-      if (cap === undefined || tokens <= 0) {
+    async record({ model_id, input_tokens, output_tokens }) {
+      if (input_tokens + output_tokens <= 0) {
         return;
       }
-      await store.addUsage({ usage_date: utcUsageDate(now()), tokens });
+      await store.addUsage({ usage_date: utcUsageDate(now()), model_id, input_tokens, output_tokens });
+    },
+    async today() {
+      const usage_date = utcUsageDate(now());
+      const [usage, models] = await Promise.all([store.getUsage({ usage_date }), store.listModelUsage({ usage_date })]);
+      return { usage_date, cap_tokens: cap, used_tokens: usage?.used_tokens ?? 0, models };
     },
   };
 }
@@ -97,10 +114,6 @@ export function tokenFactoryRole({
   return fallbackType === 'tokenfactory' ? 'fallback' : undefined;
 }
 
-async function closeStream(stream: AsyncIterator<unknown>): Promise<void> {
-  await stream.return?.();
-}
-
 /**
  * The one place Token Factory calls are limited and counted. The budget is re-checked before every
  * call: a Token Factory primary is refused with the daily-cap error, a Token Factory fallback is left
@@ -110,23 +123,28 @@ async function closeStream(stream: AsyncIterator<unknown>): Promise<void> {
  */
 export class TokenFactoryMeteredLLM implements ILLM {
   readonly #role: TokenFactoryRole;
+  readonly #modelId: string;
   readonly #budget: TokenFactoryBudget;
   readonly #logger: Logger;
   readonly #build: (options: { withFailover: boolean; onFailover: () => void }) => ILLM;
 
   constructor({
     role,
+    modelId,
     budget,
     logger,
     build,
   }: {
     role: TokenFactoryRole;
+    /** Model id on the Token Factory side of the routing, the key its usage is counted under. */
+    modelId: string;
     budget: TokenFactoryBudget;
     logger: Logger;
     /** Builds the client for one call; `withFailover: false` must leave out any fallback provider. */
     build: (options: { withFailover: boolean; onFailover: () => void }) => ILLM;
   }) {
     this.#role = role;
+    this.#modelId = modelId;
     this.#budget = budget;
     this.#logger = logger;
     this.#build = build;
@@ -189,7 +207,11 @@ export class TokenFactoryMeteredLLM implements ILLM {
       return;
     }
     try {
-      await this.#budget.record(usage.input_tokens + usage.output_tokens);
+      await this.#budget.record({
+        model_id: this.#modelId,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+      });
     } catch (error) {
       this.#logger.warn('Token Factory usage could not be counted', extractErrorLogFields(error));
     }
@@ -198,21 +220,38 @@ export class TokenFactoryMeteredLLM implements ILLM {
 
 /**
  * Meters a helper call (relevance judge, summarization, profile learning) that has no failover
- * routing: only a model configured on the `tokenfactory` provider is Token Factory traffic.
+ * routing. Every call is recorded against the turn under `role`; only a model configured on the
+ * `tokenfactory` provider is Token Factory traffic that the daily budget limits and counts.
  */
 export function meterHelperLlm({
   llm,
-  providerType,
+  identity,
+  role,
   budget,
+  usage,
   logger,
 }: {
   llm: ILLM;
-  providerType: VercelAIProviderName;
+  identity: ModelIdentity;
+  role: ModelUsageRole;
   budget: TokenFactoryBudget;
+  usage: TurnModelUsage;
   logger: Logger;
 }): ILLM {
-  if (providerType !== 'tokenfactory') {
-    return llm;
-  }
-  return new TokenFactoryMeteredLLM({ role: 'primary', budget, logger, build: () => llm });
+  const limited =
+    identity.provider === 'tokenfactory'
+      ? new TokenFactoryMeteredLLM({
+          role: 'primary',
+          modelId: identity.model_id,
+          budget,
+          logger,
+          build: () => llm,
+        })
+      : llm;
+  return new UsageRecordingLLM({
+    llm: limited,
+    onCall: callUsage => {
+      usage.record({ role, identity, usage: callUsage });
+    },
+  });
 }

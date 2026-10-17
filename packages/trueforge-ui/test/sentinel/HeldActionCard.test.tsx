@@ -19,6 +19,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     outbound_text: 'to: ana@example.com\nbody: Lunch at noon?',
     destination_host: 'mail.example.com',
     outbound_truncated: false,
+    email: null,
     ...overrides,
   };
 }

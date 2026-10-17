@@ -64,7 +64,10 @@ const PersonaContentBaseSchema = z
   })
   .strict();
 
-function validatePersonaContentNames(content: z.infer<typeof PersonaContentBaseSchema>, ctx: z.RefinementCtx): void {
+export function validatePersonaContentNames(
+  content: z.infer<typeof PersonaContentBaseSchema>,
+  ctx: z.RefinementCtx,
+): void {
   const conflict = findPersonaContentNameConflict(content);
   if (conflict === undefined) {
     return;

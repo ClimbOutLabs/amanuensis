@@ -63,6 +63,7 @@ export function stampSentinelDecision(input: {
 }): Pick<
   InternalToolCallInfo,
   | 'tier'
+  | 'tier_reason'
   | 'tier3_card'
   | 'tier2_kind'
   | 'approval_token_id'
@@ -76,6 +77,7 @@ export function stampSentinelDecision(input: {
   const decision = input.decision;
   return {
     tier: decision.tier,
+    tier_reason: decision.reason,
     tier3_card: decision.card,
     tier2_kind: decision.tier2_kind,
     approval_token_id: decision.approval_token_id,
@@ -92,6 +94,7 @@ export function stampSentinelDecision(input: {
           pre_dispatch_failure: {
             kind: 'policy_blocked' as const,
             message: autoDenyMessage(decision),
+            ...(decision.owner_message === null ? {} : { owner_message: decision.owner_message }),
           },
         }),
   };
@@ -126,6 +129,10 @@ function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
+    case 'incomplete_send_card':
+      return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
+    case 'unattended_run':
+      return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     default:

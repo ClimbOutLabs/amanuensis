@@ -124,6 +124,12 @@ export interface GetOwnedIdsInput {
 }
 
 export interface CreateScheduleInput {
+  /**
+   * Caller-supplied schedule id, used by data import so an imported schedule
+   * keeps the id its sessions and links already reference. Omitted: the store
+   * mints a fresh id.
+   */
+  id?: string;
   tenant_id: string;
   agent_id: string;
   agent_name: string;

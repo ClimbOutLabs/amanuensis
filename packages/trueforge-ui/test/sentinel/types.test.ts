@@ -206,6 +206,68 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
+  it('reads the whole message of a mail card after the SDK deserializes it', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-2',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-12',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Change a saved draft in your Gmail.',
+              plain_why: null,
+              cannot_be_undone: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+              email: {
+                action: 'change',
+                to: ['grace@example.com'],
+                cc: [],
+                bcc: ['audit@example.com'],
+                subject: 'Lease',
+                body: 'Thursday works.\n\nAda',
+                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+              },
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
+      action: 'change',
+      to: ['grace@example.com'],
+      cc: [],
+      bcc: ['audit@example.com'],
+      subject: 'Lease',
+      body: 'Thursday works.\n\nAda',
+      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+    });
+  });
+
+  it('has no email on a card that carries none, or one it cannot read', () => {
+    const card = (email: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-13', tier: 3, tier3_card: { plain_what: 'Do it', email } }],
+      })[0]?.card.email;
+    expect(card(undefined)).toBeNull();
+    expect(card(null)).toBeNull();
+    expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
+    expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
+  });
+
   it('reads a camel-cased card from a regenerated SDK shape', () => {
     const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
@@ -499,5 +561,17 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
     });
+  });
+});
+
+describe('chat scope offer', () => {
+  const ref = { id: 'call-1', tier: 3, tier3_card: { plain_what: 'Read a note.' } };
+
+  it('reads the server flag in either spelling and leaves it absent when not sent', () => {
+    const read = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [{ ...ref, ...extra }] })[0];
+    expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
+    expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
+    expect(read({})).not.toHaveProperty('chatAllowOffered');
   });
 });

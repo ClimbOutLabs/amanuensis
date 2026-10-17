@@ -532,6 +532,17 @@ async function verifySentinelPreDispatch(input: {
   if (info.mint_canonical_params !== undefined) {
     canonicalParams = info.mint_canonical_params;
   }
+  try {
+    const live = await input.toolInfo.toolSet.liveMintParams?.({
+      name: input.toolInfo.originalToolName,
+      arguments: wireArguments,
+    });
+    if (live !== undefined) {
+      canonicalParams = live;
+    }
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
@@ -1117,8 +1128,8 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: 'Use a tool that is allowed in this conversation or change strategy.',
-              suggested_action: 'change_strategy',
+              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',
@@ -1492,9 +1503,15 @@ export async function executeToolCalls({
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
+            ...(toolCall.tool_info.mint_canonical_params === undefined
+              ? {}
+              : { approved_params: toolCall.tool_info.mint_canonical_params }),
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
+            ...(toolCall.tool_info.git_remote_precondition === undefined
+              ? {}
+              : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
           },
         );
       };
