@@ -35,6 +35,8 @@ services:
       - .env
     environment:
       NODE_ENV: production
+      # Tells the server it was set up by the installer and under what name, so Settings can say how to turn the sandbox on.
+      INSTALLER_INSTANCE: '@@NAME@@'
 @@IF_SANDBOX@@      # Run code, shell and files go to the gVisor sandbox slots (project @@NAME@@-slots), never to Docker.
 @@IF_SANDBOX@@      SANDBOX_BACKEND: slots
 @@IF_SANDBOX@@      SANDBOX_SLOTS: '4'

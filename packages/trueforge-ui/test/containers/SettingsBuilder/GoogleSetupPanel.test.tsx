@@ -113,6 +113,21 @@ function fillClient() {
 }
 
 describe('GoogleSetupPanel', () => {
+  it('makes each Google Cloud page a link that opens in a new tab, including the Audience page for test users and publishing', async () => {
+    renderPanel(makePort().port);
+
+    await screen.findByLabelText('Gmail API link');
+    for (const name of ['Project link', 'Gmail API link', 'Consent screen link', 'Credentials link']) {
+      const link = screen.getByLabelText(name);
+      expect(link).toHaveAttribute('href', link.textContent);
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+    const audience = screen.getAllByLabelText('Audience page link');
+    expect(audience).toHaveLength(2);
+    expect(audience[0]).toHaveAttribute('href', 'https://console.cloud.google.com/auth/audience');
+  });
+
   it('guides a Desktop client with a copy control for each string typed into the Google console', async () => {
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });

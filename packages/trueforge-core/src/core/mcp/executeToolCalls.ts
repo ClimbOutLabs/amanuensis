@@ -531,6 +531,17 @@ async function verifySentinelPreDispatch(input: {
   if (info.mint_canonical_params !== undefined) {
     canonicalParams = info.mint_canonical_params;
   }
+  try {
+    const live = await input.toolInfo.toolSet.liveMintParams?.({
+      name: input.toolInfo.originalToolName,
+      arguments: wireArguments,
+    });
+    if (live !== undefined) {
+      canonicalParams = live;
+    }
+  } catch {
+    return 'The approved action could not be re-checked; request approval again.';
+  }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,

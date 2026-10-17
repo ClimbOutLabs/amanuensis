@@ -113,6 +113,7 @@ export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;
 export const RUN_CODE_STATUS_STATES = [
   'ready',
   'not_configured',
+  'disabled',
   'docker_unavailable',
   'daemon_unavailable',
   'image_missing',

@@ -161,6 +161,13 @@ export interface IToolSet {
    */
   fileDigest?(absolutePath: string): Promise<string | null>;
 
+  /**
+   * The params an approval is re-checked against at dispatch, rebuilt from state the call does not carry, such as a
+   * draft held by Gmail, so an approval ends when that state changes. Absent for tool sets whose approvals bind only
+   * to the call's own arguments. A rejection fails the check closed.
+   */
+  liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
+
   // Existing synchronous Code Mode allow-list. Optional implementations fall
   // back to the current unrestricted envelope; callTool still enforces policy.
   getAllowedToolNamesForSandbox?(): string[] | undefined;
