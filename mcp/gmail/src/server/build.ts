@@ -152,12 +152,13 @@ export function buildMcpServer(options: { toolPrefix?: string } = {}): {
 
     const toolDef = getToolByName(name);
     if (!toolDef || !hasScope(getAuthorizedScopes(), toolDef.scopes)) {
+      const needs = toolDef?.scopes.length ? ` It needs ${toolDef.scopes.join(" or ")}.` : "";
       return {
         isError: true,
         content: [
           {
             type: "text",
-            text: `Error: Tool "${name}" is not available. You may need to re-authenticate with additional scopes.`,
+            text: `Error: Tool "${name}" is not available.${needs} You may need to re-authenticate with additional scopes.`,
           },
         ],
       };
