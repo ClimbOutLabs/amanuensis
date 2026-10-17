@@ -187,9 +187,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
 
               <fieldset className="mt-4 min-w-0 border-0 p-0">
                 <legend className="text-sm font-medium text-text-primary">Pinned preferences</legend>
-                <p className="mt-1 text-sm text-text-secondary">
-                  Specific preferences that should remain easy to inspect and edit.
-                </p>
+                <p className="mt-1 text-sm text-text-secondary">Key preferences, kept visible and easy to edit.</p>
                 <div className="mt-3 space-y-2">
                   {draft.pinned_preferences.map((preference, index) => (
                     <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
@@ -250,9 +248,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
               <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
                 Assistant profile
               </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                Choose how your assistant understands itself and speaks with you.
-              </p>
+              <p className="mt-1 text-sm text-text-secondary">Choose how Aman sees itself and speaks with you.</p>
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div>
@@ -260,14 +256,14 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     htmlFor="personalization-assistant-name"
                     className="mb-1.5 block text-sm font-medium text-text-primary"
                   >
-                    Assistant name
+                    Name
                   </label>
                   <input
                     id="personalization-assistant-name"
                     className={inputClassName}
                     value={draft.assistant_name ?? ''}
                     onChange={event => updateDraft('assistant_name', event.target.value)}
-                    placeholder="A name for your assistant"
+                    placeholder="Aman"
                   />
                 </div>
                 <div>
@@ -309,17 +305,15 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 Learned profile
               </h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Your assistant keeps this document up to date from your conversations. Edit or clear it here; saving
-                persists your changes.
+                Aman updates this from your conversations. Edit or clear it any time.
               </p>
 
               <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-secondary-bg px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
                   <p className="mt-0.5 text-xs leading-snug text-text-secondary">
-                    After a completed turn, the host asks a local model to rewrite this document from the conversation,
-                    at most once an hour. The document is yours to edit or clear at any time, and every change is
-                    recorded in the turn's event stream.
+                    After a conversation, a local model updates this document from it, at most once an hour. You can
+                    edit or clear it any time.
                   </p>
                 </div>
                 <Switch

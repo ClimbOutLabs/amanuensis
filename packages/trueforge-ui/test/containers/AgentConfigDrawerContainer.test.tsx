@@ -103,7 +103,7 @@ describe('AgentConfigDrawerContainer', () => {
     expect(screen.queryByRole('button', { name: 'Close agent config' })).not.toBeInTheDocument();
   });
 
-  it('opens Runtime Config in a second right-side drawer', async () => {
+  it('opens Run settings in a second right-side drawer', async () => {
     render(
       <SlotsProvider>
         <ServerProvider server={createMockAgentUIServer()}>
@@ -117,9 +117,9 @@ describe('AgentConfigDrawerContainer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open config' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Runtime Config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Run settings' }));
 
-    const runtimeDrawer = await screen.findByRole('dialog', { name: 'Runtime Config' });
+    const runtimeDrawer = await screen.findByRole('dialog', { name: 'Run settings' });
     expect(runtimeDrawer).toHaveClass('md:ml-auto', 'md:mr-0', 'md:h-dvh');
     fireEvent.click(within(runtimeDrawer).getByRole('switch', { name: 'Generative UI' }));
 

@@ -4,12 +4,13 @@ import type { FC, ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
-import { useOptionalShellMode, type SettingsSection } from '../server/ShellModeContext.js';
+import { useOptionalShellMode, type SettingsMemoryTab, type SettingsSection } from '../server/ShellModeContext.js';
 import { useOptionalAmanSetup, type AmanSetupState, type MemoryBankStatus } from './AmanSetupContext.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 
 /** Where a checklist line sends the user: a Settings section, or back to the chat. */
-export type FirstRunTarget = { kind: 'settings'; section: SettingsSection } | { kind: 'chat' };
+export type FirstRunTarget =
+  { kind: 'settings'; section: SettingsSection; memoryTab?: SettingsMemoryTab } | { kind: 'chat' };
 
 export type FirstRunItem = {
   key: 'model' | 'about-you' | 'first-chat' | 'memory';
@@ -81,7 +82,8 @@ export function amanFirstRunItems(input: {
       done: bank?.connected === true,
       action: {
         label: bank === null || bank.connected ? 'Open Memory' : 'Sign in',
-        target: { kind: 'settings', section: 'memory' },
+        // Memory setup lives on the Settings sub-tab of the Memory section, not its landing tab.
+        target: { kind: 'settings', section: 'memory', memoryTab: 'settings' },
       },
     });
   }
@@ -111,7 +113,7 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
         className={className}
         onClick={() => {
           if (target.kind === 'settings') {
-            shell.setSettingsOpen(true, target.section);
+            shell.setSettingsOpen(true, target.section, target.memoryTab);
           } else {
             shell.setSettingsOpen(false);
           }

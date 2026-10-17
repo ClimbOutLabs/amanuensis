@@ -81,7 +81,7 @@ describe('amanFirstRunItems', () => {
     expect(inChat.find(item => item.key === 'memory')).toMatchObject({
       done: false,
       detail: 'amantest needs sign-in before it can recall anything.',
-      action: { label: 'Sign in', target: { kind: 'settings', section: 'memory' } },
+      action: { label: 'Sign in', target: { kind: 'settings', section: 'memory', memoryTab: 'settings' } },
     });
 
     const inSettings = amanFirstRunItems({
