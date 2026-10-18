@@ -100,6 +100,7 @@ If the Google project is in Testing mode, Google signs the account out every 7 d
 ## What to know
 
 - Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.
+- A reply stays in its conversation. Aman reads the thread from Gmail itself, and the approval card says which thread it is for ("Reply in the thread", with the original subject and sender). A reply whose thread links do not match that thread is refused. If a send is refused, nothing is sent, and any new or changed draft asks for a new approval.
 - Scheduled runs can read your email and calendar but never draft or send email. A scheduled run that wants to add an event asks you on the Needs your OK list instead.
 - After Aman reads your email or calendar in a conversation, web searches in that conversation ask first, so mail or calendar content isn't sent out in a query without you seeing it.
 - Offline mode turns Gmail and Calendar off, because they need the network.

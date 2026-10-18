@@ -16,6 +16,7 @@ import path from 'path';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
+import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
   isGmailReadToolName,
@@ -156,6 +157,8 @@ export interface SentinelAction {
   mail_draft?: ReviewableDraft | undefined;
   /** For a draft change: the saved draft it replaces, as Gmail holds it now. */
   mail_replaces?: ReviewableDraft | undefined;
+  /** For a reply: the message in its own thread that it answers, read by the host from Gmail. */
+  mail_reply_in_thread?: AnsweredMessage | undefined;
   /**
    * The event a Calendar write would add or change, settled by the Calendar tool set from the validated call and,
    * for a change, the event as Google holds it now, so the card shows what would really be written.
@@ -1517,13 +1520,15 @@ function displayList(addresses: readonly string[]): string {
   return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
 }
 
+function cardText(text: string): string {
+  const chars = Array.from(escapeDisplayText(text));
+  return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
+    ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
+    : chars.join('');
+}
+
 function cardSubject(subject: string): string {
-  const chars = Array.from(escapeDisplayText(subject));
-  const cut =
-    chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
-      ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
-      : chars.join('');
-  return `"${cut.replace(/"/g, '\\"')}"`;
+  return `"${cardText(subject).replace(/"/g, '\\"')}"`;
 }
 
 /**
@@ -1556,12 +1561,17 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       ? []
       : [`Sent as "${escapeDisplayText(content.fromName).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]),
   ].join('. ');
+  const answered = action.mail_reply_in_thread;
+  const threadLine =
+    answered === undefined
+      ? ''
+      : ` Reply in the thread: ${cardSubject(answered.subject)}, from ${cardText(answered.from)}.`;
   const plainWhat =
-    kind === 'send'
+    (kind === 'send'
       ? `Send ${subject} from your Gmail ${recipientsLine}.`
       : kind === 'change'
         ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${displayList(replaces.to) === '' ? 'no one' : displayList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`;
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) + threadLine;
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1588,6 +1598,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
               subject: escapeDisplayText(replaces.subject),
               to: replaces.to.map(address => escapeDisplayText(address)),
             },
+      reply_in_thread:
+        answered === undefined
+          ? null
+          : { subject: escapeDisplayText(answered.subject), from: escapeDisplayText(answered.from) },
     },
   };
 }

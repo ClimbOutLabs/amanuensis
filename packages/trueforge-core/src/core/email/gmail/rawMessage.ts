@@ -55,12 +55,12 @@ function messageIds(value: string): string[] {
   return idsIn(singleLine({ value, field: 'reply headers' }));
 }
 
-/** The threading headers a reply writes: the id it answers, and the chain so far (newest 20, each once). */
+/** The threading headers a reply writes: the one id it answers, and the chain so far (newest 20, each once). */
 export function replyHeaders(reply: ReplyTarget | undefined): { inReplyTo: string; references: string } {
   if (reply === undefined) {
     return { inReplyTo: '', references: '' };
   }
-  const answered = messageIds(reply.messageIdHeader);
+  const answered = messageIds(reply.messageIdHeader).slice(0, 1);
   const chain = [...new Set([...messageIds(reply.referencesHeader), ...answered])].slice(-MAX_REFERENCES);
   return { inReplyTo: answered.join(' '), references: answered.length === 0 ? '' : chain.join(' ') };
 }
