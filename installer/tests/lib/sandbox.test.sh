@@ -341,7 +341,7 @@ test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD" --sandbox-root
   unset STUB_SUDO_REFUSE
   assert_eq "$RC" 1
