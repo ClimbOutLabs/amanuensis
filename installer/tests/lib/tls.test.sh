@@ -306,8 +306,8 @@ test_a_new_address_gets_a_new_certificate() {
   sandbox_drop
 }
 
-test_backups_carry_the_authority() {
-  t_begin "every backup holds the authority's certificate and private key, so a restore keeps the one devices trust"
+test_backups_carry_the_certificate_but_not_the_key() {
+  t_begin "a backup holds the authority's certificate and never its private key, and says what a restore does"
   sandbox_new
   lan
   install_machine
@@ -315,9 +315,10 @@ test_backups_carry_the_authority() {
   assert_rc 0
   local dir
   dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
-  assert_mode "$dir/tls/root.key" 600
-  assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.key" "$dir/tls/root.key" && echo same)" same
   assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.crt" "$dir/tls/root.crt" && echo same)" same
+  assert_eq "$(find "$dir" -name 'root.key' | wc -l | tr -d ' ')" 0 "no private key anywhere in the backup"
+  assert_eq "$(grep -rl 'PRIVATE KEY' "$dir" 2>/dev/null | grep -c 'tls' || true)" 0 "and no key under another name"
+  assert_flat_contains "$OUT" "does not hold the private key of this computer's certificate authority. After a restore, Aman makes a new one and each device trusts it again."
   sandbox_drop
 }
 
@@ -398,7 +399,7 @@ test_the_front_end_is_locked_down() {
 }
 
 test_the_fingerprint_is_shown_where_trust_is_given() {
-  t_begin "the fingerprint of the authority is in the ending, on the trust page and in the doctor, with the words to compare it"
+  t_begin "the fingerprint of the authority is in the ending and in the doctor, and the trust page sends people to compare it there"
   sandbox_new
   lan
   install_machine
@@ -408,8 +409,10 @@ test_the_fingerprint_is_shown_where_trust_is_given() {
   assert_flat_contains "$OUT" "Before you trust it, check that the fingerprint your device shows is $fingerprint. If it differs, stop."
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
-  assert_contains "$page" "<code>$fingerprint</code>"
-  assert_contains "$page" "If it does not match, stop and do not trust it."
+  assert_not_contains "$page" "$fingerprint" "the plain-http page does not show a value it cannot vouch for"
+  assert_not_contains "$page" "<code>$fingerprint"
+  assert_contains "$page" "compare the fingerprint your device shows with the one in the terminal"
+  assert_contains "$page" "If they do not match, stop and do not trust it."
   assert_eq "$(pki_info | sed -n 's/.*"root_fingerprint":"\([^"]*\)".*/\1/p')" "$fingerprint"
   sandbox_drop
 }
@@ -424,6 +427,7 @@ test_the_authority_is_limited() {
   assert_contains "$info" '"root_constrained":true'
   assert_contains "$info" '"root_covers_leaf":true'
   assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"spark"'
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"version":2'
   sandbox_drop
 }
 
@@ -442,13 +446,30 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   assert_flat_contains "$OUT" "certificate authority was made again"
   assert_flat_contains "$OUT" "each device must trust it again"
   assert_contains "$(pki_info)" '"root_covers_leaf":true'
-  assert_contains "$(cat "$AMAN_HOME/tls/trust/main/index.html")" "<code>$(cat "$AMAN_HOME/tls/ca/root.fingerprint")</code>" "the page shows the new fingerprint"
+  assert_not_contains "$(cat "$AMAN_HOME/tls/trust/main/index.html")" "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" "the page never carries the fingerprint"
   assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.crt" "$AMAN_HOME/tls/trust/main/ca.crt" && echo same)" same "and offers the new certificate"
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install tls
   assert_rc 0
   assert_flat_contains "$OUT" "Trust this computer on each device"
   assert_flat_contains "$OUT" "certificate authority was made again"
+  sandbox_drop
+}
+
+test_an_authority_made_under_older_limits_is_replaced_once() {
+  t_begin "an authority whose limits were the public-suffix kind is replaced on the next re-run, and then kept"
+  sandbox_new
+  lan
+  install_machine
+  printf '["spark"]\n' >"$AMAN_HOME/tls/ca/root.names"
+  run_install --dry-run
+  assert_flat_contains "$OUT" "Make this computer's certificate authority again"
+  assert_flat_contains "$OUT" "can vouch for more names than it should"
+  run_install --yes
+  assert_rc 0
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"version":2'
+  run_install instance refresh main
+  assert_not_contains "$OUT" "made again"
   sandbox_drop
 }
 
@@ -476,6 +497,7 @@ test_the_fingerprint_is_shown_where_trust_is_given
 test_the_authority_is_limited
 test_a_new_name_makes_the_authority_again_and_says_so
 test_an_authority_from_before_it_had_limits_is_replaced_once
+test_an_authority_made_under_older_limits_is_replaced_once
 test_the_authority_and_the_certificate
 test_a_second_instance_shares_the_authority
 test_the_trust_page_and_files
@@ -487,7 +509,7 @@ test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
 test_an_existing_instance_moves_to_https_and_back
 test_a_new_address_gets_a_new_certificate
-test_backups_carry_the_authority
+test_backups_carry_the_certificate_but_not_the_key
 test_renewal_issues_what_is_due
 test_the_daily_backup_renews
 test_a_failed_certificate_is_said_with_the_one_fix

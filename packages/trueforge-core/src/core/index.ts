@@ -116,6 +116,7 @@ export {
   renderWebSearchResultsMarkdown,
   webSearchRendering,
 } from './capabilities/builtins/WebSearchRendering';
+export { resolveLocalTime } from './util/clientTimezone';
 
 // MCP contracts
 export type { ApprovalDecision } from './events/schema';
@@ -430,6 +431,19 @@ export {
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './permissions/context';
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
+export {
+  DEFAULT_MAPS_TRAVEL_MODE,
+  MAPS_TRAVEL_MODES,
+  MapsRouteResultSchema,
+  MapsTransitStepSchema,
+  MapsTravelModeSchema,
+} from './permissions/mapsRouteSchemas';
+export type {
+  MapsRouteResult,
+  MapsTransitStep,
+  MapsTransitVehicle,
+  MapsTravelMode,
+} from './permissions/mapsRouteSchemas';
 export {
   MAPS_TOOL_NAMES,
   RENDER_MAP_TOOL_NAME,

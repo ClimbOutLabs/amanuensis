@@ -45,7 +45,7 @@ For the first instance it asks, with defaults in brackets:
 - Your email, used to sign in (skipped when you pass `--email`)
 - Whether to back up automatically every day `[Y/n]` (skipped when you pass `--backups`)
 - `Go ahead?` `[Y/n]`, after it prints the plan
-- Password (typed twice, never echoed; at least 8 characters, at most 72 bytes)
+- Password (typed twice, never echoed; at least 12 characters, at most 72 bytes)
 
 When a step needs root (installing Docker, adding you to the docker group, the sandbox setup), it asks before each one. It never asks for a model key or a model server address: a Token Factory key only arrives through `--token-factory-key-stdin`, and other models are set up in the app afterwards. The addresses Aman answers at come from this computer and from `--address`, `--public-url` and `--login-url`.
 

@@ -10,7 +10,7 @@ import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 
 export interface SentinelAuditStoreContractEnv {
   store: ISentinelAuditStore;
-  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession'>;
+  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession' | 'getSession'>;
 }
 
 function entry(overrides: Partial<AuditRecordInput>): AuditRecordInput {
@@ -66,6 +66,36 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     expect(page1.map(row => row.tool_name)).toEqual(['tool_2', 'tool_1']);
     expect(page2.map(row => row.tool_name)).toEqual(['tool_0']);
     expect(page1[0]?.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+  });
+
+  it('keeps the record of an approved calendar write after its chat is deleted', async () => {
+    const env = getEnv();
+    await createChat(env, 's-cal');
+    await env.store.record(
+      entry({
+        conversation_id: 's-cal',
+        tier: 3,
+        tool_name: 'create_event',
+        description:
+          'Add "Dentist" to your Google Calendar on Monday, October 19, 2026, 9:00 am to 10:00 am (America/New_York).',
+        outcome: 'approved',
+      }),
+    );
+
+    await env.sessions.deleteSession({ tenant_id: 't1', session_id: 's-cal' });
+
+    expect(await env.sessions.getSession({ tenant_id: 't1', session_id: 's-cal' })).toBeUndefined();
+    const rows = await env.store.list({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 's-cal',
+      limit: 50,
+      offset: 0,
+    });
+    expect(rows.map(row => ({ tool_name: row.tool_name, outcome: row.outcome }))).toEqual([
+      { tool_name: 'create_event', outcome: 'approved' },
+    ]);
+    expect(rows[0]?.description).toContain('Dentist');
   });
 
   it('listForUser spans every chat and marks entries whose chat was deleted', async () => {

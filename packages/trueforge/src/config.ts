@@ -1349,12 +1349,27 @@ export interface SharedServerConfiguration {
    */
   MAPS_ROUTER_URL: string;
   /**
+   * Base URL of an OSRM-compatible server with a foot profile, used for walking routes.
+   * Env: `MAPS_WALKING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-foot`.
+   */
+  MAPS_WALKING_ROUTER_URL: string;
+  /**
+   * Base URL of an OSRM-compatible server with a bike profile, used for cycling routes.
+   * Env: `MAPS_CYCLING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-bike`.
+   */
+  MAPS_CYCLING_ROUTER_URL: string;
+  /**
+   * Base URL, including the API version, of a MOTIS-compatible public transport planner.
+   * Env: `MAPS_TRANSIT_URL`. Default `https://api.transitous.org/api/v6`.
+   */
+  MAPS_TRANSIT_URL: string;
+  /**
    * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
    * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
    */
   MAPS_TILE_URL: string;
   /**
-   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * User-Agent sent to the geocoder, router, transit planner, and tile upstreams.
    * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
    */
   MAPS_USER_AGENT: string;
@@ -2036,6 +2051,21 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAPS_ROUTER_URL',
     raw: getEnv('MAPS_ROUTER_URL'),
     defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_WALKING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_WALKING_ROUTER_URL',
+    raw: getEnv('MAPS_WALKING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-foot',
+  }),
+  MAPS_CYCLING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_CYCLING_ROUTER_URL',
+    raw: getEnv('MAPS_CYCLING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-bike',
+  }),
+  MAPS_TRANSIT_URL: parseMapsUrl({
+    envKey: 'MAPS_TRANSIT_URL',
+    raw: getEnv('MAPS_TRANSIT_URL'),
+    defaultValue: 'https://api.transitous.org/api/v6',
   }),
   MAPS_TILE_URL: parseMapsUrl({
     envKey: 'MAPS_TILE_URL',

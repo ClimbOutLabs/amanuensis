@@ -195,6 +195,9 @@ test('maps calls keep the host-stamped hosts on the card instead of the unnamed 
     maps_hosts: {
       geocoder: 'https://geocode.example.internal',
       router: 'https://routes.example.internal',
+      walking: 'https://foot.example.internal',
+      cycling: 'https://bike.example.internal',
+      transit: 'https://transit.example.internal',
       tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
     },
   };

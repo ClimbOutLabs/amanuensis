@@ -63,6 +63,33 @@ export type SentinelApprovalEmail = {
   reply_in_thread: { subject: string; from: string } | null;
 };
 
+const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
+
+export type SentinelApprovalCalendarAction = (typeof APPROVAL_CALENDAR_ACTIONS)[number];
+
+/** The whole event of a calendar card, in plain words, so what is approved is everything that is written. */
+export type SentinelApprovalCalendarEvent = {
+  action: SentinelApprovalCalendarAction;
+  /** The account whose main calendar is written. */
+  calendar: string;
+  title: string;
+  /** Local date and time in plain words. */
+  when: string;
+  time_zone: string;
+  duration: string;
+  /** Empty when there is none. */
+  location: string;
+  /** Empty when the write sets none. */
+  description: string;
+  attendees: string[];
+  /** True when Google emails the guests about this. */
+  guests_emailed: boolean;
+  /** True when a change touches one date of a repeating event. */
+  one_of_repeating: boolean;
+  /** The event as it is now, for a change; null for a new event. */
+  before: { title: string; when: string; duration: string; location: string } | null;
+};
+
 /**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
@@ -94,6 +121,8 @@ export type SentinelApprovalCard = {
   outbound_truncated: boolean;
   /** The whole message when the action is sending or saving mail, or null. */
   email: SentinelApprovalEmail | null;
+  /** The whole event when the action adds or changes a calendar event, or null. */
+  calendar_event: SentinelApprovalCalendarEvent | null;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -321,6 +350,65 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   };
 }
 
+function parseCalendarAction(value: unknown): SentinelApprovalCalendarAction | undefined {
+  return APPROVAL_CALENDAR_ACTIONS.find(action => action === value);
+}
+
+function parseCalendarBefore(value: unknown): SentinelApprovalCalendarEvent['before'] {
+  if (!isRecord(value)) return null;
+  const title = optionalString(value, 'title');
+  const when = optionalString(value, 'when');
+  const duration = optionalString(value, 'duration');
+  const location = optionalString(value, 'location');
+  if (title === undefined || when === undefined || duration === undefined || location === undefined) return null;
+  return { title, when, duration, location };
+}
+
+/** A card missing any field is not shown as an event, so a partial event is never approved as if it were whole. */
+function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | null {
+  if (!isRecord(value)) return null;
+  const action = parseCalendarAction(value.action);
+  const calendar = optionalString(value, 'calendar');
+  const title = optionalString(value, 'title');
+  const when = optionalString(value, 'when');
+  const time_zone = optionalString(value, 'time_zone') ?? optionalString(value, 'timeZone');
+  const duration = optionalString(value, 'duration');
+  const location = optionalString(value, 'location');
+  const description = optionalString(value, 'description');
+  const attendees = stringList(value.attendees);
+  const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
+  const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
+  if (
+    action === undefined ||
+    calendar === undefined ||
+    title === undefined ||
+    when === undefined ||
+    time_zone === undefined ||
+    duration === undefined ||
+    location === undefined ||
+    description === undefined ||
+    attendees === undefined ||
+    guests_emailed === undefined ||
+    one_of_repeating === undefined
+  ) {
+    return null;
+  }
+  return {
+    action,
+    calendar,
+    title,
+    when,
+    time_zone,
+    duration,
+    location,
+    description,
+    attendees,
+    guests_emailed,
+    one_of_repeating,
+    before: parseCalendarBefore(value.before),
+  };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -338,6 +426,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
     email: parseEmail(value.email),
+    calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
   });
 }
 

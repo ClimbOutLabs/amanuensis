@@ -21,10 +21,36 @@ services:
       - 'host.docker.internal:host-gateway'
 @@IF_EDGE@@      # Caddy on this computer answers for the login name, so the app reaches its issuer without a trip through the public address.
 @@IF_EDGE@@      - '@@LOGIN_HOST@@:host-gateway'
-    # Own network for the shared speech service, so instances cannot reach each other through it.
+    # The app reaches speech by the name aman-stt on a network that only the relay below shares with it.
     networks:
       - default
-      - stt
+      - link
+    restart: unless-stopped
+
+  # Carries the app's speech requests to the shared speech service and nothing else. The service is on a network of its
+  # own with this relay alone, so it has no route to the app, the login service or the https front end.
+  speech-link:
+    image: @@APP_IMAGE@@
+    pull_policy: never
+    init: true
+    user: '10001:10001'
+    entrypoint:
+      - node
+      - --input-type=module
+      - -e
+      - "import n from 'node:net';n.createServer(c=>{const u=n.connect(8001,'aman-stt-engine');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);c.pipe(u).pipe(c)}).listen(8001)"
+    networks:
+      link:
+        aliases:
+          - aman-stt
+      speech: {}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 64m
+    pids_limit: 64
     restart: unless-stopped
 
   app:
@@ -154,5 +180,10 @@ volumes:
 @@IF_SANDBOX@@    external: true
 
 networks:
-  stt:
-    name: aman_@@NAME@@_stt
+  # Between the app and the relay only.
+  link:
+    internal: true
+  # Between the relay and the shared speech service only; the installer joins the service to it.
+  speech:
+    internal: true
+    name: @@STT_NETWORK@@

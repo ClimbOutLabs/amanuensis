@@ -15,6 +15,7 @@ const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/pr
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
 const SETUP: GoogleSetupInfo = {
   mode: 'paste',
   client_type: 'desktop',
@@ -378,6 +379,35 @@ describe('GoogleConnectService', () => {
       });
       const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
       expect(grantedFeatures(record.granted_scopes)).toEqual(['gmail_read']);
+    });
+
+    it('lets a user who reads Calendar add events as one more consent, keeping every scope they had', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () =>
+        json({ access_token: 'at2', refresh_token: 'rt-new', scope: `${READ} ${CALENDAR} ${CALENDAR_WRITE}` }),
+      );
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read', 'calendar_write'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${CALENDAR} ${CALENDAR_WRITE}`);
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      expect(grantedFeatures(record.granted_scopes)).toEqual(['gmail_read', 'calendar_read', 'calendar_write']);
+      expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('refuses to add events without Calendar, with a plain message', async () => {
+      const { service, pending, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ] }));
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: null, features: ['calendar_write'] }),
+      ).rejects.toThrow('Adding events needs Calendar too');
+      expect(pending.records.size).toBe(0);
     });
 
     it('refuses to ask for Calendar before mail is connected, with a plain message', async () => {

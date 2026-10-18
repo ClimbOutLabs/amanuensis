@@ -47,7 +47,7 @@ It first checks your computer, then asks:
 2. **Your email, used to sign in**: type your email in lowercase. This is only your sign-in name; nothing is sent to it.
 3. **Back up automatically every day? [Y/n]**: press Enter.
 4. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.
-5. **Password**: choose a password of at least 8 characters and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
+5. **Password**: choose a password of at least 12 characters and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
 
 Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (this might take a while)" is the longest step; 15 minutes is normal.
 

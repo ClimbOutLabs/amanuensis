@@ -1526,13 +1526,15 @@ describe('https on the network', () => {
       /Daily backups are off, so the https certificate is renewed only when you run an aman command/,
     );
     assert.equal(check.fix, 'Run aman doctor backup --fix');
+    assert.match(check.detail, /fingerprint, to compare on a device before trusting it: AA:BB:CC/);
   });
 
   it('warns about an authority from before it had limits, and about one that does not cover a name, with the one fix', () => {
     make();
     world.tls('main', { constrained: false });
-    assert.match(tlsCheck().detail, /has no limit on the names it can vouch for/);
+    assert.match(tlsCheck().detail, /can vouch for more names than it should/);
     assert.equal(tlsCheck().fix, 'Run aman doctor tls --fix');
+    assert.match(tlsCheck().detail, /fingerprint, to compare on a device before trusting it: AA:BB:CC/);
     make();
     world.tls('main', { covers: false });
     assert.match(tlsCheck().detail, /does not cover every name of instance main/);

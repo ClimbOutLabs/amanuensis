@@ -81,7 +81,7 @@ const VISIBLE_ONLY = {
 };
 
 /** Text that is shown to the user must be text they can see: a send is refused if part of it would be hidden. */
-const visible = <T extends z.ZodType<string>>(schema: T) =>
+export const visible = <T extends z.ZodType<string>>(schema: T) =>
   schema.refine(text => !hasHiddenCharacters(text), VISIBLE_ONLY);
 
 const DraftContentShape = {

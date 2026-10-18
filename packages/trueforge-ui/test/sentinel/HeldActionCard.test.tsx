@@ -20,6 +20,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     destination_host: 'mail.example.com',
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
     ...overrides,
   };
 }
@@ -119,5 +120,37 @@ describe('HeldActionCard', () => {
     renderCard({ disabled: true });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+  });
+
+  it('shows a proposed calendar event in full, with whether guests are emailed', () => {
+    renderCard(
+      {},
+      {
+        plain_what: 'Add "Dentist" to your Google Calendar.',
+        recipient: null,
+        destination: null,
+        destination_host: null,
+        outbound_text: null,
+        cannot_be_undone: null,
+        calendar_event: {
+          action: 'create',
+          calendar: 'ada@example.com',
+          title: 'Dentist',
+          when: 'Monday, October 19, 2026, 9:00 am to 10:00 am',
+          time_zone: 'America/New_York',
+          duration: '1 hour',
+          location: '',
+          description: '',
+          attendees: ['lin@example.com'],
+          guests_emailed: false,
+          one_of_repeating: false,
+          before: null,
+        },
+      },
+    );
+    expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
+    expect(screen.getByText('Monday, October 19, 2026, 9:00 am to 10:00 am')).toBeInTheDocument();
+    expect(screen.getByText('America/New_York')).toBeInTheDocument();
+    expect(screen.getByText('Google will not email the guests about this.')).toBeInTheDocument();
   });
 });

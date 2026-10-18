@@ -295,23 +295,122 @@ test_instances_are_isolated_and_images_stay_local() {
   main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
   second=$(cat "$AMAN_HOME/instances/second/compose.yaml")
   machine=$(cat "$AMAN_HOME/machine/compose.yaml")
-  assert_contains "$main" "name: aman_main_stt"
-  assert_contains "$second" "name: aman_second_stt"
+  assert_contains "$main" "name: aman_main_speech"
+  assert_contains "$second" "name: aman_second_speech"
   assert_not_contains "$main" "aman_second" "an instance never names another's networks"
   assert_not_contains "$second" "aman_main_"
   assert_not_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "external: true" "no network is shared with other instances"
   assert_not_contains "$main" "aman_machine"
   assert_contains "$machine" "container_name: aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_main_stt aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_second_stt aman-stt"
-  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_stt aman-stt,aman_second_stt aman-stt," "the speech service is the only thing joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 2 "app and holder are never pulled"
+  assert_log_has "network connect --alias aman-stt-engine aman_main_speech aman-stt"
+  assert_log_has "network connect --alias aman-stt-engine aman_second_speech aman-stt"
+  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_second_speech aman-stt," "the speech service is the only thing joined to each"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 3 "app, holder and speech relay are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
   assert_rc 0
-  assert_log_has "network disconnect -f aman_second_stt aman-stt"
-  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_stt"
+  assert_log_has "network disconnect -f aman_second_speech aman-stt"
+  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_speech"
+  sandbox_drop
+}
+
+# What an instance set up by a release before the speech relay left behind: aman_<name>_stt with the speech service on it.
+seed_old_speech_network() {
+  echo "aman_$1_stt" >>"$SB_STATE/networks"
+  echo "aman_$1_stt aman-stt" >>"$SB_STATE/network_links"
+  echo "aman_$1_stt aman-stt aman-stt" >>"$SB_STATE/network_aliases"
+}
+
+test_upgrade_moves_speech_off_the_old_network() {
+  t_begin "an upgrade puts an instance on a newly named speech network and removes the old one"
+  sandbox_new
+  install_machine
+  local main
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "  speech:" "the network has a new key"
+  assert_contains "$main" "name: aman_main_speech"
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')" "      speech: {}" "the relay is on it"
+  assert_not_contains "$main" "_stt" "the old network is not named"
+  seed_old_speech_network main
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_has "network disconnect -f aman_main_stt aman-stt"
+  assert_log_has "network rm aman_main_stt"
+  assert_not_contains "$(cat "$SB_STATE/networks")" "aman_main_stt" "the old network is gone"
+  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_main_stt"
+  assert_contains "$(cat "$SB_STATE/network_links")" "aman_main_speech aman-stt"
+  assert_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "healthy=1"
+  assert_contains "$OUT" "Instance main is running and healthy"
+  sandbox_drop
+}
+
+test_old_speech_network_still_in_use_is_kept() {
+  t_begin "the old speech network stays while a container of the instance is still on it"
+  sandbox_new
+  install_machine
+  seed_old_speech_network main
+  echo "aman_main_stt aman-main-app-1" >>"$SB_STATE/network_links"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_lacks "network rm aman_main_stt"
+  assert_contains "$(cat "$SB_STATE/network_links")" "aman_main_stt aman-main-app-1"
+  sandbox_drop
+}
+
+test_speech_service_joined_without_its_name_is_joined_again() {
+  t_begin "a speech service already on the network without the name the relay dials is joined again with it"
+  sandbox_new
+  install_machine
+  : >"$SB_STATE/network_aliases"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_has "network disconnect -f aman_main_speech aman-stt"
+  assert_eq "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-stt aman-stt-engine"
+  assert_eq "$(grep -c 'aman_main_speech aman-stt$' "$SB_STATE/network_links")" 1 "joined once"
+  sandbox_drop
+}
+
+test_remove_takes_the_old_speech_network_along() {
+  t_begin "removing an instance also removes an old speech network it left behind"
+  sandbox_new
+  install_machine
+  add_instance second
+  seed_old_speech_network second
+  run_install instance remove second
+  assert_rc 0
+  assert_log_has "network rm aman_second_stt"
+  assert_not_contains "$(cat "$SB_STATE/networks")" "aman_second_stt"
+  sandbox_drop
+}
+
+test_speech_service_is_hardened_and_cannot_reach_the_instance() {
+  t_begin "the speech service is locked down and reaches an instance only through its relay"
+  sandbox_new
+  install_machine
+  local machine main relay_block loopback_block
+  machine=$(cat "$AMAN_HOME/machine/compose.yaml")
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$machine" "user: '10001:10001'" "not root"
+  assert_contains "$machine" "- ALL" "no capabilities"
+  assert_contains "$machine" "no-new-privileges:true"
+  assert_contains "$machine" "read_only: true"
+  assert_contains "$machine" "tmpfs:"
+  assert_contains "$machine" "mem_limit: 2g"
+  assert_contains "$machine" "pids_limit: 256"
+  relay_block=$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')
+  loopback_block=$(printf '%s\n' "$main" | sed -n '/^  loopback:/,/^  speech-link:/p')
+  assert_contains "$relay_block" "- aman-stt" "the app finds speech under the name it always used"
+  assert_contains "$relay_block" "read_only: true"
+  assert_contains "$relay_block" "no-new-privileges:true"
+  assert_contains "$relay_block" "pids_limit"
+  assert_contains "$loopback_block" "- link"
+  assert_not_contains "$loopback_block" "- stt" "the shared network of app, login and front end is not on the speech network"
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "internal: true"
+  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 2 "both speech networks are internal"
   sandbox_drop
 }
 
@@ -417,6 +516,11 @@ test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
 test_instances_are_isolated_and_images_stay_local
+test_upgrade_moves_speech_off_the_old_network
+test_old_speech_network_still_in_use_is_kept
+test_speech_service_joined_without_its_name_is_joined_again
+test_remove_takes_the_old_speech_network_along
+test_speech_service_is_hardened_and_cannot_reach_the_instance
 test_app_env_lacks_dex_only_values
 test_purge_after_remove_deletes_the_leftover_volumes
 test_purge_failure_is_not_reported_as_success

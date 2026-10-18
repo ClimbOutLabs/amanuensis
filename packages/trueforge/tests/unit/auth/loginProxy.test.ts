@@ -327,6 +327,37 @@ describe('login proxy', () => {
       }
     });
 
+    it('tells unknown addresses in plain words how long to wait once an account has had too many wrong passwords', async () => {
+      const hono = new Hono();
+      hono.all(
+        '*',
+        createLoginProxy({
+          issuerUrl: ISSUER,
+          allowedOrigins: ORIGINS,
+          limiter,
+          clientKey: c => c.req.header('x-test-client') ?? 'unknown',
+        }),
+      );
+      const post = (address: string) =>
+        hono.request('http://192.168.1.20:8791/dex/auth/local/login?back=&state=s', {
+          method: 'POST',
+          headers: {
+            host: '192.168.1.20:8791',
+            'x-test-client': address,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=owner%40example.com&password=guess',
+        });
+      for (let i = 0; i < 10; i += 1) {
+        expect((await post(`198.51.100.${String(i)}`)).status).toBe(401);
+      }
+      const locked = await post('198.51.100.200');
+      expect(locked.status).toBe(429);
+      expect(await locked.text()).toBe('Too many wrong passwords. Try again in 5 minutes.');
+      expect(locked.headers.get('retry-after')).toBe('300');
+      expect(calls).toHaveLength(10);
+    });
+
     it('does not count a post the service refused for a bad request, such as an unknown sign-in state', async () => {
       answer = () => new Response('Bad request', { status: 400, headers: { 'content-type': 'text/html' } });
       for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -626,7 +657,7 @@ describe('login proxy in front of a public sign-in address', () => {
     globalThis.fetch = realFetch;
   });
 
-  function gateway(clientKey?: () => string): Hono {
+  function gateway({ clientKey, limiter }: { clientKey?: () => string; limiter?: LoginAttemptLimiter } = {}): Hono {
     const hono = new Hono();
     hono.all(
       '*',
@@ -635,6 +666,7 @@ describe('login proxy in front of a public sign-in address', () => {
         upstreamUrl: 'http://127.0.0.1:5556/dex',
         allowedOrigins: ['https://login.example.com'],
         ...(clientKey === undefined ? {} : { clientKey }),
+        ...(limiter === undefined ? {} : { limiter }),
       }),
     );
     return hono;
@@ -652,7 +684,8 @@ describe('login proxy in front of a public sign-in address', () => {
 
   it('limits each visitor behind a reverse proxy on this computer by the address it recorded, and ignores that header elsewhere', async () => {
     globalThis.fetch = () => Promise.resolve(wrongPassword());
-    const app = gateway();
+    // Checks the per-address limit only, so the account's shared budget is set out of reach.
+    const app = gateway({ limiter: new LoginAttemptLimiter({ maxFailuresPerAccount: 1000 }) });
     const post = (remoteAddress: string, forwardedFor: string) =>
       app.fetch(
         new Request('https://login.example.com/dex/auth/local/login', {
@@ -662,7 +695,7 @@ describe('login proxy in front of a public sign-in address', () => {
             'x-forwarded-for': forwardedFor,
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: 'login=a%40b.c&password=x',
+          body: `login=user-${forwardedFor}&password=x`,
         }),
         { incoming: { socket: { remoteAddress } } },
       );
@@ -687,6 +720,7 @@ describe('login proxy in front of a public sign-in address', () => {
         upstreamUrl: 'http://127.0.0.1:5556/dex',
         allowedOrigins: ['https://login.example.com'],
         trustedProxies: ['172.17.0.1'],
+        limiter: new LoginAttemptLimiter({ maxFailuresPerAccount: 1000 }),
       }),
     );
     const post = (remoteAddress: string, forwardedFor: string) =>
@@ -698,7 +732,7 @@ describe('login proxy in front of a public sign-in address', () => {
             'x-forwarded-for': forwardedFor,
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: 'login=a%40b.c&password=x',
+          body: `login=user-${forwardedFor}&password=x`,
         }),
         { incoming: { socket: { remoteAddress } } },
       );

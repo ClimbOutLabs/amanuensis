@@ -64,6 +64,78 @@ describe('parseMapsResult', () => {
     expect(parsed.data?.distance_km).toBe(621.5);
   });
 
+  const roadResult = (mode?: string) => ({
+    status: 'ok',
+    ...(mode === undefined ? {} : { mode }),
+    from: { resolved_name: 'Rua da Emenda 45', lat: 38.7106, lng: -9.1426 },
+    to: { resolved_name: 'R. de Sao Bernardo 92', lat: 38.7142, lng: -9.1597 },
+    distance_km: 1.9,
+    duration_min: 24,
+    route_geometry: '_p~iF~ps|U',
+    attribution: '© OpenStreetMap contributors',
+  });
+
+  it('carries the mode of each road route, and treats a result without one as driving', () => {
+    for (const mode of ['walking', 'cycling', 'driving']) {
+      expect(parseMapsResult(JSON.stringify(roadResult(mode)), 'render_route').data?.mode).toBe(mode);
+    }
+    expect(parseMapsResult(JSON.stringify(roadResult()), 'render_route').data?.mode).toBe('driving');
+  });
+
+  it('parses a transit route with times and steps', () => {
+    const parsed = parseMapsResult(
+      JSON.stringify({
+        ...roadResult('transit'),
+        departs: '09:02',
+        arrives: '09:20',
+        transfers: 0,
+        steps: [
+          { kind: 'walk', duration_min: 4, to_name: 'Calhariz (Bica)' },
+          {
+            kind: 'ride',
+            vehicle: 'tram',
+            line_name: '28E',
+            headsign: 'Campo Ourique',
+            from_name: 'Calhariz (Bica)',
+            to_name: 'Estrela',
+            departs: '09:06',
+            arrives: '09:16',
+            stops_count: 6,
+          },
+        ],
+      }),
+      'render_route',
+    );
+    expect(parsed.state).toBe('ready');
+    expect(parsed.data?.mode).toBe('transit');
+    expect(parsed.data?.departs).toBe('09:02');
+    expect(parsed.data?.steps).toHaveLength(2);
+  });
+
+  it('refuses a transit result that has no steps rather than drawing half a card', () => {
+    const parsed = parseMapsResult(JSON.stringify(roadResult('transit')), 'render_route');
+    expect(parsed.state).toBe('unavailable');
+    expect(parsed.data).toBeNull();
+  });
+
+  it('says in plain words when no route was found, by mode', () => {
+    const message = (mode?: string) =>
+      parseMapsResult(JSON.stringify({ status: 'error', code: 'no_route', ...(mode ? { mode } : {}) }), 'render_route')
+        .blockedMessage;
+    expect(message('transit')).toBe(
+      'No public transport route was found between the two places. Walking may still work.',
+    );
+    expect(message('walking')).toBe('No walking route was found between the two places.');
+    expect(message('cycling')).toBe('No cycling route was found between the two places.');
+    expect(message()).toBe('No driving route was found between the two places.');
+  });
+
+  it('explains a time it could not read', () => {
+    const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'invalid_time' }), 'render_route');
+    expect(parsed.state).toBe('unavailable');
+    expect(parsed.blockedMessage).toBe('The time for the trip could not be understood.');
+  });
+
   it('maps not_found to unavailable', () => {
     const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'not_found' }), 'render_map');
     expect(parsed.state).toBe('unavailable');

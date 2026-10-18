@@ -57,8 +57,8 @@ consent_root() {
 # 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
 password_problem() {
   local LC_ALL=C
-  if [ "${#1}" -lt 8 ]; then
-    echo "The password needs at least 8 characters."
+  if [ "${#1}" -lt 12 ]; then
+    echo "The password needs at least 12 characters."
   elif [ "${#1}" -gt 72 ]; then
     echo "The password can have at most 72 characters; accented or non-Latin letters take more room."
   fi
@@ -69,7 +69,7 @@ password_problem() {
 # (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
-  local __label_first=${2:-"Password for ${I_EMAIL:-the owner account}, 8 to 72 characters"} __label_second=${3:-"Repeat the password"}
+  local __label_first=${2:-"Password for ${I_EMAIL:-the owner account}, 12 to 72 characters"} __label_second=${3:-"Repeat the password"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "--password-stdin got an empty line"
