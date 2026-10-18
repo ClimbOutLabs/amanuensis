@@ -1005,24 +1005,32 @@ confirm_purge_name() {
 }
 
 cmd_instance_remove() {
-  local name=${OPT_NAME:-} exists=0 volumes purge_list
+  local name=${OPT_NAME:-} exists=0 slots=0 volumes purge_list
   [ -n "$name" ] || usage_die "usage: install.sh instance remove <name> [--purge-data]"
   valid_name "$name" || usage_die "invalid instance name"
   if reg_exists "$name" || [ -d "$(instance_dir "$name")" ]; then
     exists=1
+    if instance_sandbox_wanted "$name"; then slots=1; fi
   fi
   if [ "$exists" = 0 ]; then
     volumes=
     if docker_reach_quietly; then
       volumes=$(instance_volumes "$name" | tr '\n' ' ')
     fi
-    if [ -z "${volumes// /}" ]; then
+    # A removal that stopped while deleting the sandboxes leaves them behind; the same command finishes it.
+    if sandbox_slots_left "$name"; then slots=1; fi
+    if [ -z "${volumes// /}" ] && [ "$slots" = 0 ]; then
       say "Instance $name does not exist; nothing to do."
       return 0
     fi
     if [ "${OPT_PURGE:-0}" != 1 ]; then
-      say "Instance $name is already removed, but its data is still here: $volumes"
-      say "To delete the data: install.sh instance remove $name --purge-data"
+      if [ -n "${volumes// /}" ]; then
+        say "Instance $name is already removed, but its data is still here: $volumes"
+        say "To delete the data: install.sh instance remove $name --purge-data"
+      else
+        say "Instance $name is already removed, but its sandboxes are still on this computer."
+        say "To delete them: install.sh instance remove $name --purge-data"
+      fi
       return 0
     fi
   fi
@@ -1031,21 +1039,31 @@ cmd_instance_remove() {
   fi
   docker_prepare
   lock_acquire
+  if [ "$slots" = 1 ] && sandbox_down_needs_root "$name" "${OPT_PURGE:-0}"; then
+    root_ready "nothing was changed"
+  fi
   if [ "$exists" = 1 ]; then
     if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
       stt_detach "$name"
       dc "$name" down || warn "The instance did not stop cleanly. Removing it anyway."
     fi
-    if instance_sandbox_wanted "$name"; then sandbox_down "$name" "${OPT_PURGE:-0}"; fi
+    if [ "$slots" = 1 ]; then sandbox_down "$name" "${OPT_PURGE:-0}"; fi
     edge_remove "$name"
     remove_instance_dir "$name"
     reg_remove "$name"
     log_event "instance $name removed"
+  elif [ "$slots" = 1 ]; then
+    sandbox_down "$name" 1
+    log_event "sandboxes of removed instance $name deleted"
   fi
   if [ "${OPT_PURGE:-0}" = 1 ]; then
     volumes=$(instance_volumes "$name" | tr '\n' ' ')
     if [ -z "${volumes// /}" ]; then
-      say "Removed instance $name. It had no data left to delete."
+      if [ "$exists" = 1 ]; then
+        say "Removed instance $name. It had no data left to delete."
+      else
+        say "Deleted the sandboxes that instance $name left behind."
+      fi
       return 0
     fi
     read -r -a purge_list <<<"$volumes"

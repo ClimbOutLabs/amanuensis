@@ -8,7 +8,8 @@
 
 SLOT_IMAGE=amanuensis-sandbox-slot:local
 SLOT_COUNT=4
-SLOT_DISK_ROOT=/var/lib/aman-slots
+# The slot setup always uses /var/lib/aman-slots; the override only lets tests point the checks here elsewhere.
+SLOT_DISK_ROOT=${AMAN_SLOT_DISK_ROOT:-/var/lib/aman-slots}
 SLOT_DISK_GB=16
 SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
 SLOT_APPARMOR_FILE=/etc/apparmor.d/aman-sandbox-slot
@@ -341,6 +342,7 @@ sandbox_ensure() {
       if ! consent_root "Set up the sandbox now?" "$OPT_SANDBOX_ROOT"; then
         die "The sandbox needs administrator rights that were not given, so instance $name was not started. Run this again and answer yes, pass --sandbox-root, or pass --no-sandbox to install without run code. --yes alone never uses admin rights."
       fi
+      root_ready "instance $name was not started"
       fix_args=(--fix --yes)
       ;;
   esac
@@ -383,13 +385,34 @@ sandbox_finish() {
   fi
 }
 
-# Stops (and with --purge-data deletes) the slots of an instance that is being removed.
+sandbox_disk_dir() { printf '%s/%s' "$SLOT_DISK_ROOT" "$1"; }
+
+# Whether any part of the slots of an instance is still on this computer: their disks, containers or volumes.
+sandbox_slots_left() {
+  local name=$1
+  [ ! -d "$(sandbox_disk_dir "$name")" ] || return 0
+  [ -z "$(D ps -aq --filter "label=com.docker.compose.project=$name-slots" 2>/dev/null || true)" ] || return 0
+  docker_volume_exists "${name}_slot_ctl_1" || docker_volume_exists "${name}_slot_ws_1"
+}
+
+# Deleting the slot disks is the one root step of a removal.
+sandbox_down_needs_root() {
+  local name=$1 purge=$2
+  [ "$purge" = 1 ] && [ -d "$(sandbox_disk_dir "$name")" ] && sandbox_native_linux
+}
+
+# Stops (and with --purge-data deletes) the slots of an instance that is being removed. Stops the run when they could
+# not be stopped, so the caller keeps what the same remove command needs to finish the job.
 sandbox_down() {
-  local name=$1 purge=${2:-0} args=(--down)
-  if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
-    warn "The sandboxes of $name could not be stopped, because the sandbox tools are missing. Run aman upgrade, then remove the instance again."
-    return 0
+  local name=$1 purge=${2:-0} args=(--down) again="install.sh instance remove $1"
+  if [ "$purge" = 1 ]; then
+    args+=(--purge)
+    again="$again --purge-data"
   fi
-  if [ "$purge" = 1 ]; then args+=(--purge); fi
-  sandbox_run "${args[@]}" --instance "$name" || warn "The sandboxes of $name could not be stopped. Run aman doctor sandbox --fix, then remove the instance again."
+  if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
+    sandbox_slots_left "$name" || return 0
+    die "The sandbox tools are missing, so the sandboxes of $name could not be stopped and the removal was not finished. Run aman upgrade, then run the same command again: $again"
+  fi
+  sandbox_run "${args[@]}" --instance "$name" ||
+    die "The sandboxes of $name could not be stopped, so the removal was not finished. Run the same command again: $again"
 }
