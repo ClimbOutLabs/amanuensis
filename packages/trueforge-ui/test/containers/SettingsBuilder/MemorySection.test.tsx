@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
-import { AmanSetupProvider } from '@/components/AmanSetupContext.js';
-import { AmanWelcome } from '@/components/AmanWelcome.js';
-import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import type { MemoryVaultCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
@@ -210,36 +207,6 @@ describe('Settings Memory section', () => {
     fireEvent.keyDown(settingsTab, { key: 'Home' });
     expect(memoriesTab).toHaveAttribute('aria-selected', 'true');
     expect(memoriesTab).toHaveFocus();
-  });
-
-  it("opens the Memory section's Settings sub-tab from the first-run guide's memory link", async () => {
-    const personalizationApi = {
-      getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
-      updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
-      deleteProfile: async () => {},
-    };
-    render(
-      <TestShell server={createServer({ memorySetUp: true })}>
-        <PersonalizationProvider api={personalizationApi}>
-          <AmanSetupProvider value={{ modelName: 'local-model', memoryBank: null, settingsHref: '/settings' }}>
-            <AmanWelcome />
-          </AmanSetupProvider>
-        </PersonalizationProvider>
-      </TestShell>,
-    );
-
-    const guide = await screen.findByTestId('aman-first-run-guide');
-    fireEvent.click(within(guide).getByRole('button', { name: 'Open Memory' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute('aria-current', 'page');
-    // Memory is set up here, so the section alone would open on Memories; the link asks for Settings.
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
-    });
-    expect(await screen.findByText('Memory settings content')).toBeInTheDocument();
   });
 });
 

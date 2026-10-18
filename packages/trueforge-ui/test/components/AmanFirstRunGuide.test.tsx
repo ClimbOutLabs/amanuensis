@@ -26,24 +26,21 @@ describe('amanFirstRunItems', () => {
       modelName: null,
       userName: null,
       hasChatted: false,
-      memoryBank: null,
       placement: 'chat',
     });
     expect(fresh.map(item => [item.key, item.done])).toEqual([
       ['model', false],
       ['about-you', false],
       ['first-chat', false],
-      ['memory', false],
     ]);
 
     const halfDone = amanFirstRunItems({
       modelName: 'local/llama',
       userName: 'Sam Rivera',
       hasChatted: false,
-      memoryBank: null,
       placement: 'chat',
     });
-    expect(halfDone.map(item => item.done)).toEqual([true, true, false, false]);
+    expect(halfDone.map(item => item.done)).toEqual([true, true, false]);
     expect(halfDone[0]?.detail).toBe('Using local/llama.');
     expect(halfDone[1]?.detail).toBe('Aman knows you as Sam Rivera.');
 
@@ -51,7 +48,6 @@ describe('amanFirstRunItems', () => {
       modelName: 'local/llama',
       userName: 'Sam',
       hasChatted: true,
-      memoryBank: { name: 'amantest', connected: true },
       placement: 'chat',
     });
     expect(done.every(item => item.done)).toBe(true);
@@ -62,33 +58,25 @@ describe('amanFirstRunItems', () => {
       modelName: '  ',
       userName: '   ',
       hasChatted: undefined,
-      memoryBank: undefined,
       placement: 'chat',
     });
     expect(items.map(item => item.key)).toEqual(['model', 'about-you']);
     expect(items.every(item => !item.done)).toBe(true);
   });
 
-  it('offers a way back to chat only from settings, and asks for sign-in on an unreachable bank', () => {
+  it('offers a way back to chat only from settings', () => {
     const inChat = amanFirstRunItems({
       modelName: 'm',
       userName: null,
       hasChatted: false,
-      memoryBank: { name: 'amantest', connected: false },
       placement: 'chat',
     });
     expect(inChat.find(item => item.key === 'first-chat')?.action).toBeUndefined();
-    expect(inChat.find(item => item.key === 'memory')).toMatchObject({
-      done: false,
-      detail: 'amantest needs sign-in before it can recall anything.',
-      action: { label: 'Sign in', target: { kind: 'settings', section: 'memory', memoryTab: 'settings' } },
-    });
 
     const inSettings = amanFirstRunItems({
       modelName: 'm',
       userName: null,
       hasChatted: false,
-      memoryBank: undefined,
       placement: 'settings',
     });
     expect(inSettings.find(item => item.key === 'first-chat')?.action).toEqual({
@@ -105,7 +93,6 @@ describe('AmanFirstRunGuide', () => {
       userName: 'Sam',
       setup: {
         modelName: 'local/llama',
-        memoryBank: undefined,
         hasChatted: false,
         firstRunGuide: { dismissed: false, dismiss },
         settingsHref: '/settings',
@@ -117,6 +104,8 @@ describe('AmanFirstRunGuide', () => {
     const items = screen.getAllByRole('listitem');
     expect(items.map(item => item.getAttribute('data-done'))).toEqual(['true', 'true', 'false']);
     expect(items[1]).toHaveTextContent('Done: Tell Aman about you');
+    // Memory works out of the box, so the checklist never asks about it.
+    expect(screen.getByTestId('aman-first-run-guide')).not.toHaveTextContent(/memory/i);
     // Done lines carry no link; there is nothing left to do there.
     expect(screen.queryByRole('link', { name: 'Open Personalization' })).not.toBeInTheDocument();
 
@@ -129,7 +118,6 @@ describe('AmanFirstRunGuide', () => {
       userName: 'Sam',
       setup: {
         modelName: 'local/llama',
-        memoryBank: { name: 'amantest', connected: true },
         hasChatted: true,
         firstRunGuide: { dismissed: false, dismiss: () => {} },
       },
@@ -138,13 +126,13 @@ describe('AmanFirstRunGuide', () => {
     unmount();
 
     renderGuide({
-      setup: { modelName: null, memoryBank: null, firstRunGuide: { dismissed: true, dismiss: () => {} } },
+      setup: { modelName: null, firstRunGuide: { dismissed: true, dismiss: () => {} } },
     });
     expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
   });
 
   it('has no dismiss control when the host cannot remember one', async () => {
-    renderGuide({ setup: { modelName: null, memoryBank: undefined, settingsHref: '/settings' } });
+    renderGuide({ setup: { modelName: null, settingsHref: '/settings' } });
     expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
@@ -152,18 +140,16 @@ describe('AmanFirstRunGuide', () => {
 
   it('is visible until the host reports a dismissal', () => {
     expect(isFirstRunGuideVisible(null)).toBe(false);
-    expect(isFirstRunGuideVisible({ modelName: null, memoryBank: undefined })).toBe(true);
+    expect(isFirstRunGuideVisible({ modelName: null })).toBe(true);
     expect(
       isFirstRunGuideVisible({
         modelName: null,
-        memoryBank: undefined,
         firstRunGuide: { dismissed: false, dismiss() {} },
       }),
     ).toBe(true);
     expect(
       isFirstRunGuideVisible({
         modelName: null,
-        memoryBank: undefined,
         firstRunGuide: { dismissed: true, dismiss() {} },
       }),
     ).toBe(false);

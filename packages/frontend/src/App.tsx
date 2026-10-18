@@ -523,7 +523,6 @@ export function App() {
                           <AmanSetupProvider
                             value={{
                               modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                              memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
                               hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
                               firstRunGuide,
                               settingsHref: '/settings',

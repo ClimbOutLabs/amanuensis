@@ -48,20 +48,13 @@ function setupFor(state: FixtureState): AmanSetupState {
   switch (state) {
     case 'fresh':
     case 'panel':
-      return { ...base, modelName: null, memoryBank: null, hasChatted: false };
+      return { ...base, modelName: null, hasChatted: false };
     case 'half':
-      return { ...base, modelName: 'local/qwen3-8b', memoryBank: null, hasChatted: false };
     case 'settings':
-      return { ...base, modelName: 'local/qwen3-8b', memoryBank: undefined, hasChatted: false };
+      return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
     case 'done':
-      return {
-        ...base,
-        modelName: 'local/qwen3-8b',
-        memoryBank: { name: 'notebook', connected: true },
-        hasChatted: true,
-      };
     case 'line':
-      return { ...base, modelName: 'local/qwen3-8b', memoryBank: undefined, hasChatted: true };
+      return { ...base, modelName: 'local/qwen3-8b', hasChatted: true };
   }
 }
 

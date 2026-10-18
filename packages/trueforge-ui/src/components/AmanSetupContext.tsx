@@ -3,7 +3,7 @@
 import { createContext, useContext, type FC, type ReactNode } from 'react';
 
 /**
- * A memory bank as the first screen reports it. `connected` is false while the connector still
+ * A memory bank as the runtime rail reports it. `connected` is false while the connector still
  * waits on this user's sign-in: a flagged bank the user cannot reach recalls nothing, so it must
  * not read as on.
  */
@@ -19,16 +19,11 @@ export type FirstRunGuideState = { dismissed: boolean; dismiss: () => void };
  * What the host has and has not set up yet, as the first screen needs to know it.
  *
  * Chat works with just a model, so nothing here blocks anything: the welcome screen lists what
- * is still unset and where to set it, and the runtime rail shows the memory bank in use.
+ * is still unset and where to set it.
  */
 export type AmanSetupState = {
   /** The model the next chat will use; null when none is configured. */
   modelName: string | null;
-  /**
-   * The memory bank, null when memory is off, undefined when the host could not find out (the
-   * screens then say nothing about memory rather than guessing).
-   */
-  memoryBank: MemoryBankStatus | null | undefined;
   /**
    * Whether this owner has started at least one chat; undefined when the host could not find
    * out, which leaves that line off the checklist.
