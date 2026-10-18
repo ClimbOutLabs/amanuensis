@@ -16,7 +16,7 @@ import type { LLMUserMessage } from '../llm/LLMTypes';
 import { SandboxFileUploadError, type Sandbox, type SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentSendInput } from './AgentThread.types';
 import { assertAttachmentBatch, stageAttachment, validatePublicFilename } from './attachmentStaging';
-import { internalSystemTag } from './contextUtils';
+import { internalSystemTag, untrustedDocumentTag } from './contextUtils';
 
 export type { AgentInputUserMessage, FileContentPart, TextContentPart, UserContentPart };
 
@@ -229,7 +229,7 @@ export function buildIngestedDocumentTextPart(
   const issueNote = document.issue !== null ? ` Note: ${document.issue}` : '';
   return {
     type: 'text',
-    text: internalSystemTag(`${header}${truncationNote}${issueNote}\n\n${text}`),
+    text: untrustedDocumentTag(`${header}${truncationNote}${issueNote}\n\n${text}`),
   };
 }
 

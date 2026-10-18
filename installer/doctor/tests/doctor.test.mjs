@@ -28,7 +28,7 @@ import {
 } from './world.mjs';
 
 // The document a healthy world prints: same shape and keys as before the text report was restyled.
-const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 28.0.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
 `;
 
 let world;
@@ -150,7 +150,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 27\.1\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -170,7 +170,7 @@ describe('document and exit codes', () => {
     assert.match(flat, /This computer x Only 1\.0 GB is free for Docker data/);
     assert.match(flat, /\d+ other checks passed\. Full report: aman doctor/);
     assert.doesNotMatch(flat, /All \d+ checks passed/);
-    assert.doesNotMatch(flat, /Docker 27\.1\.1 is running/);
+    assert.doesNotMatch(flat, /Docker 28\.0\.1 is running/);
     assert.doesNotMatch(flat, /Instance main/);
   });
 
@@ -394,6 +394,23 @@ describe('unsupported runtimes', () => {
     world.set('version', { out: 'Docker Engine - Community;\n' });
     world.set('cli_version', { out: 'podman version 5.0.0\n' });
     assert.equal(machine(world.json(), 'runtime').state, 'fail');
+  });
+
+  it('fails on native Linux with an Engine older than 28, and passes for 28, Docker Desktop and WSL2', () => {
+    make();
+    const info = (version, os) => ({ out: `${version}|x86_64|[]|${world.dockerRoot}|${DAEMON_TIME}|${os}\n`, rc: 0 });
+    world.set('info', info('27.5.1', 'Ubuntu 24.04'));
+    const check = machine(world.json(), 'runtime');
+    assert.equal(check.state, 'fail');
+    assert.match(
+      check.detail,
+      /Docker Engine 27\.5\.1 lets other devices on your network reach ports meant for this computer only/,
+    );
+    assertFixed(check);
+    world.set('info', info('28.0.0', 'Ubuntu 24.04'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
+    world.set('info', info('27.5.1', 'Docker Desktop'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
   });
 });
 
@@ -1543,6 +1560,41 @@ describe('aman backup and aman upgrade', () => {
     const result = runInstalled(['backup']);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+});
+
+describe('aman import and aman migrate', () => {
+  it('import into the one instance through the installer, with the display name passed on', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--display-name', 'Sam Example']).code, 0);
+    assert.ok(
+      world
+        .calls()
+        .includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --display-name Sam Example`),
+    );
+  });
+
+  it('import needs --instance when this computer has more than one, and a file always', () => {
+    make({ instances: ['main', 'second'] });
+    world.installerStub(world.sandbox());
+    const several = world.shim(['import', '/x/aman-export.zip']);
+    assert.equal(several.code, 2);
+    assert.match(several.stderr, /has 2 instances, so Aman cannot tell which one to import into\. Run aman import/);
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--instance', 'second']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance import second /x/aman-export.zip`));
+    const none = world.shim(['import']);
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /aman import needs the export file\. Run aman import FILE\./);
+  });
+
+  it('migrate runs the installer with the folder and the options given', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['migrate', '--from-compose', '/x/old-aman', '--user', 'sam-id']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} migrate --from-compose /x/old-aman --user sam-id`),
+    );
   });
 });
 

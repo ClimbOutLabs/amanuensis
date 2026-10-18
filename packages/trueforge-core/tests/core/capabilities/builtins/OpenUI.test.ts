@@ -12,7 +12,7 @@ import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 
 const ROUTING_SENTENCE =
-  'Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML, CSS, or scripts that openui components cannot express';
+  'Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML or CSS that openui components cannot express. HTML previews do not run scripts';
 
 describe('openUI', () => {
   it('preload true (default) matches instruction-only wiring', () => {

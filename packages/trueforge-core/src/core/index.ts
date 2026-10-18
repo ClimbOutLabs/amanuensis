@@ -33,6 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
+export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export {
   extractBase64,
@@ -409,7 +410,7 @@ export type {
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
-export { recordClassificationAudit } from './permissions/audit';
+export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
   canonicalShellForm,

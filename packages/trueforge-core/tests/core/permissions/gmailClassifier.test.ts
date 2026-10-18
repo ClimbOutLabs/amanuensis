@@ -81,6 +81,30 @@ describe('Gmail read classification', () => {
     expect(ctx.web_search.privateDataRead).toBe(false);
   });
 
+  it.each(['list_inbox_threads', 'list_drafts'])(
+    'keeps %s a silent read when it filters by from, sender or reply_to',
+    async name => {
+      const decision = await classifyTier(
+        gmailAction(name, { from: 'a@example.com', sender: 'b@example.com', reply_to: 'c@example.com' }),
+        makeCtx(),
+      );
+      expect(decision).toMatchObject({ tier: 1, reason: 'gmail_read', card: null, auto_deny: null });
+    },
+  );
+
+  it('does not treat a read-only connector mail search filtered by from as a send', async () => {
+    const search: SentinelAction = {
+      tool_name: 'search_threads',
+      canonical_params: { query: 'invoice', from: 'billing@example.com', sender: 'a@example.com' },
+      tool_type: 'mcp',
+      mcp_server_name: 'mail',
+      mcp_hints: { read_only_hint: true, open_world_hint: false },
+    };
+    const decision = await classifyTier(search, makeCtx());
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).not.toBe('connector_send');
+  });
+
   it('does not let a built-in tool of another server take the Gmail path', async () => {
     const other: SentinelAction = { ...gmailAction('read_email'), mcp_server_name: 'notes' };
     const ctx = makeCtx();

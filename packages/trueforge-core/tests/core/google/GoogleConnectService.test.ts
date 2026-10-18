@@ -30,7 +30,7 @@ function stateOf(authorizationUrl: string): string {
   return new URL(authorizationUrl).searchParams.get('state') ?? '';
 }
 
-function setup(now = new Date('2026-10-15T12:00:00.000Z')) {
+function setup(now = new Date('2026-10-15T12:00:00.000Z'), onlyAccountEmail: string | null = null) {
   const connections = new FakeConnections();
   const pending = new FakePending();
   const google = new FakeGoogle();
@@ -42,6 +42,7 @@ function setup(now = new Date('2026-10-15T12:00:00.000Z')) {
     now: () => clock,
     fetchImpl: google.fetch,
     logger,
+    only_account_email: onlyAccountEmail,
   });
   return {
     warnings,
@@ -261,6 +262,49 @@ describe('GoogleConnectService', () => {
       await expect(
         service.begin({ owner: OWNER, setup: SETUP, client: null, features: ['gmail_read'] }),
       ).rejects.toBeInstanceOf(GoogleClientError);
+    });
+  });
+
+  describe('pinned account', () => {
+    async function signIn(input: { pinned: string | null; signedInAs: string }) {
+      const ctx = setup(undefined, input.pinned);
+      ctx.google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      ctx.google.on(PROFILE_URL, () => json({ emailAddress: input.signedInAs }));
+      const { authorization_url } = await ctx.service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read'],
+      });
+      return {
+        ...ctx,
+        complete: () => ctx.service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'c' }),
+      };
+    }
+
+    it('refuses any other Google account and stores nothing', async () => {
+      const { complete, connections } = await signIn({
+        pinned: 'maya@demo.example',
+        signedInAs: 'judge@gmail.example',
+      });
+      await expect(complete()).rejects.toThrow(GoogleConsentError);
+      expect(await connections.get(OWNER)).toBeNull();
+    });
+
+    it('says in plain words that only the demo account can be connected', async () => {
+      const { complete } = await signIn({ pinned: 'maya@demo.example', signedInAs: 'judge@gmail.example' });
+      await expect(complete()).rejects.toThrow("Only this demo's own Google account can be connected here.");
+    });
+
+    it('accepts the pinned account whatever its capitals', async () => {
+      const { complete, connections } = await signIn({ pinned: 'maya@demo.example', signedInAs: 'Maya@Demo.Example' });
+      await expect(complete()).resolves.toMatchObject({ status: 'connected' });
+      expect((await connections.get(OWNER))?.account_email).toBe('Maya@Demo.Example');
+    });
+
+    it('lets any account connect when nothing is pinned', async () => {
+      const { complete } = await signIn({ pinned: null, signedInAs: 'ada@example.com' });
+      await expect(complete()).resolves.toMatchObject({ account_email: 'ada@example.com' });
     });
   });
 
@@ -494,6 +538,7 @@ describe('GoogleConnectService', () => {
       const { connections } = setup();
       await connections.save(connectedRecord());
       const unreachable = new GoogleConnectService({
+        only_account_email: null,
         connections,
         pending: new FakePending(),
         now: undefined,

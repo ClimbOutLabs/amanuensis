@@ -125,6 +125,8 @@ function buildApp(input: {
     googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),

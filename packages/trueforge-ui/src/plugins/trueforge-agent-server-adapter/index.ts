@@ -113,7 +113,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   const catalog =
     catalogOverride ??
     ({
-      modelCatalog: createModelProviderCatalog(client),
+      modelCatalog: createModelProviderCatalog(client, clientOptions),
       connectorCatalog: createConnectorCatalog(client, clientOptions),
       skillCatalog: createSkillCatalog(client),
       sandboxCatalog: createSandboxProviderCatalog(client),

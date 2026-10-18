@@ -110,6 +110,7 @@ import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -647,6 +648,16 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
+  const mcpCatalog = McpCatalog.load();
+  // Offered once so the first search needs no setup.
+  await seedDefaultSearchProviderAtBoot({
+    trueFoundryMode: isTrueFoundryModeEnabled(configuration),
+    globalSettingsStore,
+    mcpServerStore: mcpOAuthStore,
+    catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -679,6 +690,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
+    demoMode: configuration.DEMO_MODE,
+    demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
@@ -754,7 +767,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     resolveModelProviderStore,

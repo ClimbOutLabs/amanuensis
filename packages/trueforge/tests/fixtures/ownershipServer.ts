@@ -244,6 +244,8 @@ async function startSqlite(): Promise<OwnershipServer> {
     googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -332,6 +334,8 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),

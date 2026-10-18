@@ -3,9 +3,13 @@ import {
   hasCalledRetrievalTool,
   hasRetrievalTool,
   internalSystemMessage,
+  internalSystemTag,
   isFreshnessQuestion,
+  isHostWrappedText,
   isRetrievalToolName,
+  isUntrustedDocumentText,
   lastUserMessageText,
+  untrustedDocumentTag,
   userAuthoredText,
 } from '../../../src/core/runtime/contextUtils';
 
@@ -179,5 +183,22 @@ describe('hasCalledRetrievalTool', () => {
   it('is false for an empty or tool-call-free context', () => {
     expect(hasCalledRetrievalTool([])).toBe(false);
     expect(hasCalledRetrievalTool([{ role: 'user', content: 'hi' }])).toBe(false);
+  });
+});
+
+describe('host-wrapped text predicates', () => {
+  it('recognises extracted file text and internal notes as host-wrapped', () => {
+    expect(isUntrustedDocumentText(untrustedDocumentTag('body'))).toBe(true);
+    expect(isHostWrappedText(untrustedDocumentTag('body'))).toBe(true);
+    expect(isHostWrappedText(internalSystemTag('note'))).toBe(true);
+  });
+
+  it('treats the internal tag as host-wrapped but not as file text', () => {
+    expect(isUntrustedDocumentText(internalSystemTag('note'))).toBe(false);
+  });
+
+  it('leaves what the user typed alone', () => {
+    expect(isHostWrappedText('what does the lease say?')).toBe(false);
+    expect(isUntrustedDocumentText('what does the lease say?')).toBe(false);
   });
 });
