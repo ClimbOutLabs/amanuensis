@@ -3,7 +3,7 @@
  * change one event and always ask; there is no delete.
  */
 import { z } from 'zod';
-import { visible } from '../email/gmail/toolContract';
+import { fewSelectors, TOO_MANY_SELECTORS, visible } from '../email/gmail/toolContract';
 import { isRealDate } from '../util/calendarDay';
 import { isValidTimezone } from '../util/clientTimezone';
 
@@ -98,7 +98,8 @@ export const CreateEventSchema = z
   .strict()
   .refine(input => (input.attendees ?? []).length === 0 || input.send_updates !== undefined, {
     message: 'Adding guests makes Google email them. Set send_updates to "all" or "none".',
-  });
+  })
+  .refine(input => fewSelectors([input.title, input.location, input.description]), TOO_MANY_SELECTORS);
 
 export const UpdateEventSchema = z
   .object({
@@ -123,7 +124,8 @@ export const UpdateEventSchema = z
       input.location !== undefined ||
       input.description !== undefined,
     { message: 'Say what to change: title, start, end, location or description.' },
-  );
+  )
+  .refine(input => fewSelectors([input.title, input.location, input.description]), TOO_MANY_SELECTORS);
 
 export type CreateEventInput = z.infer<typeof CreateEventSchema>;
 export type UpdateEventInput = z.infer<typeof UpdateEventSchema>;

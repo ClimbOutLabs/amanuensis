@@ -275,4 +275,12 @@ describe('a change to an event', () => {
       expect(UpdateEventSchema.safeParse({ event_id: 'ev1', ...blank }).success).toBe(false);
     },
   );
+
+  it('refuses a change when Google did not list every guest, so the card never names fewer than it reaches', () => {
+    const truncated: CalendarEvent = { ...STANDUP, attendeesOmitted: true };
+    expect(update({ event_id: 'ev1', title: 'x', send_updates: 'none' }, truncated)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('did not list every guest'),
+    });
+  });
 });
