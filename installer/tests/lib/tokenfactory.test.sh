@@ -167,7 +167,7 @@ short key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 2
-  assert_flat_contains "$ERR" "--token-factory-key-stdin got an empty line"
+  assert_flat_contains "$ERR" "--token-factory-key-stdin reads the Token Factory key from it"
   install_with_key_stdin --token-factory-model 'bad model'
   assert_rc 2
   install_with_key_stdin --token-factory-model '-leading'
@@ -191,7 +191,7 @@ test_dry_run_plans_without_reading_or_printing_the_key() {
   run_install --dry-run --token-factory-key-stdin --token-factory-model vendor/m --token-factory-daily-cap 1000 --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key goes only into the instance .env. Capped at 1000 tokens per day."
+  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key is saved only in the settings file of this instance. Capped at 1000 tokens per day."
   assert_not_contains "$OUT$ERR" "$TF_KEY"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
@@ -277,7 +277,7 @@ test_a_key_on_a_rerun_replaces_the_old_one() {
   run_install --yes --token-factory-key-stdin
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_contains "$OUT" "Token Factory key updated. Restarting the app."
   assert_rotated main
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_eq "$(grep -vc '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" "$before_lines" "every other line is unchanged"
@@ -321,7 +321,7 @@ $TF_KEY
   run_install instance add second --yes --token-factory-key-stdin
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_contains "$OUT" "Token Factory key updated. Restarting the app."
   assert_eq "$(env_value second NEBIUS_API_KEY)" "$NEW_KEY"
   assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY" "the other instance is untouched"
   assert_not_contains "$OUT$ERR" "$NEW_KEY"

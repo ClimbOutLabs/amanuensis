@@ -73,7 +73,7 @@ chmod 0644 "\$main_new"
 } >"\$check"
 if ! out=\$(caddy validate --config "\$check" --adapter caddyfile 2>&1); then
   echo "\$out" >&2
-  echo "Caddy rejected the generated configuration, so nothing was replaced; Caddy keeps running as before" >&2
+  echo "Caddy rejected the generated configuration, so nothing was replaced. Caddy keeps running as before." >&2
   exit 1
 fi
 mv -f "\$site_new" $dest
@@ -100,11 +100,11 @@ STEPS
 }
 
 edge_print_firewall_hint() {
-  ui_line "Firewall: the installer changes none. Open only TCP 443 to the internet, plus SSH (22) from your own address; port 80 can stay closed. In a cloud this is the security group of the machine."
+  ui_line "Firewall: the installer changes none. Open only port 443 to the internet, plus SSH (port 22) from your own address. Port 80 can stay closed. On a cloud server this is its security group."
 }
 
 edge_print_root_steps() {
-  say "Root steps for HTTPS with Caddy (Ubuntu package archive; the Caddyfile for instance $1 is written by the installer):"
+  say "Root steps for HTTPS with Caddy (installed from Ubuntu's packages; the installer writes the settings for instance $1):"
   edge_root_script "$1" | sed 's/^/    /'
 }
 
@@ -141,7 +141,7 @@ edge_dns_check() {
       return 0
     fi
     if [ "$got" != "$EDGE_PUBLIC_IP" ]; then
-      EDGE_DNS_PROBLEM="$host resolves to $got, but this computer's public address is $EDGE_PUBLIC_IP. Point its A record at $EDGE_PUBLIC_IP, wait until it resolves, then run this again (if the address the VM is reached on is another one, pass it with --public-ip ADDRESS). Nothing was requested from Let's Encrypt."
+      EDGE_DNS_PROBLEM="$host resolves to $got, but this computer's public address is $EDGE_PUBLIC_IP. Point its A record at $EDGE_PUBLIC_IP, wait until it resolves, then run this again. If this computer is reached at another address, pass it with --public-ip ADDRESS. Nothing was requested from Let's Encrypt."
       return 0
     fi
   done
@@ -177,7 +177,7 @@ plan_edge_instance() {
   if command -v caddy >/dev/null 2>&1; then
     plan_add have "Caddy is installed"
   else
-    plan_add root "Install Caddy from the Ubuntu package archive" "apt-get install caddy; see: install.sh --print-root-steps --tls caddy"
+    plan_add root "Install Caddy from the Ubuntu package archive" "The steps: install.sh --print-root-steps --tls caddy"
     dl_add caddy
   fi
   plan_add root "Apply the Caddyfile for $app_host and $login_host" "It goes under $CADDY_ETC/aman.d. Caddy is checked and reloaded, then asks Let's Encrypt for certificates for exactly those two names."
@@ -198,7 +198,7 @@ plan_edge() {
 # After a reload Caddy needs a moment to get its certificates; the doctor right after would otherwise fail.
 edge_wait_ready() {
   local url=$1 i=0
-  say "Waiting for the certificates (Caddy asks Let's Encrypt for exactly these two names)"
+  say "Waiting for the certificates from Let's Encrypt"
   while [ "$i" -lt "$EDGE_WAIT_TRIES" ]; do
     if curl -fsS --max-time 8 -o /dev/null "$url/healthz" 2>/dev/null; then
       say "HTTPS answers at $url"
@@ -226,11 +226,11 @@ edge_ensure() {
   edge_print_root_steps "$name"
   if ! consent_root "Install Caddy and apply this configuration now?" "$OPT_TLS_ROOT"; then
     EDGE_DECLINED=1
-    warn "HTTPS for instance $name is not set up: the root steps were not approved. The instance runs on this computer only. Run this installer again and answer yes, or pass --tls-root (--yes alone never uses sudo)."
+    warn "HTTPS for instance $name is not set up, because the admin steps were not approved. The instance runs on this computer only. Run install.sh again and answer yes, or pass --tls-root. --yes alone never uses admin rights."
     return 0
   fi
   run_root sh -c "$(edge_root_script "$name")" ||
-    die "the Caddy steps failed, so HTTPS for instance $name is not set up (the instance itself runs). Fix what is reported above, then run this installer again."
+    die "The Caddy steps failed, so HTTPS for instance $name is not set up. The instance itself runs. Fix what is reported above, then run install.sh again."
   log_event "caddy configured for instance $name"
   edge_wait_ready "$(reg_get "$name" public_url)"
 }
@@ -245,13 +245,13 @@ edge_remove() {
   say "Root steps to stop serving instance $name with Caddy:"
   edge_remove_script "$name" | sed 's/^/    /'
   if ! consent_root "Remove the Caddy site for instance $name now?" "$OPT_TLS_ROOT"; then
-    warn "Caddy still serves the addresses of instance $name. Run the root steps above, or run this command again with --tls-root (--yes alone never uses sudo)."
+    warn "Caddy still serves the addresses of instance $name. Run the root steps above, or run this command again with --tls-root. --yes alone never uses admin rights."
     return 0
   fi
   if run_root sh -c "$(edge_remove_script "$name")"; then
     log_event "caddy site removed for instance $name"
   else
-    warn "the Caddy steps failed, so Caddy may still serve the addresses of instance $name. Run the root steps above by hand."
+    warn "The Caddy steps failed, so Caddy may still serve the addresses of instance $name. Run the root steps above by hand."
   fi
 }
 

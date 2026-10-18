@@ -107,17 +107,17 @@ sandbox_runtime_install() {
   if ! download_file "https://nodejs.org/dist/v$version/$file" "$tmp/$file" 2>"$STEP_LOG"; then
     rm -rf "$tmp"
     UI_FD=2 ui_step_end fail "Node.js could not be downloaded from nodejs.org"
-    die "could not download https://nodejs.org/dist/v$version/$file. Check this computer's network access to nodejs.org (install.sh --print-network lists every host), then run this again."
+    die "Could not download https://nodejs.org/dist/v$version/$file. Check that this computer can reach nodejs.org, then run this again."
   fi
   sum=$(sha256_stdin <"$tmp/$file")
   if [ "$sum" != "$expected" ]; then
     rm -rf "$tmp"
-    die "the downloaded $file does not match the pinned SHA-256 ($expected, got $sum), so it was not used. Run this again; if it keeps failing, the download is being altered on the way."
+    die "The downloaded $file does not match the expected checksum ($expected, got $sum), so it was not used. Run this again. If it keeps failing, the download is being altered on the way."
   fi
   member=node-v$version-$platform/bin/node
   if ! tar -xzf "$tmp/$file" -C "$tmp" "$member"; then
     rm -rf "$tmp"
-    die "could not unpack $file"
+    die "Could not unpack $file."
   fi
   dest=$(sandbox_runtime_node)
   ensure_private_dir "$AMAN_HOME/runtime"
@@ -127,7 +127,7 @@ sandbox_runtime_install() {
   chmod 755 "$dest.new"
   mv -f "$dest.new" "$dest"
   rm -rf "$tmp"
-  sandbox_runtime_present || die "the downloaded Node.js does not run on this computer; use --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, or pass --no-sandbox."
+  sandbox_runtime_present || die "The downloaded Node.js does not run on this computer. Use --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, or pass --no-sandbox."
   step_ok "Downloaded Node.js v$version for $platform"
 }
 
@@ -166,7 +166,7 @@ preflight_sandbox() {
     # The slot agent reads the limits of either cgroup version, so v1 is no blocker; it only reports a different line.
     cgroup=$(D info --format '{{.CgroupVersion}}' 2>/dev/null || true)
     case "$cgroup" in
-      1) check_warn "Docker here uses cgroup v1. The sandbox runs on it; memory limits are read from the v1 files" ;;
+      1) check_warn "Docker here uses cgroup v1, an older setup. The sandbox runs on it." ;;
       2 | '') ;;
       *) check_block "Docker reports an unknown cgroup setup ($cgroup), which the sandbox cannot check" "Pass --no-sandbox to install without run code." ;;
     esac
@@ -177,12 +177,12 @@ preflight_sandbox() {
       '' | *[!0-9]*) ;;
       *)
         if [ "$free" -lt "$SLOT_MIN_FREE_KB" ]; then
-          check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Free space, or pass --no-sandbox to install without run code."
+          check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Make room there, or pass --no-sandbox to install without run code."
         fi
         ;;
     esac
     if [ "$(id -u)" != 0 ] && ! command -v sudo >/dev/null 2>&1; then
-      check_block "The sandbox host setup needs administrator rights and sudo is not installed" "Run the installer as root, or pass --no-sandbox to install without run code."
+      check_block "The sandbox setup needs administrator rights, and sudo is not installed" "Run the installer as root, or pass --no-sandbox to install without run code."
     fi
   fi
 }
@@ -248,7 +248,7 @@ sandbox_install_bundle() {
   tmp=$(umask 077 && mktemp "$dest.XXXXXX")
   if ! D run --rm --entrypoint cat "$REL_APP_TAG" "$SANDBOX_BUNDLE_IN_IMAGE" >"$tmp" 2>/dev/null || [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    die "the app image $REL_APP_TAG has no sandbox setup at $SANDBOX_BUNDLE_IN_IMAGE; run install.sh again to rebuild it"
+    die "The app ($REL_APP_TAG) has no sandbox setup in it. Run install.sh again to build it again."
   fi
   write_if_changed "$dest" 644 <"$tmp" || true
   rm -f "$tmp"
@@ -278,7 +278,7 @@ sandbox_images_ensure() {
   sandbox_runtime_ensure
   sandbox_install_bundle
   sandbox_run --build-only --instance "$(sandbox_first_instance)" ||
-    die "Building the sandbox failed; the log is $(ui_path "$(sandbox_log)"). Run install.sh again once it is fixed, or pass --no-sandbox to install without run code."
+    die "Building the sandbox failed. The log is at $(ui_path "$(sandbox_log)"). Fix what it says and run install.sh again, or pass --no-sandbox to install without run code."
 }
 
 sandbox_first_instance() {
@@ -330,7 +330,7 @@ sandbox_ensure() {
     # Healthy slots still run the image they started with, so a rebuilt image (new tools, new languages)
     # needs them started again; a run that built nothing new leaves them alone.
     if [ "$refresh" != refresh ] && sandbox_slots_use_current_image "$name"; then
-      ui_skip "The sandboxes of instance $name are already healthy"
+      ui_skip "The sandboxes of instance $name are already running"
       return 0
     fi
   fi
@@ -339,13 +339,13 @@ sandbox_ensure() {
     apparmor | disk)
       sandbox_print_root_steps "$step"
       if ! consent_root "Set up the sandbox now?" "$OPT_SANDBOX_ROOT"; then
-        die "The sandbox needs administrator rights that were not given, so instance $name was not started. Answer yes when asked, or pass --sandbox-root (--yes alone never uses sudo), or pass --no-sandbox to install without run code."
+        die "The sandbox needs administrator rights that were not given, so instance $name was not started. Run this again and answer yes, pass --sandbox-root, or pass --no-sandbox to install without run code. --yes alone never uses admin rights."
       fi
       fix_args=(--fix --yes)
       ;;
   esac
   sandbox_run --instance "$name" ${fix_args[@]+"${fix_args[@]}"} ||
-    die "The sandboxes of instance $name did not come up. Run: $(sandbox_repair_command)   (details: $(ui_path "$(sandbox_log)"))"
+    die "The sandboxes of instance $name did not start. Run: $(sandbox_repair_command). The log is at $(ui_path "$(sandbox_log)")."
   sandbox_docker_boot_ensure
 }
 
@@ -359,9 +359,9 @@ sandbox_docker_boot_ensure() {
   if systemctl is-enabled --quiet docker 2>/dev/null; then return 0; fi
   ui_line "Docker does not start when this computer does, so the sandbox would stay down after a restart. Changing that needs administrator rights."
   if consent_root "Make Docker start with this computer?" "$OPT_SANDBOX_ROOT"; then
-    run_root systemctl enable docker || warn "Could not make Docker start at boot. Run: aman doctor sandbox --fix"
+    run_root systemctl enable docker || warn "Could not make Docker start with this computer. Run: aman doctor sandbox --fix"
   else
-    warn "Docker was left as it was; after a restart the sandbox stays down until you run: aman doctor sandbox --fix"
+    warn "Docker was left as it was, so after a restart the sandbox stays down until you run: aman doctor sandbox --fix"
   fi
 }
 
@@ -387,7 +387,7 @@ sandbox_finish() {
 sandbox_down() {
   local name=$1 purge=${2:-0} args=(--down)
   if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
-    warn "The sandboxes of $name could not be stopped (the sandbox tools are missing here). Run aman upgrade, then remove the instance again."
+    warn "The sandboxes of $name could not be stopped, because the sandbox tools are missing. Run aman upgrade, then remove the instance again."
     return 0
   fi
   if [ "$purge" = 1 ]; then args+=(--purge); fi

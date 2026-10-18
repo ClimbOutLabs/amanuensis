@@ -26,7 +26,7 @@ demo_env_on() {
 }
 
 demo_plan_text() {
-  printf 'Turn demo mode on for instance %s and seed the synthetic demo world for %s' "$1" "$2"
+  printf 'Turn demo mode on for instance %s and fill it with example data for %s' "$1" "$2"
 }
 
 # Sets DEMO_MODE=true in the managed block and restarts the app when that changed it.
@@ -37,9 +37,9 @@ demo_enable() {
   demo_env_on "$name" && return 0
   env_managed_set "$env" DEMO_MODE true
   log_event "demo mode turned on for instance $name"
-  say "Demo mode on for instance $name; restarting the app"
+  say "Demo mode is on for instance $name. Restarting the app."
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app || {
-    warn "The app of instance $name did not restart healthy. Run: aman doctor instance --fix"
+    warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
     return 1
   }
 }
@@ -50,12 +50,12 @@ demo_seed_run() {
   args=(demo-seed --user "$user")
   if [ "$reset" = 1 ]; then args+=(--reset); fi
   if [ "$(instance_state "$name")" != running ]; then
-    warn "instance $name is not running, so the demo world was not seeded. Start it with install.sh, then run: $(demo_seed_command "$name")"
+    warn "Instance $name is not running, so no example data was added. Start it with install.sh, then run: $(demo_seed_command "$name")"
     return 1
   fi
-  say "Seeding the demo world for $user on instance $name"
+  say "Adding example data for $user to instance $name"
   dc "$name" exec -T app aman "${args[@]}" || {
-    warn "the demo seed failed. Run it again with: $(demo_seed_command "$name")"
+    warn "Adding the example data failed. Run it again with: $(demo_seed_command "$name")"
     return 1
   }
   log_event "demo seed ${args[*]:2} on instance $name"
@@ -78,7 +78,7 @@ cmd_instance_demo_seed() {
   require_installed
   name=$(instance_pick)
   demo_env_on "$name" ||
-    die "instance $name is not a demo instance. Turn demo mode on and seed it with: install.sh --demo --name $name"
+    die "Instance $name is not a demo instance. Turn demo mode on and add example data with: install.sh --demo --name $name"
   docker_prepare
   lock_acquire
   demo_seed_run "$name" "$(reg_get "$name" owner_email)" "$OPT_RESET" || exit 1

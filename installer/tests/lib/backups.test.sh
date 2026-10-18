@@ -26,7 +26,7 @@ test_the_plan_names_the_daily_backup() {
   sandbox_new
   run_install --dry-run --email owner@example.invalid
   assert_flat_contains "$OUT" "Back up every day, keeping the last 7"
-  assert_flat_contains "$OUT" "Runs at 03:30 with a crontab line of your user."
+  assert_flat_contains "$OUT" "Runs at 03:30 with a scheduled task of your user (cron)."
   assert_no_path "$AMAN_HOME"
   install_machine
   run_install --dry-run

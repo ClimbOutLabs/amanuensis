@@ -108,7 +108,7 @@ cmd_migrate() {
     old_app=$id
   done
   [ -n "$old_app" ] ||
-    die "Aman found no old Aman containers made from $folder. Start the old Aman once with docker compose up -d in that folder, then run this again."
+    die "No old Aman was found running from $folder. Start it once with docker compose up -d in that folder, then run this again."
   project=$(D inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$old_app" 2>/dev/null)
   for id in $(old_containers "$folder" "$project"); do
     is_postgres "$id" || continue
@@ -117,22 +117,22 @@ cmd_migrate() {
     old_pg=$id
   done
   [ -n "$old_pg" ] ||
-    die "Aman found no database of the old Aman made from $folder. Start the old Aman once with docker compose up -d in that folder, then run this again."
+    die "No database of the old Aman was found in $folder. Start the old Aman once with docker compose up -d in that folder, then run this again."
   [ "$(D inspect --format '{{.State.Running}}' "$old_pg" 2>/dev/null)" = true ] ||
     die "The database of the old Aman is not running. Run docker compose up -d postgres in $folder, then run this again."
   memory=$(old_mount "$old_app" /data/memory)
   knowledge=$(old_mount "$old_app" /data/persona-knowledge)
   [ -n "$memory" ] && [ -n "$knowledge" ] ||
-    die "The old Aman has no memory or knowledge folder mounted, so this move cannot find them. Follow docs/migrate-from-compose.md to move by hand."
+    die "The old Aman has no memory or knowledge folder, so this move cannot find them. Follow docs/migrate-from-compose.md to move by hand."
   pg_image=$(D inspect --format '{{.Config.Image}}' "$old_pg")
 
   MIGRATE_ACTIVE=1
   migrate_cleanup
-  say "Copying the old Aman from $folder; the old Aman keeps running and is not changed."
+  say "Copying the old Aman from $folder. It keeps running and is not changed."
   D network create --internal --label "$MIGRATE_LABEL" "$MIGRATE_NET" >/dev/null ||
     die "Aman could not make a private network for the copy. Run: aman doctor docker"
   for volume in $MIGRATE_VOLUMES; do
-    D volume create --label "$MIGRATE_LABEL" "$volume" >/dev/null || die "Aman could not make a temporary volume. Run: aman doctor disk"
+    D volume create --label "$MIGRATE_LABEL" "$volume" >/dev/null || die "Aman could not make room for a temporary copy. Run: aman doctor disk"
   done
   # Trust needs no password and is safe here: the network is internal and holds only this copy and the export.
   # The copied database lives in named temporary volumes covering both places Postgres images declare (17 and 18), so
@@ -143,7 +143,7 @@ cmd_migrate() {
     die "Aman could not start the temporary database. Run: aman doctor docker"
   until D exec "$MIGRATE_PG" pg_isready -h 127.0.0.1 -U aman -d aman -q >/dev/null 2>&1; do
     tries=$((tries + 1))
-    [ "$tries" -lt 60 ] || die "The temporary database did not start in a minute. Run: aman doctor docker"
+    [ "$tries" -lt 60 ] || die "The temporary database did not start within a minute. Run: aman doctor docker"
     sleep 1
   done
   # shellcheck disable=SC2016 # the old container's own settings name its database
@@ -156,7 +156,7 @@ cmd_migrate() {
     sh -c "cp -a /from/memory/. /to/memory/ && cp -a /from/knowledge/. /to/knowledge/ && chown -R $APP_UID:$APP_UID /to /out" ||
     die "The old memory and knowledge folders could not be copied. Run: aman doctor disk"
 
-  listing=$(migrate_export --migrate --list-users) || die "The copy of the old database could not be read; the message above says why. Run this again once that is fixed."
+  listing=$(migrate_export --migrate --list-users) || die "The copy of the old database could not be read. The message above says why. Fix that, then run this again."
   owners=$(migrate_owners "$listing") ||
     die "Aman could not read the list of people from the copy of the old database. Run this again."
   with_chats=$(printf '%s\n' "$owners" | awk -F '\t' '$2 > 0')
@@ -179,13 +179,13 @@ cmd_migrate() {
   say "Exporting the chats of $user from the copy"
   migrate_export --migrate --include-uploads ${include[@]+"${include[@]}"} --user "$user" \
     --secrets-env /migrate/old.env --out /out/aman-export.zip >/dev/null ||
-    die "The export from the copy failed; the message above says why. Run this again once that is fixed."
+    die "The export from the copy failed. The message above says why. Fix that, then run this again."
   ensure_private_dir "$AMAN_HOME/exports"
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   dest=$AMAN_HOME/exports/aman-export-$stamp.zip
   MIGRATE_PART=$dest.part
   if ! D run --rm --network none -v aman_migrate_out:/out:ro "$MIGRATE_IMAGE" cat /out/aman-export.zip >"$MIGRATE_PART"; then
-    die "The export could not be copied out of its volume. Run: aman doctor disk"
+    die "The export file could not be saved. Run: aman doctor disk"
   fi
   chmod 600 "$MIGRATE_PART"
   mv "$MIGRATE_PART" "$dest"

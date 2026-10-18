@@ -60,7 +60,7 @@ password_problem() {
   if [ "${#1}" -lt 12 ]; then
     echo "The password needs at least 12 characters."
   elif [ "${#1}" -gt 72 ]; then
-    echo "The password can have at most 72 characters; accented or non-Latin letters take more room."
+    echo "The password can have at most 72 characters. Accented or non-Latin letters count as more than one."
   fi
 }
 
@@ -72,7 +72,7 @@ ask_password() {
   local __label_first=${2:-"Password for ${I_EMAIL:-the owner account}, 12 to 72 characters"} __label_second=${3:-"Repeat the password"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
-    [ -n "$__first" ] || usage_die "--password-stdin got an empty line"
+    [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
     __problem=$(password_problem "$__first")
     [ -z "$__problem" ] || usage_die "$__problem"
     printf -v "$__var" '%s' "$__first"
@@ -83,8 +83,8 @@ ask_password() {
       ui_password __first "$__label_first" || die "No password was entered, so nothing more was changed."
       ui_password __second "$__label_second" || die "No password was entered, so nothing more was changed."
     else
-      IFS= read -r __first || die "No password was provided on stdin."
-      IFS= read -r __second || die "The password was not repeated on stdin."
+      IFS= read -r __first || die "No password was given on the input."
+      IFS= read -r __second || die "The password was not repeated on the input."
     fi
     __problem=$(password_problem "$__first")
     if [ -n "$__problem" ]; then
@@ -96,7 +96,7 @@ ask_password() {
       return 0
     fi
     if [ ! -t 0 ]; then
-      die "No valid password could be read from stdin."
+      die "No valid password came from the input, so nothing was changed."
     fi
     __tries=$((__tries + 1))
   done
@@ -174,10 +174,10 @@ lock_acquire() {
   if ! mkdir "$lock" 2>/dev/null; then
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      die "another installer run (pid $pid) is active; wait for it to finish"
+      die "Another install is running right now (process $pid). Wait for it to finish, then run this again."
     fi
     rm -rf "$lock"
-    mkdir "$lock" || die "could not take the installer lock at $lock"
+    mkdir "$lock" || die "Could not mark this run as active at $lock. If no other install is running, remove that folder and try again."
   fi
   printf '%s\n' "$$" >"$lock/pid"
   LOCK_HELD=1

@@ -145,7 +145,7 @@ test_purge_after_remove_deletes_the_leftover_volumes() {
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data" "--yes does not confirm"
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 0
-  assert_contains "$OUT" "deleted its data volumes"
+  assert_contains "$OUT" "deleted its data:"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_data"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_dex"
   assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_second_"
@@ -165,8 +165,8 @@ test_purge_failure_is_not_reported_as_success() {
   STUB_VOLUME_RM_FAIL=aman_second_data
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 1
-  assert_flat_contains "$ERR" "could not delete the volumes: aman_second_data"
-  assert_not_contains "$OUT" "deleted its data volumes"
+  assert_flat_contains "$ERR" "The data could not be deleted: aman_second_data"
+  assert_not_contains "$OUT" "deleted its data:"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
   unset STUB_VOLUME_RM_FAIL
   run_install instance remove second --purge-data --confirm-name second
@@ -282,7 +282,7 @@ test_add_before_install_is_refused() {
   sandbox_new
   add_instance x
   assert_rc 1
-  assert_flat_contains "$ERR" "run install.sh first"
+  assert_flat_contains "$ERR" "Run install.sh first"
   sandbox_drop
 }
 
@@ -342,7 +342,7 @@ test_upgrade_moves_speech_off_the_old_network() {
   assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_main_stt"
   assert_contains "$(cat "$SB_STATE/network_links")" "aman_main_speech aman-stt"
   assert_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "healthy=1"
-  assert_contains "$OUT" "Instance main is running and healthy"
+  assert_contains "$OUT" "Instance main is running and answering"
   sandbox_drop
 }
 

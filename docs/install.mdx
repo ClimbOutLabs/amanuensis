@@ -30,7 +30,7 @@ installer/install.sh
 The installer works in phases and shows you a printed plan before changing anything:
 
 1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2 or newer, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
-2. **Plan and confirmation.** Prints each step as done, will do, or needs root, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
+2. **Plan and confirmation.** Prints each step as done, to do, or needs admin, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
 3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
 4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup, builds the app and helper images locally from the checked-out source, then the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
 5. **Machine services.** Starts the shared speech-to-text service.
@@ -88,7 +88,7 @@ unset KEY
 
 `printf` is a shell builtin, so the key never appears as an argument of any process. With `--password-stdin` as well, the password is the first line and the key the second.
 
-To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces `NEBIUS_API_KEY` in the managed block of its `.env` (mode 600, written atomically), prints `Token Factory key updated; restarting the app`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
+To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces `NEBIUS_API_KEY` in the managed block of its `.env` (mode 600, written atomically), prints `Token Factory key updated. Restarting the app.`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
 
 ### Fresh Docker installs on Linux
 

@@ -206,12 +206,12 @@ test_plan_words_and_nothing_printed_twice() {
   assert_not_contains "$OUT$ERR" "[root]"
   assert_flat_contains "$OUT" "> to do Create the folder"
   local after
-  after=${OUT#*Building images (4 of 6)}
+  after=${OUT#*Building the app (4 of 6)}
   assert_not_contains "$after" "to do" "the plan is not printed again"
   assert_flat_contains "$after" "+ Built the Aman app"
   assert_flat_contains "$after" "+ Built the speech-to-text service"
   assert_flat_contains "$after" "+ Downloaded the sign-in service"
-  assert_flat_contains "$after" "+ Instance main is running and healthy"
+  assert_flat_contains "$after" "+ Instance main is running and answering"
   sandbox_drop
 }
 

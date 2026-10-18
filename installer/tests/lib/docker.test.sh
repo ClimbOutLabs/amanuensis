@@ -123,7 +123,7 @@ test_group_member_without_relogin_uses_sg() {
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
   assert_contains "$OUT" "Open a new terminal window"
-  assert_contains "$OUT" "without a re-login"
+  assert_flat_contains "$OUT" "your other terminals do not have yet"
   assert_log_has "sg docker -c"
   assert_log_lacks "usermod"
   assert_log_lacks "sudo docker"
@@ -151,7 +151,7 @@ test_doctor_follows_sudo_access() {
   rm -f "$SB_BIN/sg"
   INSTALL_EXTRA=(--add-docker-group)
   install_machine
-  assert_flat_contains "$ERR" "using sudo for Docker during this run only"
+  assert_flat_contains "$ERR" "Using sudo for Docker during this run only"
   assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"
   sandbox_drop
 }
