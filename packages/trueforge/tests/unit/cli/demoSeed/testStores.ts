@@ -1,4 +1,4 @@
-import type { Transaction } from 'kysely';
+import type { Kysely, Transaction } from 'kysely';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,8 @@ export type TestStores = DemoSeedStores<Transaction<Database>>;
 
 export interface TestWorld {
   stores: TestStores;
+  /** The same database, for planting rows the seed itself never writes. */
+  db: Kysely<Database>;
   memoryDir: string;
   knowledgeDir: string;
   /** Documents the indexer was asked to index, in order. */
@@ -57,6 +59,7 @@ export async function createTestWorld(options: { indexes?: boolean } = {}): Prom
   });
   return {
     stores: createSqliteDemoSeedStores({ db, memoryDir, tenantId: TENANT_ID, knowledge }),
+    db,
     memoryDir,
     knowledgeDir,
     queued,

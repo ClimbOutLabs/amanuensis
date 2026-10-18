@@ -32,6 +32,8 @@ export interface DemoSpace {
 export interface DemoWorld {
   /** The seeded day (`YYYY-MM-DD` in the user's zone); a changed day means the dated content is stale. */
   day: string;
+  /** The zone that defines the seed day. */
+  timeZone: string;
   personas: DemoPersona[];
   profile: PersonalizationProfileContent;
   notes: DemoNote[];

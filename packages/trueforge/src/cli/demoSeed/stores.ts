@@ -3,6 +3,7 @@ import { SqliteAgentStore } from '../../db/sqlite/agent-store/SqliteAgentStore';
 import { SqlitePersonaStore } from '../../db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSessionStore } from '../../db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSpaceStore } from '../../db/sqlite/space-store/SqliteSpaceStore';
 import type { Database } from '../../db/sqlite/types';
 import { MarkdownMemoryClient } from '../../runtime/memory/markdownMemoryClient';
@@ -28,6 +29,7 @@ export function createSqliteDemoSeedStores({
     agentStore: new SqliteAgentStore(db),
     scheduleStore: new SqliteScheduleStore(db),
     spaceStore: new SqliteSpaceStore(db),
+    sessionStore: new SqliteSessionStore(db),
     knowledge,
     memory: new MarkdownMemoryClient({ baseDir: memoryDir, namespace: tenantId }),
   };

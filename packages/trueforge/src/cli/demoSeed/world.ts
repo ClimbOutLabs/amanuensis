@@ -2,7 +2,6 @@ import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
-import { dayLabels, type DayLabels } from './calendar';
 import { photographyGuide, relocationGuide } from './maya/knowledge';
 import { mayaMemoryNotes } from './maya/memories';
 import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
@@ -27,14 +26,14 @@ export const DEFAULT_DEMO_USER = 'judge@example.com';
 export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
 
 export interface DemoWorldInput {
-  /** "Today" in the user's zone: every date in the world is an offset from this day. */
+  /** "Today" in the user's zone; dates her mail and calendar hold stay fixed, and only what is past moves. */
   today: CalendarDay;
   timeZone: string;
   /** Fully qualified `provider/model` for the personas and the agent. */
   modelName: string;
 }
 
-function buildSpaces(days: DayLabels): DemoSpace[] {
+function buildSpaces(today: CalendarDay): DemoSpace[] {
   return [
     {
       id: DEMO_TASKS_SPACE_ID,
@@ -43,15 +42,15 @@ function buildSpaces(days: DayLabels): DemoSpace[] {
         purpose: "Maya's task list: what is open, what is in progress and what is done.",
         status: 'active',
         format: 'markdown',
-        body: tasksSpaceBody(days),
+        body: tasksSpaceBody(today),
       },
     },
   ];
 }
 
-function buildNotes(days: DayLabels): DemoNote[] {
+function buildNotes(): DemoNote[] {
   return [
-    ...mayaMemoryNotes(days),
+    ...mayaMemoryNotes(),
     {
       key: 'gp-search',
       body: `Maya needs a regular English-speaking GP. Shortlist: ${GP_CLINIC.name} (${GP_CLINIC.address}, open ${GP_CLINIC.hours}) is the first choice and ${BACKUP_CLINIC.name} (${BACKUP_CLINIC.address}) the backup. ${VISA_CLINIC.name} is already booked for her visa medical, so do not suggest it as a GP.`,
@@ -59,10 +58,8 @@ function buildNotes(days: DayLabels): DemoNote[] {
   ];
 }
 
-/** Everything the seed writes, derived from "today" in the user's zone so the dates stay relative. */
+/** Everything the seed writes for "today" in the user's zone. */
 export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
-  const days = dayLabels(input.today);
-
   const profile: PersonalizationProfileContent = {
     assistant_name: null,
     assistant_identity: null,
@@ -78,13 +75,14 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
 
   return {
     day: isoDay(input.today),
+    timeZone: input.timeZone,
     personas: [
       { id: DEMO_JUNE_ID, content: junePersona(input.modelName), knowledge: relocationGuide() },
       { id: DEMO_THEO_ID, content: theoPersona(input.modelName), knowledge: photographyGuide() },
     ],
     profile,
-    notes: buildNotes(days),
-    spaces: buildSpaces(days),
+    notes: buildNotes(),
+    spaces: buildSpaces(input.today),
     agentDescription: `Synthetic demo assistant (${DEMO_MARKER}).`,
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
@@ -101,7 +99,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
         'Good morning. Read my calendar for today and my inbox.',
         'Summarise what needs my attention: what is on today, what I need to prepare, and which emails are waiting on me.',
         `Flag upcoming appointments and what to bring. Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
-        'Draft a reply for anything that needs one, but do not send anything. Leave every send for me to approve under Needs your OK.',
+        'For any email that needs a reply, write a short suggested reply in the brief. Do not send or save anything.',
       ].join(' '),
       cron: '30 7 * * *',
       timezone: input.timeZone,

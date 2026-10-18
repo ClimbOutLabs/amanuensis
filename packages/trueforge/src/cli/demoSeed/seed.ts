@@ -1,13 +1,21 @@
-import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentSpecSchema,
+  type AgentSpec,
+  type CreatedBySubject,
+  type ISessionStore,
+} from '@truefoundry/trueforge-core/agent-session';
+import { isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { ulid } from 'ulid';
 import type { IAgentStore } from '../../db/agentStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../../db/personaStore';
 import type { IScheduleStore } from '../../db/scheduleStore';
+import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ISpaceStore } from '../../db/spaceStore';
 import type { WithTransaction } from '../../db/transaction';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
+import { dayInZone } from './calendar';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
 import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME } from './world';
@@ -17,7 +25,6 @@ const MEMORY_TIMEOUT_MS = 10_000;
 const KNOWLEDGE_SETTLE_TIMEOUT_MS = 180_000;
 const SHARED_VAULT = 'default';
 const PAGE_SIZE = 100;
-const SEED_DAY_KEY = 'demo_seed_day';
 const NOTE_MARKER_LINE = new RegExp(`^> ${DEMO_MARKER}:([a-z0-9-]+)$`);
 
 export interface DemoSeedStores<TTransaction> {
@@ -27,6 +34,8 @@ export interface DemoSeedStores<TTransaction> {
   agentStore: IAgentStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   spaceStore: ISpaceStore<TTransaction>;
+  /** Only for clearing chats an earlier version of the seed wrote; this one writes none. */
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   knowledge: DemoKnowledgeLibrary;
   memory: MemoryClient;
 }
@@ -56,6 +65,7 @@ export interface ResetReport {
   profile: number;
   agent: number;
   schedule: number;
+  sessions: number;
   spaces: number;
   memory: number;
 }
@@ -310,6 +320,12 @@ async function seedProfile<TTransaction>({
   return existing === undefined ? 'created' : 'updated';
 }
 
+/** Connectors someone attached to the demo agent stay attached; the seed owns the rest of its spec. */
+function withAttachedConnectors({ wanted, stored }: { wanted: AgentSpec; stored: AgentSpec | undefined }): AgentSpec {
+  const attached = stored?.mcp_servers;
+  return attached === undefined ? wanted : AgentSpecSchema.parse({ ...wanted, mcp_servers: attached });
+}
+
 async function seedAgent<TTransaction>({
   stores,
   scope,
@@ -320,28 +336,26 @@ async function seedAgent<TTransaction>({
   world: DemoWorld;
 }): Promise<{ outcome: SeedOutcome; agentId: string }> {
   const existing = await stores.agentStore.getAgent({ tenant_id: scope.tenantId, name: DEMO_AGENT_NAME });
+  const manifest = withAttachedConnectors({ wanted: world.agentSpec, stored: existing?.manifest });
   if (existing === undefined) {
     const created = await stores.agentStore.createAgent({
       tenant_id: scope.tenantId,
       name: DEMO_AGENT_NAME,
       description: world.agentDescription,
-      manifest: world.agentSpec,
+      manifest,
       external_id: null,
       created_by_subject: subjectFor(scope.userId),
     });
     return { outcome: 'created', agentId: created.id };
   }
-  if (
-    existing.description === world.agentDescription &&
-    isSameJson({ left: existing.manifest, right: world.agentSpec })
-  ) {
+  if (existing.description === world.agentDescription && isSameJson({ left: existing.manifest, right: manifest })) {
     return { outcome: 'unchanged', agentId: existing.id };
   }
   await stores.agentStore.updateAgent({
     tenant_id: scope.tenantId,
     id: existing.id,
     description: world.agentDescription,
-    manifest: world.agentSpec,
+    manifest,
   });
   return { outcome: 'updated', agentId: existing.id };
 }
@@ -361,6 +375,53 @@ async function findSchedule<TTransaction>({
     created_by_or_agent_ids: undefined,
   });
   return data.find(schedule => schedule.name === DEMO_SCHEDULE_NAME);
+}
+
+/** Schedules and chats an earlier version of the seed wrote under names or markers this one no longer uses. */
+async function removeEarlierSeeds<TTransaction>({
+  stores,
+  scope,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+}): Promise<{ schedules: number; sessions: number }> {
+  const removed = { schedules: 0, sessions: 0 };
+  const { data: schedules } = await stores.scheduleStore.listSchedules({
+    tenant_id: scope.tenantId,
+    limit: PAGE_SIZE,
+    page_token: undefined,
+    agent_names: [DEMO_AGENT_NAME],
+    created_by_or_agent_ids: undefined,
+  });
+  for (const schedule of schedules) {
+    if (isDemoId(schedule.name) && schedule.created_by_subject.subject_id === scope.userId) {
+      await stores.scheduleStore.deleteSchedule({ tenant_id: scope.tenantId, id: schedule.id });
+      removed.schedules += 1;
+    }
+  }
+  // Deleting a chat leaves its audit rows in place.
+  for (;;) {
+    const { data: sessions } = await stores.sessionStore.listSessions({
+      tenant_id: scope.tenantId,
+      limit: PAGE_SIZE,
+      page_token: undefined,
+      order: undefined,
+      start_timestamp: undefined,
+      end_timestamp: undefined,
+      agent_id: undefined,
+      created_by_or_agent_ids: { created_by_subject_id: scope.userId, agent_ids: [] },
+      metadata: { [DEMO_MARKER]: 'true' },
+      source_type: undefined,
+      source_id: undefined,
+    });
+    if (sessions.length === 0) {
+      return removed;
+    }
+    for (const session of sessions) {
+      await stores.sessionStore.deleteSession({ tenant_id: scope.tenantId, session_id: session.session_id });
+      removed.sessions += 1;
+    }
+  }
 }
 
 async function seedSchedule<TTransaction>({
@@ -418,25 +479,26 @@ async function seedSchedule<TTransaction>({
 }
 
 /**
- * The Tasks space. A space stamped with today's seed day is left as it is, because the assistant keeps it
- * current (a ticked task); a space from an earlier day, or one that lost its stamp, is rewritten.
+ * The Tasks space. One last written on the seed day is left as it is, because the assistant keeps it current
+ * (a ticked task); one from an earlier day is rewritten unless it already says the same.
  */
 async function seedSpaces<TTransaction>({
   stores,
   scope,
-  spaces,
-  day,
+  world,
+  now,
 }: {
   stores: DemoSeedStores<TTransaction>;
   scope: DemoSeedScope;
-  spaces: DemoSpace[];
-  day: string;
+  world: DemoWorld;
+  now: Date;
 }): Promise<SeedReport['spaces']> {
+  // Compared on the clock that wrote updated_at, so a rehearsal with --today keeps same-day edits.
+  const runDay = isoDay(dayInZone({ now, timeZone: world.timeZone }));
   const report = { created: 0, updated: 0, unchanged: 0 };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
-  const stamp = `> ${SEED_DAY_KEY}:${day}`;
-  for (const space of spaces) {
-    const content = { ...space.content, body: `${space.content.body}\n\n${stamp}` };
+  for (const space of world.spaces) {
+    const { content } = space;
     const existing = await stores.spaceStore.getSpace({ ...owner, space_id: space.id });
     const aggregate = await stores.spaceStore.getAggregate(owner);
     if (existing === undefined) {
@@ -447,7 +509,10 @@ async function seedSpaces<TTransaction>({
         expected_aggregate_revision: aggregate.revision,
       });
       report.created += 1;
-    } else if (existing.body.includes(stamp) || isSameSpaceContent({ stored: existing, wanted: content })) {
+    } else if (
+      isoDay(dayInZone({ now: new Date(existing.updated_at), timeZone: world.timeZone })) === runDay ||
+      isSameSpaceContent({ stored: existing, wanted: content })
+    ) {
       report.unchanged += 1;
     } else {
       await stores.spaceStore.updateSpace({
@@ -495,9 +560,18 @@ export async function seedDemoWorld<TTransaction>({
   const { personas, knowledge } = await seedPersonas({ stores, scope, world });
   const profile = await seedProfile({ stores, scope, world });
   const agent = await seedAgent({ stores, scope, world });
+  await removeEarlierSeeds({ stores, scope });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
-  const spaces = await seedSpaces({ stores, scope, spaces: world.spaces, day: world.day });
-  return { personas, profile, agent: agent.outcome, schedule, spaces, knowledge, memory };
+  const spaces = await seedSpaces({ stores, scope, world, now });
+  return {
+    personas,
+    profile,
+    agent: agent.outcome,
+    schedule,
+    spaces,
+    knowledge,
+    memory,
+  };
 }
 
 /** Removes only what carries the synthetic marker; everything the user made themselves stays. */
@@ -513,10 +587,15 @@ export async function resetDemoWorld<TTransaction>({
     profile: 0,
     agent: 0,
     schedule: 0,
+    sessions: 0,
     spaces: 0,
     memory: 0,
   };
   const owner = { tenant_id: scope.tenantId, created_by: scope.userId };
+
+  const earlier = await removeEarlierSeeds({ stores, scope });
+  report.schedule += earlier.schedules;
+  report.sessions += earlier.sessions;
 
   const schedule = await findSchedule({ stores, scope });
   if (schedule?.created_by_subject.subject_id === scope.userId) {

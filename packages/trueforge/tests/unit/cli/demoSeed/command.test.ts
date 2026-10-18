@@ -19,6 +19,7 @@ const RESET_REPORT: ResetReport = {
   profile: 1,
   agent: 1,
   schedule: 1,
+  sessions: 0,
   spaces: 1,
   memory: 22,
 };
@@ -128,13 +129,13 @@ describe('aman demo-seed', () => {
     const { deps, calls } = fakeDeps({ enabled: true });
     const { io, err, out } = fakeIo();
 
-    expect(await createDemoSeed(deps)({ args: ['--today', '2026-10-26'], io })).toBe(0);
+    expect(await createDemoSeed(deps)({ args: ['--today', '2026-10-19'], io })).toBe(0);
 
     expect(calls.seed).toEqual([
-      expect.objectContaining({ today: { year: 2026, month: 10, day: 26 }, timeZone: 'Europe/Lisbon' }),
+      expect.objectContaining({ today: { year: 2026, month: 10, day: 19 }, timeZone: 'Europe/Lisbon' }),
     ]);
-    expect(err.join('')).toContain('pretending today is 2026-10-26');
-    expect(JSON.parse(out.join(''))).toMatchObject({ action: 'seed', today: '2026-10-26' });
+    expect(err.join('')).toContain('pretending today is 2026-10-19');
+    expect(JSON.parse(out.join(''))).toMatchObject({ action: 'seed', today: '2026-10-19' });
   });
 
   it('tells the operator when knowledge documents are still indexing', async () => {
@@ -191,6 +192,7 @@ describe('aman demo-seed', () => {
     [['--timezone', 'Mars/Olympus'], 'Unknown time zone'],
     [['--today', '2026-02-30'], '--today must be a real day'],
     [['--today', 'tomorrow'], '--today must be a real day'],
+    [['--today', '19/10/2026'], 'such as 2026-10-19'],
     [['--user', 'two words'], '--user'],
     [['--bogus'], 'bogus'],
   ])('rejects bad arguments %j as a usage error', async (args, message) => {

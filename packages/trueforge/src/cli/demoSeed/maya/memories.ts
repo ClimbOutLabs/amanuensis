@@ -1,13 +1,13 @@
-import type { DayLabels } from '../calendar';
 import type { DemoNote } from '../model';
+import { MAYA_DAYS } from './days';
 
-/** Maya's long-term memory, one note per fact. Dated phrasing is relative to the seed day. */
-export function mayaMemoryNotes(days: DayLabels): DemoNote[] {
-  const meetup = `${days.weekday(10)}, ${days.monthDay(10)}`;
+/** Maya's long-term memory, one note per fact; a date in it is the one her mail and calendar hold. */
+export function mayaMemoryNotes(): DemoNote[] {
+  const meetup = `${MAYA_DAYS.weekday(10)}, ${MAYA_DAYS.monthDay(10)}`;
   return [
     {
       key: 'identity',
-      body: 'Maya is 38 years old. She moved from Austin, Texas to Lisbon, Portugal about two weeks ago for a fresh start.',
+      body: 'Maya is 38 years old. She moved from Austin, Texas to Lisbon, Portugal for a fresh start.',
     },
     {
       key: 'work',

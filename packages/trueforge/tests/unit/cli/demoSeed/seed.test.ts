@@ -1,3 +1,4 @@
+import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import { parseDateOnly } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
@@ -10,6 +11,8 @@ import {
   DEMO_TASKS_SPACE_ID,
   DEMO_THEO_ID,
 } from '../../../../src/cli/demoSeed/world';
+import { SentinelAuditStore } from '../../../../src/db/sentinelAuditStore';
+import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createTestWorld, MODEL_NAME, TENANT_ID, USER_ID, type TestStores, type TestWorld } from './testStores';
 
 const scope = { tenantId: TENANT_ID, userId: USER_ID };
@@ -21,6 +24,9 @@ const NOTE_COUNT = buildDemoWorld({
   timeZone: 'Europe/Lisbon',
   modelName: MODEL_NAME,
 }).notes.length;
+
+const LEGACY_SCHEDULE_NAME = 'demo-synthetic-morning-briefing';
+const subject: CreatedBySubject = { subject_id: USER_ID, subject_type: 'user', subject_display_name: USER_ID };
 
 function worldFor(now: Date) {
   const timeZone = 'Europe/Lisbon';
@@ -48,11 +54,29 @@ describe('demo seed against the real stores', () => {
   let stores: TestStores;
 
   beforeEach(async () => {
+    // Only the clock is moved to the seed day (and keeps ticking): the stores stamp updated_at from it.
+    jest.useFakeTimers({
+      advanceTimers: true,
+      doNotFake: [
+        'hrtime',
+        'nextTick',
+        'performance',
+        'queueMicrotask',
+        'setImmediate',
+        'clearImmediate',
+        'setInterval',
+        'clearInterval',
+        'setTimeout',
+        'clearTimeout',
+      ],
+      now: DAY_ONE,
+    });
     world = await createTestWorld();
     stores = world.stores;
   });
 
   afterEach(async () => {
+    jest.useRealTimers();
     await world.teardown();
   });
 
@@ -96,7 +120,7 @@ describe('demo seed against the real stores', () => {
     const spaces = await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 });
 
     expect(spaces.map(space => space.name)).toEqual(['Tasks']);
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('- [ ] Find English-speaking GP');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('- [x] Find English-speaking GP - done');
   });
 
   it('keeps each persona library apart and has every document indexed', async () => {
@@ -153,8 +177,7 @@ describe('demo seed against the real stores', () => {
     expect(world.queued).toHaveLength(11);
   });
 
-  it('keeps what the demo did on the same day: a ticked task survives a second run', async () => {
-    await seed(stores, DAY_ONE);
+  async function rewriteTasks(body: string) {
     const tasks = await stores.spaceStore.getSpace({ ...owner, space_id: DEMO_TASKS_SPACE_ID });
     const aggregate = await stores.spaceStore.getAggregate(owner);
     await stores.spaceStore.updateSpace({
@@ -164,27 +187,63 @@ describe('demo seed against the real stores', () => {
       purpose: tasks?.purpose ?? 'Tasks',
       status: 'active',
       format: 'markdown',
-      body: `${tasks?.body ?? ''}\nEdited by the assistant.`,
+      body,
       expected_revision: tasks?.revision ?? 0,
       expected_aggregate_revision: aggregate.revision,
     });
+  }
 
+  it('keeps what the assistant wrote on the same day, even with nothing of the seed left in the body', async () => {
     await seed(stores, DAY_ONE);
+    await rewriteTasks('- [x] Pick up the lens\nEdited by the assistant.');
 
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Edited by the assistant.');
+    const report = await seed(stores, DAY_ONE);
+
+    expect(report.spaces).toEqual({ created: 0, updated: 0, unchanged: 1 });
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toBe('- [x] Pick up the lens\nEdited by the assistant.');
   });
 
-  it('moves the dated content forward on the next day without duplicating anything', async () => {
+  it('rewrites the Tasks space on a new seed day, and stamps nothing into it', async () => {
+    await seed(stores, DAY_ONE);
+    await rewriteTasks('Edited by the assistant.');
+
+    const report = await seed(stores, DAY_TWO);
+
+    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    const body = await spaceBody(stores, DEMO_TASKS_SPACE_ID);
+    expect(body).toContain('- [x] Find English-speaking GP - done');
+    expect(body).not.toContain('Edited by the assistant.');
+    expect(body).not.toContain('demo_seed_day');
+  });
+
+  it('keeps a connector attached to the demo agent when it seeds again', async () => {
+    await seed(stores, DAY_ONE);
+    const agent = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
+    await stores.agentStore.updateAgent({
+      tenant_id: TENANT_ID,
+      id: agent?.id ?? '',
+      description: agent?.description ?? '',
+      manifest: AgentSpecSchema.parse({ ...agent?.manifest, mcp_servers: [{ name: 'mail' }] }),
+    });
+
+    const again = await seed(stores, DAY_TWO);
+
+    const stored = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
+    expect(stored?.manifest.mcp_servers?.map(server => server.name)).toEqual(['mail']);
+    expect(again.agent).toBe('unchanged');
+  });
+
+  it('changes nothing on the next day when nobody edited anything', async () => {
     await seed(stores, DAY_ONE);
 
     const report = await seed(stores, DAY_TWO);
 
-    // Only the meetup note carries a date.
-    expect(report.memory).toEqual({ created: 0, updated: 1, unchanged: NOTE_COUNT - 1, removed: 0 });
-    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    // Every dated fact is pinned to the mailbox week, so nothing changes.
+    expect(report.memory).toEqual({ created: 0, updated: 0, unchanged: NOTE_COUNT, removed: 0 });
+    expect(report.spaces).toEqual({ created: 0, updated: 0, unchanged: 1 });
     expect(report.knowledge).toMatchObject({ created: 0, unchanged: 11, removed: 0 });
     expect(await vault(stores)).toHaveLength(NOTE_COUNT);
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Nov 4, 10:00');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 21, 10:00');
   });
 
   it('seeds a rehearsal day that is not the real today', async () => {
@@ -196,7 +255,7 @@ describe('demo seed against the real stores', () => {
 
     await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });
 
-    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 28, 10:00');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 21, 10:00');
   });
 
   it('never overwrites a profile the user wrote themselves', async () => {
@@ -279,6 +338,96 @@ describe('demo seed against the real stores', () => {
       expect(retained.ok).toBe(true);
     }
 
+    /** What an earlier demo seed left: a briefing schedule under its old name and a prewritten briefing chat. */
+    async function plantLegacyWorld(): Promise<{ sessionId: string }> {
+      const agent = await stores.agentStore.createAgent({
+        tenant_id: TENANT_ID,
+        name: DEMO_AGENT_NAME,
+        description: `Synthetic demo assistant (${DEMO_MARKER}).`,
+        manifest: worldFor(DAY_ONE).agentSpec,
+        external_id: null,
+        created_by_subject: subject,
+      });
+      await stores.withTransaction(transaction =>
+        stores.scheduleStore.createScheduleAndRun(
+          {
+            tenant_id: TENANT_ID,
+            agent_id: agent.id,
+            agent_name: agent.name,
+            name: LEGACY_SCHEDULE_NAME,
+            manifest: worldFor(DAY_ONE).scheduleManifest,
+            created_by_subject: subject,
+            runFrom: DAY_ONE,
+          },
+          transaction,
+        ),
+      );
+      const sessionId = 'legacy-briefing';
+      await new Sessions({ sessionStore: new SqliteSessionStore(world.db) }).create({
+        tenant_id: TENANT_ID,
+        session_id: sessionId,
+        created_by_subject: subject,
+        agent: { type: 'inline', spec: worldFor(DAY_ONE).agentSpec },
+        external_id: null,
+        metadata: { [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-12' },
+      });
+      await new SentinelAuditStore(world.db).record({
+        tenant_id: TENANT_ID,
+        created_by: USER_ID,
+        conversation_id: sessionId,
+        tier: 2,
+        tool_name: 'send_email',
+        description: 'Send a reply',
+        outcome: 'denied',
+        auto_deny_reason: null,
+      });
+      return { sessionId };
+    }
+
+    async function legacyLeft(sessionId: string) {
+      const { data: schedules } = await stores.scheduleStore.listSchedules({
+        tenant_id: TENANT_ID,
+        limit: 10,
+        page_token: undefined,
+        agent_names: undefined,
+        created_by_or_agent_ids: undefined,
+      });
+      return {
+        schedules: schedules.map(schedule => schedule.name),
+        session: await new SqliteSessionStore(world.db).getSession({ tenant_id: TENANT_ID, session_id: sessionId }),
+        audit: await new SentinelAuditStore(world.db).list({
+          tenant_id: TENANT_ID,
+          created_by: USER_ID,
+          conversation_id: sessionId,
+          limit: 10,
+          offset: 0,
+        }),
+      };
+    }
+
+    it('removes what an earlier seed left, but keeps its audit rows', async () => {
+      const { sessionId } = await plantLegacyWorld();
+
+      await resetDemoWorld({ stores, scope });
+
+      const left = await legacyLeft(sessionId);
+      expect(left.schedules).toEqual([]);
+      expect(left.session).toBeUndefined();
+      expect(left.audit.map(row => row.tool_name)).toEqual(['send_email']);
+      expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME })).toBeUndefined();
+    });
+
+    it('replaces what an earlier seed left when it seeds again', async () => {
+      const { sessionId } = await plantLegacyWorld();
+
+      await seed(stores, DAY_ONE);
+
+      const left = await legacyLeft(sessionId);
+      expect(left.schedules).toEqual([DEMO_SCHEDULE_NAME]);
+      expect(left.session).toBeUndefined();
+      expect(left.audit).toHaveLength(1);
+    });
+
     it('removes the synthetic records and nothing else', async () => {
       await addRealRecords();
       await seed(stores, DAY_ONE);
@@ -289,6 +438,7 @@ describe('demo seed against the real stores', () => {
         profile: 1,
         agent: 1,
         schedule: 1,
+        sessions: 0,
         spaces: 1,
         memory: NOTE_COUNT,
       });
@@ -344,6 +494,7 @@ describe('demo seed against the real stores', () => {
         profile: 0,
         agent: 0,
         schedule: 0,
+        sessions: 0,
         spaces: 0,
         memory: 0,
       });

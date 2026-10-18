@@ -37,27 +37,32 @@ function noteBody(world: ReturnType<typeof worldOn>, key: string): string {
 }
 
 describe('buildDemoWorld dates', () => {
-  it('dates the tasks from the seed day', () => {
-    const body = tasksBody(worldOn(MONDAY));
+  it('pins every date her mail and calendar own to the demo mailbox week, whatever day the seed runs', () => {
+    const body = tasksBody(worldOn(day('2026-10-19')));
 
-    expect(body).toContain('- [ ] Find English-speaking GP (in progress)\n  GP appointment Thu Oct 22, 2026, 09:30');
-    expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 18');
-    expect(noteBody(worldOn(MONDAY), 'newcomers')).toContain('Thursday, Nov 5 at Café do Cais');
+    expect(body).toContain('GP appointment Thursday, October 22, 2026, 09:30');
+    expect(body).toContain('Appointment Oct 21, 10:00 at Amoreira Health Check');
+    expect(body).toContain('Sessions: Oct 23 Alfama sunrise, Oct 24 Miradouro da Graça golden hour, Oct 31 Belém');
+    expect(body).toContain('Pick up the 35mm-equivalent camera lens - due Thursday, October 22');
+    expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 11');
+    expect(tasksBody(worldOn(day('2026-10-21')))).toBe(body);
+    expect(tasksBody(worldOn(day('2026-11-30')))).toBe(tasksBody(worldOn(day('2026-10-23'))));
   });
 
-  it('keeps the GP appointment on its fixed date whatever day the seed runs', () => {
-    for (const seedDay of ['2026-10-19', '2026-10-20', '2026-11-02']) {
-      expect(tasksBody(worldOn(day(seedDay)))).toContain('GP appointment Thu Oct 22, 2026, 09:30');
-    }
+  it('shows the GP visit as done, not in progress, once the seed day is past it', () => {
+    expect(tasksBody(worldOn(day('2026-10-22')))).toContain('- [ ] Find English-speaking GP (in progress)');
+
+    const after = tasksBody(worldOn(day('2026-10-23')));
+    expect(after).toContain('- [x] Find English-speaking GP - done Thursday, October 22');
+    expect(after).not.toContain('Find English-speaking GP (in progress)');
   });
 
-  it('changes only dated content when the day moves', () => {
+  it('keeps every memory note the same when the day moves', () => {
     const first = worldOn(MONDAY);
     const later = worldOn(day('2026-11-02'));
 
-    const changed = first.notes.filter(note => noteBody(later, note.key) !== note.body).map(note => note.key);
-    expect(changed).toEqual(['newcomers']);
-    expect(tasksBody(later)).not.toBe(tasksBody(first));
+    expect(later.notes).toEqual(first.notes);
+    expect(noteBody(first, 'newcomers')).toContain('Thursday, Oct 29 at Café do Cais');
     expect(later.day).toBe('2026-11-02');
   });
 
@@ -75,14 +80,16 @@ describe('buildDemoWorld content', () => {
     expect(DEFAULT_DEMO_TIME_ZONE).toBe('Europe/Lisbon');
   });
 
-  it('seeds a Morning brief that reads calendar and inbox, drafts replies and never sends', () => {
+  // Scheduled runs are never offered Gmail drafting or sending, so the brief may only suggest replies in its text.
+  it('seeds a Morning brief that reads calendar and inbox, suggests replies and never sends or saves', () => {
     const { scheduleManifest } = worldOn(MONDAY, DEFAULT_DEMO_TIME_ZONE);
 
     expect(scheduleManifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon', status: 'active' });
     expect(scheduleManifest.task).toContain('calendar for today and my inbox');
-    expect(scheduleManifest.task).toContain('Draft a reply');
-    expect(scheduleManifest.task).toContain('do not send anything');
-    expect(scheduleManifest.task).toContain('Needs your OK');
+    expect(scheduleManifest.task).toContain('write a short suggested reply in the brief');
+    expect(scheduleManifest.task).toContain('Do not send or save anything');
+    expect(scheduleManifest.task).not.toContain('Draft a reply');
+    expect(scheduleManifest.task).not.toContain('Needs your OK');
     expect(scheduleManifest.task).toContain('Flag upcoming appointments and what to bring');
     expect(scheduleManifest.task).toContain('Rua da Emenda 45, 1200-169 Lisboa');
   });
@@ -148,7 +155,7 @@ describe('buildDemoWorld content', () => {
     const world = worldOn(MONDAY);
 
     expect(tasksBody(world)).toContain(
-      'GP appointment Thu Oct 22, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
+      'GP appointment Thursday, October 22, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
     );
     expect(noteBody(world, 'short-term-rental')).toContain('Rua da Emenda 45, 1200-169 Lisboa, in Chiado');
   });

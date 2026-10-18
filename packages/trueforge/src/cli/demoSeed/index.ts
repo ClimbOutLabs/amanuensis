@@ -10,14 +10,14 @@ const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <ian
 
 Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
 two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected Google account. Every
-record is marked demo_synthetic. Dates are relative to "today" in the user's time zone, so any day gives a
-coherent week. Re-running it on the same day keeps the Tasks space as it is; --reset removes the synthetic
-records. Needs DEMO_MODE=true.
+record is marked demo_synthetic. Dates her mail and calendar hold are fixed to the demo mailbox week (Monday
+19 October 2026); "today" only decides what is already past. Re-running it on the same day keeps the Tasks
+space as it is; --reset removes the synthetic records. Needs DEMO_MODE=true.
 
   --reset              Remove the synthetic records only, then stop
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
-  --today <day>        Treat this day as "today", for rehearsing on a fixed day (default: the real today)
+  --today <day>        Treat this day as "today", such as 2026-10-19 for the mailbox day (default: the real today)
   --model <p/model>    Model for the personas and agent (default: first configured model)
 `;
 
@@ -97,7 +97,7 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
 
     const today = options.today === undefined ? undefined : parseDateOnly(options.today);
     if (options.today !== undefined && today === undefined) {
-      throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-26.');
+      throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-19.');
     }
 
     if (!(await deps.demoModeEnabled())) {
