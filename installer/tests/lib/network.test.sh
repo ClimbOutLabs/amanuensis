@@ -365,7 +365,7 @@ test_no_question_about_the_address() {
   t_begin "the interactive flow asks for a name and an email and never about the address"
   sandbox_new_plain
   fixture_full_machine
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y

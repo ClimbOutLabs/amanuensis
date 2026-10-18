@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
-ANSWERS="Instance name=>
+ANSWERS="Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y

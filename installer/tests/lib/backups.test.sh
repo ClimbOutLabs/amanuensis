@@ -58,7 +58,7 @@ test_backups_flag_is_checked() {
 test_the_question_is_asked_once() {
   t_begin "the interactive install asks 'Back up automatically every day? [Y/n]', n turns it off, and a re-run does not ask again"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>n
 Go ahead?=>y
@@ -73,7 +73,7 @@ Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$(mode_file)" off
   sandbox_drop
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>
 Go ahead?=>y

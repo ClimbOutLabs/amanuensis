@@ -124,7 +124,8 @@ Amanuensis installer
 
   install.sh                      set up Aman on this computer: check it, show the plan, build, start a first instance
   install.sh --dry-run            show the plan and change nothing
-  install.sh instance add <name>  add an instance for another person
+  install.sh instance add [<name>]
+                                  add an instance for another person; asks the name when left out
   install.sh instance list        show every instance
   install.sh instance remove <name> [--purge-data]
                                   remove an instance; --purge-data deletes its data too

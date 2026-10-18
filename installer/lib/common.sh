@@ -229,32 +229,33 @@ valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
 
-# The reason a value is refused, as one sentence, or nothing when it is fine. The prompts show it and ask again.
+# The reason a value is refused, or nothing when it is fine. The prompts show it and ask again.
+NAME_RULE="Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
 name_problem() {
   local v=$1 rest
   if [ -z "$v" ]; then
-    echo "A name is needed."
+    echo "A name is needed. $NAME_RULE"
   elif [ "$v" = machine ]; then
-    echo "\"machine\" is reserved; pick another name."
+    echo "\"machine\" is kept for Aman's own use. Pick another name."
   elif has_control_chars "$v"; then
-    echo "The name has a control character; use lowercase letters, digits or hyphens."
+    echo "The name has a control character. $NAME_RULE"
   elif [[ $v == *_* ]]; then
-    echo "\"$v\" has an underscore; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has an underscore. $NAME_RULE"
   elif [[ $v == *[[:space:]]* ]]; then
-    echo "\"$v\" has a space; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has a space. $NAME_RULE"
   elif [[ $v == *[A-Z]* ]]; then
-    echo "\"$v\" has capital letters; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has capital letters. $NAME_RULE"
   elif [[ $v == [!a-z]* ]]; then
-    echo "\"$v\" must start with a letter."
+    echo "\"$v\" does not start with a letter. $NAME_RULE"
   elif [[ $v == *[!a-z0-9-]* ]]; then
     rest=${v//[a-z0-9-]/}
-    echo "\"$v\" has the character ${rest:0:1}; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has the character ${rest:0:1}. $NAME_RULE"
   elif [ "${#v}" -gt 24 ]; then
-    echo "\"$v\" is longer than 24 characters."
+    echo "\"$v\" is longer than 24 characters. $NAME_RULE"
   elif [[ $v == *- ]]; then
-    echo "\"$v\" must not end with a hyphen."
+    echo "\"$v\" ends with a hyphen. End it with a letter or a number."
   elif ! valid_name "$v"; then
-    echo "\"$v\" is not a usable name; use lowercase letters, digits or hyphens, starting with a letter."
+    echo "\"$v\" cannot be used as a name. $NAME_RULE"
   fi
 }
 

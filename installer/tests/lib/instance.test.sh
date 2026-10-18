@@ -277,6 +277,60 @@ test_a_new_instance_points_to_settings_for_a_model() {
   sandbox_drop
 }
 
+test_add_warns_when_the_installed_version_is_older() {
+  local builds
+  t_begin "instance add says once when the installed Aman is older than this checkout, and nothing when they match"
+  sandbox_new
+  install_machine
+  add_instance same
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "older than this copy"
+  repo_commit_change "newer code"
+  builds=$(log_count "docker build")
+  add_instance later
+  assert_rc 0
+  assert_flat_contains "$ERR" "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
+  assert_eq "$(printf '%s' "$ERR" | grep -c 'older than this copy')" 1 "the warning shows once"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  sandbox_drop
+}
+
+test_add_without_a_name_asks_for_one() {
+  t_begin "instance add with no name asks for one at a terminal, with no default, and refuses an empty, taken or invalid name"
+  sandbox_new
+  install_machine
+  run_install_tty "Name for this instance:=>
+Name for this instance:=>main
+Name for this instance:=>Bad_Name
+Name for this instance:=>work
+Your email=>work@example.invalid
+Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
+Repeat the password=>$SENTINEL_PASSWORD" instance add
+  assert_eq "$RC" 0
+  assert_not_contains "$OUT" "Name for this instance ["
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Name for this instance:')" 4 "the question is asked until the name is usable"
+  assert_flat_contains "$OUT" "A name is needed. Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
+  assert_flat_contains "$OUT" "An instance called main already exists. Pick another name."
+  assert_flat_contains "$OUT" "\"Bad_Name\" has an underscore."
+  assert_file "$AMAN_HOME/state/instances/work.conf"
+  assert_flat_contains "$OUT" "Instance work is ready."
+  sandbox_drop
+}
+
+test_add_without_a_name_and_no_terminal_is_a_usage_error() {
+  t_begin "instance add with no name and no terminal stops with the usage line, as before"
+  sandbox_new
+  install_machine
+  run_install instance add
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
+  assert_not_contains "$OUT$ERR" "Name for this instance"
+  run_install instance add --yes --email work@example.invalid
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
+  sandbox_drop
+}
+
 test_add_before_install_is_refused() {
   t_begin "instance add before the machine is set up points to install.sh"
   sandbox_new
@@ -527,6 +581,9 @@ test_purge_failure_is_not_reported_as_success
 test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
 test_name_validation
+test_add_warns_when_the_installed_version_is_older
+test_add_without_a_name_asks_for_one
+test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
 test_url_validation
 test_a_new_instance_points_to_settings_for_a_model

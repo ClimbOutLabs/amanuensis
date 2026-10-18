@@ -112,7 +112,7 @@ test_key_in_the_callers_environment_is_ignored() {
 test_no_model_prompts_on_a_terminal() {
   t_begin "no question about a key or a model server is asked, and the summary points to Settings"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y

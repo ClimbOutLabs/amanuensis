@@ -59,11 +59,13 @@ source_id() {
   printf '%s-d%s\n' "$base" "$dirty"
 }
 
+checkout_app_tag() { printf 'aman-app:%s\n' "$(source_id .)"; }
+
 # Resolves tags for the current checkout into REL_* globals (read-only).
 release_resolve() {
   pins_validate
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
-  REL_APP_TAG=aman-app:$(source_id .)
+  REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
 }
