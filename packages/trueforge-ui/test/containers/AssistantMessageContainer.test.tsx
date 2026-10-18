@@ -32,19 +32,26 @@ vi.mock('@/components/MapCard.js', () => ({
   ),
 }));
 
-function renderAssistantMessage(
+function assistantMessageTree(
   messages: ThreadMessageLike[],
   options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
 ) {
-  return render(
+  return (
     <RuntimeHarness
       messages={messages}
       isRunning={options?.isRunning}
       onRespondToToolApproval={options?.onRespondToToolApproval}
     >
       <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-    </RuntimeHarness>,
+    </RuntimeHarness>
   );
+}
+
+function renderAssistantMessage(
+  messages: ThreadMessageLike[],
+  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
+) {
+  return render(assistantMessageTree(messages, options));
 }
 
 function getAgentInternals(): HTMLElement {
@@ -558,6 +565,36 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer images without a chat image scope', () => {
+  const DATA_PNG = 'data:image/png;base64,iVBORw0KGgo=';
+
+  it('shows a model data: image as not shown when the turn has no session id', () => {
+    const server = Object.assign(createMockAgentUIServer(), {
+      chatImages: {
+        listTurnImages: vi.fn(() => Promise.resolve({ artifacts: [], emails: [] })),
+        showTurnImages: vi.fn(() => Promise.resolve({ status: 'done' as const, images: [] })),
+        imageUrl: ({ sessionId, imageId }: { sessionId: string; imageId: string }) =>
+          `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
+      },
+    });
+    const { container } = render(
+      <ServerProvider server={server}>
+        {assistantMessageTree([
+          { role: 'assistant', content: `Here: ![model pixel](${DATA_PNG})`, metadata: { custom: { turnId: 't1' } } },
+        ])}
+      </ServerProvider>,
+    );
+    expect(container.querySelector(`img[src="${DATA_PNG}"]`)).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toHaveTextContent('model pixel (image not shown)');
+  });
+
+  it('shows a model data: image as not shown when there is no chat images port', () => {
+    const { container } = renderAssistantMessage([{ role: 'assistant', content: `![x](${DATA_PNG})` }]);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toBeInTheDocument();
   });
 });
 

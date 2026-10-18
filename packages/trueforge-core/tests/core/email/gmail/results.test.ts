@@ -55,6 +55,20 @@ describe('result shapes', () => {
     }
   });
 
+  it('lists the web images an email links, even when it also has plain text', () => {
+    const withImages = readEmailResult({
+      context,
+      message: message({
+        id: 'm1',
+        body: 'Sale today',
+        html: '<p>Sale</p><img src="https://example.com/banner.png"><img src="cid:logo">',
+      }),
+    });
+    expect(withImages.linked_images).toEqual(['https://example.com/banner.png']);
+    const plain = readEmailResult({ context, message: message({ id: 'm2', body: 'hi' }) });
+    expect('linked_images' in plain).toBe(false);
+  });
+
   it('lists threads with the fields the fetch semantics expect and states coverage', () => {
     const result = listThreadsResult({
       context,

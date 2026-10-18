@@ -1,6 +1,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
+import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
@@ -529,7 +530,7 @@ export class GmailToolSet extends LocalToolMCP {
         ordinal: this.#stagedSizes.length + 1,
       });
       this.#stagedSizes.push(bytes.length);
-      return jsonResult(
+      const response = jsonResult(
         {
           account: this.#options.account,
           untrusted_content: UNTRUSTED_NOTICE,
@@ -543,6 +544,20 @@ export class GmailToolSet extends LocalToolMCP {
         },
         staged.sandboxCreated,
       );
+      // A picture also goes to the host as an image block, which the chat shows after re-encoding it;
+      // the model reads only the text above.
+      return CHAT_IMAGE_INPUT_MIME_TYPES.has(attachment.mimeType.toLowerCase())
+        ? {
+            ...response,
+            result: {
+              ...response.result,
+              content: [
+                ...response.result.content,
+                { type: 'image' as const, data: bytes.toString('base64'), mimeType: attachment.mimeType.toLowerCase() },
+              ],
+            },
+          }
+        : response;
     } catch (error) {
       return error instanceof InvalidFileInputError || error instanceof SandboxFileUploadError
         ? this.#stagingFailure(error)
