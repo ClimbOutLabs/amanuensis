@@ -72,7 +72,7 @@ password_problem() {
   fi
   if [ "${#1}" -lt 8 ]; then missing+=("at least 8 characters"); fi
   if [[ $1 != *[0-9]* ]]; then missing+=("a number"); fi
-  if [[ $1 != *[^A-Za-z0-9]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
+  if [[ $1 != *[[:punct:]]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
   case ${#missing[@]} in
     0) ;;
     1) echo "That password still needs ${missing[0]}." ;;

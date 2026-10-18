@@ -105,6 +105,14 @@ test_a_number_and_a_symbol_are_needed() {
 " instance password --password-stdin
   assert_rc 2
   assert_flat_contains "$ERR" "That password still needs a symbol"
+  change_password "eightchr
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a number and a symbol"
+  change_password "eight ch8
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a symbol"
   change_password "eight-c8
 " instance password --password-stdin
   assert_rc 0
