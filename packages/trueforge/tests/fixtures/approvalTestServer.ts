@@ -36,6 +36,7 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
@@ -55,6 +56,8 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
+import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
+import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -150,6 +153,14 @@ function buildApp(input: {
     scheduleStore: new SqliteScheduleStore(db),
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new SqliteChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new SqliteTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore,
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,

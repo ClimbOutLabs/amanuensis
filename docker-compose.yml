@@ -220,8 +220,8 @@ services:
   # Login profile. Start with `docker compose --profile login up --build` after
   # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
   # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
-  # then shows a real sign-in screen backed by one local account, with no
-  # external identity provider.
+  # then shows a real sign-in screen backed by one local account, on Aman's own
+  # sign-in service. Standalone also needs OIDC_ALLOWED_EMAILS (the owner).
 
   # One-shot: mints a self-signed certificate for https://localhost:5556 the
   # first time the profile runs. OIDC issuers must be HTTPS; the server trusts

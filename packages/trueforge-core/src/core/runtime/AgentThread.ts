@@ -3616,6 +3616,7 @@ export class AgentThread {
         toolCallResults.push({
           message: { role: 'tool', tool_call_id: call.id, content: closeout.rawContent },
           rawContent: closeout.rawContent,
+          images: [],
           toolCallInfo: call.tool_info,
           screen: undefined,
           info: toolMapping.get(call.function.name),

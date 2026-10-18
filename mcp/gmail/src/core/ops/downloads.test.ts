@@ -271,6 +271,25 @@ describe("download_attachment handler (7.7)", () => {
     });
   });
 
+  it("also returns a picture attachment as an image block for the host, and nothing else", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const pngCtx = makeCtx({ attachmentsGet: vi.fn().mockResolvedValue({ data: { data: png.toString("base64url") } }) });
+    const picture = await registry.dispatch(
+      "download_attachment",
+      { messageId: "msg-001", attachmentId: "att-1", savePath: tmpDir, filename: "photo.png" },
+      pngCtx,
+    );
+    expect(picture.content).toContainEqual({ type: "image", data: png.toString("base64"), mimeType: "image/png" });
+
+    const pdfCtx = makeCtx({ attachmentsGet: vi.fn().mockResolvedValue({ data: { data: attachmentB64 } }) });
+    const document = await registry.dispatch(
+      "download_attachment",
+      { messageId: "msg-001", attachmentId: "att-1", savePath: tmpDir, filename: "report.pdf" },
+      pdfCtx,
+    );
+    expect(document.content.every(block => block.type === "text")).toBe(true);
+  });
+
   it("sanitizes a path-traversal filename via safeJoinWithinBase basename()", async () => {
     const attGet = vi.fn().mockResolvedValue({ data: { data: attachmentB64 } });
     const ctx = makeCtx({ attachmentsGet: attGet });

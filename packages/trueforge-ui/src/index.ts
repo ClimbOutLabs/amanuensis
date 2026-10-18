@@ -139,6 +139,10 @@ export { UserMessageEdit } from './atoms/UserMessageEdit.js';
 export type { UserMessageEditProps } from './atoms/UserMessageEdit.js';
 export { WelcomeScreen } from './atoms/WelcomeScreen.js';
 export type { WelcomeScreenProps } from './atoms/WelcomeScreen.js';
+export { TurnImages } from './chatImages/ChatImages.js';
+export { ChatImageScope } from './chatImages/chatImageScope.js';
+export type { ChatImageScopeValue } from './chatImages/chatImageScope.js';
+export type { ChatImagesCatalog } from './plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 
 export { AgentStepsCard } from './atoms/adapters/AgentStepsCardAdapter.js';
 export type { AgentStepsCardProps } from './atoms/adapters/AgentStepsCardAdapter.js';
