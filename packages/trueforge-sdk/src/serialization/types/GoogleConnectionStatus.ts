@@ -9,9 +9,9 @@ import { GoogleSetupInfo } from "./GoogleSetupInfo.js";
 
 export const GoogleConnectionStatus: core.serialization.ObjectSchema<serializers.GoogleConnectionStatus.Raw, TrueForge.GoogleConnectionStatus> = core.serialization.object({
         "accountEmail": core.serialization.property("account_email", core.serialization.string().nullable()),
-        "available": core.serialization.boolean(),
         "features": core.serialization.list(GoogleFeatureStatus),
         "hasSavedClient": core.serialization.property("has_saved_client", core.serialization.boolean()),
+        "locked": core.serialization.boolean(),
         "setup": GoogleSetupInfo,
         "state": GoogleConnectionStatusState
     });
@@ -19,9 +19,9 @@ export const GoogleConnectionStatus: core.serialization.ObjectSchema<serializers
 export declare namespace GoogleConnectionStatus {
     export interface Raw {
         account_email?: string | null;
-        available: boolean;
         features: GoogleFeatureStatus.Raw[];
         has_saved_client: boolean;
+        locked: boolean;
         setup: GoogleSetupInfo.Raw;
         state: GoogleConnectionStatusState.Raw;
     }

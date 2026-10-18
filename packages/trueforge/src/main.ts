@@ -676,6 +676,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnections: googleConnectionStore,
   });
   const sentinelServices = createSentinelServices({
+    demoMode: configuration.DEMO_MODE,
+    demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
