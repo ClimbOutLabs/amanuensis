@@ -971,6 +971,7 @@ describe('ToolCallContainer: held search request', () => {
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
