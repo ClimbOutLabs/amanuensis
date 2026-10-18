@@ -70,6 +70,7 @@ import {
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
@@ -158,6 +159,12 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   new Uint8Array(buffer).set(content);
   return buffer;
 }
+
+/** What a person is told when the reply that offered a file is not in this chat. */
+const MISSING_REPLY_MESSAGE = 'This reply could not be found. Reload the chat, then try again.';
+
+/** What a person is told when no sandbox is set up to hold the file. */
+const NO_SANDBOX_MESSAGE = 'The sandbox is turned off, so this file is not available. Turn on the sandbox in Settings.';
 
 /** What a person is told when a file was never copied out of a workspace that has since been cleared. */
 const CLEARED_WORKSPACE_MESSAGE =
@@ -1517,18 +1524,20 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       // session cannot be used to reach this session's sandbox.
       const turn = await session.getTurn(turnId);
       if (!turn) {
-        return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+        return c.json({ error: { message: MISSING_REPLY_MESSAGE } }, 404);
       }
 
       // Persisted copy first: the sandbox that produced this file is likely long gone by the time
       // anyone clicks download (the provider auto-stops it minutes after the turn ends, then
       // deletes it later). Only a turn still running, or one that predates this feature, has no
       // row here, and those fall through to the live sandbox below, unchanged from before.
-      const persisted = await deps.turnArtifactStore.getArtifact({
-        tenant_id: requestContext.tenant_id,
-        session_id: sessionId,
-        turn_id: turnId,
+      const persisted = await findTurnArtifact({
+        store: deps.turnArtifactStore,
+        tenantId: requestContext.tenant_id,
+        sessionId,
+        turn: turn.record,
         path,
+        getTurn: async previousTurnId => (await session.getTurn(previousTurnId))?.record,
       });
       if (persisted?.status === 'stored' && persisted.digest !== null) {
         const blob = await deps.turnArtifactStore.getBlob({
@@ -1570,7 +1579,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         sessionId,
       });
       if (provider === undefined) {
-        return c.json({ error: { message: 'No sandbox provider configured' } }, 412);
+        return c.json({ error: { message: NO_SANDBOX_MESSAGE } }, 412);
       }
 
       try {

@@ -15,6 +15,9 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { extractSearchCitationSources, type CitationToolCall } from '../utils/citationMarkers.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
+/** Names what failed; the server's message under it says what to do next. */
+const DOWNLOAD_FAILED_TITLE = 'The file could not be downloaded';
+
 function filenameFromPath(path: string): string {
   return path.split('/').pop() || 'download';
 }
@@ -105,7 +108,7 @@ export function AssistantTextContainer() {
       triggerBrowserDownload(await downloadSandboxFile(path), filenameFromPath(path));
     } catch (error) {
       if (toaster != null) {
-        toaster.showError(error);
+        toaster.showError(error, { title: DOWNLOAD_FAILED_TITLE });
       } else {
         console.error('Failed to download sandbox artifact', error);
       }

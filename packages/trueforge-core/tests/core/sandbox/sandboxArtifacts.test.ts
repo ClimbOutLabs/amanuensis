@@ -1,4 +1,8 @@
-import { extractSandboxArtifactsFromMessage, parseSandboxArtifacts } from '../../../src/core/sandbox/sandboxArtifacts';
+import {
+  extractSandboxArtifactsFromMessage,
+  normalizeSandboxArtifactBlocks,
+  parseSandboxArtifacts,
+} from '../../../src/core/sandbox/sandboxArtifacts';
 
 describe('parseSandboxArtifacts', () => {
   it('parses tfy markdown-link pairs', () => {
@@ -117,5 +121,66 @@ describe('extractSandboxArtifactsFromMessage', () => {
   it('handles CRLF line endings after the fence marker', () => {
     const message = '```sandbox_artifacts\r\n[a.txt](/tmp/a.txt)\r\n```';
     expect(extractSandboxArtifactsFromMessage(message)).toEqual([{ name: 'a.txt', path: '/tmp/a.txt' }]);
+  });
+});
+
+const CHART_LINK = '[Weekly food budget chart](/egress/weekly_food_budget.pdf)';
+const CHART = { name: 'Weekly food budget chart', path: '/egress/weekly_food_budget.pdf' };
+const CANONICAL_CHART = ['```sandbox_artifacts', CHART_LINK, '```'].join('\n');
+
+/** Shapes self-hosted models actually emit; each one still declares the chart. */
+const LOOSE_BLOCKS: Record<string, string> = {
+  'glued to the end of a sentence': `The chart is ready. \`\`\`sandbox_artifacts\n${CHART_LINK}\n\`\`\``,
+  'indented four spaces': `The chart is ready.\n\n    \`\`\`sandbox_artifacts\n    ${CHART_LINK}\n    \`\`\``,
+  'wrapped in another fence': `\`\`\`\`markdown\n\`\`\`sandbox_artifacts\n${CHART_LINK}\n\`\`\`\n\`\`\`\``,
+  'written on one line': `The chart is ready.\n\n\`\`\`sandbox_artifacts ${CHART_LINK} \`\`\``,
+  'spelled with a hyphen and capitals': `The chart is ready.\n\n\`\`\`Sandbox-Artifacts\n${CHART_LINK}\n\`\`\``,
+  'fenced with tildes': `The chart is ready.\n\n~~~sandbox_artifacts\n${CHART_LINK}\n~~~`,
+};
+
+describe('extractSandboxArtifactsFromMessage on loosely formatted blocks', () => {
+  for (const [shape, message] of Object.entries(LOOSE_BLOCKS)) {
+    it(`finds the file when the block is ${shape}`, () => {
+      expect(extractSandboxArtifactsFromMessage(message)).toEqual([CHART]);
+    });
+  }
+
+  it('finds a block the finished message never closed', () => {
+    expect(extractSandboxArtifactsFromMessage(`Done.\n\n\`\`\`sandbox_artifacts\n${CHART_LINK}\n`)).toEqual([CHART]);
+  });
+});
+
+describe('normalizeSandboxArtifactBlocks', () => {
+  for (const [shape, message] of Object.entries(LOOSE_BLOCKS)) {
+    it(`turns a block ${shape} into one well-formed fence`, () => {
+      const normalized = normalizeSandboxArtifactBlocks({ text: message, complete: true });
+      expect(normalized.endsWith(`${CANONICAL_CHART}\n`)).toBe(true);
+      expect(normalized.split('sandbox_artifacts')).toHaveLength(2);
+      expect(normalized).not.toContain('````');
+    });
+  }
+
+  it('leaves a message with no block untouched', () => {
+    expect(normalizeSandboxArtifactBlocks({ text: 'No files here.', complete: true })).toBe('No files here.');
+  });
+
+  it('drops a block that names no file', () => {
+    expect(normalizeSandboxArtifactBlocks({ text: 'Done.\n\n```sandbox_artifacts\n\n```', complete: true })).toBe(
+      'Done.',
+    );
+  });
+
+  it('hides a block that is still streaming in, and shows it once the message is complete', () => {
+    const partial = `Done.\n\n\`\`\`sandbox_artifacts\n${CHART_LINK}\n`;
+    expect(normalizeSandboxArtifactBlocks({ text: partial, complete: false })).toBe('Done.');
+    expect(normalizeSandboxArtifactBlocks({ text: partial, complete: true })).toBe(`Done.\n\n${CANONICAL_CHART}\n`);
+  });
+
+  it('gathers several blocks into one card at the end', () => {
+    const message =
+      '```sandbox_artifacts\n[a.txt](/tmp/a.txt)\n```\nMiddle text.\n```sandbox_artifacts\n[b.txt](/tmp/b.txt)\n```';
+    expect(normalizeSandboxArtifactBlocks({ text: message, complete: true })).toBe(
+      '\nMiddle text.\n\n```sandbox_artifacts\n[a.txt](/tmp/a.txt)\n[b.txt](/tmp/b.txt)\n```\n',
+    );
   });
 });

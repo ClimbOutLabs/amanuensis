@@ -1,5 +1,6 @@
 'use client';
 
+import { normalizeSandboxArtifactBlocks } from '@truefoundry/trueforge-core/core/sandbox/sandboxArtifacts';
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import { useMemo, useRef } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -436,7 +437,11 @@ export function Markdown({
 
   // Pre-parse source rewrites (LaTeX-style math delimiters, unicode-hyphen bullets; see
   // transformMarkdownSource.ts) applied before ReactMarkdown parses. The stored message is untouched.
-  const transformedContent = useMemo(() => transformMarkdownSource(content), [content]);
+  // A file block the model formatted loosely becomes one card fence first, so it never shows raw.
+  const transformedContent = useMemo(
+    () => transformMarkdownSource(normalizeSandboxArtifactBlocks({ text: content, complete: isStreaming !== true })),
+    [content, isStreaming],
+  );
 
   // Create remark plugins dynamically based on citation sources availability
   const remarkPlugins = useMemo(() => createRemarkPlugins(citationSources), [citationSources]);

@@ -38,16 +38,8 @@ export function SandboxArtifactDownload({
   const ChatFileDownload = useSlot('ChatFileDownload');
   const artifacts = useMemo(() => parseSandboxArtifacts(code), [code]);
   if (artifacts.length === 0) {
-    // Nothing parsed: show the raw block instead of an empty reply, so the user
-    // at least sees what the model wrote.
-    return (
-      <pre
-        data-testid="aui-sandbox-artifacts-raw"
-        className="aui-sandbox-artifacts-raw my-2 overflow-x-auto rounded-lg border border-border bg-card-bg p-3 font-mono text-sm text-text-secondary"
-      >
-        {code}
-      </pre>
-    );
+    // A block naming no file shows nothing: its raw text means nothing to the person reading.
+    return null;
   }
 
   // Check if there are any HTML artifacts to preview
