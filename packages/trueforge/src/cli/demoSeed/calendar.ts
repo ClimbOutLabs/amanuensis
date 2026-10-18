@@ -1,18 +1,5 @@
 /** Calendar days in the demo user's time zone; the seed never reads the machine's zone. */
-export interface CalendarDay {
-  year: number;
-  month: number;
-  day: number;
-}
-
-export function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { addDays, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 
 function partValue({ parts, type }: { parts: Intl.DateTimeFormatPart[]; type: Intl.DateTimeFormatPartTypes }): number {
   const part = parts.find(candidate => candidate.type === type);
@@ -37,17 +24,6 @@ export function dayInZone({ now, timeZone }: { now: Date; timeZone: string }): C
   };
 }
 
-export function addDays({ day, days }: { day: CalendarDay; days: number }): CalendarDay {
-  const shifted = new Date(Date.UTC(day.year, day.month - 1, day.day + days));
-  return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1, day: shifted.getUTCDate() };
-}
-
-/** `2026-10-15`; also the stable per-day key stored on seeded records. */
-export function isoDay(day: CalendarDay): string {
-  const two = (value: number): string => String(value).padStart(2, '0');
-  return `${String(day.year)}-${two(day.month)}-${two(day.day)}`;
-}
-
 /** `Thursday, October 15`; a calendar label has no zone, so it is formatted from UTC noon. */
 export function longDayLabel(day: CalendarDay): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -56,18 +32,6 @@ export function longDayLabel(day: CalendarDay): string {
     month: 'long',
     day: 'numeric',
   }).format(new Date(Date.UTC(day.year, day.month - 1, day.day, 12)));
-}
-
-const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-/** Parses `YYYY-MM-DD`; undefined for anything else, including a day that does not exist (such as 2026-02-30). */
-export function parseIsoDay(text: string): CalendarDay | undefined {
-  const match = ISO_DAY.exec(text);
-  if (match === null) {
-    return undefined;
-  }
-  const day: CalendarDay = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
-  return isoDay(addDays({ day, days: 0 })) === text ? day : undefined;
 }
 
 /** Calendar labels for the days around a seed day, by offset from it. */

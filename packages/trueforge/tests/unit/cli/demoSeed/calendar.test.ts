@@ -1,12 +1,6 @@
-import {
-  addDays,
-  dayInZone,
-  dayLabels,
-  isValidTimeZone,
-  isoDay,
-  longDayLabel,
-  parseIsoDay,
-} from '../../../../src/cli/demoSeed/calendar';
+import { addDays, isoDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
+import { dayInZone, dayLabels, longDayLabel } from '../../../../src/cli/demoSeed/calendar';
 
 describe('calendar', () => {
   it('reads today in the target zone, not in UTC', () => {
@@ -28,19 +22,8 @@ describe('calendar', () => {
   });
 
   it('validates zone names', () => {
-    expect(isValidTimeZone('Europe/Lisbon')).toBe(true);
-    expect(isValidTimeZone('Mars/Olympus')).toBe(false);
-  });
-});
-
-describe('parseIsoDay', () => {
-  it('reads a real day', () => {
-    expect(parseIsoDay('2026-10-26')).toEqual({ year: 2026, month: 10, day: 26 });
-    expect(parseIsoDay('2028-02-29')).toEqual({ year: 2028, month: 2, day: 29 });
-  });
-
-  it.each(['2026-02-30', '2026-13-01', '2027-02-29', '26-10-26', '2026-1-5', 'tomorrow', ''])('rejects %j', text => {
-    expect(parseIsoDay(text)).toBeUndefined();
+    expect(isValidTimezone('Europe/Lisbon')).toBe(true);
+    expect(isValidTimezone('Mars/Olympus')).toBe(false);
   });
 });
 

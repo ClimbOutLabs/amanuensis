@@ -1,4 +1,5 @@
-import { dayInZone, parseIsoDay } from '../../../../src/cli/demoSeed/calendar';
+import { parseDateOnly } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
 import {
   buildDemoWorld,
@@ -187,7 +188,7 @@ describe('demo seed against the real stores', () => {
   });
 
   it('seeds a rehearsal day that is not the real today', async () => {
-    const today = parseIsoDay('2026-10-26');
+    const today = parseDateOnly('2026-10-26');
     if (today === undefined) {
       throw new Error('Not a day.');
     }

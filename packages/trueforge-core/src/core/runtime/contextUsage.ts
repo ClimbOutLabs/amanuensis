@@ -8,7 +8,8 @@ import type { CompletionUsage } from '../llm/LLMTypes';
  */
 export const CurrentContextUsageSchema = z
   .object({
-    prompt_tokens: z.number().int().nonnegative().describe('Live prompt-side context tokens for the next LLM call.'),
+    // Estimated from text length when no provider count is known, so it can be fractional.
+    prompt_tokens: z.number().nonnegative().describe('Live prompt-side context tokens for the next LLM call.'),
     completion_tokens: z
       .number()
       .int()

@@ -1,4 +1,5 @@
-import { dayInZone, parseIsoDay, type CalendarDay } from '../../../../src/cli/demoSeed/calendar';
+import { parseDateOnly, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
 import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
@@ -12,7 +13,7 @@ function worldOn(today: CalendarDay, timeZone = 'Europe/Lisbon') {
 }
 
 function day(text: string): CalendarDay {
-  const parsed = parseIsoDay(text);
+  const parsed = parseDateOnly(text);
   if (parsed === undefined) {
     throw new Error(`Not a day: ${text}`);
   }

@@ -25,12 +25,19 @@ sandbox_log() { printf '%s/sandbox.log' "$STATE_DIR"; }
 # An instance keeps the sandbox unless it was installed with --no-sandbox.
 instance_sandbox_wanted() { [ "$(reg_get "$1" sandbox)" != off ]; }
 
+# True when this run turns the sandbox on for an existing instance that was installed without it. Asking for the
+# sandbox again is the default, so only --no-sandbox leaves such an instance as it is.
+sandbox_enable_wanted() {
+  [ "$OPT_NO_SANDBOX" != 1 ] && [ -n "${OPT_NAME:-}" ] && reg_exists "$OPT_NAME" && ! instance_sandbox_wanted "$OPT_NAME"
+}
+
 # True when any instance, existing or about to be created, gets the sandbox.
 sandbox_needed() {
   local name
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then return 0; fi
   done
+  if sandbox_enable_wanted; then return 0; fi
   need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]
 }
 
@@ -201,13 +208,22 @@ plan_sandbox() {
   plan_image "$SLOT_IMAGE" "The sandbox is built" "Build the sandbox" slot-image
   for name in $(reg_names); do
     instance_sandbox_wanted "$name" || continue
-    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name"; then
+    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name" &&
+      sandbox_slots_use_current_image "$name"; then
       plan_add have "The $SLOT_COUNT sandboxes of instance $name are running"
+      if [ "$OPT_NO_SANDBOX" = 1 ] && [ "$name" = "${OPT_NAME:-}" ]; then
+        plan_add have "Instance $name keeps its sandbox" "--no-sandbox only applies to a new instance."
+      fi
     else
       pending=1
       plan_add todo "Start $SLOT_COUNT sandboxes for $name" "Run code (Python, shell and files) uses them."
     fi
   done
+  if sandbox_enable_wanted; then
+    pending=1
+    plan_add todo "Turn on the sandbox for instance $OPT_NAME (run code, PDF and image reading)" \
+      "Its chats, memory and files are kept. The app restarts once."
+  fi
   if need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]; then
     pending=1
     plan_add todo "Start $SLOT_COUNT sandboxes for $I_NAME" "Run code (Python, shell and files) uses them."
@@ -246,6 +262,15 @@ sandbox_run() {
     --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "aman doctor sandbox" --embedded
 }
 
+# Brings the sandbox up for an existing instance installed without it and records that it has it. The compose file is
+# rendered and the app recreated by the caller; named volumes are never touched.
+sandbox_enable() {
+  local name=$1
+  sandbox_ensure "$name"
+  reg_set "$name" sandbox slots
+  log_event "instance $name sandbox turned on"
+}
+
 # Execute phase of the images step: the bundle, then the slot image (cached when nothing changed).
 sandbox_images_ensure() {
   sandbox_needed || return 0
@@ -258,8 +283,8 @@ sandbox_images_ensure() {
 
 sandbox_first_instance() {
   local name
-  if [ -n "${I_NAME:-}" ]; then
-    printf '%s' "$I_NAME"
+  if [ -n "${I_NAME:-}" ] || [ -n "${OPT_NAME:-}" ]; then
+    printf '%s' "${I_NAME:-$OPT_NAME}"
     return 0
   fi
   name=$(reg_names | head -n 1)
@@ -275,6 +300,24 @@ sandbox_print_root_steps() {
   ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
 }
 
+# The id Docker has for the slot image now; changes only when a rebuild changed the image.
+sandbox_image_id() {
+  D image inspect --format '{{.Id}}' "$SLOT_IMAGE" 2>/dev/null | head -n 1 || true
+}
+
+# Whether every running slot of an instance was started from the slot image as it is now. True when that cannot be told.
+sandbox_slots_use_current_image() {
+  local name=$1 current running id
+  current=$(sandbox_image_id)
+  [ -n "$current" ] || return 0
+  running=$(D ps -q --filter "label=com.docker.compose.project=$name-slots" 2>/dev/null || true)
+  [ -n "$running" ] || return 0
+  # shellcheck disable=SC2086 # one argument per container id
+  for id in $(D inspect --format '{{.Image}}' $running 2>/dev/null); do
+    [ "$id" = "$current" ] || return 1
+  done
+}
+
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because
 # the app mounts the slots' control volumes. "refresh" starts them even when healthy, so a rebuilt image replaces
 # the running slots (an upgrade).
@@ -284,7 +327,9 @@ sandbox_ensure() {
   [ -f "$(sandbox_bundle)" ] || sandbox_install_bundle
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
-    if [ "$refresh" != refresh ]; then
+    # Healthy slots still run the image they started with, so a rebuilt image (new tools, new languages)
+    # needs them started again; a run that built nothing new leaves them alone.
+    if [ "$refresh" != refresh ] && sandbox_slots_use_current_image "$name"; then
       ui_skip "The sandboxes of instance $name are already healthy"
       return 0
     fi

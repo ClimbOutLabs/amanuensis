@@ -43,6 +43,10 @@
             "pages": ["introduction", "install", "quickstart"]
           },
           {
+            "group": "Your Data and Safety",
+            "pages": ["safety", "privacy", "schedules", "backup"]
+          },
+          {
             "group": "TrueForge Harness",
             "pages": [
               {
@@ -52,6 +56,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "google",
                   "skills",
                   "sandbox",
                   "deployment-security"

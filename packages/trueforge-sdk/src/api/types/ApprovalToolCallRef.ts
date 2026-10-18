@@ -5,6 +5,8 @@ import * as TrueForge from "../index.js";
 export interface ApprovalToolCallRef {
     /** Whether the owner may allow this tool for good. */
     canAlwaysAllow?: boolean;
+    /** Whether the user may approve this tool for the rest of the chat. */
+    canChatAllow?: boolean;
     /** ISO 8601 time after which a held action can no longer be approved. */
     expiresAt?: string;
     /** Set when a scheduled run held this action for the owner. The run did not wait for an answer. */

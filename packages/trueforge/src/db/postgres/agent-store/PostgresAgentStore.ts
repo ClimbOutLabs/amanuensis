@@ -145,7 +145,7 @@ export class PostgresAgentStore implements IAgentStore<Transaction<Database>> {
       const row = await db
         .insertInto('agent')
         .values({
-          id: newId(),
+          id: input.id ?? newId(),
           tenant_id: input.tenant_id,
           name: input.name,
           description: input.description,

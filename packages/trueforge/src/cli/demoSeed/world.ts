@@ -1,7 +1,8 @@
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
+import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
-import { dayLabels, isoDay, type CalendarDay, type DayLabels } from './calendar';
+import { dayLabels, type DayLabels } from './calendar';
 import { photographyGuide, relocationGuide } from './maya/knowledge';
 import { mayaMemoryNotes } from './maya/memories';
 import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';

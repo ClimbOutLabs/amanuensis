@@ -1,7 +1,8 @@
+import { parseDateOnly } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
-import { isValidTimeZone, parseIsoDay } from './calendar';
 import type { DemoSeedSession } from './session';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
@@ -90,11 +91,11 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
       throw new UsageError('--user must be a login email without spaces.');
     }
     const timeZone = options.timezone ?? DEFAULT_DEMO_TIME_ZONE;
-    if (!isValidTimeZone(timeZone)) {
+    if (!isValidTimezone(timeZone)) {
       throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Lisbon.`);
     }
 
-    const today = options.today === undefined ? undefined : parseIsoDay(options.today);
+    const today = options.today === undefined ? undefined : parseDateOnly(options.today);
     if (options.today !== undefined && today === undefined) {
       throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-26.');
     }

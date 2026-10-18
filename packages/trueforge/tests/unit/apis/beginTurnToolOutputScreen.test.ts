@@ -9,19 +9,23 @@ import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
   SetGlobalSettingInput,
 } from '../../../src/db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../../../src/db/googleConnectionStore';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteRepositoryStore } from '../../../src/db/sqlite/repository-store/SqliteRepositoryStore';
@@ -75,6 +79,10 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
   }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
+  }
 }
 
 /** The tool-output screen config is the constructor arg carrying the screening tuning. */
@@ -107,7 +115,10 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     configuration.MEMORY_SCREEN_URL = originalScreenUrl;
   });
 
-  async function beginTurnWithStore(store: CountingGlobalSettingsStore) {
+  async function beginTurnWithStore(
+    store: CountingGlobalSettingsStore,
+    googleConnectionStore?: IGoogleConnectionStore,
+  ) {
     const logger = createLogger({ silent: true });
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
@@ -163,6 +174,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
+        mcpCatalog: McpCatalog.load(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,
@@ -180,6 +192,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
         skillStore: new SqliteSkillStore(db),
         repositoryStore: new SqliteRepositoryStore(db),
         spaceStore: new SqliteSpaceStore(db),
+        googleConnectionStore,
         turnArtifactStore: new FakeTurnArtifactStore(),
         eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
         logger,
@@ -261,5 +274,37 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     } finally {
       configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS = originalTimeout;
     }
+  });
+
+  describe('Google connections', () => {
+    const originalDemoMode = configuration.DEMO_MODE;
+
+    afterEach(() => {
+      configuration.DEMO_MODE = originalDemoMode;
+    });
+
+    async function googleConnectionsOf(input: { demoMode: boolean }) {
+      configuration.DEMO_MODE = input.demoMode;
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new CountingGlobalSettingsStore(new SqliteGlobalSettingsStore(db));
+      const googleStore = new SqliteGoogleConnectionStore(db);
+      const { ctorArgs } = await beginTurnWithStore(store, googleStore);
+      const space = ctorArgs.find(arg => typeof arg === 'object' && arg !== null && 'googleConnections' in arg);
+      if (typeof space !== 'object' || space === null || !('googleConnections' in space)) {
+        throw new Error('space resource wiring not found in resolver constructor args');
+      }
+      return { given: space.googleConnections, googleStore };
+    }
+
+    it('hands the stored Google logins to the turn', async () => {
+      const { given, googleStore } = await googleConnectionsOf({ demoMode: false });
+      expect(given).toBe(googleStore);
+    });
+
+    it('never gives a demo instance a real mailbox, even with a stored Google login', async () => {
+      const { given } = await googleConnectionsOf({ demoMode: true });
+      expect(given).toBeUndefined();
+    });
   });
 });

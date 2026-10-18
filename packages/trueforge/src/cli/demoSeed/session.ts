@@ -1,6 +1,7 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../db/sqlite/types';
-import { dayInZone, type CalendarDay } from './calendar';
+import { dayInZone } from './calendar';
 import type { DemoKnowledgeLibrary } from './knowledgeLibrary';
 import { resetDemoWorld, seedDemoWorld, type ResetReport, type SeedReport } from './seed';
 import { createSqliteDemoSeedStores } from './stores';
