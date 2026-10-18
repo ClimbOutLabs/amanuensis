@@ -6,18 +6,20 @@
  * their owner and tenant fields along, which import checks for shape and
  * then replaces with the importing user's identity.
  *
- * People's own data is read strictly: chats and their dates, message roles
- * and text, tool call ids, names, arguments and results, the agent a chat
- * runs, uploaded files and their digests, memories, spaces, personas,
- * schedules, connectors, audit rows, and the ids that tie them together.
- * Everything else is Aman's own bookkeeping (tool call enrichment, turn
- * events, turn state, metrics, thread runtime state, settings it never
- * applies) and is read through lenient.ts, so a change to those internals in
- * any version never stops an import.
+ * What people see and own is read strictly: chats and their dates, message
+ * roles and text, tool call ids, names, arguments and results, the turn
+ * events a chat is drawn from (VISIBLE_EVENT_TYPES) and a finished turn's
+ * output, the agent a chat runs, uploaded files and their digests, memories,
+ * spaces, personas, schedules, connectors, audit rows, and the ids that tie
+ * them together. Aman's own bookkeeping is read through lenient.ts, so a
+ * change to it in any version never stops an import: tool call enrichment
+ * (even inside visible events), telemetry and lifecycle events, other turn
+ * states, metrics, thread runtime state, and settings import never applies.
  */
 import {
   AgentSpecSchema,
   CreatedBySubjectSchema,
+  EventType,
   SessionAgentSchema,
   SessionMetadataSchema,
   SessionMetricsSchema,
@@ -47,7 +49,16 @@ import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedul
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
-import { internal, internalList, isRecord, noteLeftOut, readInternal } from './lenient';
+import {
+  forwardIssues,
+  internal,
+  isRecord,
+  mixedList,
+  noteLeftOut,
+  readInternal,
+  readVisible,
+  visible,
+} from './lenient';
 
 export const ImportManifestSchema = z.object({
   format: z.string(),
@@ -74,8 +85,22 @@ function readTurnCustom(value: unknown): ReturnType<typeof parseTurnCustom> {
   }
 }
 
-/** Turn events are Aman's own record of a turn; one this version cannot read is repaired or left out. */
-const ImportEventListSchema = internalList(ImportEventSchema);
+/** The events the chat on screen is drawn from; every other event is Aman's own record of the turn. */
+const VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  EventType.TURN_CREATED,
+  EventType.MODEL_MESSAGE,
+  EventType.TOOL_RESPONSE,
+  EventType.TOOL_RESPONSE_V2,
+  EventType.TOOL_APPROVAL_REQUIRED,
+  EventType.TOOL_RESPONSE_REQUIRED,
+  EventType.MCP_AUTH_REQUIRED,
+  EventType.TURN_DONE,
+]);
+
+const ImportEventListSchema = mixedList({
+  schema: ImportEventSchema,
+  isVisible: event => isRecord(event) && typeof event['type'] === 'string' && VISIBLE_EVENT_TYPES.has(event['type']),
+});
 
 /** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
 const ArchivedInstantSchema = z.iso.datetime({ offset: true });
@@ -106,34 +131,22 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
   effect: true,
 });
 
-/** A message with each tool call's host-owned info read leniently; the call itself stays strict. */
-function withReadableToolInfo(message: unknown): unknown {
-  if (!isRecord(message) || !Array.isArray(message['tool_calls'])) {
+/** A message is what people see; only each tool call's host-owned info is read leniently. */
+const ImportContextMessageSchema = visible(ContextMessageSchema).transform((message, ctx) => {
+  if (!('tool_calls' in message) || message.tool_calls === undefined) {
     return message;
   }
-  const toolCalls = message['tool_calls'].map((call: unknown) =>
-    isRecord(call) ? { ...call, tool_info: readInternal(InternalToolCallInfoSchema, call['tool_info']) } : call,
-  );
+  const toolCalls: typeof message.tool_calls = [];
+  for (const call of message.tool_calls) {
+    const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
+    if (!toolInfo.success) {
+      ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
+      return z.NEVER;
+    }
+    toolCalls.push({ ...call, tool_info: toolInfo.data });
+  }
   return { ...message, tool_calls: toolCalls };
-}
-
-const ImportContextMessageSchema = z
-  .preprocess(withReadableToolInfo, ContextMessageSchema)
-  .transform((message, ctx) => {
-    if (!('tool_calls' in message) || message.tool_calls === undefined) {
-      return message;
-    }
-    const toolCalls: typeof message.tool_calls = [];
-    for (const call of message.tool_calls) {
-      const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
-      if (!toolInfo.success) {
-        ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
-        return z.NEVER;
-      }
-      toolCalls.push({ ...call, tool_info: toolInfo.data });
-    }
-    return { ...message, tool_calls: toolCalls };
-  });
+});
 
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
@@ -202,8 +215,19 @@ const ImportTurnFieldsSchema = z.object({
   first_turn_id: z.string(),
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
-  // A state this version cannot read lands like a turn left running: cancelled, with nothing lost.
-  state: internal(TurnStateSchema, { status: 'running' }),
+  state: z.unknown().transform((value, ctx) => {
+    // A finished turn's output is what people read, so it stays strict.
+    const parsed =
+      isRecord(value) && value['status'] === 'done'
+        ? readVisible(TurnStateSchema, value)
+        : // Any other state this version cannot read lands like a turn left running: cancelled, with nothing lost.
+          TurnStateSchema.safeParse(readInternal(TurnStateSchema, value, { status: 'running' }));
+    if (!parsed.success) {
+      forwardIssues(ctx, { issues: parsed.error.issues, path: [] });
+      return z.NEVER;
+    }
+    return parsed.data;
+  }),
   input: z.array(TurnInputItemSchema),
   custom: z.unknown().transform(readTurnCustom),
   created_at: ArchivedInstantSchema,

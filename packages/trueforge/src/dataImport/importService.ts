@@ -109,7 +109,7 @@ import {
   type ImportSpacesFile,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
-import { countingLeftOut } from './lenient';
+import { countingLeftOut, isRecord } from './lenient';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -176,10 +176,6 @@ function formatIssuePath(issuePath: readonly PropertyKey[]): string {
     }
   }
   return out === '' ? 'the top level' : out;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -666,12 +662,15 @@ function buildSummary({
   standInAgentNames,
   filesLeftBehind,
   leftOutDetails,
+  trimmedSpaces,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
   leftOutDetails: number;
+  /** Spaces whose history starts after revision 1 in the archive. */
+  trimmedSpaces: number;
   filesLeftBehind: number;
 }): string {
   const counts = [
@@ -699,9 +698,10 @@ function buildSummary({
     connectorNames.length === 0
       ? ''
       : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
-    leftOutDetails === 0
+    trimmedSpaces === 0
       ? ''
-      : 'Some behind-the-scenes details from an older version were left out. Your chats are complete.',
+      : `The older history of ${pluralize(trimmedSpaces, 'space', 'spaces')} was trimmed before the export, so ${trimmedSpaces === 1 ? 'its' : 'their'} versions now start at 1.`,
+    leftOutDetails === 0 ? '' : 'Some behind-the-scenes details from an older version were left out.',
     'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
     'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
   ]
@@ -1063,7 +1063,11 @@ async function importArchive<TTransaction>(
     });
   } catch (error) {
     if (error instanceof DataImportError && error.cause instanceof Error) {
-      deps.logger.warn('Data import could not read a chat back', { error: error.message, stack: error.cause.stack });
+      deps.logger.warn('Data import could not read a chat back', {
+        error: error.message,
+        message: error.cause.message,
+        stack: error.cause.stack,
+      });
     }
     throw error;
   }
@@ -1365,6 +1369,7 @@ async function importArchive<TTransaction>(
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
         leftOutDetails,
+        trimmedSpaces: spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length,
       }),
     };
   } catch (cause) {

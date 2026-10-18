@@ -3146,8 +3146,10 @@ describe('runDataImport with an export from an older version', () => {
 
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(4);
+      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
+      expect(result.summary).not.toContain('Your chats are complete');
       expect(result.summary).toContain(
-        'Some behind-the-scenes details from an older version were left out. Your chats are complete.',
+        'The older history of 1 space was trimmed before the export, so its versions now start at 1.',
       );
 
       const store = target.stores.sessionStore;
@@ -3160,8 +3162,8 @@ describe('runDataImport with an export from an older version', () => {
           order: 'asc',
         })
       ).data.filter(event => event.type === 'aman.memory.recall');
-      expect(recalls).toHaveLength(1);
-      expect(recalls[0]).toMatchObject({ stats: { dropped_below_threshold: 0, budget_reason: 'normal' } });
+      // Its budget reason is a recorded choice this version cannot know, so the record is left out.
+      expect(recalls).toEqual([]);
 
       const texts = async (turnId: string) =>
         (
@@ -3226,11 +3228,14 @@ describe('runDataImport with an export from an older version', () => {
         .mockRejectedValueOnce(new Error('The store refused this turn'));
       const error = await importError(target, archive);
       expect(error instanceof Error && error.message).toBe(
-        `Chat ${SEED_IDS.sessionMain} in this export could not be read back: The store refused this turn. Nothing was imported.`,
+        `Chat ${SEED_IDS.sessionMain} in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
       );
       expect(target.logger.warn).toHaveBeenCalledWith(
         'Data import could not read a chat back',
-        expect.objectContaining({ stack: expect.stringContaining('The store refused this turn') }),
+        expect.objectContaining({
+          message: 'The store refused this turn',
+          stack: expect.stringContaining('The store refused this turn'),
+        }),
       );
     } finally {
       await source.close();
@@ -3254,8 +3259,10 @@ function withChangedInternals(entries: Map<string, Buffer>): void {
     turn['state'] = { status: 'paused-for-a-future-reason' };
     turn['future_turn_field'] = 1;
     for (const event of recordsAt(record['events'], 'events')) {
-      delete event['created_at'];
       event['future_event_field'] = 'x';
+      if (String(event['type']).startsWith('aman.')) {
+        delete event['created_at'];
+      }
     }
     listAt(record['events'], 'events').push({ type: 'aman.future.event', id: 'evt-future', payload: 3 });
     for (const thread of Object.values(recordAt(recordAt(turn['snapshot'], 'snapshot')['threads'], 'threads'))) {
@@ -3334,6 +3341,76 @@ describe('runDataImport when Aman internals have changed', () => {
       expect(error instanceof Error && error.message).toMatch(
         /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.turn\.snapshot\.threads\.main\.context\[0\]/,
       );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport keeps what people see strict', () => {
+  /** Adds an event to the first chat's first turn record. */
+  function withEvent(entries: Map<string, Buffer>, event: Record<string, unknown>): void {
+    const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+    listAt(turnRecordOf(records, 'session-1-turn-1')['events'], 'events').push(event);
+    entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+  }
+
+  it('refuses a model message whose content changed shape, saying where', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-changed-message');
+    try {
+      const changed = await repack(archive, entries => {
+        withEvent(entries, {
+          type: 'model.message',
+          id: 'evt-changed-message',
+          created_at: '2026-09-01T10:00:00.000Z',
+          thread_id: MAIN_THREAD_ID,
+          content: { blocks: ['Paris.'] },
+        });
+      });
+      const error = await importError(target, changed);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error instanceof Error && error.message).toMatch(
+        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.events\[\d+\]/,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports an approval event whose card was written before its newer fields existed', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-card');
+    try {
+      const older = await repack(archive, entries => {
+        withEvent(entries, {
+          type: 'tool.approval_required',
+          id: 'evt-older-approval',
+          created_at: '2026-09-01T10:00:00.000Z',
+          thread_id: MAIN_THREAD_ID,
+          tool_calls: [
+            {
+              id: 'call-older-send',
+              source_event_id: 'evt-model',
+              tier3_card: {
+                plain_what: 'Send the report.',
+                plain_why: null,
+                cannot_be_undone: null,
+                why_asked_again: null,
+                destination: 'reports.example.com',
+                recipient: null,
+                amount: null,
+                parsed_command: null,
+              },
+            },
+          ],
+        });
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
     } finally {
       await source.close();
       await target.close();

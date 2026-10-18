@@ -467,10 +467,8 @@ export async function replaySessions(
       if (cause instanceof DataImportError) {
         throw cause;
       }
-      const message = cause instanceof Error ? cause.message.trim() : '';
-      const reason = message === '' ? 'An unexpected error.' : /[.!?]$/.test(message) ? message : `${message}.`;
       throw new DataImportError(
-        `Chat ${session.session_id} in this export could not be read back: ${reason} Nothing was imported.`,
+        `Chat ${session.session_id} in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
         400,
         { cause },
       );
