@@ -148,7 +148,7 @@ Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter)"
   assert_contains "$OUT" "Your email, used to sign in"
-  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters"
+  assert_contains "$OUT" "Password for owner@example.invalid, 12 to 72 characters"
   assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
   assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"

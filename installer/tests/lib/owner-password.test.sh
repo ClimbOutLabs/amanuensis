@@ -83,7 +83,7 @@ test_short_password_is_refused() {
   change_password "short
 " instance password --password-stdin
   assert_rc 2
-  assert_flat_contains "$ERR" "The password needs at least 8 characters."
+  assert_flat_contains "$ERR" "The password needs at least 12 characters."
   assert_eq "$(dex_env)" "$before"
   assert_eq "$(wipes)" ""
   sandbox_drop
@@ -110,12 +110,12 @@ test_prompts_on_a_terminal() {
   t_begin "on a terminal it asks for the new password twice, not shown, and a wrong repeat asks again"
   sandbox_new
   install_machine
-  run_install_tty "New password for $OWNER, 8 to 72 characters (not shown):=>wrong-first-time
+  run_install_tty "New password for $OWNER, 12 to 72 characters (not shown):=>wrong-first-time
 Repeat the new password (not shown):=>not-the-same
-New password for $OWNER, 8 to 72 characters (not shown):=>$NEW_PASSWORD
+New password for $OWNER, 12 to 72 characters (not shown):=>$NEW_PASSWORD
 Repeat the new password (not shown):=>$NEW_PASSWORD" instance password
   assert_rc 0
-  assert_contains "$OUT" "New password for $OWNER, 8 to 72 characters (not shown):"
+  assert_contains "$OUT" "New password for $OWNER, 12 to 72 characters (not shown):"
   assert_contains "$OUT" "Repeat the new password (not shown):"
   assert_contains "$OUT" "The passwords do not match. Type them again."
   assert_not_contains "$OUT" "$NEW_PASSWORD" "not echoed"

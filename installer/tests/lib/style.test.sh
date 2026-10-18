@@ -23,7 +23,7 @@ $PASSWORD_ANSWERS"
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Example: you@example.com"
   assert_contains "$OUT" "Go ahead? [Y/n]"
-  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters (not shown)"
+  assert_contains "$OUT" "Password for owner@example.invalid, 12 to 72 characters (not shown)"
   assert_contains "$OUT" "Repeat the password (not shown)"
   sandbox_drop
 }
@@ -145,8 +145,8 @@ Repeat the password=>short
 Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_flat_contains "$OUT" "The password needs at least 8 characters."
-  assert_eq "$(printf '%s' "$OUT" | grep -c 'Password for owner@example.invalid, 8 to 72 characters')" 2 "the rule is in both questions"
+  assert_flat_contains "$OUT" "The password needs at least 12 characters."
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Password for owner@example.invalid, 12 to 72 characters')" 2 "the rule is in both questions"
   assert_not_contains "$OUT" "short"
   assert_not_contains "$OUT" "$SENTINEL_PASSWORD"
   sandbox_drop

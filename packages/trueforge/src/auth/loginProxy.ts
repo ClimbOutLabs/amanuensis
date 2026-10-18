@@ -26,6 +26,14 @@ const SECURITY_HEADERS: Record<string, string> = {
   'cache-control': 'no-store',
 };
 
+function tooManyText(retryAfterSeconds: number, scope: 'address' | 'account'): string {
+  if (scope === 'address') {
+    return `Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`;
+  }
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return `Too many wrong passwords. Try again in ${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+}
+
 /** The sign-in service can be passed through only when it sits on this computer and has a path of its own. */
 export function isProxiableIssuer(issuerUrl: string): boolean {
   try {
@@ -148,8 +156,8 @@ export function createLoginProxy({
     throw new Error('The sign-in service must have the same path where it runs and where browsers find it');
   }
 
-  const tooMany = (retryAfterSeconds: number): Response =>
-    new Response(`Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`, {
+  const tooMany = (retryAfterSeconds: number, scope: 'address' | 'account' = 'address'): Response =>
+    new Response(tooManyText(retryAfterSeconds, scope), {
       status: 429,
       headers: {
         'content-type': 'text/plain; charset=UTF-8',
@@ -204,7 +212,7 @@ export function createLoginProxy({
     }
     const permit = guessing && body !== undefined ? limiter.begin(key, account) : undefined;
     if (permit !== undefined && !permit.allowed) {
-      return tooMany(permit.retryAfterSeconds);
+      return tooMany(permit.retryAfterSeconds, permit.scope);
     }
     const headers = new Headers();
     for (const name of FORWARDED_REQUEST_HEADERS) {
