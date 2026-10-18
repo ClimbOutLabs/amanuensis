@@ -410,7 +410,7 @@ sandbox_down() {
   fi
   if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
     sandbox_slots_left "$name" || return 0
-    die "The sandboxes of $name could not be stopped (the sandbox tools are missing here), so the removal was not finished. Run aman upgrade, then run the same command again: $again"
+    die "The sandboxes of $name could not be stopped, because the tools that stop them are missing. The removal was not finished. Run aman upgrade, then run the same command again: $again"
   fi
   sandbox_run "${args[@]}" --instance "$name" ||
     die "The sandboxes of $name could not be stopped, so the removal was not finished. Run the same command again: $again"

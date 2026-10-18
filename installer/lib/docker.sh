@@ -111,8 +111,8 @@ run_root() {
 # done and later sudo calls of this run do not ask again. $1 says what was left as it was.
 root_ready() {
   [ "$(id -u)" != 0 ] || return 0
-  command -v sudo >/dev/null 2>&1 || die "This needs administrator rights and sudo is not installed, so $1. Run the same command again as root."
-  sudo -v -p 'Your computer password, for sudo (not shown): ' ||
+  command -v sudo >/dev/null 2>&1 || die "This needs administrator rights, and this computer has no way to ask for them, so $1. Run the same command again from an administrator account."
+  sudo -v -p 'Your computer password (it stays hidden as you type): ' ||
     die "The password was not accepted, so $1. Type the password you use to log in to this computer, then run the same command again."
 }
 
