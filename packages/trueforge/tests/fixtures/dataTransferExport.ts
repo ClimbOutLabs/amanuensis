@@ -33,6 +33,7 @@ export async function exportInstanceArchive<TTransaction>({
   subjectId,
   includeUploads = true,
   secrets = [],
+  maxEntryBytes,
 }: {
   instance: ExportableInstance<TTransaction>;
   tenantId: string;
@@ -40,6 +41,8 @@ export async function exportInstanceArchive<TTransaction>({
   includeUploads?: boolean;
   /** Normalized exact-match secrets, as the entry points pass them. */
   secrets?: readonly string[];
+  /** A small per-file cap, so a test can pass it without a huge archive. */
+  maxEntryBytes?: number;
 }): Promise<Buffer> {
   const { stores } = instance;
   const deps: DataExportDeps<TTransaction> = {
@@ -74,6 +77,7 @@ export async function exportInstanceArchive<TTransaction>({
       exportedAt: EXPORT_TEST_TIME,
       appVersion: '0.0.0-test',
       maxBytes: 1024 * 1024 * 1024,
+      ...(maxEntryBytes === undefined ? {} : { maxEntryBytes }),
     },
     sink,
   );

@@ -20,6 +20,7 @@ import { resolveMemoryExportSource } from '../dataExport/memorySource';
 import { normalizeSecrets } from '../dataExport/secretScrub';
 import {
   ZipEntryLimitExceededError,
+  ZipEntrySizeCapExceededError,
   ZipOutputClosedError,
   ZipSizeCapExceededError,
 } from '../dataExport/zipStreamWriter';
@@ -62,6 +63,9 @@ export interface DataExportRouterDeps<TTransaction> {
 function failureReason(error: unknown): string {
   if (error instanceof ZipSizeCapExceededError) {
     return 'over the size limit';
+  }
+  if (error instanceof ZipEntrySizeCapExceededError) {
+    return 'a file over the size limit';
   }
   if (error instanceof ZipEntryLimitExceededError) {
     return 'too many files';

@@ -1,6 +1,7 @@
 /**
- * Streams one user's data export archive: one JSON file per section, the
- * memory tree as Markdown, and uploaded files only when requested. Never
+ * Streams one user's data export archive: one JSON file per section (chats
+ * spread over numbered `sessions/` files), the memory tree as Markdown, and
+ * uploaded files only when requested. Never
  * exported: model providers and their keys, OAuth tokens, registered OAuth
  * clients, approval tokens, always-allow grants, skills and registered
  * repositories, sandbox state, schedule run history, and anything another
@@ -23,6 +24,7 @@ import type {
   SessionRecord,
   TokenPagination,
   TurnRecord,
+  TurnSnapshot,
 } from '@truefoundry/trueforge-core/agent-session';
 
 import { errorCode } from '../cli/errorCode';
@@ -58,13 +60,17 @@ import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScr
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
 import { createExportScrubber, type ExportScrubber } from './secretScrub';
-import { exportableEvents, withoutDeploymentBoundFields } from './sessionRecords';
-import { ZipStreamWriter } from './zipStreamWriter';
+import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBoundFields } from './sessionRecords';
+import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
 
 export const EXPORT_FORMAT = 'aman-export';
-export const EXPORT_SCHEMA_VERSION = 1;
+/** 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records. */
+export const EXPORT_SCHEMA_VERSION = 2;
 
 const PAGE_LIMIT = 200;
+
+/** A sessions/ file is closed once the next record would take it past this size; import parses one file at a time. */
+const SESSION_PART_TARGET_BYTES = 64 * 1024 * 1024;
 
 /** Persona choices read per chat; a chat records one per turn at most. */
 const PERSONA_ACTIVATION_LIMIT = 100_000;
@@ -128,6 +134,8 @@ export interface DataExportRequest {
   exportedAt: Date;
   appVersion: string;
   maxBytes: number;
+  /** Largest single file; defaults to the limit import reads with. */
+  maxEntryBytes?: number;
 }
 
 export interface DataExportResult {
@@ -205,21 +213,80 @@ async function writeJsonEntry<TTransaction>(
   await context.zip.addTextEntry(name, JSON.stringify(context.scrub.json(toPlainJson(value)), null, 2));
 }
 
+/** Full turn records, oldest first, read one at a time. */
+async function* turnsOf<TTransaction>(
+  deps: DataExportDeps<TTransaction>,
+  sessionId: string,
+): AsyncGenerator<TurnRecord<TurnCustom>> {
+  const summaries = paged(pageToken =>
+    deps.sessionStore.listTurns({ session_id: sessionId, limit: PAGE_LIMIT, page_token: pageToken }),
+  );
+  for await (const summary of summaries) {
+    const full = await deps.sessionStore.getTurn({ session_id: sessionId, turn_id: summary.turn_id });
+    if (full !== undefined) {
+      yield full;
+    }
+  }
+}
+
 async function listAllTurns<TTransaction>(
   deps: DataExportDeps<TTransaction>,
   sessionId: string,
 ): Promise<TurnRecord<TurnCustom>[]> {
-  const summaries = paged(pageToken =>
-    deps.sessionStore.listTurns({ session_id: sessionId, limit: PAGE_LIMIT, page_token: pageToken }),
-  );
   const turns: TurnRecord<TurnCustom>[] = [];
-  for await (const summary of summaries) {
-    const full = await deps.sessionStore.getTurn({ session_id: sessionId, turn_id: summary.turn_id });
-    if (full !== undefined) {
-      turns.push(full);
-    }
+  for await (const turn of turnsOf(deps, sessionId)) {
+    turns.push(turn);
   }
   return turns;
+}
+
+/** One record of a sessions/ file, and what to call it if it alone is too large. */
+interface SessionPartRecord {
+  subject: string;
+  record: unknown;
+}
+
+/**
+ * Writes the records into numbered sessions/ files, starting a new file before one would pass
+ * the target size. A record that alone is over the per-file limit fails the export before
+ * anything import would refuse is written. At least one file is written, so an export without
+ * chats still has its sessions section.
+ */
+async function writeSessionParts<TTransaction>(
+  context: ExportContext<TTransaction>,
+  records: AsyncIterable<SessionPartRecord>,
+): Promise<void> {
+  const { zip } = context;
+  const targetBytes = Math.min(SESSION_PART_TARGET_BYTES, zip.maxEntryBytes);
+  // Two brackets and two newlines around the records.
+  const frameBytes = 4;
+  let part: string[] = [];
+  let partBytes = frameBytes;
+  let index = 0;
+  const flush = async (): Promise<void> => {
+    index += 1;
+    const name = sessionPartName(index);
+    context.sections.push(name);
+    await zip.addTextEntry(name, part.length === 0 ? '[]' : `[\n${part.join(',\n')}\n]`);
+    part = [];
+    partBytes = frameBytes;
+  };
+  for await (const { subject, record } of records) {
+    const json = JSON.stringify(context.scrub.json(withoutDeploymentBoundFields(toPlainJson(record))));
+    // The record plus the comma and newline that separate it from the next.
+    const bytes = Buffer.byteLength(json) + 2;
+    if (frameBytes + bytes > zip.maxEntryBytes) {
+      throw new ZipEntrySizeCapExceededError({ subject, bytes, capBytes: zip.maxEntryBytes });
+    }
+    if (part.length > 0 && partBytes + bytes > targetBytes) {
+      await flush();
+    }
+    part.push(json);
+    partBytes += bytes;
+  }
+  if (part.length > 0 || index === 0) {
+    await flush();
+  }
 }
 
 export async function runDataExport<TTransaction>(
@@ -229,7 +296,7 @@ export async function runDataExport<TTransaction>(
 ): Promise<DataExportResult> {
   const { subject } = request;
   const { tenantId, subjectId } = subject;
-  const zip = new ZipStreamWriter(out, { maxBytes: request.maxBytes });
+  const zip = new ZipStreamWriter(out, { maxBytes: request.maxBytes, maxEntryBytes: request.maxEntryBytes });
   const scrub = createExportScrubber(request.secrets);
   const context: ExportContext<TTransaction> = { deps, zip, scrub, request, sections: [] };
   // Only what this user created: no agent-bound sessions or schedules of other users.
@@ -275,13 +342,24 @@ export async function runDataExport<TTransaction>(
     ? await writeUploadedFiles(context, sessionStream())
     : new Map<string, string>();
 
-  // sessions.json: full fidelity (turns with snapshots, per-turn events, artifact index).
-  async function* sessions(): AsyncIterable<unknown> {
+  // sessions/: full fidelity. A chat record (the session and its persona choices) is followed by
+  // one record per turn with its snapshot, events and artifact index.
+  async function* sessionRecords(): AsyncIterable<SessionPartRecord> {
     for await (const session of sessionStream()) {
-      const turns = await listAllTurns(deps, session.session_id);
-      const turnsWithEvents: unknown[] = [];
-      const artifacts: TurnArtifactRecord[] = [];
-      for (const turn of turns) {
+      // Newest first in the store; the archive keeps them oldest first so a replay lands in order.
+      const personaActivations = (
+        await deps.personaStore.listSessionPersonaActivations({
+          tenant_id: tenantId,
+          session_id: session.session_id,
+          limit: PERSONA_ACTIVATION_LIMIT,
+        })
+      ).reverse();
+      yield {
+        subject: `The record of chat ${session.session_id}`,
+        record: { kind: 'session', session, persona_activations: personaActivations },
+      };
+      let previous: TurnSnapshot | undefined;
+      for await (const turn of turnsOf(deps, session.session_id)) {
         const events = paged(pageToken =>
           deps.sessionStore.listTurnEvents({
             session_id: session.session_id,
@@ -295,43 +373,35 @@ export async function runDataExport<TTransaction>(
         for await (const event of events) {
           eventList.push(event);
         }
-        turnsWithEvents.push({ turn, events: exportableEvents(eventList) });
-        artifacts.push(
-          ...(await deps.turnArtifactStore.listArtifacts({
-            tenant_id: tenantId,
-            session_id: session.session_id,
-            turn_id: turn.turn_id,
-          })),
-        );
-      }
-      // Artifact rows are write-once, so their last change is their creation.
-      const artifactRows = artifacts.map(artifact => {
-        const archiveEntry = uploadEntries.get(artifactKey(artifact));
-        return {
-          ...artifact,
-          updated_at: artifact.created_at,
-          ...(archiveEntry === undefined ? {} : { archive_entry: archiveEntry }),
-        };
-      });
-      // Newest first in the store; the archive keeps them oldest first so a replay lands in order.
-      const personaActivations = (
-        await deps.personaStore.listSessionPersonaActivations({
+        const artifacts = await deps.turnArtifactStore.listArtifacts({
           tenant_id: tenantId,
           session_id: session.session_id,
-          limit: PERSONA_ACTIVATION_LIMIT,
-        })
-      ).reverse();
-      yield withoutDeploymentBoundFields(
-        toPlainJson({
-          session,
-          turns: turnsWithEvents,
-          artifacts: artifactRows,
-          persona_activations: personaActivations,
-        }),
-      );
+          turn_id: turn.turn_id,
+        });
+        // Artifact rows are write-once, so their last change is their creation.
+        const artifactRows = artifacts.map(artifact => {
+          const archiveEntry = uploadEntries.get(artifactKey(artifact));
+          return {
+            ...artifact,
+            updated_at: artifact.created_at,
+            ...(archiveEntry === undefined ? {} : { archive_entry: archiveEntry }),
+          };
+        });
+        const { snapshot, ...turnFields } = turn;
+        yield {
+          subject: `One turn of chat ${session.session_id}`,
+          record: {
+            kind: 'turn',
+            turn: { ...turnFields, snapshot: { threads: exportedThreads({ snapshot, previous }) } },
+            events: exportableEvents(eventList),
+            artifacts: artifactRows,
+          },
+        };
+        previous = snapshot;
+      }
     }
   }
-  await writeJsonArrayEntry(context, 'sessions.json', sessions());
+  await writeSessionParts(context, sessionRecords());
 
   await writeJsonArrayEntry(context, 'folders.json', folders);
 

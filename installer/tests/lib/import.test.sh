@@ -62,12 +62,28 @@ test_a_failed_import_still_starts_the_app_and_fails() {
   export STUB_IMPORT_FAIL=1
   run_install instance import main "$EXPORT_FILE"
   assert_rc 1
-  assert_flat_contains "$ERR" "already has chats"
-  assert_flat_contains "$ERR" "The import failed"
+  assert_flat_contains "$ERR" "Import failed: This instance already has chats, so the import was refused and nothing was changed."
+  assert_not_contains "$ERR" "message above"
+  assert_not_contains "$ERR" "Data import rejected"
   # Only the CLI knows whether a failed run left anything behind, so the installer does not claim it.
   assert_not_contains "$ERR" "Nothing was kept"
   assert_file "$SB_STATE/up/aman-main"
   unset STUB_IMPORT_FAIL
+  sandbox_drop
+}
+
+test_a_refused_import_names_the_file_and_its_size_on_its_failure_line() {
+  t_begin "the failure line carries the app's own reason, such as a file over the size limit"
+  sandbox_new
+  install_with_owner
+  make_export
+  export STUB_IMPORT_FAIL="sessions.json is 935 MB, over the 256 MB limit for one file. Export again with the latest Aman, which keeps every file under this limit."
+  run_install instance import main "$EXPORT_FILE"
+  unset STUB_IMPORT_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "Import failed: sessions.json is 935 MB, over the 256 MB limit for one file. Export again with the latest Aman"
+  assert_flat_contains "$ERR" "Full log:"
+  assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }
 
@@ -254,6 +270,7 @@ test_import_waits_for_the_search_model
 test_a_stopped_instance_is_started_to_download_the_model
 test_import_gives_up_when_the_model_never_arrives
 test_a_failed_import_still_starts_the_app_and_fails
+test_a_refused_import_names_the_file_and_its_size_on_its_failure_line
 test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file
 test_import_for_an_unknown_instance_is_refused

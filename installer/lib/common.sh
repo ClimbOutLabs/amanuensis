@@ -156,6 +156,23 @@ step_fail() {
   exit 1
 }
 
+# ---- the app's own reason when one of its commands fails -------------------------------------------
+
+# cli_log NAME: an emptied private file to send a CLI run's error output to; prints its path.
+cli_log() {
+  ensure_private_dir "$STATE_DIR/logs"
+  : >"$STATE_DIR/logs/$1.log"
+  printf '%s' "$STATE_DIR/logs/$1.log"
+}
+
+# cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
+# or FALLBACK when it wrote none.
+cli_reason() {
+  local line
+  line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)
+  printf '%s' "${line:-$2}"
+}
+
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum | cut -d' ' -f1

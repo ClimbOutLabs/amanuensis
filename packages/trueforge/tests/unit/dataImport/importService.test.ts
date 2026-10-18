@@ -9,6 +9,7 @@ import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforg
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DataImportError } from '../../../src/dataImport/importError';
@@ -51,6 +52,7 @@ import {
   type DataTransferSeedStores,
 } from '../../fixtures/dataTransferSeed';
 import { listAt, parseJson, recordAt, recordsAt, stringAt, type JsonRecord } from '../../fixtures/jsonGuards';
+import { legacySessionsOf, setLegacySessions } from '../../fixtures/legacySessions';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(120_000);
@@ -410,7 +412,7 @@ describe('runDataImport', () => {
     try {
       const newer = await repack(archive, entries => {
         const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
-        manifest['schema_version'] = 2;
+        manifest['schema_version'] = EXPORT_SCHEMA_VERSION + 1;
         entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
       });
       const error: unknown = await runDataImport(importDeps(target), importRequest(newer)).catch(
@@ -443,13 +445,13 @@ describe('runDataImport', () => {
     const target = await makeInstance('target-missing');
     try {
       const broken = await repack(archive, entries => {
-        entries.delete('sessions.json');
+        entries.delete('sessions/0001.json');
       });
       const error: unknown = await runDataImport(importDeps(target), importRequest(broken)).catch(
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('missing its sessions.json section');
+      expect(error instanceof Error && error.message).toContain('missing its sessions/0001.json section');
     } finally {
       await source.close();
       await target.close();
@@ -479,10 +481,10 @@ describe('runDataImport', () => {
     const target = await makeInstance('target-crossref');
     try {
       const broken = await repack(archive, entries => {
-        const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+        const sessions = legacySessionsOf(entries);
         const firstTurn = recordAt(listAt(recordAt(sessions[0], 'first chat')['turns'], 'turns')[0], 'first turn');
         recordAt(firstTurn['turn'], 'turn')['session_id'] = 'some-other-session';
-        entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+        setLegacySessions(entries, sessions);
       });
       const error: unknown = await runDataImport(importDeps(target), importRequest(broken)).catch(
         (caught: unknown) => caught,
@@ -503,7 +505,9 @@ describe('runDataImport', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('larger than the import limit');
+      expect(error instanceof Error && error.message).toMatch(
+        /^The export file is \d+ KB, over the 128 bytes limit for an import\. Export again without uploaded files\.$/,
+      );
     } finally {
       await source.close();
       await target.close();
@@ -1197,9 +1201,9 @@ describe('runDataImport reports damage by location only', () => {
     try {
       const warn = target.logger.warn;
       const broken = await repack(archive, entries => {
-        const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+        const sessions = legacySessionsOf(entries);
         recordAt(recordAt(sessions[0], 'first chat')['session'], 'session')['created_at'] = 'private-value-123';
-        entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+        setLegacySessions(entries, sessions);
       });
       const error = await importError(target, broken);
       expect(error).toMatchObject({ status: 400 });
@@ -1892,7 +1896,7 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       const tampered = await repack(
         await withConnectors(archive, [connectorRecord('plain-one', { url: 'https://plain.example.com/mcp' })]),
         entries => {
-          const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+          const sessions = legacySessionsOf(entries);
           for (const item of sessions) {
             const agent = recordAt(recordAt(recordAt(item, 'entry')['session'], 'session')['agent'], 'agent');
             if (agent['type'] === 'inline') {
@@ -1900,7 +1904,7 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
               spec['mcp_servers'] = [{ name: 'plain-one' }, { name: 'kept-elsewhere' }];
             }
           }
-          entries.set('sessions.json', Buffer.from(JSON.stringify(sessions), 'utf8'));
+          setLegacySessions(entries, sessions);
         },
       );
       await runDataImport(importDeps(target), importRequest(tampered));
@@ -2160,7 +2164,7 @@ async function withPendingApproval(
   arguments_: string,
 ): Promise<Buffer> {
   return repack(archive, entries => {
-    const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+    const sessions = legacySessionsOf(entries);
     const entry = recordAt(
       sessions.find(
         item => recordAt(recordAt(item, 'entry')['session'], 'session')['session_id'] === SEED_IDS.sessionScheduled,
@@ -2216,7 +2220,7 @@ async function withPendingApproval(
       completed_at: '2026-10-16T09:00:01.000Z',
     };
     listAt(turnEntry['events'], 'events').push(card);
-    entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+    setLegacySessions(entries, sessions);
   });
 }
 
@@ -2226,7 +2230,7 @@ async function editScheduledTurn(
   mutate: (edit: { entry: JsonRecord; turnEntry: JsonRecord; turn: JsonRecord; thread: JsonRecord }) => void,
 ): Promise<Buffer> {
   return repack(archive, entries => {
-    const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+    const sessions = legacySessionsOf(entries);
     const entry = recordAt(
       sessions.find(
         item => recordAt(recordAt(item, 'entry')['session'], 'session')['session_id'] === SEED_IDS.sessionScheduled,
@@ -2240,7 +2244,7 @@ async function editScheduledTurn(
       'main thread',
     );
     mutate({ entry, turnEntry, turn, thread });
-    entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+    setLegacySessions(entries, sessions);
   });
 }
 
@@ -2338,11 +2342,11 @@ describe('runDataImport keeps permission history and persona choices', () => {
     try {
       const older = await repack(archive, entries => {
         entries.delete('audit.json');
-        const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+        const sessions = legacySessionsOf(entries);
         for (const item of sessions) {
           delete recordAt(item, 'entry')['persona_activations'];
         }
-        entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+        setLegacySessions(entries, sessions);
       });
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(3);
@@ -2648,11 +2652,11 @@ describe('runDataImport never restores a live approval', () => {
     const target = await makeInstance('target-grants');
     try {
       const planted = await repack(archive, entries => {
-        const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+        const sessions = legacySessionsOf(entries);
         for (const item of sessions) {
           recordAt(recordAt(item, 'entry')['session'], 'session')['approval_grants'] = ['reporter-server:send_report'];
         }
-        entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+        setLegacySessions(entries, sessions);
       });
       await runDataImport(importDeps(target), importRequest(planted));
       const sessions = await target.stores.sessionStore.listSessions({
@@ -2672,6 +2676,248 @@ describe('runDataImport never restores a live approval', () => {
       for (const session of sessions.data) {
         expect(session.approval_grants).toEqual([]);
       }
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+/** A per-file cap small enough that a few dozen ordinary turns cross it. */
+const SMALL_ENTRY_CAP = 64 * 1024;
+
+/** About 300 bytes per message, an ordinary question or answer. */
+function turnText(turn: number, role: string): string {
+  return `${role} ${String(turn)}: ${'Plain sentence about the garden plan. '.repeat(8)}`;
+}
+
+/**
+ * One chat with `turns` turns, each adding a question and an answer to the main thread and
+ * streaming `eventText` as its model message events.
+ */
+async function seedLongChat(
+  instance: Instance,
+  {
+    sessionId,
+    turns,
+    eventText = ['A streamed reply. '.repeat(10)],
+  }: { sessionId: string; turns: number; eventText?: string[] },
+): Promise<void> {
+  const store = instance.stores.sessionStore;
+  await store.createSession({
+    tenant_id: TENANT,
+    session_id: sessionId,
+    created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+    agent: {
+      type: 'inline',
+      spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+    },
+    custom: null,
+    metadata: {},
+    external_id: null,
+    source: null,
+  });
+  let previousTurnId: string | undefined;
+  for (let index = 0; index < turns; index += 1) {
+    const turnId = `${sessionId}-turn-${String(index + 1)}`;
+    await store.createTurn(
+      makeCreateTurnInput({
+        sessionId,
+        turnId,
+        ...(previousTurnId === undefined ? { update_session_title_if_not_exist: 'Long chat' } : { previousTurnId }),
+        new_context_appends: [
+          {
+            thread_id: MAIN_THREAD_ID,
+            context: [
+              { role: 'user', content: turnText(index, 'Question') },
+              { role: 'assistant', content: turnText(index, 'Answer') },
+            ],
+            current_context_usage: { prompt_tokens: 10 * (index + 1), completion_tokens: 5 },
+          },
+        ],
+      }),
+    );
+    await store.appendToEvents({
+      session_id: sessionId,
+      turn_id: turnId,
+      events: eventText.map(content => ({ ...makeModelMessageEvent(), content })),
+    });
+    const completedAt = new Date().toISOString();
+    const state = { status: 'done' as const, output: null, required_actions: [], completed_at: completedAt };
+    await store.updateTurnState({
+      session_id: sessionId,
+      turn_id: turnId,
+      state,
+      turn_done_event: { type: 'turn.done', id: `done-${turnId}`, created_at: completedAt, state, thread_id: null },
+    });
+    previousTurnId = turnId;
+  }
+}
+
+async function lastTurnContext(instance: Instance, sessionId: string, turns: number): Promise<unknown> {
+  const turn = await instance.stores.sessionStore.getTurn({
+    session_id: sessionId,
+    turn_id: `${sessionId}-turn-${String(turns)}`,
+  });
+  return turn?.snapshot.threads[MAIN_THREAD_ID]?.context;
+}
+
+describe('runDataImport with chats larger than one file may be', () => {
+  const TURNS = 60;
+
+  it('exports a long chat as sessions/ files under the per-file cap and imports it back whole', async () => {
+    const source = await makeInstance('source-long');
+    const target = await makeInstance('target-long');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await seedLongChat(source, {
+        sessionId: 'long-chat',
+        turns: TURNS,
+        eventText: Array(5).fill('Streamed. '.repeat(20)),
+      });
+      const archive = await exportInstanceArchive({
+        instance: source,
+        tenantId: TENANT,
+        subjectId: 'alice',
+        maxEntryBytes: SMALL_ENTRY_CAP,
+      });
+      const entries = readZipEntries(archive);
+      for (const entry of entries) {
+        expect({ name: entry.name, over: entry.data.byteLength > SMALL_ENTRY_CAP }).toEqual({
+          name: entry.name,
+          over: false,
+        });
+      }
+      const parts = entries.filter(entry => entry.name.startsWith('sessions/'));
+      expect(parts.length).toBeGreaterThan(1);
+      expect(entries.some(entry => entry.name === 'sessions.json')).toBe(false);
+
+      // What the single sessions.json held: every turn repeated the whole chat so far.
+      const partBytes = parts.reduce((sum, part) => sum + part.data.byteLength, 0);
+      const singleFileBytes = Buffer.byteLength(JSON.stringify(legacySessionsOf(entries)));
+      console.log(
+        `long chat: sessions/ files ${String(partBytes)} bytes, as one sessions.json ${String(singleFileBytes)} bytes`,
+      );
+      expect(singleFileBytes).toBeGreaterThan(SMALL_ENTRY_CAP);
+      expect(singleFileBytes).toBeGreaterThan(partBytes * 4);
+
+      const result = await runDataImport(importDeps(target), {
+        ...importRequest(archive),
+        maxEntryBytes: SMALL_ENTRY_CAP,
+      });
+      expect(result.chats).toBe(4);
+      expect(await lastTurnContext(target, 'long-chat', TURNS)).toEqual(
+        await lastTurnContext(source, 'long-chat', TURNS),
+      );
+      // A middle turn keeps exactly the messages it had, not the later ones.
+      const middle = await target.stores.sessionStore.getTurn({
+        session_id: 'long-chat',
+        turn_id: 'long-chat-turn-30',
+      });
+      expect(middle?.snapshot.threads[MAIN_THREAD_ID]?.context).toHaveLength(60);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('still imports the single sessions.json of format version 1', async () => {
+    const source = await makeInstance('source-legacy');
+    const target = await makeInstance('target-legacy');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await seedLongChat(source, { sessionId: 'long-chat', turns: 5 });
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const legacy = await repack(archive, entries => {
+        setLegacySessions(entries, legacySessionsOf(entries));
+        const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
+        manifest['schema_version'] = 1;
+        entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
+      });
+      expect(readZipEntries(legacy).some(entry => entry.name.startsWith('sessions/'))).toBe(false);
+      const result = await runDataImport(importDeps(target), importRequest(legacy));
+      expect(result.chats).toBe(4);
+      expect(await lastTurnContext(target, 'long-chat', 5)).toEqual(await lastTurnContext(source, 'long-chat', 5));
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses a format 1 sessions.json over the per-file cap, naming it and its size', async () => {
+    const source = await makeInstance('source-legacy-big');
+    const target = await makeInstance('target-legacy-big');
+    try {
+      await seedLongChat(source, { sessionId: 'long-chat', turns: TURNS });
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const legacy = await repack(archive, entries => {
+        setLegacySessions(entries, legacySessionsOf(entries));
+      });
+      const error = await runDataImport(importDeps(target), {
+        ...importRequest(legacy),
+        maxEntryBytes: SMALL_ENTRY_CAP,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error instanceof Error && error.message).toMatch(
+        /^sessions\.json is \d+ (KB|MB), over the 64 KB limit for one file\. Export again with the latest Aman, which keeps every file under this limit\.$/,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('fails the export early when one turn alone is over the per-file cap, naming the chat and its size', async () => {
+    const source = await makeInstance('source-one-big-turn');
+    try {
+      await seedLongChat(source, { sessionId: 'huge-turn-chat', turns: 1, eventText: ['y'.repeat(80 * 1024)] });
+      const error = await exportInstanceArchive({
+        instance: source,
+        tenantId: TENANT,
+        subjectId: 'alice',
+        maxEntryBytes: SMALL_ENTRY_CAP,
+      }).catch((caught: unknown) => caught);
+      expect(error instanceof Error && error.message).toBe(
+        'One turn of chat huge-turn-chat is 82 KB, over the 64 KB limit for one file in an export. Delete some long chats you no longer need, then export again.',
+      );
+    } finally {
+      await source.close();
+    }
+  });
+
+  it('points at the sessions/ file and the turn of a damaged record, never its value', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-part-damage');
+    try {
+      const broken = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        const turnRecord = records.find(record => record['kind'] === 'turn');
+        recordAt(recordAt(turnRecord, 'turn record')['turn'], 'turn')['created_at'] = 'private-value-456';
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const error = await importError(target, broken);
+      const message = error instanceof Error ? error.message : '';
+      expect(message).toMatch(
+        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.turn\.created_at/,
+      );
+      expect(message).not.toContain('private-value-456');
+      expect(target.logger.warn.mock.calls[0]?.[1]).toMatchObject({
+        section: 'sessions/0001.json',
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+      });
     } finally {
       await source.close();
       await target.close();

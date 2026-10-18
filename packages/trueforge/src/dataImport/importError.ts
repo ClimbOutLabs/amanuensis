@@ -8,3 +8,8 @@ export class DataImportError extends Error {
     this.status = status;
   }
 }
+
+/** An archive that contradicts itself; nothing is written. */
+export function damagedExportError(detail: string): DataImportError {
+  return new DataImportError(`This export is damaged: ${detail} Nothing was imported.`, 400);
+}

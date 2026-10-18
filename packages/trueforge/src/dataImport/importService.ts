@@ -35,8 +35,11 @@ import path from 'node:path';
 import type { Logger } from 'winston';
 import type { z } from 'zod';
 
+import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from '../dataExport/archiveLimits';
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
+import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords';
+import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
@@ -64,7 +67,7 @@ import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScr
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
-import { DataImportError } from './importError';
+import { damagedExportError, DataImportError } from './importError';
 import {
   compensate,
   emptyLedger,
@@ -93,6 +96,7 @@ import {
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportSchedulesFileSchema,
+  ImportSessionPartFileSchema,
   ImportSessionsFileSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
@@ -105,10 +109,12 @@ import {
   type ImportPersonasFile,
   type ImportScheduleRecord,
   type ImportSessionEntry,
+  type ImportSessionPartRecord,
   type ImportSettingsFile,
   type ImportSpacesFile,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
+import { assembleSessionParts } from './sessionParts';
 import { restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
 
@@ -135,11 +141,10 @@ export interface DataImportRequest {
   };
   /** Cap for the archive itself and for its total uncompressed size. */
   maxBytes: number;
+  /** Per-file uncompressed cap; defaults to the limit export writes to. */
+  maxEntryBytes?: number;
 }
 
-/** Per-file uncompressed cap inside the archive. */
-const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
-const MAX_ENTRIES = 100_000;
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 
@@ -154,7 +159,6 @@ const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
 const REQUIRED_SECTIONS = [
   'manifest.json',
   'chats.json',
-  'sessions.json',
   'folders.json',
   'agents.json',
   'personas.json',
@@ -182,30 +186,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The chat and turn ids around an issue in sessions.json, so a log line points at the damaged turn. */
+/**
+ * The chat and turn ids around an issue in a sessions file, so a log line points at the damaged
+ * turn. A sessions.json entry holds a chat and its turns; a sessions/ record holds one or the other.
+ */
 function locateSessionIds(json: unknown, issuePath: readonly PropertyKey[]): { session_id?: string; turn_id?: string } {
-  const [sessionIndex, turnsKey, turnIndex] = issuePath;
-  if (!Array.isArray(json) || typeof sessionIndex !== 'number') {
+  const [index, turnsKey, turnIndex] = issuePath;
+  if (!Array.isArray(json) || typeof index !== 'number') {
     return {};
   }
-  const entry: unknown = json[sessionIndex];
+  const entry: unknown = json[index];
   if (!isRecord(entry)) {
     return {};
   }
   const located: { session_id?: string; turn_id?: string } = {};
   const session = entry['session'];
+  const turns = entry['turns'];
+  const nestedTurn: unknown =
+    turnsKey === 'turns' && typeof turnIndex === 'number' && Array.isArray(turns) ? turns[turnIndex] : undefined;
+  const turn = isRecord(nestedTurn) ? nestedTurn['turn'] : entry['turn'];
   if (isRecord(session) && typeof session['session_id'] === 'string') {
     located.session_id = session['session_id'];
+  } else if (isRecord(turn) && typeof turn['session_id'] === 'string') {
+    located.session_id = turn['session_id'];
   }
-  const turns = entry['turns'];
-  if (turnsKey === 'turns' && typeof turnIndex === 'number' && Array.isArray(turns)) {
-    const turnEntry: unknown = turns[turnIndex];
-    const turn = isRecord(turnEntry) ? turnEntry['turn'] : undefined;
-    if (isRecord(turn) && typeof turn['turn_id'] === 'string') {
-      located.turn_id = turn['turn_id'];
-    }
+  if (isRecord(turn) && typeof turn['turn_id'] === 'string') {
+    located.turn_id = turn['turn_id'];
   }
   return located;
+}
+
+function isSessionsSection(name: string): boolean {
+  return name === 'sessions.json' || sessionPartIndex(name) !== undefined;
 }
 
 function parseSection<TSchema extends z.ZodType>({
@@ -236,7 +248,7 @@ function parseSection<TSchema extends z.ZodType>({
     return result.data;
   }
   const [first] = result.error.issues;
-  const ids = first === undefined || name !== 'sessions.json' ? {} : locateSessionIds(json, first.path);
+  const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
   logger.warn('Data import rejected an export section', {
     section: name,
     issue_count: result.error.issues.length,
@@ -252,9 +264,21 @@ function parseSection<TSchema extends z.ZodType>({
   });
 }
 
+/**
+ * The archive's chats. Format 2 spreads them over sessions/ files, which are read again on each
+ * pass, so only one file is held at a time; a format 1 sessions.json is read once.
+ */
+interface ArchiveSessions {
+  /** Chat ids in archive order. */
+  ids: string[];
+  /** Agent names the chats refer to. */
+  agentNames: ReadonlySet<string>;
+  entries: () => Iterable<ImportSessionEntry>;
+}
+
 interface ArchiveContents {
   manifest: ImportManifest;
-  sessions: ImportSessionEntry[];
+  sessions: ArchiveSessions;
   folders: ImportFolderRecord[];
   agents: ImportAgentRecord[];
   personas: ImportPersonasFile;
@@ -268,18 +292,66 @@ interface ArchiveContents {
   sourceTenantId: string;
 }
 
+/** The sessions/ file names in order; a gap in the numbering is a missing file. */
+function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
+  const indices = [...files.keys()]
+    .map(sessionPartIndex)
+    .filter(index => index !== undefined)
+    .sort((a, b) => a - b);
+  return indices.map((index, position) => {
+    const expected = sessionPartName(position + 1);
+    if (index !== position + 1) {
+      throw new DataImportError(`This export is missing its ${expected} section, so nothing was imported.`, 400);
+    }
+    return expected;
+  });
+}
+
+function readSessionEntries(input: {
+  files: ReadonlyMap<string, Buffer>;
+  logger: DataImportDeps<never>['logger'];
+}): () => Iterable<ImportSessionEntry> {
+  const { files, logger } = input;
+  const partNames = sessionPartNames(files);
+  if (files.has('sessions.json')) {
+    if (partNames.length > 0) {
+      throw damagedExportError('it holds chats both in sessions.json and in sessions/ files.');
+    }
+    const entries = parseSection({ files, name: 'sessions.json', schema: ImportSessionsFileSchema, logger });
+    return () => entries;
+  }
+  if (partNames.length === 0) {
+    throw new DataImportError(
+      `This export is missing its ${sessionPartName(1)} section, so nothing was imported.`,
+      400,
+    );
+  }
+  // The last file read is kept, so an export with one sessions/ file is parsed once for every pass.
+  let last: { name: string; records: ImportSessionPartRecord[] } | undefined;
+  function* records() {
+    for (const name of partNames) {
+      if (last?.name !== name) {
+        last = { name, records: parseSection({ files, name, schema: ImportSessionPartFileSchema, logger }) };
+      }
+      yield* last.records;
+    }
+  }
+  return () => assembleSessionParts(records());
+}
+
 function loadArchive(input: {
   archive: Buffer;
   maxBytes: number;
+  maxEntryBytes: number;
   logger: DataImportDeps<never>['logger'];
 }): ArchiveContents {
-  const { archive, maxBytes, logger } = input;
+  const { archive, maxBytes, maxEntryBytes, logger } = input;
   let entries: ZipArchiveEntry[];
   try {
     entries = readZipArchive(archive, {
-      maxEntryBytes: Math.min(MAX_ENTRY_BYTES, maxBytes),
+      maxEntryBytes: Math.min(maxEntryBytes, maxBytes),
       maxTotalBytes: maxBytes,
-      maxEntries: MAX_ENTRIES,
+      maxEntries: ZIP_MAX_ENTRIES,
     });
   } catch (cause) {
     if (cause instanceof ZipArchiveError) {
@@ -310,13 +382,15 @@ function loadArchive(input: {
     throw new DataImportError('This export uses a format version this Aman cannot read, so nothing was imported.', 400);
   }
 
-  // chats.json is validated even though sessions.json is the restore source:
+  // chats.json is validated even though the sessions section is the restore source:
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
+  const folders = section('folders.json', ImportFoldersFileSchema);
+  const sessionEntries = readSessionEntries({ files, logger });
   const contents: ArchiveContents = {
     manifest,
-    sessions: section('sessions.json', ImportSessionsFileSchema),
-    folders: section('folders.json', ImportFoldersFileSchema),
+    sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
+    folders,
     agents: section('agents.json', ImportAgentsFileSchema),
     personas: section('personas.json', ImportPersonasFileSchema),
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
@@ -333,52 +407,44 @@ function loadArchive(input: {
   return contents;
 }
 
-function damaged(detail: string): DataImportError {
-  return new DataImportError(`This export is damaged: ${detail} Nothing was imported.`, 400);
-}
-
-function validateCrossReferences(contents: ArchiveContents): void {
-  const { sessions, folders, agents, personas, spaces, schedules, connectors } = contents;
-
-  const agentIds = new Set<string>();
-  const agentNames = new Set<string>();
-  for (const agent of agents) {
-    if (agentIds.has(agent.id) || agentNames.has(agent.name)) {
-      throw damaged(`agent ${agent.name} appears twice.`);
-    }
-    agentIds.add(agent.id);
-    agentNames.add(agent.name);
-  }
-
+/** Checks every chat against the folders and itself, in one pass, and keeps what later steps need. */
+function checkSessions(
+  entries: Iterable<ImportSessionEntry>,
+  folders: readonly ImportFolderRecord[],
+): Pick<ArchiveSessions, 'ids' | 'agentNames'> {
   const folderIds = new Set<string>();
   for (const folder of folders) {
     if (folderIds.has(folder.folder_id)) {
-      throw damaged(`folder ${folder.folder_id} appears twice.`);
+      throw damagedExportError(`folder ${folder.folder_id} appears twice.`);
     }
     folderIds.add(folder.folder_id);
   }
 
   const sessionIds = new Set<string>();
-  for (const entry of sessions) {
+  const agentNames = new Set<string>();
+  for (const entry of entries) {
     const session = entry.session;
     if (sessionIds.has(session.session_id)) {
-      throw damaged(`chat ${session.session_id} appears twice.`);
+      throw damagedExportError(`chat ${session.session_id} appears twice.`);
     }
     sessionIds.add(session.session_id);
+    if (session.agent.type === 'reference' && session.agent.name !== null) {
+      agentNames.add(session.agent.name);
+    }
     if (session.folder_id !== null && !folderIds.has(session.folder_id)) {
-      throw damaged(`chat ${session.session_id} points at a folder that is not in the export.`);
+      throw damagedExportError(`chat ${session.session_id} points at a folder that is not in the export.`);
     }
     const custom = session.custom;
     if (custom !== null && custom !== undefined && !(typeof custom === 'object' && Object.keys(custom).length === 0)) {
-      throw damaged(`chat ${session.session_id} has custom data that this version does not store.`);
+      throw damagedExportError(`chat ${session.session_id} has custom data that this version does not store.`);
     }
     const turnIds = new Set<string>();
     for (const { turn } of entry.turns) {
       if (turn.session_id !== session.session_id) {
-        throw damaged(`a turn in chat ${session.session_id} belongs to a different chat.`);
+        throw damagedExportError(`a turn in chat ${session.session_id} belongs to a different chat.`);
       }
       if (turnIds.has(turn.turn_id)) {
-        throw damaged(`turn ${turn.turn_id} appears twice in chat ${session.session_id}.`);
+        throw damagedExportError(`turn ${turn.turn_id} appears twice in chat ${session.session_id}.`);
       }
       turnIds.add(turn.turn_id);
       try {
@@ -393,15 +459,32 @@ function validateCrossReferences(contents: ArchiveContents): void {
     }
     for (const artifact of entry.artifacts) {
       if (artifact.session_id !== session.session_id || !turnIds.has(artifact.turn_id)) {
-        throw damaged(`a stored file in chat ${session.session_id} points at a turn that is not in the export.`);
+        throw damagedExportError(
+          `a stored file in chat ${session.session_id} points at a turn that is not in the export.`,
+        );
       }
     }
+  }
+  return { ids: [...sessionIds], agentNames };
+}
+
+function validateCrossReferences(contents: ArchiveContents): void {
+  const { agents, personas, spaces, schedules, connectors } = contents;
+
+  const agentIds = new Set<string>();
+  const agentNames = new Set<string>();
+  for (const agent of agents) {
+    if (agentIds.has(agent.id) || agentNames.has(agent.name)) {
+      throw damagedExportError(`agent ${agent.name} appears twice.`);
+    }
+    agentIds.add(agent.id);
+    agentNames.add(agent.name);
   }
 
   const personaIds = new Set<string>();
   for (const { persona } of personas) {
     if (personaIds.has(persona.id)) {
-      throw damaged(`persona ${persona.id} appears twice.`);
+      throw damagedExportError(`persona ${persona.id} appears twice.`);
     }
     personaIds.add(persona.id);
   }
@@ -410,10 +493,10 @@ function validateCrossReferences(contents: ArchiveContents): void {
     const numbers = revisions.map(revision => revision.revision).sort((a, b) => a - b);
     const complete = numbers.length === space.revision && numbers.every((value, index) => value === index + 1);
     if (!complete) {
-      throw damaged(`space ${space.id} is missing some of its revisions.`);
+      throw damagedExportError(`space ${space.id} is missing some of its revisions.`);
     }
     if (revisions.some(revision => revision.id !== space.id)) {
-      throw damaged(`space ${space.id} has a revision that belongs to a different space.`);
+      throw damagedExportError(`space ${space.id} has a revision that belongs to a different space.`);
     }
   }
 
@@ -421,12 +504,12 @@ function validateCrossReferences(contents: ArchiveContents): void {
   const scheduleNames = new Set<string>();
   for (const schedule of schedules) {
     if (scheduleIds.has(schedule.id)) {
-      throw damaged(`schedule ${schedule.id} appears twice.`);
+      throw damagedExportError(`schedule ${schedule.id} appears twice.`);
     }
     scheduleIds.add(schedule.id);
     const nameKey = `${schedule.agent_name ?? ''}\n${schedule.name}`;
     if (scheduleNames.has(nameKey)) {
-      throw damaged(`two schedules named ${schedule.name} appear in the export.`);
+      throw damagedExportError(`two schedules named ${schedule.name} appear in the export.`);
     }
     scheduleNames.add(nameKey);
   }
@@ -434,7 +517,7 @@ function validateCrossReferences(contents: ArchiveContents): void {
   const connectorNames = new Set<string>();
   for (const connector of connectors) {
     if (connectorNames.has(connector.name)) {
-      throw damaged(`connector ${connector.name} appears twice.`);
+      throw damagedExportError(`connector ${connector.name} appears twice.`);
     }
     connectorNames.add(connector.name);
   }
@@ -644,11 +727,8 @@ function planAgents(contents: ArchiveContents): AgentPlan {
       referencedNames.add(schedule.agent_name);
     }
   }
-  for (const entry of contents.sessions) {
-    const agent = entry.session.agent;
-    if (agent.type === 'reference' && agent.name !== null) {
-      referencedNames.add(agent.name);
-    }
+  for (const name of contents.sessions.agentNames) {
+    referencedNames.add(name);
   }
   const placeholders: AgentPlan['placeholders'] = [];
   for (const name of referencedNames) {
@@ -823,7 +903,10 @@ export async function runDataImport<TTransaction>(
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   if (request.archive.byteLength > request.maxBytes) {
-    throw new DataImportError('The file is larger than the import limit, so nothing was imported.', 400);
+    throw new DataImportError(
+      `The export file is ${formatArchiveBytes(request.archive.byteLength)}, over the ${formatArchiveBytes(request.maxBytes)} limit for an import. Export again without uploaded files.`,
+      400,
+    );
   }
   if (importsInFlight.has(tenantId)) {
     throw new DataImportError(IMPORT_BUSY_MESSAGE, 409);
@@ -847,7 +930,12 @@ async function importArchive<TTransaction>(
   { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> },
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
-  const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
+  const contents = loadArchive({
+    archive: request.archive,
+    maxBytes: request.maxBytes,
+    maxEntryBytes: request.maxEntryBytes ?? ARCHIVE_MAX_ENTRY_BYTES,
+    logger: deps.logger,
+  });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
   const connectors = normalizeImportedConnectors(contents.connectors);
   const connectorNames = new Set(connectors.map(connector => connector.name));
@@ -870,7 +958,7 @@ async function importArchive<TTransaction>(
     tenantId,
     subjectId,
     ids: {
-      sessionIds: sessions.map(entry => entry.session.session_id),
+      sessionIds: sessions.ids,
       folderIds: folders.map(folder => folder.folder_id),
       personas: personas.map(entry => entry.persona),
       spaceIds: spaces.map(entry => entry.space.id),
@@ -974,7 +1062,11 @@ async function importArchive<TTransaction>(
         name: folder.name,
       });
     }
-    await restoreSessions(replayStore, restoreContext, sessions);
+    // One chat at a time, dropped once it landed, so the replay never holds more than one.
+    for (const entry of sessions.entries()) {
+      await restoreSessions(replayStore, restoreContext, [entry]);
+      await replayStore.deleteSession({ tenant_id: tenantId, session_id: entry.session.session_id });
+    }
   } catch (cause) {
     if (cause instanceof DataImportError) {
       throw cause;
@@ -990,7 +1082,7 @@ async function importArchive<TTransaction>(
   const planned: ImportLedger = {
     agent_ids: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
     folder_ids: folders.map(folder => folder.folder_id),
-    session_ids: sessions.map(entry => entry.session.session_id),
+    session_ids: sessions.ids,
     knowledge_db_paths: knowledgePlan.map(library => library.dbPath),
     memory_files: plannedMemoryFiles.map(file => file.targetPath),
   };
@@ -1039,7 +1131,7 @@ async function importArchive<TTransaction>(
     await restoreSessions(
       deps.sessionStore,
       { ...restoreContext, onSessionCreated: sessionId => created.session_ids.push(sessionId) },
-      sessions,
+      sessions.entries(),
     );
 
     for (const library of knowledgePlan) {
@@ -1093,15 +1185,6 @@ async function importArchive<TTransaction>(
           },
           tx,
         );
-      }
-
-      for (const entry of sessions) {
-        for (const activation of entry.persona_activations) {
-          await deps.personaStore.recordPersonaActivation(
-            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
-            tx,
-          );
-        }
       }
 
       if (!(tx instanceof Kysely)) {
@@ -1213,7 +1296,13 @@ async function importArchive<TTransaction>(
         }
       }
 
-      for (const entry of sessions) {
+      for (const entry of sessions.entries()) {
+        for (const activation of entry.persona_activations) {
+          await deps.personaStore.recordPersonaActivation(
+            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
+            tx,
+          );
+        }
         for (const artifact of entry.artifacts) {
           const identity = {
             tenant_id: tenantId,
@@ -1262,7 +1351,7 @@ async function importArchive<TTransaction>(
     lock.committed();
 
     const result: Omit<ImportDataResult, 'summary'> = {
-      chats: sessions.length,
+      chats: sessions.ids.length,
       memories: memoryCount,
       personas: personas.length,
       spaces: spaces.length,

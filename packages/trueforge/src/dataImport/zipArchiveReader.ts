@@ -10,6 +10,8 @@
  */
 import { crc32, inflateRawSync } from 'node:zlib';
 
+import { formatArchiveBytes } from '../dataExport/archiveLimits';
+
 export class ZipArchiveError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -93,7 +95,9 @@ function readCentralDirectory(bytes: Buffer, limits: ZipArchiveLimits): CentralE
     throw invalidArchive();
   }
   if (entryCount > limits.maxEntries) {
-    throw new ZipArchiveError('The archive contains too many files.');
+    throw new ZipArchiveError(
+      `The export holds ${String(entryCount)} files, more than the ${String(limits.maxEntries)} an import takes. Export again without uploaded files.`,
+    );
   }
   if (centralOffset + centralSize > bytes.length) {
     throw invalidArchive();
@@ -154,13 +158,17 @@ function readCentralDirectory(bytes: Buffer, limits: ZipArchiveLimits): CentralE
     }
     seenNames.add(name);
     if (size > limits.maxEntryBytes) {
-      throw new ZipArchiveError('One file in the archive is larger than the import limit.');
+      throw new ZipArchiveError(
+        `${name} is ${formatArchiveBytes(size)}, over the ${formatArchiveBytes(limits.maxEntryBytes)} limit for one file. Export again with the latest Aman, which keeps every file under this limit.`,
+      );
     }
     totalBytes += size;
-    if (totalBytes > limits.maxTotalBytes) {
-      throw new ZipArchiveError('The archive is larger than the import limit.');
-    }
     entries.push({ name, method, crc, compressedSize, size, localHeaderOffset });
+  }
+  if (totalBytes > limits.maxTotalBytes) {
+    throw new ZipArchiveError(
+      `The files in the export add up to ${formatArchiveBytes(totalBytes)}, over the ${formatArchiveBytes(limits.maxTotalBytes)} limit for an import. Export again without uploaded files.`,
+    );
   }
   return entries;
 }
@@ -180,7 +188,8 @@ function extractEntry(bytes: Buffer, entry: CentralEntry): Buffer {
   const compressed = bytes.subarray(dataStart, dataEnd);
   let data: Buffer;
   if (entry.method === 0) {
-    data = Buffer.from(compressed);
+    // A view, not a copy: the archive stays in memory for the whole import anyway.
+    data = compressed;
   } else {
     try {
       data = inflateRawSync(compressed, { maxOutputLength: entry.size });
@@ -198,8 +207,9 @@ function extractEntry(bytes: Buffer, entry: CentralEntry): Buffer {
 }
 
 /**
- * Reads a whole archive into memory, enforcing the limits from the central
- * directory before extraction and again as bytes land. Callers cap the
+ * Reads a whole archive, enforcing the limits from the central directory
+ * before extraction and again as bytes land. Stored entries are views into
+ * `bytes`, so they cost no memory beyond the archive itself. Callers cap the
  * upload itself first, so the archive bytes are already bounded.
  */
 export function readZipArchive(bytes: Buffer, limits: ZipArchiveLimits): ZipArchiveEntry[] {

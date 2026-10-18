@@ -63,8 +63,9 @@ function resolveAgentBinding(
   return resolved === undefined ? agent : { type: 'reference', id: resolved.id, name: resolved.name };
 }
 
+/** A sessions/ archive shares unchanged messages between turns, so most compare by identity. */
 function sameMessage(left: ContextMessage, right: ContextMessage): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 /** Length of the longest common prefix of two contexts, compared message by message. */
@@ -282,7 +283,7 @@ async function restoreTurn(
 export async function restoreSessions(
   store: ISessionStore<SessionCustom, TurnCustom>,
   context: SessionRestoreContext,
-  sessions: readonly ImportSessionEntry[],
+  sessions: Iterable<ImportSessionEntry>,
 ): Promise<void> {
   for (const entry of sessions) {
     const session = entry.session;

@@ -16,6 +16,7 @@ import type { Transaction } from 'kysely';
 import { createLogger } from 'winston';
 
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import { sessionPartIndex } from '../../../src/dataExport/sessionRecords';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
@@ -48,6 +49,7 @@ import { createPostgresTestDatabase } from '../../db/postgres/testDatabase';
 import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import { SEED_HISTORY, SEED_IDS, seedRichInstance, type DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
 import { isRecord, parseJson, recordAt, recordsAt, stringAt, type JsonRecord } from '../../fixtures/jsonGuards';
+import { legacySessionsOf } from '../../fixtures/legacySessions';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 const TENANT = 'default';
@@ -306,7 +308,7 @@ function auditRowsWithoutIds(archive: Map<string, Buffer>): JsonRecord[] {
 }
 
 function expectNoApprovalGrants(archive: Map<string, Buffer>): void {
-  for (const entry of recordsAt(parseJson(archive.get('sessions.json'), 'sessions.json'), 'sessions.json')) {
+  for (const entry of recordsAt(legacySessionsOf(archive), 'sessions')) {
     expect(recordAt(entry['session'], 'session')['approval_grants']).toEqual([]);
   }
 }
@@ -317,10 +319,13 @@ function expectExportsToMatch(first: Buffer, second: Buffer): void {
   expect([...secondEntries.keys()].sort()).toEqual([...firstEntries.keys()].sort());
   expect(auditRowsWithoutIds(secondEntries)).toEqual(auditRowsWithoutIds(firstEntries));
   expectNoApprovalGrants(secondEntries);
+  expect(normalizeSection('sessions.json', legacySessionsOf(secondEntries))).toEqual(
+    normalizeSection('sessions.json', legacySessionsOf(firstEntries)),
+  );
   for (const [name, data] of firstEntries) {
     const other = secondEntries.get(name);
     expect(other).toBeDefined();
-    if (name === 'audit.json') {
+    if (name === 'audit.json' || sessionPartIndex(name) !== undefined) {
       continue;
     }
     if (name.endsWith('.json')) {
