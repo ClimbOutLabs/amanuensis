@@ -9,7 +9,7 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
-#   aman import FILE [--instance NAME] [--display-name NAME]
+#   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
 #   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
@@ -86,7 +86,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman upgrade [--check] [--force]
        aman password [--instance NAME] [--password-stdin]
          sets a new owner password; run it on the computer where Aman is installed
-       aman import FILE [--instance NAME] [--display-name NAME]
+       aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
        aman migrate --from-compose FOLDER [--user ID]
 USAGE
 }
@@ -1609,6 +1609,7 @@ run_import() {
         rest+=("$1" "$2")
         shift
         ;;
+      --dry-run) rest+=("$1") ;;
       -*) die_usage "Unknown argument: $1" ;;
       *)
         [ -z "$file" ] || die_usage "Unexpected argument: $1"

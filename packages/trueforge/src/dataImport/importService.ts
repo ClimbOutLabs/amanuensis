@@ -83,6 +83,7 @@ import {
   type PreflightDeps,
 } from './importPreflight';
 import {
+  forEachToolCall,
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
   ImportConnectorsFileSchema,
@@ -95,7 +96,10 @@ import {
   ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  isToolType,
   LEFT_OUT_PLURALS,
+  UnknownToolTypeError,
+  withToolTypeResolver,
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
@@ -108,6 +112,8 @@ import {
   type ImportSessionPartRecord,
   type ImportSettingsFile,
   type ImportSpacesFile,
+  type ToolType,
+  type ToolTypeResolver,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
@@ -333,18 +339,31 @@ function parseSection<TSchema extends z.ZodType>({
 }
 
 /** A sessions file read one record at a time, so each detail left out is told against its own chat. */
+/** The chat a raw sessions record belongs to, and its title as far as it is known yet. */
+function rawChat(item: unknown, titles: ReadonlyMap<string, string | null>): { id: string; title: string | null } {
+  const session = isRecord(item) ? item['session'] : undefined;
+  const turn = isRecord(item) ? item['turn'] : undefined;
+  const fromSession = isRecord(session) && typeof session['session_id'] === 'string' ? session['session_id'] : '';
+  const fromTurn = isRecord(turn) && typeof turn['session_id'] === 'string' ? turn['session_id'] : '';
+  const id = fromSession === '' ? fromTurn : fromSession;
+  const rawTitle = isRecord(session) && typeof session['title'] === 'string' ? session['title'] : null;
+  return { id, title: titles.get(id) ?? rawTitle };
+}
+
 function parseChatRecords<TSchema extends z.ZodType>({
   files,
   name,
   schema,
   chatOf,
+  chats,
   logger,
   leftOut,
 }: {
   files: ReadonlyMap<string, Buffer>;
   name: string;
   schema: TSchema;
-  chatOf: (record: z.output<TSchema>) => string;
+  chatOf: (record: z.output<TSchema>) => { id: string; title: string | null | undefined };
+  chats: ChatReading;
   logger: DataImportDeps<never>['logger'];
   leftOut: LeftOutReport;
 }): z.output<TSchema>[] {
@@ -356,12 +375,30 @@ function parseChatRecords<TSchema extends z.ZodType>({
   const owners: LeftOutByOwner = new Map();
   const records: z.output<TSchema>[] = [];
   for (const [index, item] of list.data.entries()) {
-    const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(item));
+    let parsed: { result: z.ZodSafeParseResult<z.output<TSchema>>; leftOut: LeftOutCounts };
+    try {
+      parsed = withToolTypeResolver(chats.resolveToolType, () => countingLeftOut(() => schema.safeParse(item)));
+    } catch (cause) {
+      if (!(cause instanceof UnknownToolTypeError)) {
+        throw cause;
+      }
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' uses the tool ${cause.toolName}, and this Aman cannot tell what kind of tool it was, so nothing was imported. Update Aman to its newest version, then import again.`,
+        400,
+        { cause },
+      );
+    }
+    const { result, leftOut: counts } = parsed;
     if (!result.success) {
       const issues = result.error.issues.map(issue => ({ ...issue, path: [index, ...issue.path] }));
       rejectSection({ name, json, error: new z.ZodError(issues), logger });
     }
-    const owner = `chat:${chatOf(result.data)}`;
+    const chat = chatOf(result.data);
+    if (chat.title !== undefined) {
+      chats.titles.set(chat.id, chat.title);
+    }
+    const owner = `chat:${chat.id}`;
     const into = owners.get(owner) ?? new Map<string, number>();
     addCounts({ into, counts });
     owners.set(owner, into);
@@ -418,12 +455,68 @@ function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
   });
 }
 
+/** What reading chat records needs beyond the file: titles seen so far, and how to tell a tool's kind. */
+interface ChatReading {
+  titles: Map<string, string | null>;
+  resolveToolType: ToolTypeResolver;
+}
+
+/**
+ * Tells the kind of a tool call recorded with a kind this version does not know, from facts and
+ * never by guessing: a call to a connector in the export or in this Aman's connector catalog is a
+ * connector tool; otherwise every other call to the same tool in the export must agree on one kind.
+ */
+function toolTypeResolver({
+  files,
+  connectorNames,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  connectorNames: ReadonlySet<string>;
+}): ToolTypeResolver {
+  let recorded: Map<string, ToolType | 'conflicting'> | undefined;
+  const recordedTypes = (): Map<string, ToolType | 'conflicting'> => {
+    if (recorded !== undefined) {
+      return recorded;
+    }
+    const found = new Map<string, ToolType | 'conflicting'>();
+    for (const [name, data] of files) {
+      if (name !== 'sessions.json' && sessionPartIndex(name) === undefined) {
+        continue;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(data.toString('utf8'));
+      } catch {
+        // A damaged file is reported by the parse that needs it.
+        continue;
+      }
+      forEachToolCall(json, ({ toolName, toolInfo }) => {
+        const type = toolInfo['type'];
+        if (isToolType(type)) {
+          const before = found.get(toolName);
+          found.set(toolName, before === undefined || before === type ? type : 'conflicting');
+        }
+      });
+    }
+    recorded = found;
+    return found;
+  };
+  return ({ toolName, serverName }) => {
+    if (serverName !== '' && connectorNames.has(serverName)) {
+      return 'mcp';
+    }
+    const type = recordedTypes().get(toolName);
+    return type === undefined || type === 'conflicting' ? undefined : type;
+  };
+}
+
 function readSessionEntries(input: {
   files: ReadonlyMap<string, Buffer>;
   logger: DataImportDeps<never>['logger'];
   leftOut: LeftOutReport;
+  chats: ChatReading;
 }): () => Iterable<ImportSessionEntry> {
-  const { files, logger, leftOut } = input;
+  const { files, logger, leftOut, chats } = input;
   const partNames = sessionPartNames(files);
   if (files.has('sessions.json')) {
     if (partNames.length > 0) {
@@ -433,7 +526,8 @@ function readSessionEntries(input: {
       files,
       name: 'sessions.json',
       schema: ImportSessionEntrySchema,
-      chatOf: entry => entry.session.session_id,
+      chatOf: entry => ({ id: entry.session.session_id, title: entry.session.title }),
+      chats,
       logger,
       leftOut,
     });
@@ -456,7 +550,11 @@ function readSessionEntries(input: {
             files,
             name,
             schema: ImportSessionPartRecordSchema,
-            chatOf: record => (record.kind === 'session' ? record.session.session_id : record.turn.session_id),
+            chatOf: record =>
+              record.kind === 'session'
+                ? { id: record.session.session_id, title: record.session.title }
+                : { id: record.turn.session_id, title: undefined },
+            chats,
             logger,
             leftOut,
           }),
@@ -472,9 +570,11 @@ function loadArchive(input: {
   archive: Buffer;
   maxBytes: number;
   maxEntryBytes: number;
+  /** Connector names this Aman's catalog knows, for telling the kind of a tool call. */
+  catalogConnectorNames: ReadonlySet<string>;
   logger: DataImportDeps<never>['logger'];
 }): ArchiveContents {
-  const { archive, maxBytes, maxEntryBytes, logger } = input;
+  const { archive, maxBytes, maxEntryBytes, catalogConnectorNames, logger } = input;
   let entries: ZipArchiveEntry[];
   try {
     entries = readZipArchive(archive, {
@@ -516,7 +616,19 @@ function loadArchive(input: {
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
   const folders = section('folders.json', ImportFoldersFileSchema);
-  const sessionEntries = readSessionEntries({ files, logger, leftOut });
+  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const sessionEntries = readSessionEntries({
+    files,
+    logger,
+    leftOut,
+    chats: {
+      titles: new Map(),
+      resolveToolType: toolTypeResolver({
+        files,
+        connectorNames: new Set([...catalogConnectorNames, ...connectors.map(connector => connector.name)]),
+      }),
+    },
+  });
   const contents: ArchiveContents = {
     manifest,
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
@@ -526,7 +638,7 @@ function loadArchive(input: {
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
-    connectors: section('connectors.json', ImportConnectorsFileSchema),
+    connectors,
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
@@ -1076,6 +1188,7 @@ async function importArchive<TTransaction>(
     archive: request.archive,
     maxBytes: request.maxBytes,
     maxEntryBytes: request.maxEntryBytes ?? ARCHIVE_MAX_ENTRY_BYTES,
+    catalogConnectorNames: new Set(deps.mcpCatalog.list().map(preset => preset.name)),
     logger: deps.logger,
   });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;

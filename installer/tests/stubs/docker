@@ -484,6 +484,9 @@ case "$cmd" in
           fi
           exit 1
         fi
+        case "$*" in
+          *--dry-run*) echo "This was a dry run, so nothing was imported. The import would bring 1 chat." >&2 ;;
+        esac
         printf '{"user_id":"stub","chats":1}\n'
         exit 0
         ;;

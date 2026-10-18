@@ -38,7 +38,7 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   assert_contains "$run" "-v aman_main_data:/data"
   assert_contains "$run" "--tmpfs /import:rw,mode=0700,uid=10001,gid=10001"
   assert_contains "$run" "--env-file $AMAN_HOME/instances/main/.env"
-  assert_contains "$run" "aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" import $OWNER owner"
+  assert_contains "$run" "aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"} import $OWNER owner"
   local stop_line run_line up_line
   stop_line=$(grep -n 'compose .* stop app' "$STUB_LOG" | head -n 1 | cut -d: -f1)
   run_line=$(grep -n 'aman import-data --in' "$STUB_LOG" | head -n 1 | cut -d: -f1)
@@ -99,6 +99,24 @@ test_an_import_that_runs_out_of_memory_says_so() {
   assert_rc 1
   assert_flat_contains "$ERR" "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
   assert_not_contains "$ERR" "node::Abort"
+  assert_file "$SB_STATE/up/aman-main"
+  sandbox_drop
+}
+
+test_a_dry_run_checks_the_file_and_imports_nothing() {
+  t_begin "instance import --dry-run passes --dry-run to the CLI, takes no backup and says nothing was imported"
+  sandbox_new
+  install_with_owner
+  make_export
+  run_install instance import main "$EXPORT_FILE" --dry-run
+  assert_rc 0
+  assert_eq "$(import_count)" 1
+  assert_contains "$(import_runs)" "import $OWNER owner --dry-run"
+  assert_eq "$(kept_backups | wc -l | tr -d ' ')" 0 "a dry run takes no backup"
+  assert_flat_contains "$OUT" "Nothing is imported."
+  assert_flat_contains "$OUT" "Checked aman-export.zip. Nothing was imported."
+  assert_flat_contains "$ERR" "would bring"
+  assert_not_contains "$OUT" "Imported into instance main"
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }
@@ -288,6 +306,7 @@ test_import_gives_up_when_the_model_never_arrives
 test_a_failed_import_still_starts_the_app_and_fails
 test_a_refused_import_names_the_file_and_its_size_on_its_failure_line
 test_an_import_that_runs_out_of_memory_says_so
+test_a_dry_run_checks_the_file_and_imports_nothing
 test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file
 test_import_for_an_unknown_instance_is_refused

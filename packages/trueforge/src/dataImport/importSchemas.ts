@@ -120,12 +120,94 @@ const VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
   EventType.TURN_DONE,
 ]);
 
-const ImportEventListSchema = mixedList({
-  schema: ImportEventSchema,
-  label: LEFT_OUT.turnEvent,
-  visibleLabel: LEFT_OUT.toolDetail,
-  isVisible: event => isRecord(event) && typeof event['type'] === 'string' && VISIBLE_EVENT_TYPES.has(event['type']),
-});
+/** A tool call's own name and server, and the tool info it carries; see forEachToolCall. */
+export interface ArchivedToolCall {
+  toolName: string;
+  serverName: string;
+  toolInfo: Record<string, unknown>;
+}
+
+/** Visits every tool call (an object with a function name and tool info) anywhere inside `value`. */
+export function forEachToolCall(value: unknown, visit: (call: ArchivedToolCall) => void): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      forEachToolCall(item, visit);
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  const toolInfo = value['tool_info'];
+  const fn = value['function'];
+  if (isRecord(toolInfo) && isRecord(fn) && typeof fn['name'] === 'string') {
+    const serverName = toolInfo['mcp_server_name'];
+    visit({ toolName: fn['name'], serverName: typeof serverName === 'string' ? serverName : '', toolInfo });
+  }
+  for (const entry of Object.values(value)) {
+    forEachToolCall(entry, visit);
+  }
+}
+
+const TOOL_TYPES = InternalToolCallInfoSchema.shape.type.options;
+export type ToolType = (typeof TOOL_TYPES)[number];
+
+export function isToolType(value: unknown): value is ToolType {
+  return TOOL_TYPES.some(type => type === value);
+}
+
+/** Says which kind of tool a call used, from what this Aman knows; undefined when it cannot tell. */
+export type ToolTypeResolver = (call: Pick<ArchivedToolCall, 'toolName' | 'serverName'>) => ToolType | undefined;
+
+/** A tool call whose kind neither its archive nor this Aman can tell. */
+export class UnknownToolTypeError extends Error {
+  readonly toolName: string;
+  constructor(toolName: string) {
+    super(`The kind of the tool ${toolName} is not one this version knows.`);
+    this.name = 'UnknownToolTypeError';
+    this.toolName = toolName;
+  }
+}
+
+let toolTypeResolver: ToolTypeResolver | undefined;
+
+/** Runs a synchronous parse with `resolver` telling the kind of tool calls recorded with one this version does not know. */
+export function withToolTypeResolver<T>(resolver: ToolTypeResolver, run: () => T): T {
+  const outer = toolTypeResolver;
+  toolTypeResolver = resolver;
+  try {
+    return run();
+  } finally {
+    toolTypeResolver = outer;
+  }
+}
+
+/** Fills in the kind of each tool call recorded with one this version does not know, or throws. */
+function withKnownToolTypes(value: unknown): unknown {
+  forEachToolCall(value, ({ toolName, serverName, toolInfo }) => {
+    if (isToolType(toolInfo['type'])) {
+      return;
+    }
+    const resolved = toolTypeResolver?.({ toolName, serverName });
+    if (resolved === undefined) {
+      throw new UnknownToolTypeError(toolName);
+    }
+    // The archive is parsed from a fresh JSON copy, so filling the value in place changes nothing else.
+    toolInfo['type'] = resolved;
+    noteLeftOut({ label: LEFT_OUT.toolDetail });
+  });
+  return value;
+}
+
+const ImportEventListSchema = z.preprocess(
+  withKnownToolTypes,
+  mixedList({
+    schema: ImportEventSchema,
+    label: LEFT_OUT.turnEvent,
+    visibleLabel: LEFT_OUT.toolDetail,
+    isVisible: event => isRecord(event) && typeof event['type'] === 'string' && VISIBLE_EVENT_TYPES.has(event['type']),
+  }),
+);
 
 /** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
 const ArchivedInstantSchema = z.iso.datetime({ offset: true });
@@ -157,8 +239,9 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
 });
 
 /** A message is what people see; only each tool call's host-owned info is read leniently. */
-const ImportContextMessageSchema = visible(ContextMessageSchema, { label: LEFT_OUT.toolDetail }).transform(
-  (message, ctx) => {
+const ImportContextMessageSchema = z
+  .preprocess(withKnownToolTypes, visible(ContextMessageSchema, { label: LEFT_OUT.toolDetail }))
+  .transform((message, ctx) => {
     if (!('tool_calls' in message) || message.tool_calls === undefined) {
       return message;
     }
@@ -172,8 +255,7 @@ const ImportContextMessageSchema = visible(ContextMessageSchema, { label: LEFT_O
       toolCalls.push({ ...call, tool_info: toolInfo.data });
     }
     return { ...message, tool_calls: toolCalls };
-  },
-);
+  });
 
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';

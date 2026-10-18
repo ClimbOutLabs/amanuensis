@@ -3495,3 +3495,70 @@ describe('runDataImport tells the person everything it left out', () => {
     }
   });
 });
+
+describe('runDataImport with a tool call of a kind this version does not know', () => {
+  /** Gives the older maps call a tool kind from a later version, naming `serverName` as its connector. */
+  function withUnknownToolKind(serverName: string) {
+    return (entries: Map<string, Buffer>): void => {
+      const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+      const thread = recordAt(
+        recordAt(recordAt(turnRecordOf(records, 'edited-turn-3')['turn'], 'turn')['snapshot'], 'snapshot')['threads'],
+        'threads',
+      )['main'];
+      for (const message of recordsAt(recordAt(thread, 'main thread')['context'], 'context')) {
+        for (const call of Array.isArray(message['tool_calls']) ? recordsAt(message['tool_calls'], 'calls') : []) {
+          const info = recordAt(call['tool_info'], 'tool info');
+          info['type'] = 'kind-from-a-later-version';
+          info['mcp_server_name'] = serverName;
+        }
+      }
+      entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+    };
+  }
+
+  async function olderArchive(source: Instance): Promise<Buffer> {
+    await seedRichInstance({
+      stores: source.stores,
+      tenantId: TENANT,
+      userId: 'alice',
+      memoryDir: source.memoryDir,
+      knowledgeDir: source.knowledgeDir,
+    });
+    await seedEditedFirstMessageChat(source);
+    const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+    return repack(archive, asOlderVersionExport);
+  }
+
+  it('takes the kind from a connector the export carries, and reports the repair', async () => {
+    const source = await makeInstance('source-tool-kind');
+    const target = await makeInstance('target-tool-kind');
+    try {
+      const archive = await repack(await olderArchive(source), withUnknownToolKind('plain-connector'));
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      expect(result.chats).toBe(4);
+      expect(result.summary).toContain("Chat 'Untitled chat': 7 tool details from an older version were left out.");
+      const turn = await target.stores.sessionStore.getTurn({ session_id: 'edited-chat', turn_id: 'edited-turn-3' });
+      const call = turn?.snapshot.threads[MAIN_THREAD_ID]?.context.find(message => 'tool_calls' in message);
+      expect(call).toMatchObject({ tool_calls: [{ id: 'call-older-route', tool_info: { type: 'mcp' } }] });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('fails with a plain line naming the chat and the tool when nothing tells the kind', async () => {
+    const source = await makeInstance('source-tool-kind-unknown');
+    const target = await makeInstance('target-tool-kind-unknown');
+    try {
+      const archive = await repack(await olderArchive(source), withUnknownToolKind(''));
+      const error = await importError(target, archive);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error instanceof Error && error.message).toBe(
+        "Chat 'Untitled chat' uses the tool render_route, and this Aman cannot tell what kind of tool it was, so nothing was imported. Update Aman to its newest version, then import again.",
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});

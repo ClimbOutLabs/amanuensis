@@ -3,7 +3,7 @@
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
 #        install.sh instance demo-seed [--reset]
-#        install.sh instance import <name> <file.zip> [--display-name NAME]
+#        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
 #        install.sh instance password [<name>]
@@ -131,7 +131,7 @@ Amanuensis installer
                                   remove an instance; --purge-data deletes its data too
   install.sh instance demo-seed [--reset] [--instance NAME]
                                   fill a demo instance with example data, or clear it with --reset
-  install.sh instance import <name> <file.zip> [--display-name NAME]
+  install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
                                   put an exported file into an instance (it is backed up first; its app pauses meanwhile)
   install.sh migrate --from-compose <folder> [--user ID]
                                   export your data from an older Aman in that folder; the old Aman is only read
@@ -157,7 +157,7 @@ Options
   --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
   --verbose             show technical details and the full list of downloads
-  --dry-run             show the plan and stop
+  --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
   --name NAME           name of the first instance (default main)
   --email ADDRESS       the email you sign in with
   --instance NAME       which instance demo-seed and password apply to (default: the only one)
@@ -380,8 +380,8 @@ main() {
   fi
   if [ "$DRY_RUN" = 1 ]; then
     case "$COMMAND:$SUBCOMMAND" in
-      install: | upgrade: | instance:add) ;;
-      *) usage_die "--dry-run applies to install, upgrade and instance add" ;;
+      install: | upgrade: | instance:add | instance:import) ;;
+      *) usage_die "--dry-run applies to install, upgrade, instance add and instance import" ;;
     esac
   fi
   case "$COMMAND" in

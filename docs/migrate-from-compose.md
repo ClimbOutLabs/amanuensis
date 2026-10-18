@@ -210,7 +210,7 @@ installer/install.sh instance remove $PERSON --purge-data
 installer/install.sh instance add $PERSON --email <owner-email>
 ```
 
-If the file comes from an older version of Aman, the summary also names each chat, by its title, that lost behind-the-scenes details, and how many. The full list is in the log the import names. A failed import always starts the app again and prints one line, `Import failed:` followed by the reason and what to do next. The full output is kept in the log file named under it. If the instance was used after an interrupted import, nothing is removed. The import only ever writes into a fresh instance and refuses any user other than the instance owner.
+To check a file first, run `aman import FILE --dry-run`: it says what the import would bring, and what it would leave out, and changes nothing. If the file comes from an older version of Aman, the summary also names each chat, by its title, that lost behind-the-scenes details, and how many. The full list is in the log the import names. A failed import always starts the app again and prints one line, `Import failed:` followed by the reason and what to do next. The full output is kept in the log file named under it. If the instance was used after an interrupted import, nothing is removed. The import only ever writes into a fresh instance and refuses any user other than the instance owner.
 
 ## 6. Check the result
 
