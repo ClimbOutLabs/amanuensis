@@ -305,7 +305,7 @@ Name for this instance:=>Bad_Name
 Name for this instance:=>work
 Your email=>work@example.invalid
 Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" instance add
+Enter password again=>$SENTINEL_PASSWORD" instance add
   assert_eq "$RC" 0
   assert_not_contains "$OUT" "Name for this instance ["
   assert_eq "$(printf '%s' "$OUT" | grep -c 'Name for this instance:')" 4 "the question is asked until the name is usable"
