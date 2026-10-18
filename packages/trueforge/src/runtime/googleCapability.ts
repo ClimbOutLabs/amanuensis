@@ -17,6 +17,7 @@ import { GmailToolSet, type AttachmentStager } from '@truefoundry/trueforge-core
 import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
 import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
 import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
+import type { Logger } from 'winston';
 /** Puts a mail attachment in the turn's sandbox through the one staging helper; no sandbox, no stager. */
 export function sandboxAttachmentStager(
   sandbox: Pick<Sandbox, 'uploadUserFile'> | undefined,
@@ -43,6 +44,7 @@ interface GoogleCapabilityOptions {
   timeZone: string | undefined;
   /** Replaceable so tests never reach Google. */
   fetchImpl: typeof fetch | undefined;
+  logger: Logger;
 }
 
 export async function googleCapability(options: GoogleCapabilityOptions): Promise<AgentCapability | undefined> {
@@ -87,6 +89,7 @@ export async function googleCapability(options: GoogleCapabilityOptions): Promis
               features,
               timeZone: options.timeZone,
               sentinel: options.sentinel,
+              logger: options.logger,
             }),
           ]
         : []),

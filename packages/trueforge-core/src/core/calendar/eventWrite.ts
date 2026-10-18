@@ -336,6 +336,14 @@ export function resolveUpdate(input: {
       error: 'Someone else organizes this event, so Aman cannot change it. Ask the organizer to change it.',
     };
   }
+  // Google left some guests out of the list, so the card could not name everyone the change reaches.
+  if (existing.attendeesOmitted === true) {
+    return {
+      ok: false,
+      error:
+        'Google did not list every guest of this event, so Aman cannot show who it would reach. Change it in Google Calendar.',
+    };
+  }
   const guests = (existing.attendees ?? []).flatMap(guest =>
     guest.self === true || guest.email === undefined ? [] : [guest.email],
   );

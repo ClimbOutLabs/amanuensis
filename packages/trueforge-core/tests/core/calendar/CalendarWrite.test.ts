@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { MAX_IDEOGRAPHIC_SELECTORS } from '../../../src/core/email/gmail/mimeText';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
@@ -9,6 +10,7 @@ import { checkHeldReplay, holdApprovalCalls } from '../../../src/core/permission
 import { DEMO_SEND_REFUSAL } from '../../../src/core/permissions/sendAllowlist';
 import type { Route } from '../email/gmail/harness';
 import { scriptedGoogle } from '../email/gmail/harness';
+import { capturingLogger } from '../google/fakes';
 import { build, EVENTS_PATH, json, text } from './harness';
 
 const WRITE = ['gmail_read', 'calendar_read', 'calendar_write'] as const;
@@ -406,6 +408,28 @@ function recordingServices(): { services: SentinelServices; rows: AuditRecordInp
 }
 
 describe('the permissions log', () => {
+  it('still reports a saved event as saved when its log row cannot be written, and logs that instead', async () => {
+    const { logger, lines } = capturingLogger();
+    const services: SentinelServices = {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      audit: {
+        record: row => (row.outcome === 'ran' ? Promise.reject(new Error('audit store is down')) : Promise.resolve()),
+      },
+    };
+    const built = await build({
+      routes: [insertRoute],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services,
+      logger,
+    });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    expect(outcome.failure).toBe(false);
+    expect(JSON.parse(outcome.rawContent)).toMatchObject({ event_id: 'new1', status: 'created' });
+    expect(writes(built.google.urls)).toHaveLength(1);
+    expect(lines.some(line => line.includes('Calendar write audit row could not be written'))).toBe(true);
+  });
+
   it('records the write once Google saved it, with what was saved', async () => {
     const { services, rows } = recordingServices();
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
@@ -599,5 +623,24 @@ describe('on a demo instance', () => {
     });
     expect(text(response)).toContain(DEMO_SEND_REFUSAL);
     expect(writes(google.urls)).toEqual([]);
+  });
+});
+
+describe('hidden text', () => {
+  it('refuses event text with more ideographic variation selectors than a word needs, as a Gmail draft does', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const selectors = '\u{E0100}'.repeat(MAX_IDEOGRAPHIC_SELECTORS + 1);
+    for (const field of ['title', 'location', 'description']) {
+      const info = await built.tools.toolCallInfo({
+        name: 'create_event',
+        arguments: { ...DENTIST, [field]: `漢${selectors}` },
+      });
+      expect(info.pre_dispatch_failure?.message).toContain('Nothing was saved');
+    }
+    const fine = await built.tools.toolCallInfo({
+      name: 'create_event',
+      arguments: { ...DENTIST, title: '漢\u{E0100}' },
+    });
+    expect(fine.pre_dispatch_failure).toBeUndefined();
   });
 });

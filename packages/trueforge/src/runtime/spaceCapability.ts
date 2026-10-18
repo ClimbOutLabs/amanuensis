@@ -1331,6 +1331,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           web_search: this.webSearchTurn,
         }),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
+        logger: this.#space.logger,
       });
     } catch (error) {
       this.#space.logger.warn(
