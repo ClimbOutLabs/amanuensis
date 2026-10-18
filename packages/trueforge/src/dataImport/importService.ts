@@ -1421,6 +1421,7 @@ async function importArchive<TTransaction>(
         description: agent.description,
         manifest: detachConnectors({ spec: agent.manifest, names: connectorNames }),
         external_id: agent.external_id,
+        host_managed: agent.host_managed,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(agent.id);
@@ -1437,6 +1438,7 @@ async function importArchive<TTransaction>(
           instructions: 'This agent was created by a data import. Set its instructions before use.',
         }),
         external_id: null,
+        host_managed: false,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(placeholder.id);
@@ -1589,6 +1591,11 @@ async function importArchive<TTransaction>(
             agent_id: agent.id,
             agent_name: agent.name,
             name: schedule.name,
+            // Personas keep their ids on import; one the export did not carry runs as the agent's own assistant.
+            persona_id:
+              schedule.persona_id !== null && personas.some(({ persona }) => persona.id === schedule.persona_id)
+                ? schedule.persona_id
+                : null,
             manifest: { ...schedule.manifest, status: 'paused' },
             created_by_subject: importerSubject,
             runFrom: new Date(),

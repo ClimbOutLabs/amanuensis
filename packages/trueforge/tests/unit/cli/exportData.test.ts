@@ -337,6 +337,7 @@ describe('aman export-data against a real database', () => {
       await seedSession(db, 'trueforge-default', 's1');
       await seedSession(db, 'someone-else', 's2');
       await new SqliteAgentStore(db).createAgent({
+        host_managed: false,
         tenant_id: 'default',
         created_by_subject: { subject_id: 'trueforge-default', subject_type: 'user', subject_display_name: 'x' },
         name: 'mine',
@@ -468,6 +469,7 @@ describe('aman export-data against a real database', () => {
         }),
       );
       await new SqliteAgentStore(db).createAgent({
+        host_managed: false,
         tenant_id: 'default',
         created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'Alice' },
         name: 'writer',

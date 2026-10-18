@@ -7951,6 +7951,10 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "runs_as": {
+            "description": "Who runs it, in plain words: a persona, the assistant, or a saved agent.",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -7959,6 +7963,7 @@
         "required": [
           "id",
           "agent_name",
+          "runs_as",
           "name",
           "manifest",
           "created_by_subject",

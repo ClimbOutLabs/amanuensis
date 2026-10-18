@@ -68,6 +68,7 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
   async function seedAgent(): Promise<{ id: string; name: string }> {
     seq += 1;
     const agent = await deps.getAgentStore().createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: USER_SUBJECT,
       name: `agent-${String(Date.now())}-${String(seq)}`,
@@ -112,6 +113,7 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: `sched-${String(Date.now())}-${String(seq)}`,
       manifest: manifest({ status, cron }),
       created_by_subject: USER_SUBJECT,

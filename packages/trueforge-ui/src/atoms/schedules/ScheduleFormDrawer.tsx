@@ -114,8 +114,14 @@ function ScheduleFormDrawerBody({
     };
   }, [open, mode, initialAgentId, server]);
 
+  // A saved schedule names who runs it in plain words, so a chat-made one never shows its stored agent name.
   const agentLabel =
-    selectedAgent?.name ?? savedFromCreate?.agentName ?? schedule?.agentName ?? (agentId.length > 0 ? agentId : '');
+    savedFromCreate?.runsAs ??
+    schedule?.runsAs ??
+    selectedAgent?.name ??
+    savedFromCreate?.agentName ??
+    schedule?.agentName ??
+    (agentId.length > 0 ? agentId : '');
 
   const mcpMounts = useMemo(() => {
     const mounts = selectedAgent?.agentSpec?.mcpServers ?? [];

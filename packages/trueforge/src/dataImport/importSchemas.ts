@@ -461,6 +461,8 @@ export const ImportAgentRecordSchema = z.object({
   description: z.string(),
   manifest: AgentSpecSchema,
   external_id: z.string().nullable(),
+  /** Absent from exports made before host-made schedule agents were marked. */
+  host_managed: z.boolean().default(false),
   created_by_subject: CreatedBySubjectSchema,
   created_at: z.string(),
   updated_at: z.string(),
@@ -516,6 +518,8 @@ export const ImportScheduleRecordSchema = z.object({
   agent_id: z.string().min(1),
   agent_name: z.string().nullable(),
   name: z.string().min(1),
+  /** Absent from exports made before schedules kept a persona. */
+  persona_id: z.string().min(1).nullable().default(null),
   manifest: ScheduleManifestSchema,
   status: ScheduleStatusSchema,
   created_by_subject: CreatedBySubjectSchema,

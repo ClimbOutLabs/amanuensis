@@ -248,6 +248,7 @@ describe('turns', () => {
       const sessionStore = new SqliteSessionStore(db);
       const agentStore = new SqliteAgentStore(db);
       const agent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: 'default',
         name: 'managed-agent',
         description: 'Test agent.',
@@ -571,6 +572,7 @@ describe('turns', () => {
       // A reference agent, so the pass has to ask the agent store for the turn's model.
       const agentStore = new SqliteAgentStore(db);
       const referencedAgent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: 'learning-agent',
         description: 'Test agent.',
@@ -797,6 +799,7 @@ describe('turns', () => {
       const sessions = new Sessions({ sessionStore });
       const agentStore = new SqliteAgentStore(db);
       const agent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: 'default',
         created_by_subject: {
           subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,

@@ -229,6 +229,7 @@ describe('Data export route', () => {
     // Agents: alice has one, bob has one of his own.
     const agentStore = new SqliteAgentStore(db);
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: TENANT_ID,
       created_by_subject: subject('alice'),
       name: 'reporter',
@@ -237,6 +238,7 @@ describe('Data export route', () => {
       external_id: 'reporter-external',
     });
     await agentStore.createAgent({
+      host_managed: false,
       tenant_id: TENANT_ID,
       created_by_subject: subject('bob'),
       name: 'bob-agent',
@@ -281,6 +283,7 @@ describe('Data export route', () => {
       tenant_id: TENANT_ID,
       agent_id: agent.id,
       agent_name: 'reporter',
+      persona_id: null,
       name: 'alice-daily',
       manifest: { task: 'Write the daily summary', cron: '0 9 * * *', timezone: 'UTC', status: 'active' },
       created_by_subject: subject('alice'),
@@ -290,6 +293,7 @@ describe('Data export route', () => {
       tenant_id: TENANT_ID,
       agent_id: agent.id,
       agent_name: 'reporter',
+      persona_id: null,
       name: 'bob-weekly',
       manifest: { task: 'Bob weekly task', cron: '0 10 * * 1', timezone: 'UTC', status: 'paused' },
       created_by_subject: subject('bob'),

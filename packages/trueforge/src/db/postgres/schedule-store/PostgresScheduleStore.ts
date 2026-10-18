@@ -41,6 +41,7 @@ function toScheduleRecord(row: Selectable<ScheduleTable>): ScheduleRecord {
     agent_id: row.agent_id,
     agent_name: row.agent_name,
     name: row.name,
+    persona_id: row.persona_id,
     manifest: parseStoredScheduleManifest(row.manifest),
     status: row.status,
     created_by_subject: CreatedBySubjectSchema.parse(row.created_by_subject),
@@ -146,6 +147,7 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
           agent_id: input.agent_id,
           agent_name: input.agent_name,
           name: input.name,
+          persona_id: input.persona_id,
           manifest: json(input.manifest),
           // Column mirrors the manifest so the dispatch scan and API reads share one value.
           status: input.manifest.status,

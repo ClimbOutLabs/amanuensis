@@ -40,6 +40,7 @@ import {
   type ScheduleManifest,
   type ScheduleStatus,
 } from '../schemas/schedule';
+import { ChatAssistantUnavailableError, type ChatAssistant } from './chatAssistant';
 import { nextTriggerAfter, validateManifest } from './cron';
 
 /** Cron day-of-week order: index 0 is Sunday. */
@@ -57,7 +58,6 @@ export const CreateScheduleToolSchema = z
     days: z.array(WeekdaySchema).optional().describe('Days for a weekly schedule.'),
     time: z.string().optional().describe('24-hour local time, like 08:00.'),
     time_zone: TimezoneSchema.optional(),
-    agent: NameSchema.optional(),
   })
   .strict();
 
@@ -72,7 +72,7 @@ type ScheduleRefToolInput = z.infer<typeof ScheduleRefToolSchema>;
 
 /** Keys the host adds to an approved call: what the card was settled on, so a later change ends the approval. */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
-const APPROVED_AGENT_KEY = 'resolved_agent_id';
+const APPROVED_RUNS_AS_KEY = 'resolved_runs_as';
 const APPROVED_SCHEDULE_KEY = 'resolved_schedule_id';
 
 const NOT_APPROVED = 'Nothing was changed because the user has not approved it. Ask again if they still want it.';
@@ -88,10 +88,10 @@ export interface ScheduleTurnContext {
   tenant_id: string;
   /** The person in the chat; schedules are created as, listed for and changed only by them. */
   owner: CreatedBySubject;
-  /** An agent the owner may use, by name; undefined names the chat's own agent. Undefined when none fits. */
-  resolveAgent: (name: string | undefined) => Promise<AgentRecord | undefined>;
-  /** The name the owner gave their assistant; shown instead of the chat's own agent name. Null when unset. */
-  assistantName: string | null;
+  /** A schedule made here always runs as this chat's own assistant. */
+  chatAssistant: ChatAssistant;
+  /** Who a saved schedule runs as, in plain words. */
+  runsAs: (schedule: ScheduleRecord) => Promise<string>;
   logger: Logger;
 }
 
@@ -111,7 +111,6 @@ type Prepared<T> = { ok: true; value: T } | { ok: false; message: string };
 interface PreparedCreate {
   approved: Record<string, unknown>;
   review: Tier3Schedule;
-  agent: AgentRecord;
   manifest: ScheduleManifest;
 }
 
@@ -234,6 +233,28 @@ export function cronFromRecurrence(
   return { ok: true, cron: `${at} ${days.length === 7 ? '*' : days.join(',')}` };
 }
 
+/** Each problem with the call, by field, in one line. */
+function plainIssues(error: z.ZodError): string {
+  const issues = error.issues.map(issue =>
+    issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`,
+  );
+  return `These details were not valid: ${issues.join('; ')}.`;
+}
+
+/**
+ * Older tool lists offered an `agent` field. A schedule always runs as this chat's assistant, so a stray one is
+ * dropped and the person still gets the card.
+ */
+function withoutRetiredAgent(params: CallToolRequest['params']): CallToolRequest['params'] {
+  if (params.name !== CREATE_SCHEDULE_TOOL_NAME || params.arguments === undefined || !('agent' in params.arguments)) {
+    return params;
+  }
+  return {
+    ...params,
+    arguments: Object.fromEntries(Object.entries(params.arguments).filter(([key]) => key !== 'agent')),
+  };
+}
+
 function jsonResult(value: unknown) {
   return toolResultResponse({ text: JSON.stringify(value) });
 }
@@ -259,7 +280,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. Never say something is scheduled unless this succeeded. If how often or what time is unclear, ask the user first. Times are in the user's time zone. The user approves a card before anything is saved.",
+          "The only way to make a recurring task. It runs as the assistant in this chat. Never say something is scheduled unless this succeeded. If how often or what time is unclear, ask the user first. Times are in the user's time zone. The user approves a card before anything is saved.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -300,6 +321,10 @@ export class ScheduleToolSet extends LocalToolMCP {
     return this.#tools;
   }
 
+  override callTool(...[params, ...rest]: Parameters<LocalToolMCP['callTool']>): ReturnType<LocalToolMCP['callTool']> {
+    return super.callTool(withoutRetiredAgent(params), ...rest);
+  }
+
   /**
    * The host classifies every call. A create or delete card is built from what the host would really save or
    * remove, and what it was settled on joins the approved call so a later change needs a new approval.
@@ -308,18 +333,21 @@ export class ScheduleToolSet extends LocalToolMCP {
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
-    const info = await super.toolCallInfo(params, resolveUnderlyingTool);
-    const prepared = isScheduleWriteToolName(params.name) ? await this.#prepareWrite(params) : undefined;
+    const call = withoutRetiredAgent(params);
+    const info = await super.toolCallInfo(call, resolveUnderlyingTool);
+    const prepared = isScheduleWriteToolName(call.name) ? await this.#prepareWrite(call) : undefined;
     if (prepared !== undefined && !prepared.ok) {
-      return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: prepared.message } };
+      // Not a permission wall: the model can fix the call or ask the user. A policy block would count toward
+      // the turn's "tool not allowed here" stop.
+      return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
       workspace_cwd: null,
       action: {
-        tool_name: params.name,
-        canonical_params: prepared?.value.approved ?? params.arguments ?? {},
+        tool_name: call.name,
+        canonical_params: prepared?.value.approved ?? call.arguments ?? {},
         tool_type: 'truefoundry-system',
         mcp_server_name: SCHEDULE_SERVER_ID,
         mcp_hints: {
@@ -342,7 +370,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (!isScheduleWriteToolName(params.name)) {
       return undefined;
     }
-    const prepared = await this.#prepareWrite(params);
+    const prepared = await this.#prepareWrite(withoutRetiredAgent(params));
     if (!prepared.ok) {
       throw new Error(prepared.message);
     }
@@ -358,10 +386,10 @@ export class ScheduleToolSet extends LocalToolMCP {
     return this.#prepareDelete(params.arguments ?? {});
   }
 
-  async #prepareCreate(args: Record<string, unknown>): Promise<Prepared<PreparedCreate>> {
+  #prepareCreate(args: Record<string, unknown>): Prepared<PreparedCreate> {
     const parsed = CreateScheduleToolSchema.safeParse(args);
     if (!parsed.success) {
-      return { ok: false, message: `Nothing was saved. The schedule details were not valid: ${parsed.error.message}` };
+      return { ok: false, message: `Nothing was saved. ${plainIssues(parsed.error)} Fix this and try again.` };
     }
     const input = parsed.data;
     const timing = cronFromRecurrence(input);
@@ -384,36 +412,29 @@ export class ScheduleToolSet extends LocalToolMCP {
       validateManifest(manifest, now);
     } catch (error) {
       if (error instanceof InvalidCronError) {
-        return { ok: false, message: `Nothing was saved. ${error.message}` };
+        return {
+          ok: false,
+          message: 'Nothing was saved because that timing cannot run. Ask the user for another time.',
+        };
       }
       throw error;
     }
-    const agent = await this.#options.resolveAgent(input.agent);
-    if (agent === undefined) {
-      return {
-        ok: false,
-        message:
-          input.agent === undefined
-            ? 'Nothing was saved because this chat has no saved agent to run it. Ask the user which agent should run it.'
-            : `Nothing was saved because there is no agent named "${input.agent}" that the user can use. Ask the user which agent should run it.`,
-      };
-    }
+    const { chatAssistant } = this.#options;
     return {
       ok: true,
       value: {
-        approved: { ...args, [APPROVED_ZONE_KEY]: timezone, [APPROVED_AGENT_KEY]: agent.id },
+        approved: { ...args, [APPROVED_ZONE_KEY]: timezone, [APPROVED_RUNS_AS_KEY]: chatAssistant.approval_key },
         review: {
           action: 'create',
           name: plainScheduleName(input.name),
           when: describeScheduleTiming(timing.cron),
           time_zone: timezone,
           task: manifest.task,
-          runs_as: await this.#runsAs({ id: agent.id, name: agent.name }),
+          runs_as: chatAssistant.display_name,
           next_runs: upcomingRuns({ cron: timing.cron, timezone, from: now, count: PREVIEW_RUNS }).map(at =>
             formatRunTime({ at, timezone }),
           ),
         },
-        agent,
         manifest,
       },
     };
@@ -439,22 +460,12 @@ export class ScheduleToolSet extends LocalToolMCP {
           when: describeScheduleTiming(schedule.manifest.cron),
           time_zone: schedule.manifest.timezone,
           task: schedule.manifest.task,
-          runs_as: await this.#runsAs({ id: schedule.agent_id, name: schedule.agent_name }),
+          runs_as: await this.#options.runsAs(schedule),
           next_runs: [],
         },
         schedule,
       },
     };
-  }
-
-  /** The assistant's own name for the chat's agent; any other agent by its name. */
-  async #runsAs(agent: { id: string; name: string }): Promise<string> {
-    const { assistantName } = this.#options;
-    if (assistantName === null) {
-      return agent.name;
-    }
-    const own = await this.#options.resolveAgent(undefined);
-    return own?.id === agent.id ? assistantName : agent.name;
   }
 
   /** The owner's own schedules, newest first, up to the lookup limit. */
@@ -475,7 +486,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     return schedules;
   }
 
-  /** One of the owner's schedules by id, else by name. Names repeat across agents, so a shared name asks for the id. */
+  /** One of the owner's schedules by id, else by name. Names can repeat, so a shared name asks for the id. */
   async #find(ref: ScheduleRefToolInput): Promise<Prepared<ScheduleRecord>> {
     const schedules = await this.#ownSchedules();
     const byId = schedules.find(schedule => schedule.id === ref.schedule);
@@ -487,9 +498,12 @@ export class ScheduleToolSet extends LocalToolMCP {
       return { ok: true, value: named[0] };
     }
     if (named.length > 1) {
+      const choices = await Promise.all(
+        named.map(async schedule => `${schedule.id} (runs as ${await this.#options.runsAs(schedule)})`),
+      );
       return {
         ok: false,
-        message: `More than one schedule is named "${ref.schedule}". Use its id instead: ${named.map(s => `${s.id} (${s.agent_name})`).join(', ')}.`,
+        message: `More than one schedule is named "${ref.schedule}". Try again with its id: ${choices.join(', ')}.`,
       };
     }
     return {
@@ -520,7 +534,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       status: schedule.status,
       next_run: await this.#nextRun(schedule),
       task: schedule.manifest.task,
-      runs_as: schedule.agent_name,
+      runs_as: await this.#options.runsAs(schedule),
     };
   }
 
@@ -533,11 +547,21 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (input.approval?.status !== 'allow') {
       return errorResult(NOT_APPROVED);
     }
-    const prepared = await this.#prepareCreate(input.input);
+    const prepared = this.#prepareCreate(input.input);
     if (!prepared.ok) {
       return errorResult(prepared.message);
     }
-    const { agent, manifest } = prepared.value;
+    const { manifest } = prepared.value;
+    const { chatAssistant } = this.#options;
+    let agent: AgentRecord;
+    try {
+      agent = await chatAssistant.agent();
+    } catch (error) {
+      if (error instanceof ChatAssistantUnavailableError) {
+        return errorResult(error.message);
+      }
+      throw error;
+    }
     let schedule: ScheduleRecord;
     try {
       schedule = await this.#options.withTransaction(async transaction => {
@@ -547,6 +571,7 @@ export class ScheduleToolSet extends LocalToolMCP {
             agent_id: agent.id,
             agent_name: agent.name,
             name: input.input.name,
+            persona_id: chatAssistant.persona_id,
             manifest,
             created_by_subject: this.#options.owner,
             runFrom: this.#options.now(),
@@ -558,7 +583,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     } catch (error) {
       if (error instanceof ScheduleNameConflictError) {
         return errorResult(
-          `Nothing was saved because a schedule named "${input.input.name}" already exists for ${agent.name}. Pick another name.`,
+          `Nothing was saved because the user already has a schedule named "${input.input.name}". Try again with another name.`,
         );
       }
       throw error;
@@ -587,7 +612,9 @@ export class ScheduleToolSet extends LocalToolMCP {
         ),
       );
       if (updated === undefined) {
-        return errorResult(`The schedule "${existing.name}" was deleted before it could be changed.`);
+        return errorResult(
+          `Nothing was changed because the schedule "${existing.name}" was deleted first. Call list_schedules to see what is left.`,
+        );
       }
       await this.#audit({
         tool_name: input.status === 'paused' ? PAUSE_SCHEDULE_TOOL_NAME : RESUME_SCHEDULE_TOOL_NAME,
