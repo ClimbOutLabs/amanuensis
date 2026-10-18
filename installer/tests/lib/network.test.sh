@@ -367,6 +367,7 @@ test_no_question_about_the_address() {
   fixture_full_machine
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD

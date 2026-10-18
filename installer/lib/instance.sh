@@ -133,6 +133,7 @@ machine_running() {
 instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
   dir=$(instance_dir "$name")
+  owner_name_backfill "$name"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -181,7 +182,33 @@ instance_render() {
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
-    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" | write_if_changed "$dir/dex.yaml" 644 || true
+    "OWNER_EMAIL=$email" "OWNER_NAME=$(reg_get "$name" owner_name)" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" |
+    write_if_changed "$dir/dex.yaml" 644 || true
+}
+
+# What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.
+owner_name_default() { # email
+  local start=${1%%@*}
+  printf '%s' "${start:0:80}"
+}
+
+# An instance from before the question has no recorded name. It keeps the name its sign-in service already shows,
+# unless that is the old fixed 'owner', and then gets the start of its email. Nothing is asked, so refresh and upgrade
+# stay unattended. The app reads the name from .env too, to fill Personalization once.
+owner_name_backfill() { # name
+  local name=$1 current env
+  env="$(instance_dir "$name")/.env"
+  current=$(reg_get "$name" owner_name)
+  if [ -z "$current" ]; then
+    current=$(sed -n "s/^ *username: '\(.*\)'\$/\1/p" "$(instance_dir "$name")/dex.yaml" 2>/dev/null | head -n 1)
+    if [ "$current" = owner ] || [ -n "$(display_name_problem "$current")" ]; then
+      current=$(owner_name_default "$(reg_get "$name" owner_email)")
+    fi
+    reg_set "$name" owner_name "$current"
+  fi
+  if [ -f "$env" ] && grep -q '^# >>> managed by the installer' "$env" && ! grep -q '^OWNER_NAME=' "$env"; then
+    env_managed_set "$env" OWNER_NAME "$current"
+  fi
 }
 
 # running, partial or stopped, from the containers Compose labelled for the project.
@@ -361,9 +388,11 @@ instance_collect() {
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
   ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person gets a new instance. Example: main" name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
-    I_EMAIL="owner@example.invalid"
+    I_EMAIL="you@example.invalid"
   fi
   ask_valid I_EMAIL "Your email, used to sign in" "" "Example: you@example.com" email_problem
+  I_OWNER_NAME=${OPT_YOUR_NAME:-}
+  ask_valid I_OWNER_NAME "What should Aman call you?" "$(owner_name_default "$I_EMAIL")" "" display_name_problem
   if [ -n "$I_PUBLIC_URL" ]; then
     valid_origin "$I_PUBLIC_URL" || usage_die "The public address must look like https://aman.example.com, with nothing after the name."
     case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "The public address must start with https://." ;; esac
@@ -377,7 +406,7 @@ instance_collect() {
   instance_collect_addresses
   instance_collect_tls
   instance_collect_token_factory
-  ui_ok "Instance $I_NAME for $I_EMAIL"
+  ui_ok "Instance $I_NAME for $I_OWNER_NAME ($I_EMAIL)"
 }
 
 # --address adds a name or address Aman should also answer at; each is checked as it is read, like every other flag.
@@ -539,14 +568,14 @@ instance_create() {
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "IF_GATEWAY=$(gateway_flag "$I_ORIGINS" "$I_PUBLIC_URL")" "LOGIN_PORT=$I_LOGIN_PORT" \
-    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
+    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "OWNER_NAME=$I_OWNER_NAME" "API_KEY=$api_key" \
     "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
     write_if_changed "$dir/.env" 600 || true
   AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
-    "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
+    "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "owner_name=$I_OWNER_NAME" "cookie_suffix=$cookie" "client_id=$client_id" \
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
@@ -729,6 +758,8 @@ gateway_flag() { # origins public_url
 instance_env_repair() {
   local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
   env="$(instance_dir "$name")/.env"
+  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
+  owner_name_backfill "$name"
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
@@ -753,7 +784,7 @@ instance_env_repair() {
     "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
     "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
-    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "API_KEY=$(rand_hex 32)" \
+    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
     "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }

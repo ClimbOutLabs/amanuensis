@@ -339,6 +339,7 @@ test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
   assert_log_lacks "sudo -v"
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -358,6 +359,7 @@ test_root_steps_answered_yes_on_a_terminal() {
   printf 'needs_disk\n' >"$SB_STATE/slots_state"
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -377,6 +379,7 @@ test_root_steps_declined_on_a_terminal() {
   printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
