@@ -14,6 +14,12 @@ export const SEARCH_HELD_REASON = 'it needed approval';
 
 const SEARCH_WHAT_PREFIX = 'Search the web through ';
 
+/** Opening of the Tavily search card sentence, which also names what the call costs. */
+export const TAVILY_SEARCH_WHAT_PREFIX = 'Search the web with Tavily for: ';
+
+/** Opening of the Tavily page-read card sentence. */
+export const TAVILY_EXTRACT_WHAT_PREFIX = 'Read these web pages with Tavily: ';
+
 // Cards saved before the hold reason moved into plain_what kept it here, with older key wording.
 const SAVED_HOLD_PREFIX = 'Held for approval: ';
 const SAVED_SECRET_REASON = 'it contains a secret this server holds';
@@ -33,9 +39,11 @@ export function searchHoldAuditText({ server, why }: { server: string; why: stri
   return `${SEARCH_WHAT_PREFIX}${server}${heldBecause(why === '' ? SEARCH_ASK_REASON : why)}`;
 }
 
-/** Whether a card sentence was written by `searchHoldCardText`. */
+/** Whether a card sentence describes a held search, generic or Tavily. */
 export function isSearchHoldCardText(text: string): boolean {
-  return text.startsWith(SEARCH_WHAT_PREFIX);
+  return [SEARCH_WHAT_PREFIX, TAVILY_SEARCH_WHAT_PREFIX, TAVILY_EXTRACT_WHAT_PREFIX].some(prefix =>
+    text.startsWith(prefix),
+  );
 }
 
 /** Hold reason a search card saved before this wording kept in why_asked_again, or undefined. */

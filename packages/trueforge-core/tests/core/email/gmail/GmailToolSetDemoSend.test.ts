@@ -1,7 +1,7 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { DEMO_SEND_REFUSAL } from '../../../../src/core/permissions/sendAllowlist';
-import { plainDraft } from './fixtures';
-import { approvedContext, build, json, route, text, type Route } from './harness';
+import { message, plainDraft } from './fixtures';
+import { approvedContext, build, json, route, text, threadRoute, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 const DEMO_LIST = ['maya@demo.example', 'friend@demo.example'];
@@ -12,20 +12,31 @@ const sendRoute: Route = url =>
 
 const sentCount = (urls: string[]) => urls.filter(entry => entry.includes('/drafts/send')).length;
 
+const REPLY = plainDraft({
+  id: 'm',
+  threadId: 't9',
+  to: 'stranger@outside.example',
+  subject: 'Re: Lease',
+  body: 'Thursday works.',
+  extraHeaders: [
+    { name: 'In-Reply-To', value: '<orig@example.com>' },
+    { name: 'References', value: '<orig@example.com>' },
+  ],
+});
+
+/** The message the reply answers, so the reply's threading holds and only the list can refuse it. */
+const ANSWERED = message({
+  id: 'orig',
+  threadId: 't9',
+  from: 'stranger@outside.example',
+  subject: 'Lease',
+  extraHeaders: [{ name: 'Message-ID', value: '<orig@example.com>' }],
+});
+
 /** The drafts a model can make for each way of sending, each with one address outside the list. */
-const STRAY_DRAFTS: { name: string; mail: GmailMessage }[] = [
+const STRAY_DRAFTS: { name: string; mail: GmailMessage; routes?: Route[] }[] = [
   { name: 'send', mail: plainDraft({ id: 'm', to: 'stranger@outside.example', body: 'Hi' }) },
-  {
-    name: 'reply',
-    mail: plainDraft({
-      id: 'm',
-      threadId: 't9',
-      to: 'stranger@outside.example',
-      subject: 'Re: Lease',
-      body: 'Thursday works.',
-      extraHeaders: [{ name: 'In-Reply-To', value: '<orig@example.com>' }],
-    }),
-  },
+  { name: 'reply', mail: REPLY, routes: [threadRoute({ id: 't9', messages: [ANSWERED, REPLY] })] },
   {
     name: 'reply-all with an extra Cc',
     mail: plainDraft({
@@ -51,11 +62,11 @@ const STRAY_DRAFTS: { name: string; mail: GmailMessage }[] = [
 ];
 
 describe('demo send allowlist on send_draft', () => {
-  describe.each(STRAY_DRAFTS)('$name', ({ mail }) => {
+  describe.each(STRAY_DRAFTS)('$name', ({ mail, routes = [] }) => {
     it('is refused before any card is shown', async () => {
       const { tools, google } = await build({
         features: [...COMPOSE],
-        routes: [draftRoute(mail), sendRoute],
+        routes: [draftRoute(mail), sendRoute, ...routes],
         demoSendAllowlist: DEMO_LIST,
       });
       const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
@@ -69,7 +80,7 @@ describe('demo send allowlist on send_draft', () => {
     it('is refused again at send time even when the send was approved', async () => {
       const { tools, google, sentinel } = await build({
         features: [...COMPOSE],
-        routes: [draftRoute(mail), sendRoute],
+        routes: [draftRoute(mail), sendRoute, ...routes],
         demoSendAllowlist: null,
       });
       const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
