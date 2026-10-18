@@ -57,7 +57,7 @@ describe('AmanWelcome', () => {
 
   it('shows the first-run checklist with links to settings until it is dismissed', async () => {
     renderWelcome({
-      setup: { modelName: null, memoryBank: null, hasChatted: false, settingsHref: '/settings' },
+      setup: { modelName: null, hasChatted: false, settingsHref: '/settings' },
     });
     const list = await screen.findByRole('list', { name: 'Setup checklist' });
     expect(list).toHaveTextContent('Add a model');
@@ -71,7 +71,7 @@ describe('AmanWelcome', () => {
   it('after dismissal, shows one quiet line about the name only while it is unset', async () => {
     const { unmount } = renderWelcome({
       userName: null,
-      setup: { modelName: 'local-model', memoryBank: undefined, firstRunGuide: dismissed, settingsHref: '/settings' },
+      setup: { modelName: 'local-model', firstRunGuide: dismissed, settingsHref: '/settings' },
     });
     const prompt = await screen.findByTestId('aman-name-prompt');
     expect(prompt).toHaveTextContent('Aman does not know your name yet.');
@@ -81,7 +81,7 @@ describe('AmanWelcome', () => {
 
     renderWelcome({
       userName: 'Sam',
-      setup: { modelName: 'local-model', memoryBank: undefined, firstRunGuide: dismissed },
+      setup: { modelName: 'local-model', firstRunGuide: dismissed },
     });
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-name-prompt')).not.toBeInTheDocument();

@@ -4,16 +4,15 @@ import type { FC, ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
-import { useOptionalShellMode, type SettingsMemoryTab, type SettingsSection } from '../server/ShellModeContext.js';
-import { useOptionalAmanSetup, type AmanSetupState, type MemoryBankStatus } from './AmanSetupContext.js';
+import { useOptionalShellMode, type SettingsSection } from '../server/ShellModeContext.js';
+import { useOptionalAmanSetup, type AmanSetupState } from './AmanSetupContext.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 
 /** Where a checklist line sends the user: a Settings section, or back to the chat. */
-export type FirstRunTarget =
-  { kind: 'settings'; section: SettingsSection; memoryTab?: SettingsMemoryTab } | { kind: 'chat' };
+export type FirstRunTarget = { kind: 'settings'; section: SettingsSection } | { kind: 'chat' };
 
 export type FirstRunItem = {
-  key: 'model' | 'about-you' | 'first-chat' | 'memory';
+  key: 'model' | 'about-you' | 'first-chat';
   label: string;
   detail: string;
   done: boolean;
@@ -29,16 +28,14 @@ function hasText(value: string | null | undefined): value is string {
 }
 
 /**
- * The checklist, computed from real state so it ticks itself off. Memory is optional and only
- * listed when the host could find out about it; the first chat is listed only when the host
- * knows whether one happened.
+ * The checklist, computed from real state so it ticks itself off. The first chat is listed only
+ * when the host knows whether one happened. Memory is never listed: it works out of the box.
  */
 export function amanFirstRunItems(input: {
   modelName: string | null;
   /** The personalization profile's user name; undefined while the profile is still loading. */
   userName: string | null | undefined;
   hasChatted: boolean | undefined;
-  memoryBank: MemoryBankStatus | null | undefined;
   placement: FirstRunPlacement;
 }): FirstRunItem[] {
   const items: FirstRunItem[] = [];
@@ -68,25 +65,6 @@ export function amanFirstRunItems(input: {
       ...(input.placement === 'settings' ? { action: { label: 'Back to chat', target: { kind: 'chat' } } } : {}),
     });
   }
-  if (input.memoryBank !== undefined) {
-    const bank = input.memoryBank;
-    items.push({
-      key: 'memory',
-      label: 'Connect a memory bank (optional)',
-      detail:
-        bank === null
-          ? 'Memory is off, so nothing carries over between chats.'
-          : bank.connected
-            ? `${bank.name} is on.`
-            : `${bank.name} needs sign-in before it can recall anything.`,
-      done: bank?.connected === true,
-      action: {
-        label: bank === null || bank.connected ? 'Open Memory' : 'Sign in',
-        // Memory setup lives on the Settings sub-tab of the Memory section, not its landing tab.
-        target: { kind: 'settings', section: 'memory', memoryTab: 'settings' },
-      },
-    });
-  }
   return items;
 }
 
@@ -113,7 +91,7 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
         className={className}
         onClick={() => {
           if (target.kind === 'settings') {
-            shell.setSettingsOpen(true, target.section, target.memoryTab);
+            shell.setSettingsOpen(true, target.section);
           } else {
             shell.setSettingsOpen(false);
           }
@@ -155,7 +133,6 @@ export const AmanFirstRunGuide: FC<{ placement: FirstRunPlacement; className?: s
     modelName: setup.modelName,
     userName: personalization?.profile?.user_name,
     hasChatted: setup.hasChatted,
-    memoryBank: setup.memoryBank,
     placement,
   });
   const doneCount = items.filter(item => item.done).length;

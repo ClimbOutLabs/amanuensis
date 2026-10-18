@@ -2,19 +2,22 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { isSetupComplete, mergeSetupRead } from '../src/setupStatus';
 
-test('setup is complete only with a model, a connected or unknown bank, and a first chat or no count', () => {
+test('setup is complete with a model and a first chat or no count', () => {
   const bank = { name: 'amantest', connected: true };
   assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: true }), true);
   assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: undefined }), true);
   assert.equal(isSetupComplete({ modelName: 'local', memoryBank: bank, hasChatted: false }), false);
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: undefined, hasChatted: true }), true);
-  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: null, hasChatted: true }), false);
-  assert.equal(
-    isSetupComplete({ modelName: 'local', memoryBank: { ...bank, connected: false }, hasChatted: true }),
-    false,
-  );
   assert.equal(isSetupComplete({ modelName: null, memoryBank: bank, hasChatted: true }), false);
   assert.equal(isSetupComplete({ modelName: '  ', memoryBank: bank, hasChatted: true }), false);
+});
+
+test('memory never holds setup back', () => {
+  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: undefined, hasChatted: true }), true);
+  assert.equal(isSetupComplete({ modelName: 'local', memoryBank: null, hasChatted: true }), true);
+  assert.equal(
+    isSetupComplete({ modelName: 'local', memoryBank: { name: 'amantest', connected: false }, hasChatted: true }),
+    true,
+  );
 });
 
 test('a failed re-read keeps what was known and a successful one replaces it', () => {

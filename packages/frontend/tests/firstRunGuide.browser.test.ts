@@ -38,8 +38,8 @@ const THEMES = ['light', 'dark'] as const;
 
 /** What each fixture state must show; the screenshot is taken only after this is on screen. */
 const EXPECTATIONS = {
-  fresh: { heading: 'Welcome to Aman', progress: '0 of 4 done.' },
-  half: { heading: 'Welcome to Aman', progress: '2 of 4 done.' },
+  fresh: { heading: 'Welcome to Aman', progress: '0 of 3 done.' },
+  half: { heading: 'Welcome to Aman', progress: '2 of 3 done.' },
   done: { heading: 'You are all set', progress: 'Everything on this list is done.' },
   settings: { heading: 'Welcome to Aman', progress: '2 of 3 done.' },
 } as const;
@@ -58,6 +58,8 @@ async function checkChecklist(page: Page, state: keyof typeof EXPECTATIONS) {
   await card.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
   await card.getByRole('heading', { name: EXPECTATIONS[state].heading }).waitFor({ timeout: RENDER_TIMEOUT_MS });
   assert.match(await page.getByTestId('aman-first-run-progress').innerText(), new RegExp(EXPECTATIONS[state].progress));
+  // Memory works out of the box, so the checklist never asks about it.
+  assert.doesNotMatch(await card.innerText(), /memory/i);
 }
 
 test('first-run screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
