@@ -627,20 +627,47 @@ describe('on a demo instance', () => {
 });
 
 describe('hidden text', () => {
-  it('refuses event text with more ideographic variation selectors than a word needs, as a Gmail draft does', async () => {
+  /** `count` ideographs that each carry one variation selector: every one shows, but together they carry data. */
+  const marked = (count: number) => '漢\u{E0100}'.repeat(count);
+
+  /** The same total split over title, location and description, so only the cap across fields can refuse it. */
+  function spread(total: number) {
+    const title = Math.ceil(total / 3);
+    const location = Math.ceil((total - title) / 2);
+    return { title: marked(title), location: marked(location), description: marked(total - title - location) };
+  }
+
+  it('lets a new event carry up to the Gmail cap of variation selectors across its text, and no more', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
-    const selectors = '\u{E0100}'.repeat(MAX_IDEOGRAPHIC_SELECTORS + 1);
-    for (const field of ['title', 'location', 'description']) {
-      const info = await built.tools.toolCallInfo({
-        name: 'create_event',
-        arguments: { ...DENTIST, [field]: `漢${selectors}` },
-      });
-      expect(info.pre_dispatch_failure?.message).toContain('Nothing was saved');
-    }
-    const fine = await built.tools.toolCallInfo({
+    const atLimit = await built.tools.toolCallInfo({
       name: 'create_event',
-      arguments: { ...DENTIST, title: '漢\u{E0100}' },
+      arguments: { ...DENTIST, ...spread(MAX_IDEOGRAPHIC_SELECTORS) },
     });
-    expect(fine.pre_dispatch_failure).toBeUndefined();
+    expect(atLimit.pre_dispatch_failure).toBeUndefined();
+    expect(atLimit.tier).toBe(3);
+    for (const text of [spread(MAX_IDEOGRAPHIC_SELECTORS + 1), { title: marked(MAX_IDEOGRAPHIC_SELECTORS + 1) }]) {
+      const over = await built.tools.toolCallInfo({ name: 'create_event', arguments: { ...DENTIST, ...text } });
+      expect(over.pre_dispatch_failure?.message).toContain('Nothing was saved');
+      expect(over.tier3_card ?? null).toBeNull();
+    }
+  });
+
+  it('holds a change to the same cap', async () => {
+    const built = await build({
+      routes: [eventRoutes(() => STANDUP)],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+    });
+    const change = { event_id: 'ev1', send_updates: 'none' };
+    const atLimit = await built.tools.toolCallInfo({
+      name: 'update_event',
+      arguments: { ...change, ...spread(MAX_IDEOGRAPHIC_SELECTORS) },
+    });
+    expect(atLimit.pre_dispatch_failure).toBeUndefined();
+    const over = await built.tools.toolCallInfo({
+      name: 'update_event',
+      arguments: { ...change, ...spread(MAX_IDEOGRAPHIC_SELECTORS + 1) },
+    });
+    expect(over.pre_dispatch_failure?.message).toContain('Nothing was saved');
   });
 });
