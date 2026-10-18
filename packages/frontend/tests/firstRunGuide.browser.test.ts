@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { createServer } from 'vite';
+import { createServer, defaultClientConditions } from 'vite';
 
 function findChromiumExecutable(): string {
   const candidates = [
@@ -66,6 +66,8 @@ test('first-run screens render in light and dark at desktop and phone width', { 
     configFile: false,
     root: frontendRoot,
     logLevel: 'silent',
+    // The published ui dist leaves core modules external, so resolve them from source like the app does.
+    resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
     server: { host: '127.0.0.1', port: 0 },
   });
   let browser: Browser | undefined;
