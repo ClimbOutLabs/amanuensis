@@ -474,7 +474,10 @@ case "$cmd" in
         if [ -n "${STUB_IMPORT_FAIL:-}" ]; then
           # The CLI's JSON log lines come first; its error is the last plain line.
           echo '{"level":"warn","message":"Data import rejected an export section"}' >&2
-          if [ "$STUB_IMPORT_FAIL" = 1 ]; then
+          if [ "$STUB_IMPORT_FAIL" = heap ]; then
+            # How Node ends when it runs out of memory: no message of the app's own, then a native stack.
+            printf 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\n 1: 0xb0a1f0 node::Abort() [node]\n' >&2
+          elif [ "$STUB_IMPORT_FAIL" = 1 ]; then
             echo "This instance already has chats, so the import was refused and nothing was changed." >&2
           else
             echo "$STUB_IMPORT_FAIL" >&2

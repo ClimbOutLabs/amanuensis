@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import v8 from 'node:v8';
 
 import { sql, type Transaction } from 'kysely';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
@@ -2918,6 +2919,76 @@ describe('runDataImport with chats larger than one file may be', () => {
         session_id: SEED_IDS.sessionMain,
         turn_id: 'session-1-turn-1',
       });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport dry run on a long chat', () => {
+  const TURNS = 120;
+
+  it('checks each turn in a store holding at most that turn and the one it continues', async () => {
+    const source = await makeInstance('source-replay');
+    const target = await makeInstance('target-replay');
+    try {
+      await seedLongChat(source, { sessionId: 'long-chat', turns: TURNS });
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const createTurn = jest.spyOn(InMemorySessionStore.prototype, 'createTurn');
+      const heapBefore = process.memoryUsage().heapUsed;
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      console.log(
+        `long chat dry run: heap ${((process.memoryUsage().heapUsed - heapBefore) / (1024 * 1024)).toFixed(1)} MB after`,
+      );
+      expect(result.chats).toBe(1);
+      // A store that took every turn of the chat would keep a full copy of each turn's snapshot.
+      const turnsPerStore = new Map<unknown, number>();
+      for (const store of createTurn.mock.contexts) {
+        turnsPerStore.set(store, (turnsPerStore.get(store) ?? 0) + 1);
+      }
+      expect(Math.max(...turnsPerStore.values())).toBeLessThanOrEqual(2);
+      expect(createTurn.mock.calls.length).toBeGreaterThanOrEqual(TURNS);
+      expect(await lastTurnContext(target, 'long-chat', TURNS)).toEqual(
+        await lastTurnContext(source, 'long-chat', TURNS),
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('stops before the memory runs out, naming the chat and what to do', async () => {
+    const source = await makeInstance('source-heap');
+    const target = await makeInstance('target-heap');
+    try {
+      await seedLongChat(source, { sessionId: 'long-chat', turns: 3 });
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const real = v8.getHeapStatistics();
+      jest.spyOn(v8, 'getHeapStatistics').mockReturnValue({
+        ...real,
+        heap_size_limit: 4 * 1024 * 1024 * 1024,
+        used_heap_size: 3.8 * 1024 * 1024 * 1024,
+      });
+      const error = await importError(target, archive);
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error instanceof Error && error.message).toBe(
+        'Chat long-chat is too large to import with the memory Aman has here (3.8 GB of 4 GB in use), so nothing was imported. Give Docker more memory, then run the import again.',
+      );
+      const sessions = await target.stores.sessionStore.listSessions({
+        tenant_id: TENANT,
+        limit: 10,
+        page_token: undefined,
+        order: 'asc',
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        source_type: undefined,
+        source_id: undefined,
+      });
+      expect(sessions.data).toEqual([]);
     } finally {
       await source.close();
       await target.close();

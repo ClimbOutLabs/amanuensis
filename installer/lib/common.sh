@@ -166,9 +166,13 @@ cli_log() {
 }
 
 # cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
-# or FALLBACK when it wrote none.
+# or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump instead, so it is named here.
 cli_reason() {
   local line
+  if grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
+    printf '%s' "Aman ran out of memory. Give Docker more memory, then run this again."
+    return 0
+  fi
   line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)
   printf '%s' "${line:-$2}"
 }

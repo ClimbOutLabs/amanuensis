@@ -87,6 +87,21 @@ test_a_refused_import_names_the_file_and_its_size_on_its_failure_line() {
   sandbox_drop
 }
 
+test_an_import_that_runs_out_of_memory_says_so() {
+  t_begin "an import that runs out of memory says so on its failure line, not the stack it printed"
+  sandbox_new
+  install_with_owner
+  make_export
+  export STUB_IMPORT_FAIL=heap
+  run_install instance import main "$EXPORT_FILE"
+  unset STUB_IMPORT_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
+  assert_not_contains "$ERR" "node::Abort"
+  assert_file "$SB_STATE/up/aman-main"
+  sandbox_drop
+}
+
 test_an_interrupted_import_still_starts_the_app() {
   local signal
   for signal in INT TERM HUP; do
@@ -271,6 +286,7 @@ test_a_stopped_instance_is_started_to_download_the_model
 test_import_gives_up_when_the_model_never_arrives
 test_a_failed_import_still_starts_the_app_and_fails
 test_a_refused_import_names_the_file_and_its_size_on_its_failure_line
+test_an_import_that_runs_out_of_memory_says_so
 test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file
 test_import_for_an_unknown_instance_is_refused
