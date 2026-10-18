@@ -9,12 +9,12 @@ upgrade_rollback() {
   local name failed=0 rc=1
   set +e
   UPGRADE_STAGE=rollback
-  warn "the upgrade failed; restoring the previous version"
+  warn "The upgrade failed. Putting the previous version back."
   if [ -f "$RELEASE_DIR/previous.release.json" ]; then
     cp "$RELEASE_DIR/previous.release.json" "$RELEASE_DIR/release.json"
   fi
   if ! release_load "$RELEASE_DIR/release.json"; then
-    warn "the previous release record is unreadable; restore by hand from $UPGRADE_BACKUP"
+    warn "The record of the previous version cannot be read, so it cannot be put back by itself. Your backup is at $UPGRADE_BACKUP."
     lock_release
     exit 2
   fi
@@ -22,7 +22,7 @@ upgrade_rollback() {
   for name in $(reg_names); do
     # An instance that never became healthy has no data to restore and nothing worth bringing back.
     instance_ever_healthy "$name" || continue
-    say "Restoring instance $name"
+    say "Putting instance $name back"
     dc "$name" down >/dev/null 2>&1
     if [ -n "$UPGRADE_BACKUP" ]; then
       (restore_sqlite "$name" "$UPGRADE_BACKUP" "$CUR_APP_TAG") || failed=1
@@ -32,10 +32,10 @@ upgrade_rollback() {
   done
   if [ "$failed" = 0 ]; then
     rc=1
-    say "Rolled back to the previous version. The database is restored from $UPGRADE_BACKUP."
+    say "The previous version is back, with its data restored from the backup at $UPGRADE_BACKUP."
   else
     rc=2
-    warn "The rollback did not fully complete. Your backup is at ${UPGRADE_BACKUP:-none}; run aman doctor instance --fix after fixing the error above."
+    warn "The previous version could not be fully put back. Your backup is at ${UPGRADE_BACKUP:-none}. Fix the error above, then run: aman doctor instance --fix"
   fi
   lock_release
   exit "$rc"
@@ -65,7 +65,7 @@ upgrade_health_gate() {
   for name in $(reg_names); do
     instance_ever_healthy "$name" || continue
     run_doctor --json --local --instance "$name" >/dev/null 2>&1 ||
-      die "The doctor reports a failure for instance $name, which was healthy before. Run aman doctor to see it and aman doctor instance --fix to repair it, or run aman upgrade --force."
+      die "Instance $name worked before but has a problem now, so the upgrade did not start. See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
   done
 }
 
@@ -74,7 +74,7 @@ upgrade_health_gate() {
 upgrade_prepare() {
   UPGRADE_BACKUP=
   if [ -n "$(reg_names)" ]; then
-    BACKUP_ONLY_HEALTHY=1 backup_run "" || die "the pre-upgrade backup failed; nothing was changed"
+    BACKUP_ONLY_HEALTHY=1 backup_run "" || die "The backup before the upgrade failed, so nothing was changed."
     UPGRADE_BACKUP=$LAST_BACKUP_DIR
   fi
   images_ensure
@@ -100,7 +100,7 @@ upgrade_switch() {
 cmd_upgrade() {
   local name
   require_installed
-  release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
+  release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   docker_attach
   release_resolve
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
@@ -111,11 +111,11 @@ cmd_upgrade() {
       return 0
     fi
     if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
-      say "The recorded version is current but some of its images are missing; upgrade would rebuild them."
+      say "Aman is up to date, but part of it is missing. An upgrade would build it again."
       return 0
     fi
     lock_acquire
-    say "Rebuilding missing images of the recorded version"
+    say "Building the missing parts again"
     images_ensure
     machine_up "$REL_STT_TAG"
     for name in $(reg_names); do
@@ -131,7 +131,7 @@ cmd_upgrade() {
   [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || say "  app     $CUR_APP_TAG -> $REL_APP_TAG"
   [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || say "  speech  $CUR_STT_TAG -> $REL_STT_TAG"
   [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
-  if upgrade_any_sandbox; then say "  sandbox PDF and image reading (rebuilds the sandbox image)"; fi
+  if upgrade_any_sandbox; then say "  sandbox PDF and image reading (builds the sandbox again)"; fi
   if [ "$OPT_CHECK" = 1 ]; then
     return 0
   fi
@@ -140,13 +140,17 @@ cmd_upgrade() {
     return 0
   fi
   lock_acquire
-  say "Order: check health, back up every instance, build the new images, restart the instances, check health again."
-  say "If a restart fails, the old images come back and each database is restored from the new backup."
+  say "Steps: check each instance, back up every instance, build the new version, restart the instances, check again."
+  say "If anything fails, the old version and the backup are put back."
   upgrade_health_gate
   upgrade_prepare
   upgrade_switch
-  say "Upgraded to $REL_APP_TAG. The pre-upgrade backup is ${UPGRADE_BACKUP:-not needed (no instance had data)}."
+  if [ -n "$UPGRADE_BACKUP" ]; then
+    say "Upgraded to $REL_APP_TAG. The backup from before the upgrade is at $UPGRADE_BACKUP."
+  else
+    say "Upgraded to $REL_APP_TAG. No backup was needed, since no instance had data yet."
+  fi
   if [ -x "$(doctor_shim)" ]; then
-    DOCTOR_TIMEOUT=180 run_doctor || warn "doctor reported problems after the upgrade; see its output above"
+    DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
   fi
 }

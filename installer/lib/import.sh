@@ -38,7 +38,7 @@ import_on_exit() {
   IMPORT_STOPPED_APP=
   say "Starting the app of instance $name again"
   dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||
-    warn "The app of instance $name did not start healthy. Run: aman doctor instance --fix"
+    warn "The app of instance $name did not start properly. Run: aman doctor instance --fix"
 }
 
 # An instance that never started has no database to back up and no search model yet, so it is started once.
@@ -101,7 +101,7 @@ import_run() {
   if [ "$was_running" = 1 ]; then
     say "Stopping the app of instance $name for the import"
     IMPORT_STOPPED_APP=$name
-    dc "$name" stop app >/dev/null || die "could not stop the app of instance $name; nothing was imported"
+    dc "$name" stop app >/dev/null || die "The app of instance $name did not stop, so nothing was imported."
   fi
   say "Importing $base into instance $name for $owner"
   D run --rm -i --network none \
@@ -120,18 +120,18 @@ import_run() {
     return 1
   fi
   log_event "data import into instance $name from $base"
-  ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export; set them up in Settings."
+  ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export. Set them up in Settings."
 }
 
 cmd_instance_import() {
   local name=${OPT_NAME:-} file=${OPT_IMPORT_FILE:-} owner
   [ -n "$name" ] && [ -n "$file" ] || usage_die "usage: install.sh instance import NAME FILE"
   valid_name "$name" || usage_die "invalid instance name"
-  [ -f "$file" ] || die "there is no file at $file"
+  [ -f "$file" ] || die "There is no file at $file."
   require_installed
   reg_exists "$name" || die "instance $name does not exist"
   owner=$(reg_get "$name" owner_email)
-  [ -n "$owner" ] || die "instance $name has no recorded owner"
+  [ -n "$owner" ] || die "Instance $name has no recorded owner, so nothing was imported."
   ask_valid OPT_DISPLAY_NAME "Your name, as imported chats show it" "${owner%%@*}" "" display_name_problem
   docker_prepare
   lock_acquire

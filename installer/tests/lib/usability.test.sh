@@ -204,7 +204,7 @@ test_upgrade_says_what_it_does() {
   assert_rc 0
   assert_contains "$OUT" "Upgrading these parts of the installed version:"
   assert_not_contains "$OUT" "would change"
-  assert_contains "$OUT" "back up every instance, build the new images, restart the instances"
+  assert_contains "$OUT" "back up every instance, build the new version, restart the instances"
   sandbox_drop
 }
 

@@ -98,7 +98,7 @@ test_import_needs_a_name_and_a_file() {
   assert_flat_contains "$ERR" "usage: install.sh instance import NAME FILE"
   run_install instance import main "$SB/nope.zip"
   assert_rc 1
-  assert_flat_contains "$ERR" "there is no file at"
+  assert_flat_contains "$ERR" "There is no file at"
   assert_eq "$(import_count)" 0
   assert_eq "$(log_count 'stop app')" 0 "the app was never stopped"
   sandbox_drop
@@ -155,7 +155,7 @@ test_import_takes_a_kept_backup_first() {
   assert_rc 0
   assert_eq "$(kept_backups | wc -l | tr -d ' ')" 1
   assert_file "$(kept_backups)/main/db.sqlite"
-  assert_flat_contains "$OUT" "and kept until you remove it"
+  assert_flat_contains "$OUT" "kept until you remove it"
   local backup_line run_line
   backup_line=$(grep -n 'aman backup' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   run_line=$(grep -n 'aman import-data --in' "$STUB_LOG" | head -n 1 | cut -d: -f1)
@@ -219,7 +219,7 @@ test_a_stopped_instance_is_started_to_download_the_model() {
   run_install instance import main "$EXPORT_FILE"
   unset STUB_MODEL_DOWNLOADING
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main is running and healthy"
+  assert_flat_contains "$OUT" "Instance main is running and answering"
   assert_eq "$(import_count)" 1
   sandbox_drop
 }

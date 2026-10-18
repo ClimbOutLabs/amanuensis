@@ -58,9 +58,9 @@ pick_port() {
 check_port_usable() {
   valid_port "$1" || die "$3 must be a number between 1024 and 65535"
   if port_reserved "$1" "$2"; then
-    die "$3 $1 is already used by another instance or by the stack itself"
+    die "$3 $1 is already used by another instance or by Aman itself"
   fi
   if port_in_use "$1"; then
-    die "$3 $1 is already in use on this machine"
+    die "$3 $1 is already in use on this computer"
   fi
 }

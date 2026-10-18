@@ -139,7 +139,7 @@ test_migrate_refuses_two_old_apps() {
   printf 'old-server trueforge server app\nother-postgres amanuensis postgres postgres\n' >"$SB_STATE/old_containers"
   run_install migrate --from-compose "$OLD"
   assert_rc 1
-  assert_flat_contains "$ERR" "Aman found no database of the old Aman made from $OLD."
+  assert_flat_contains "$ERR" "No database of the old Aman was found in $OLD."
   assert_log_lacks "pg_dump"
   assert_eq "$(exports | wc -l | tr -d ' ')" 0
   sandbox_drop
@@ -174,11 +174,11 @@ test_migrate_refuses_what_it_cannot_read() {
   mkdir -p "$SB/empty"
   run_install migrate --from-compose "$SB/empty"
   assert_rc 1
-  assert_flat_contains "$ERR" "has neither packages/trueforge/.env nor .env. Pass --from-compose the folder that holds the old compose.yml or docker-compose.yml."
+  assert_flat_contains "$ERR" "has no .env or packages/trueforge/.env. Pass --from-compose the folder the old Aman runs from, the one with its compose.yml or docker-compose.yml."
   rm -f "$SB_STATE/old_compose_dir"
   run_install migrate --from-compose "$OLD"
   assert_rc 1
-  assert_flat_contains "$ERR" "Aman found no old Aman containers made from $OLD."
+  assert_flat_contains "$ERR" "No old Aman was found running from $OLD."
   printf '%s' "$OLD" >"$SB_STATE/old_compose_dir"
   export STUB_OLD_PG_STOPPED=1
   run_install migrate --from-compose "$OLD"
@@ -266,7 +266,7 @@ test_migrate_options_belong_to_migrate() {
   old_stack
   run_install migrate --from-compose "$OLD"
   assert_rc 1
-  assert_flat_contains "$ERR" "this machine is not set up yet; run install.sh first"
+  assert_flat_contains "$ERR" "Aman is not set up on this computer yet. Run install.sh first."
   run_install backup --from-compose "$OLD"
   assert_rc 2
   assert_flat_contains "$ERR" "--from-compose and --user apply to migrate"

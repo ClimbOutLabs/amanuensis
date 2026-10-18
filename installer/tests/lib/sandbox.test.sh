@@ -128,7 +128,7 @@ test_download_needs_curl_or_wget() {
 }
 
 test_checksum_mismatch_is_refused() {
-  t_begin "a tarball that does not match the pinned SHA-256 is refused and nothing is kept"
+  t_begin "a tarball that does not match the expected checksum is refused and nothing is kept"
   sandbox_new
   STUB_CURL_CORRUPT=1
   with_input "$SENTINEL_PASSWORD
@@ -136,7 +136,7 @@ test_checksum_mismatch_is_refused() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "does not match the pinned SHA-256"
+  assert_flat_contains "$ERR" "does not match the expected checksum"
   assert_flat_contains "$ERR" "so it was not used"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   assert_log_lacks "aman-sandbox.mjs"
@@ -154,7 +154,7 @@ test_download_failure_is_explained() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
+  assert_flat_contains "$ERR" "Could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   sandbox_drop
 }
@@ -370,7 +370,7 @@ test_healthy_slots_need_no_root() {
   printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\n' >"$SB_STATE/volumes"
   printf 'ready\n' >"$SB_STATE/slots_state"
   install_machine
-  assert_contains "$OUT" "The sandboxes of instance main are already healthy"
+  assert_contains "$OUT" "The sandboxes of instance main are already running"
   assert_log_lacks "--fix"
   sandbox_drop
 }

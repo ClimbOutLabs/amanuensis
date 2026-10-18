@@ -95,7 +95,7 @@ preflight_docker_space() {
     '' | *[!0-9]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
-        check_block "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free" "Free space with: docker system prune"
+        check_block "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free" "Make room on that disk (old Docker files go with: docker system prune), then run install.sh again."
       else
         check_ok "$((free / 1024 / 1024)) GB free for Docker data"
       fi
@@ -113,7 +113,7 @@ preflight_docker_memory() {
   if [ "$bytes" -lt "$DOCKER_MEM_BLOCK_BYTES" ]; then
     check_block "Docker has only $gb GB of memory and needs at least 6 GB to build the app" "Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap, then run install.sh again."
   elif [ "$bytes" -lt "$DOCKER_MEM_WARN_BYTES" ]; then
-    check_warn "Docker has $gb GB of memory. The first build needs at least 6 GB and may be slow; 8 GB or more is recommended" "Raise it in Docker Desktop under Settings, Resources, Memory."
+    check_warn "Docker has $gb GB of memory. The first build may be slow; 8 GB or more is recommended" "Raise it in Docker Desktop under Settings, Resources, Memory."
   else
     check_ok "Docker has $((bytes / 1073741824)) GB of memory"
   fi
@@ -128,28 +128,28 @@ preflight_system() {
     Darwin) pretty=macOS ;;
     *)
       unsupported=1
-      check_block "Operating system $os is not supported" "On Windows, run this inside the WSL2 distribution that Docker Desktop integrates with."
+      check_block "Operating system $os is not supported" "On Windows, run this inside the Linux of WSL2, which Docker Desktop sets up."
       ;;
   esac
   case "$arch" in
     x86_64 | amd64 | aarch64 | arm64) ;;
     *)
       unsupported=1
-      check_block "CPU architecture $arch is not supported" "Use an x86_64 or arm64 computer."
+      check_block "This kind of computer ($arch) is not supported" "Use an x86_64 or arm64 computer."
       ;;
   esac
   if [ "$unsupported" = 0 ]; then check_ok "$pretty on $arch"; fi
   if command -v git >/dev/null 2>&1; then
     check_ok "git is installed"
   else
-    check_block "git is not installed, and the images are built from the checkout it reads" "Install git, then run install.sh again."
+    check_block "git is not installed, and the installer needs it to build the app" "Install git, then run install.sh again."
   fi
   free=$(free_kb "$AMAN_HOME")
   case "${free:-}" in
     '' | *[!0-9]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
-        check_block "Less than 10 GB free on the disk holding $(ui_path "$AMAN_HOME") ($((free / 1024 / 1024)) GB free)" "Free some space there, then run install.sh again."
+        check_block "Less than 10 GB free on the disk holding $(ui_path "$AMAN_HOME") ($((free / 1024 / 1024)) GB free)" "Make room on that disk, then run install.sh again."
       else
         check_ok "$((free / 1024 / 1024)) GB free for the install"
       fi
@@ -182,7 +182,7 @@ print_network_destinations() {
     case "$fid" in '' | '#'*) continue ;; esac
     all="$all $hosts"
   done <"$DOWNLOADS_FILE"
-  say "The installer may contact only these hosts:"
+  say "The installer may contact only these sites:"
   for line in $(printf '%s' "$all" | tr ' ' '\n' | sort -u); do
     say "  $line"
   done
@@ -190,7 +190,7 @@ print_network_destinations() {
   skipped=$(network_skipped_addresses)
   if [ -n "$skipped" ]; then
     say ""
-    say "Addresses of this computer that Aman does not open at, because other devices cannot reach them (virtual or VPN networks):"
+    say "Addresses of this computer that Aman skips, because other devices cannot reach them (virtual or VPN networks):"
     while read -r iface addr; do
       say "  $addr ($iface)"
     done <<<"$skipped"
@@ -231,9 +231,9 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
-  ui_hint "Everything is built on this computer; nothing is pushed anywhere."
+  ui_hint "Everything is built on this computer. Nothing is sent anywhere."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    ui_hint "Steps marked needs admin use sudo and only run after you say yes (or pass --install-docker, --add-docker-group, --sandbox-root or --tls-root; --yes alone does not allow them). The docker group gives full control of this computer."
+    ui_hint "Steps marked needs admin change this computer and run only after you say yes. --yes alone does not allow them; --install-docker, --add-docker-group, --sandbox-root and --tls-root do."
   fi
   if [ "$EDGE_IN_PLAN" = 1 ]; then
     edge_print_firewall_hint
@@ -242,7 +242,7 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sources. The first run takes several minutes, mostly for the image builds."
+    ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -271,13 +271,13 @@ plan_preflight() {
   case "$DOCKER_ACCESS" in
     direct | sg) ;;
     install)
-      plan_add root "Install Docker Engine from the vendor repository" "See: install.sh --print-root-steps"
+      plan_add root "Install Docker Engine from Docker's own download site" "The steps: install.sh --print-root-steps"
       ui_skip "Docker is not installed yet; the plan below installs it"
       dl_add docker-engine
       ;;
     add-group)
-      plan_add root "Add $(current_user) to the docker group, then use it for this run without a re-login"
-      ui_skip "You cannot use Docker yet; the plan below adds you to the docker group"
+      plan_add root "Give $(current_user) access to Docker, and use it in this run right away"
+      ui_skip "You cannot use Docker yet; the plan below gives you access"
       ;;
     *)
       docker_blocked_parts
@@ -296,7 +296,7 @@ plan_preflight() {
         ;;
       sg)
         ver=${DOCKER_ENGINE_VERSION%.*}
-        check_ok "Docker $ver works through the docker group, no sign-out needed for this run"
+        check_ok "Docker $ver works for this run"
         ;;
     esac
   fi
@@ -337,10 +337,10 @@ plan_build() {
     if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
-      PLAN_UPGRADE_NOTE="This checkout is newer than the installed version, so it will be updated."
-      plan_add todo "Update the installed version to this checkout" \
-        "App $CUR_APP_TAG to $REL_APP_TAG." \
-        "Instances that have data are backed up first. If the restart fails, the old version comes back and each database is restored."
+      PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
+      plan_add todo "Update Aman to this newer copy" \
+        "App version $CUR_APP_TAG to $REL_APP_TAG." \
+        "Each instance with data is backed up first. If the update fails, the old version and the backup are put back."
     fi
   fi
 
@@ -383,7 +383,7 @@ plan_build() {
     if [ -n "$I_ORIGINS" ]; then
       plan_instance_with_addresses
     else
-      plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
+      plan_add todo "Create instance $I_NAME for $I_EMAIL" "Open it at $I_PUBLIC_URL. Sign-in uses port $I_LOGIN_PORT on this computer."
     fi
     if [ "$I_TF" = 1 ]; then
       plan_add todo "Use Token Factory (model $I_TF_MODEL) as the default model" "$(tf_plan_detail)"
@@ -401,7 +401,7 @@ plan_build() {
     fi
   fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
-    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key goes only into the instance .env."
+    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."
   fi
   plan_backups
   plan_edge
@@ -432,12 +432,12 @@ plan_existing_addresses() { # name
   hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
   if [ "$(tls_target "$name")" = local ]; then
     plan_add todo "Serve instance $name over https on your network" \
-      "It will answer at: $hosts, with a certificate from an authority Aman makes on this computer. The old plain address sends devices to https." \
-      "Each device trusts that authority once. Its data and sign-in stay as they are."
+      "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
+      "Each device trusts that certificate once. Its data and sign-in stay as they are."
     return 0
   fi
   plan_add todo "Open instance $name on your network" \
-    "It will answer at: $hosts. Sign-in works from each, and the port is open to your network on private addresses only." \
+    "It will open at: $hosts. Sign-in works from each. Only devices on your private network can reach it." \
     "Its data and sign-in stay as they are."
 }
 
@@ -450,15 +450,15 @@ plan_tls() {
     if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
-    plan_add todo "Make this computer's certificate authority again" \
-      "The one from an earlier version can vouch for more names than it should. The new one covers only the names Aman is opened at and private addresses. Each device trusts it again."
+    plan_add todo "Make this computer's root certificate again" \
+      "The old one, from an earlier version, is valid for more names than it should be. The new one covers only the names Aman opens at and private addresses. Each device trusts it again."
   fi
   [ "$need" = 1 ] || return 0
-  plan_image "$(tls_image)" "The https front end is downloaded" "Download the https front end" https-front
+  plan_image "$(tls_image)" "The https service is downloaded" "Download the https service" https-front
   if [ -f "$(tls_ca_dir)/root.crt" ]; then
-    plan_add have "This computer's certificate authority exists"
+    plan_add have "This computer's root certificate exists"
   else
-    plan_add todo "Make this computer's certificate authority" "Your devices trust it once, so https works. Its key stays private on this computer."
+    plan_add todo "Make this computer's root certificate" "Each device trusts it once, so https works. Its private key never leaves this computer."
   fi
 }
 
@@ -469,7 +469,7 @@ backups_collect() {
   B_MODE=daily
   if [ -z "$(backup_scheduler)" ]; then
     B_MODE=off
-    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "This computer has no scheduler that works without admin rights."; fi
+    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "This computer has no way to run a task every day without admin rights."; fi
     return 0
   fi
   if [ "$DRY_RUN" != 1 ] && ! ui_confirm "Back up automatically every day?" y; then B_MODE=off; fi
@@ -584,7 +584,7 @@ install_execute() {
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
   fi
-  ui_phase "Building images" 4 6
+  ui_phase "Building the app" 4 6
   if [ "$INSTALL_UPGRADE" = 1 ]; then
     upgrade_prepare
   else
@@ -663,17 +663,17 @@ plan_instance_with_addresses() {
   hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
   if [ -n "$I_TLS_PORT" ]; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
-      "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate from an authority Aman makes on this computer. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
+      "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate Aman makes on this computer. Sign-in uses port $I_LOGIN_PORT on this computer." \
       "Port $I_PORT only sends devices to https. $(plan_public_address_note)"
     return 0
   fi
   if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
-      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
-      "This computer's public address (${I_PUBLIC_ADDRESSES% }) is not used: signing in over plain http across the internet is not safe. For the internet use --tls caddy."
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. Sign-in uses port $I_LOGIN_PORT on this computer." \
+      "This computer's public address (${I_PUBLIC_ADDRESSES% }) is not used, because signing in over plain http from the internet is not safe. For the internet use --tls caddy."
   else
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
-      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)."
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. Sign-in uses port $I_LOGIN_PORT on this computer."
   fi
 }
 

@@ -159,9 +159,9 @@ tls_image_ensure() {
   local image
   image=$(tls_image)
   docker_image_exists "$image" && return 0
-  step_begin "pull-tls" "Downloading the https front end"
-  D pull "$image" >"$STEP_LOG" 2>&1 || step_fail "The https front end could not be downloaded" "Check this computer's network access to registry-1.docker.io (install.sh --print-network lists every host), then run aman doctor tls --fix."
-  step_ok "The https front end is downloaded"
+  step_begin "pull-tls" "Downloading the https service"
+  D pull "$image" >"$STEP_LOG" 2>&1 || step_fail "The https service could not be downloaded" "Check that this computer can reach registry-1.docker.io, then run: aman doctor tls --fix"
+  step_ok "The https service is downloaded"
 }
 
 # Issues the certificate again for every instance served over https where it is close to its end or its addresses

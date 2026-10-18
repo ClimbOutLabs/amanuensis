@@ -33,7 +33,7 @@ test_demo_install_turns_demo_mode_on_and_seeds_the_owner() {
   assert_contains "$(seed_runs)" "-T app aman demo-seed --user $OWNER"
   assert_contains "$(cat "$STUB_LOG")" "--project-name aman-main" "run through the instance project"
   assert_not_contains "$(seed_runs)" "--reset"
-  assert_flat_contains "$OUT" "Demo on. Reseed:"
+  assert_flat_contains "$OUT" "Demo on. Fill again:"
   assert_flat_contains "$OUT" "instance demo-seed --instance main"
   local up_line seed_line
   up_line=$(grep -n 'up -d --wait' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
@@ -103,7 +103,7 @@ test_demo_seed_before_install_is_refused() {
   sandbox_new
   run_install instance demo-seed
   assert_rc 1
-  assert_flat_contains "$ERR" "not set up yet"
+  assert_flat_contains "$ERR" "not set up on this computer yet"
   sandbox_drop
 }
 
@@ -156,7 +156,7 @@ test_seed_failure_fails_the_run_and_names_the_command() {
   install_demo
   unset STUB_DEMO_FAIL
   assert_rc 1
-  assert_flat_contains "$ERR" "demo seed failed"
+  assert_flat_contains "$ERR" "Adding the example data failed"
   assert_flat_contains "$ERR" "instance demo-seed --instance main"
   assert_contains "$OUT" "Instance main"
   assert_eq "$(env_value main DEMO_MODE)" true
@@ -170,7 +170,7 @@ test_demo_dry_run_changes_nothing() {
   sandbox_new
   run_install --dry-run --demo --email "$OWNER"
   assert_rc 0
-  assert_flat_contains "$OUT" "Turn demo mode on for instance main and seed the synthetic demo world for $OWNER"
+  assert_flat_contains "$OUT" "Turn demo mode on for instance main and fill it with example data for $OWNER"
   assert_no_path "$AMAN_HOME/instances"
   assert_eq "$(seed_count)" 0
   sandbox_drop
@@ -233,7 +233,7 @@ test_demo_install_summary_survives_a_rerun() {
   rm -f "$SB_STATE/up/aman-main"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "Demo on. Reseed:"
+  assert_flat_contains "$OUT" "Demo on. Fill again:"
   assert_eq "$(seed_count)" 1 "a plain re-run does not seed"
   sandbox_drop
 }

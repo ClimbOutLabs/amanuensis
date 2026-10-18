@@ -305,7 +305,7 @@ $NEW_PASSWORD
   run_install instance password
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "this machine is not set up yet; run install.sh first"
+  assert_flat_contains "$ERR" "Aman is not set up on this computer yet. Run install.sh first."
   sandbox_drop
 }
 
