@@ -471,13 +471,6 @@
   line-height: 1.75rem;
 }
 
-.aman-runtime-rail__identity p:last-child {
-  margin: 0.35rem 0 0;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
-
 /* Grouped rail sections: small-caps label over one value line. The top border carries
  * the separation the old identity divider used to provide. */
 .aman-runtime-rail__section {

@@ -241,7 +241,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
 
           <div className="aman-runtime-rail__identity">
             <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
-            <p>A personal assistant with a little character.</p>
           </div>
 
           {trimmedUserName === undefined || trimmedUserName === '' ? null : (
