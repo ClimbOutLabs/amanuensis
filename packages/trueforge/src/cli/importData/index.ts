@@ -8,7 +8,7 @@ import { errorCode } from '../errorCode';
 import { UsageError } from '../io';
 import type { ImportDataSession } from './session';
 
-const USAGE = `Usage: aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]
+const USAGE = `Usage: aman import-data --in <file.zip> [--user <owner>] [--display-name <name>] [--dry-run]
        aman import-data --check-ready
 
 Restores a data export (made by aman export-data) into this instance. Each person gets a new
@@ -20,6 +20,7 @@ machine that runs it; there is no button in the app.
   --in <file.zip>         The export archive
   --user <owner>          The owner's user id (default: the owner); any other id is refused
   --display-name <name>   How the owner is named on imported chats (default: the user id)
+  --dry-run               Check the file and say what an import would bring, including anything it would leave out, and change nothing
   --check-ready           Print whether the search model the import needs is on disk yet, and change nothing
 
 Prints the result as JSON on stdout and a summary on stderr. Exit codes: 0 ok, 1 failure, 2 usage.
@@ -52,6 +53,7 @@ function parseOptions(args: readonly string[]) {
         in: { type: 'string' },
         user: { type: 'string' },
         'display-name': { type: 'string' },
+        'dry-run': { type: 'boolean', default: false },
         'check-ready': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -102,7 +104,12 @@ export function createImportData(deps: ImportDataDeps): Command {
       return 0;
     }
     if (options['check-ready']) {
-      if (options.in !== undefined || options.user !== undefined || options['display-name'] !== undefined) {
+      if (
+        options.in !== undefined ||
+        options.user !== undefined ||
+        options['display-name'] !== undefined ||
+        options['dry-run']
+      ) {
         throw new UsageError('--check-ready takes no other options.');
       }
       const ready = await deps.searchModelReady();
@@ -130,9 +137,15 @@ export function createImportData(deps: ImportDataDeps): Command {
       }
       const named = options['display-name']?.trim();
       const displayName = named === undefined || named === '' ? userId : named;
-      const result = await session.importArchive({ archive, userId, displayName }).catch((error: unknown) => {
+      const dryRun = options['dry-run'];
+      const result = await session.importArchive({ archive, userId, displayName, dryRun }).catch((error: unknown) => {
         throw describeFailure(error);
       });
+      if (dryRun) {
+        await io.stderr(`${result.summary}\n`);
+        await io.stdout(`${JSON.stringify({ user_id: userId, dry_run: true, ...result })}\n`);
+        return 0;
+      }
       await session
         .recordAudit({ userId, description: `Imported data for ${userId} from the command line. ${result.summary}` })
         .catch(async (error: unknown) => {

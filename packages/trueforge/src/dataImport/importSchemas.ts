@@ -75,12 +75,35 @@ export type ImportManifest = z.infer<typeof ImportManifestSchema>;
 export const ImportEventSchema = SessionEventWithPassthroughSchema;
 export type ImportEvent = z.infer<typeof ImportEventSchema>;
 
+/** What the person is told was left out, in the singular; LEFT_OUT_PLURALS has each plural. */
+export const LEFT_OUT = {
+  toolDetail: 'tool detail',
+  turnEvent: 'background note',
+  turnState: 'reply status',
+  turnDetail: 'reply detail',
+  threadDetail: 'assistant detail',
+  chatDetail: 'chat detail',
+  checklistDetail: 'checklist detail',
+  permissionSetting: 'permission setting',
+} as const;
+
+export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
+  [LEFT_OUT.toolDetail]: 'tool details',
+  [LEFT_OUT.turnEvent]: 'background notes',
+  [LEFT_OUT.turnState]: 'reply statuses',
+  [LEFT_OUT.turnDetail]: 'reply details',
+  [LEFT_OUT.threadDetail]: 'assistant details',
+  [LEFT_OUT.chatDetail]: 'chat details',
+  [LEFT_OUT.checklistDetail]: 'checklist details',
+  [LEFT_OUT.permissionSetting]: 'permission settings',
+};
+
 /** Host-owned turn data; one this version does not store is left out. */
 function readTurnCustom(value: unknown): ReturnType<typeof parseTurnCustom> {
   try {
     return parseTurnCustom(value ?? null);
   } catch {
-    noteLeftOut();
+    noteLeftOut({ label: LEFT_OUT.turnDetail });
     return null;
   }
 }
@@ -99,6 +122,8 @@ const VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
 
 const ImportEventListSchema = mixedList({
   schema: ImportEventSchema,
+  label: LEFT_OUT.turnEvent,
+  visibleLabel: LEFT_OUT.toolDetail,
   isVisible: event => isRecord(event) && typeof event['type'] === 'string' && VISIBLE_EVENT_TYPES.has(event['type']),
 });
 
@@ -132,21 +157,23 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
 });
 
 /** A message is what people see; only each tool call's host-owned info is read leniently. */
-const ImportContextMessageSchema = visible(ContextMessageSchema).transform((message, ctx) => {
-  if (!('tool_calls' in message) || message.tool_calls === undefined) {
-    return message;
-  }
-  const toolCalls: typeof message.tool_calls = [];
-  for (const call of message.tool_calls) {
-    const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
-    if (!toolInfo.success) {
-      ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
-      return z.NEVER;
+const ImportContextMessageSchema = visible(ContextMessageSchema, { label: LEFT_OUT.toolDetail }).transform(
+  (message, ctx) => {
+    if (!('tool_calls' in message) || message.tool_calls === undefined) {
+      return message;
     }
-    toolCalls.push({ ...call, tool_info: toolInfo.data });
-  }
-  return { ...message, tool_calls: toolCalls };
-});
+    const toolCalls: typeof message.tool_calls = [];
+    for (const call of message.tool_calls) {
+      const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
+      if (!toolInfo.success) {
+        ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
+        return z.NEVER;
+      }
+      toolCalls.push({ ...call, tool_info: toolInfo.data });
+    }
+    return { ...message, tool_calls: toolCalls };
+  },
+);
 
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
@@ -189,11 +216,11 @@ const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
  */
 const ImportThreadFieldsSchema = z.object({
   thread_id: z.string().min(1),
-  current_context_usage: internal(CurrentContextUsageSchema),
-  parent: internal(AgentParentSchema.nullable()).optional(),
-  agent_info: internal(ImportAgentInfoSchema.nullable()).optional(),
-  completion: internal(ImportCompletionMarkerSchema.nullable()).optional(),
-  task_state: internal(TaskStateSchema.optional()).optional(),
+  current_context_usage: internal(CurrentContextUsageSchema, { label: LEFT_OUT.threadDetail }),
+  parent: internal(AgentParentSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
+  agent_info: internal(ImportAgentInfoSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
+  completion: internal(ImportCompletionMarkerSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
+  task_state: internal(TaskStateSchema.optional(), { label: LEFT_OUT.threadDetail }).optional(),
 });
 
 const ImportThreadSnapshotSchema = z.object({
@@ -219,9 +246,11 @@ const ImportTurnFieldsSchema = z.object({
     // A finished turn's output is what people read, so it stays strict.
     const parsed =
       isRecord(value) && value['status'] === 'done'
-        ? readVisible(TurnStateSchema, value)
+        ? readVisible(TurnStateSchema, value, { label: LEFT_OUT.toolDetail })
         : // Any other state this version cannot read lands like a turn left running: cancelled, with nothing lost.
-          TurnStateSchema.safeParse(readInternal(TurnStateSchema, value, { status: 'running' }));
+          TurnStateSchema.safeParse(
+            readInternal(TurnStateSchema, value, { label: LEFT_OUT.turnState, fallback: { status: 'running' } }),
+          );
     if (!parsed.success) {
       forwardIssues(ctx, { issues: parsed.error.issues, path: [] });
       return z.NEVER;
@@ -249,23 +278,23 @@ export const ImportSessionRecordSchema = z.object({
   title: z.string().nullable(),
   folder_id: z.string().nullable(),
   external_id: z.string().nullable(),
-  source: internal(SessionSourceSchema.nullable()),
-  metadata: internal(SessionMetadataSchema),
+  source: internal(SessionSourceSchema.nullable(), { label: LEFT_OUT.chatDetail }),
+  metadata: internal(SessionMetadataSchema, { label: LEFT_OUT.chatDetail }),
   // Never stored on import, so data in it is left out.
   custom: z.unknown().transform(value => {
     if (isRecord(value) ? Object.keys(value).length > 0 : value !== null && value !== undefined) {
-      noteLeftOut();
+      noteLeftOut({ label: LEFT_OUT.chatDetail });
     }
     return null;
   }),
-  task_checklist: internal(TaskChecklistSchema),
-  metrics: internal(SessionMetricsSchema),
-  repository_id: internal(z.string().nullable()),
-  workspace_cwd: internal(z.string().nullable()),
+  task_checklist: internal(TaskChecklistSchema, { label: LEFT_OUT.checklistDetail }),
+  metrics: internal(SessionMetricsSchema, { label: LEFT_OUT.chatDetail }),
+  repository_id: internal(z.string().nullable(), { label: LEFT_OUT.chatDetail }),
+  workspace_cwd: internal(z.string().nullable(), { label: LEFT_OUT.chatDetail }),
   last_turn_id: z.string().nullable(),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
-  last_activity_timestamp_ms: internal(z.number()),
+  last_activity_timestamp_ms: internal(z.number(), { label: LEFT_OUT.chatDetail }),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
@@ -299,11 +328,9 @@ export const ImportSessionEntrySchema = z.object({
   persona_activations: z.array(ImportPersonaActivationSchema).default([]),
 });
 export type ImportSessionEntry = z.infer<typeof ImportSessionEntrySchema>;
-/** The single sessions.json of format version 1. */
-export const ImportSessionsFileSchema = z.array(ImportSessionEntrySchema);
 
 /** A record of a sessions/ file: a chat, then each of its turns in order. */
-const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
+export const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('session'),
     session: ImportSessionRecordSchema,
@@ -320,7 +347,6 @@ const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 export type ImportSessionPartRecord = z.infer<typeof ImportSessionPartRecordSchema>;
-export const ImportSessionPartFileSchema = z.array(ImportSessionPartRecordSchema);
 
 export const ImportFolderRecordSchema = z.object({
   tenant_id: z.string(),
@@ -418,7 +444,7 @@ export const ImportSettingsFileSchema = z.object({
   /** Instance-wide toggles; only present for an administrator's export. */
   instance: z.array(z.object({ key: z.string().min(1), value: z.string() })),
   // Never applied on import.
-  permission_settings: internal(SentinelUserSettingsSchema),
+  permission_settings: internal(SentinelUserSettingsSchema, { label: LEFT_OUT.permissionSetting }),
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;
 

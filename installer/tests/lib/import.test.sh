@@ -50,6 +50,7 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   fi
   assert_flat_contains "$OUT" "Imported into instance main"
   assert_flat_contains "$OUT" "Model keys and connector sign-ins are not part of an export"
+  assert_flat_contains "$ERR" "Full log:"
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }

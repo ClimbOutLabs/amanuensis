@@ -6,24 +6,30 @@
  */
 import { z } from 'zod';
 
-let tally: { leftOut: number } | undefined;
+/** Internal details repaired or left out, by the plain label of what they were. */
+export type LeftOutCounts = ReadonlyMap<string, number>;
 
-/** Runs a synchronous parse and reports how many internal details it repaired or left out. */
-export function countingLeftOut<T>(run: () => T): { result: T; leftOut: number } {
+let tally: Map<string, number> | undefined;
+
+/**
+ * Runs a synchronous parse and reports what it repaired or left out. Every reader below notes
+ * each change here, so nothing is left out without the person being told.
+ */
+export function countingLeftOut<T>(run: () => T): { result: T; leftOut: LeftOutCounts } {
   const outer = tally;
-  const current = { leftOut: 0 };
+  const current = new Map<string, number>();
   tally = current;
   try {
-    return { result: run(), leftOut: current.leftOut };
+    return { result: run(), leftOut: current };
   } finally {
     tally = outer;
   }
 }
 
-/** Counts one internal detail left out by a reader of its own. */
-export function noteLeftOut(): void {
-  if (tally !== undefined) {
-    tally.leftOut += 1;
+/** Notes internal details left out by a reader, under the label the person is shown. */
+export function noteLeftOut({ label, count = 1 }: { label: string; count?: number }): void {
+  if (tally !== undefined && count > 0) {
+    tally.set(label, (tally.get(label) ?? 0) + count);
   }
 }
 
@@ -80,12 +86,9 @@ function repaired(schema: z.ZodType, { value, scope }: { value: unknown; scope: 
       const fixed =
         repaired(field, { value: value[key], scope: fieldScope }) ??
         (fieldScope === 'all' ? neutral(field) : undefined);
+      // A field nothing can stand in for means the record cannot be rebuilt.
       if (fixed === undefined) {
-        if (fieldScope !== 'all') {
-          return undefined;
-        }
-        changes += 1;
-        continue;
+        return undefined;
       }
       changes += fixed.changes;
       if (fixed.value !== undefined) {
@@ -131,11 +134,15 @@ function repaired(schema: z.ZodType, { value, scope }: { value: unknown; scope: 
   return undefined;
 }
 
-function counted(repair: Repair): unknown {
-  for (let index = 0; index < repair.changes; index += 1) {
-    noteLeftOut();
-  }
+function counted(repair: Repair, label: string): unknown {
+  noteLeftOut({ label, count: repair.changes });
   return repair.value;
+}
+
+interface ReadOptions<T extends z.ZodType> {
+  /** What the person is told was left out, such as "tool detail". */
+  label: string;
+  fallback?: z.input<T>;
 }
 
 /**
@@ -145,7 +152,7 @@ function counted(repair: Repair): unknown {
 export function readInternal<T extends z.ZodType>(
   schema: T,
   value: unknown,
-  fallback?: z.input<T>,
+  { label, fallback }: ReadOptions<T>,
 ): z.output<T> | undefined {
   const direct = schema.safeParse(value);
   if (direct.success) {
@@ -155,10 +162,10 @@ export function readInternal<T extends z.ZodType>(
     repaired(schema, { value, scope: 'all' }) ??
     (fallback === undefined ? neutral(schema) : { value: fallback, changes: 1 });
   if (fixed === undefined) {
-    noteLeftOut();
+    noteLeftOut({ label });
     return undefined;
   }
-  const parsed = schema.safeParse(counted(fixed));
+  const parsed = schema.safeParse(counted(fixed, label));
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -166,7 +173,11 @@ export function readInternal<T extends z.ZodType>(
  * `value` read against a schema for what people see: it must fit as is, except for internal
  * enrichment under INTERNAL_KEYS, which is repaired. Otherwise the strict result says where it fails.
  */
-export function readVisible<T extends z.ZodType>(schema: T, value: unknown): z.ZodSafeParseResult<z.output<T>> {
+export function readVisible<T extends z.ZodType>(
+  schema: T,
+  value: unknown,
+  { label }: { label: string },
+): z.ZodSafeParseResult<z.output<T>> {
   const direct = schema.safeParse(value);
   if (direct.success) {
     return direct;
@@ -175,7 +186,7 @@ export function readVisible<T extends z.ZodType>(schema: T, value: unknown): z.Z
   if (fixed === undefined) {
     return direct;
   }
-  const parsed = schema.safeParse(counted(fixed));
+  const parsed = schema.safeParse(counted(fixed, label));
   return parsed.success ? parsed : direct;
 }
 
@@ -183,11 +194,11 @@ export function readVisible<T extends z.ZodType>(schema: T, value: unknown): z.Z
 const MISSING = Symbol('missing');
 
 /** A field of internal detail; it fails only when nothing at all can stand in for it. */
-export function internal<T extends z.ZodType>(schema: T, fallback?: z.input<T>) {
+export function internal<T extends z.ZodType>(schema: T, options: ReadOptions<T>) {
   return z
     .unknown()
     .transform((value, ctx) => {
-      const parsed = schema.safeParse(readInternal(schema, value === MISSING ? undefined : value, fallback));
+      const parsed = schema.safeParse(readInternal(schema, value === MISSING ? undefined : value, options));
       if (!parsed.success) {
         ctx.addIssue({ code: 'custom', message: 'An internal detail could not be read or replaced.' });
         return z.NEVER;
@@ -208,9 +219,9 @@ export function forwardIssues(
 }
 
 /** A field of what people see; see readVisible. */
-export function visible<T extends z.ZodType>(schema: T) {
+export function visible<T extends z.ZodType>(schema: T, options: { label: string }) {
   return z.unknown().transform((value, ctx) => {
-    const parsed = readVisible(schema, value);
+    const parsed = readVisible(schema, value, options);
     if (!parsed.success) {
       forwardIssues(ctx, { issues: parsed.error.issues, path: [] });
       return z.NEVER;
@@ -226,15 +237,21 @@ export function visible<T extends z.ZodType>(schema: T) {
 export function mixedList<T extends z.ZodType>({
   schema,
   isVisible,
+  label,
+  visibleLabel,
 }: {
   schema: T;
   isVisible: (item: unknown) => boolean;
+  /** What an internal record left out is called. */
+  label: string;
+  /** What repaired enrichment inside a visible record is called. */
+  visibleLabel: string;
 }) {
   return z.array(z.unknown()).transform((items, ctx) => {
     const kept: z.output<T>[] = [];
     for (const [index, item] of items.entries()) {
       if (isVisible(item)) {
-        const parsed = readVisible(schema, item);
+        const parsed = readVisible(schema, item, { label: visibleLabel });
         if (!parsed.success) {
           forwardIssues(ctx, { issues: parsed.error.issues, path: [index] });
           return z.NEVER;
@@ -242,7 +259,7 @@ export function mixedList<T extends z.ZodType>({
         kept.push(parsed.data);
         continue;
       }
-      const read = readInternal(schema, item);
+      const read = readInternal(schema, item, { label });
       if (read !== undefined) {
         kept.push(read);
       }

@@ -121,8 +121,9 @@ import_run() {
     UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi
-  # The CLI's summary of what it imported.
+  # The CLI's summary of what it imported, including anything from an older version it left out.
   cat "$log" >&2
+  UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
   log_event "data import into instance $name from $base"
   ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export. Set them up in Settings."
 }

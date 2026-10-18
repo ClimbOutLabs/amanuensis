@@ -3146,7 +3146,8 @@ describe('runDataImport with an export from an older version', () => {
 
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(4);
-      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
+      expect(result.summary).toContain("Chat 'First chat': 1 background note from an older version was left out.");
+      expect(result.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
       expect(result.summary).not.toContain('Your chats are complete');
       expect(result.summary).toContain(
         'The older history of 1 space was trimmed before the export, so its versions now start at 1.',
@@ -3304,7 +3305,10 @@ describe('runDataImport when Aman internals have changed', () => {
 
       const result = await runDataImport(importDeps(target), importRequest(changed));
       expect(result.chats).toBe(4);
-      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
+      for (const chat of ['First chat', 'Morning digest', 'Unfinished chat', 'Untitled chat']) {
+        expect(result.summary).toMatch(new RegExp(`Chat '${chat}': [^.]* from an older version were left out\\.`));
+      }
+      expect(result.summary).toContain('Your settings: 3 permission settings from an older version were left out.');
       const messages = async (instance: Instance, sessionId: string, turnId: string) =>
         (
           (await instance.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId }))?.snapshot.threads[
@@ -3410,7 +3414,81 @@ describe('runDataImport keeps what people see strict', () => {
       });
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(3);
-      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
+      expect(result.summary).toContain("Chat 'First chat': 3 tool details from an older version were left out.");
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport tells the person everything it left out', () => {
+  it('lists the same details in a dry run, and writes nothing', async () => {
+    const source = await makeInstance('source-dry-run');
+    const target = await makeInstance('target-dry-run');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await seedEditedFirstMessageChat(source);
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const older = await repack(archive, asOlderVersionExport);
+
+      const dry = await runDataImport(importDeps(target), { ...importRequest(older), dryRun: true });
+      expect(dry.summary).toMatch(/^This was a dry run, so nothing was imported\. The import would bring 4 chats/);
+      expect(dry.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
+      const sessions = await target.stores.sessionStore.listSessions({
+        tenant_id: TENANT,
+        limit: 10,
+        page_token: undefined,
+        order: 'asc',
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        source_type: undefined,
+        source_id: undefined,
+      });
+      expect(sessions.data).toEqual([]);
+
+      const real = await runDataImport(importDeps(target), importRequest(older));
+      expect(real.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('shows the first 20 lines and logs the full list', async () => {
+    const source = await makeInstance('source-many-left-out');
+    const target = await makeInstance('target-many-left-out');
+    try {
+      for (let index = 0; index < 23; index += 1) {
+        await seedLongChat(source, { sessionId: `chat-${String(index)}`, turns: 1 });
+      }
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const changed = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records.filter(item => item['kind'] === 'session')) {
+          recordAt(record['session'], 'session')['metrics'] = { total_turns: 'many' };
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const result = await runDataImport(importDeps(target), importRequest(changed));
+      expect(result.summary.match(/Chat 'Long chat': /g)).toHaveLength(20);
+      expect(result.summary).toContain('And 3 more. The full list is in the import log.');
+      expect(target.logger.info).toHaveBeenCalledWith('Data import left out internal details from an older version', {
+        left_out: expect.arrayContaining([expect.stringContaining("Chat 'Long chat'")]),
+      });
+      const logged: unknown = target.logger.info.mock.calls.find(
+        ([message]) => message === 'Data import left out internal details from an older version',
+      )?.[1];
+      expect(recordAt(logged, 'logged list')['left_out']).toHaveLength(23);
     } finally {
       await source.close();
       await target.close();

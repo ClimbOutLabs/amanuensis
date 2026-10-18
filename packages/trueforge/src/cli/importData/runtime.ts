@@ -122,7 +122,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
 
   return {
     owner,
-    importArchive: ({ archive, userId, displayName }) =>
+    importArchive: ({ archive, userId, displayName, dryRun }) =>
       runDataImport(
         {
           sessionStore: new SqliteSessionStore(db),
@@ -151,6 +151,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           archive,
           subject: { tenantId: TENANT_ID, subjectId: userId, subjectDisplayName: displayName, agentIds: [] },
           maxBytes: configuration.DATA_IMPORT_MAX_BYTES,
+          dryRun,
         },
       ),
     recordAudit: ({ userId, description }) =>

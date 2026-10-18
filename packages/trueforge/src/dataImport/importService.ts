@@ -28,7 +28,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Logger } from 'winston';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from '../dataExport/archiveLimits';
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
@@ -91,10 +91,11 @@ import {
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportSchedulesFileSchema,
-  ImportSessionPartFileSchema,
-  ImportSessionsFileSchema,
+  ImportSessionEntrySchema,
+  ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  LEFT_OUT_PLURALS,
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
@@ -109,7 +110,7 @@ import {
   type ImportSpacesFile,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
-import { countingLeftOut, isRecord } from './lenient';
+import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -139,10 +140,54 @@ export interface DataImportRequest {
   maxBytes: number;
   /** Per-file uncompressed cap; defaults to the limit export writes to. */
   maxEntryBytes?: number;
+  /** Checks the archive and reports what an import would bring, writing nothing. */
+  dryRun?: boolean;
 }
 
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
+/** Lines about left-out details shown in the summary; the import log has them all. */
+const LEFT_OUT_LINES_SHOWN = 20;
+
+const SECTION_OWNERS: Readonly<Record<string, string>> = { 'settings.json': 'Your settings' };
+
+/** "a", "a and b", "a, b and c". */
+function plainList(parts: readonly string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
+}
+
+/** One line per chat or section that lost internal details, saying how many of each kind. */
+function leftOutLines({
+  report,
+  titles,
+}: {
+  report: LeftOutReport;
+  titles: ReadonlyMap<string, string | null>;
+}): string[] {
+  const merged: LeftOutByOwner = new Map();
+  for (const owners of report.values()) {
+    for (const [owner, counts] of owners) {
+      const into = merged.get(owner) ?? new Map<string, number>();
+      addCounts({ into, counts });
+      merged.set(owner, into);
+    }
+  }
+  const lines: string[] = [];
+  for (const [owner, counts] of merged) {
+    const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    if (total === 0) {
+      continue;
+    }
+    const name = owner.startsWith('chat:')
+      ? `Chat '${titles.get(owner.slice('chat:'.length)) ?? 'Untitled chat'}'`
+      : (SECTION_OWNERS[owner.slice('section:'.length)] ?? `The ${owner.slice('section:'.length)} section`);
+    const parts = [...counts].map(
+      ([label, count]) => `${String(count)} ${count === 1 ? label : (LEFT_OUT_PLURALS[label] ?? label)}`,
+    );
+    lines.push(`${name}: ${plainList(parts)} from an older version ${total === 1 ? 'was' : 'were'} left out.`);
+  }
+  return lines;
+}
 
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
@@ -212,8 +257,58 @@ function isSessionsSection(name: string): boolean {
   return name === 'sessions.json' || sessionPartIndex(name) !== undefined;
 }
 
-/** Internal details each section left out, by section name; a section read again replaces its count. */
-type LeftOutCounts = Map<string, number>;
+/** Who lost an internal detail: `chat:<id>` or `section:<file name>`, with what was lost. */
+type LeftOutByOwner = Map<string, Map<string, number>>;
+
+/** Per file read, so a file read again on a later pass replaces what it reported. */
+type LeftOutReport = Map<string, LeftOutByOwner>;
+
+function readSectionJson({ files, name }: { files: ReadonlyMap<string, Buffer>; name: string }): unknown {
+  const data = files.get(name);
+  if (data === undefined) {
+    throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+  }
+  try {
+    const json: unknown = JSON.parse(data.toString('utf8'));
+    return json;
+  } catch (cause) {
+    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
+      cause,
+    });
+  }
+}
+
+function rejectSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): never {
+  const [first] = error.issues;
+  const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
+  logger.warn('Data import rejected an export section', {
+    section: name,
+    issue_count: error.issues.length,
+    // Paths and issue kinds only: the archive's own values never reach the log.
+    issues: error.issues.slice(0, MAX_LOGGED_ISSUES).map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
+    ...ids,
+  });
+  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
+  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
+    cause: error,
+  });
+}
+
+function addCounts({ into, counts }: { into: Map<string, number>; counts: LeftOutCounts }): void {
+  for (const [label, count] of counts) {
+    into.set(label, (into.get(label) ?? 0) + count);
+  }
+}
 
 function parseSection<TSchema extends z.ZodType>({
   files,
@@ -226,40 +321,54 @@ function parseSection<TSchema extends z.ZodType>({
   name: string;
   schema: TSchema;
   logger: DataImportDeps<never>['logger'];
-  leftOut: LeftOutCounts;
+  leftOut: LeftOutReport;
 }): z.infer<TSchema> {
-  const data = files.get(name);
-  if (data === undefined) {
-    throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+  const json = readSectionJson({ files, name });
+  const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(json));
+  if (!result.success) {
+    rejectSection({ name, json, error: result.error, logger });
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(data.toString('utf8'));
-  } catch (cause) {
-    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
-      cause,
-    });
+  leftOut.set(name, new Map([[`section:${name}`, new Map(counts)]]));
+  return result.data;
+}
+
+/** A sessions file read one record at a time, so each detail left out is told against its own chat. */
+function parseChatRecords<TSchema extends z.ZodType>({
+  files,
+  name,
+  schema,
+  chatOf,
+  logger,
+  leftOut,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  name: string;
+  schema: TSchema;
+  chatOf: (record: z.output<TSchema>) => string;
+  logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+}): z.output<TSchema>[] {
+  const json = readSectionJson({ files, name });
+  const list = z.array(z.unknown()).safeParse(json);
+  if (!list.success) {
+    rejectSection({ name, json, error: list.error, logger });
   }
-  const { result, leftOut: count } = countingLeftOut(() => schema.safeParse(json));
-  if (result.success) {
-    leftOut.set(name, count);
-    return result.data;
+  const owners: LeftOutByOwner = new Map();
+  const records: z.output<TSchema>[] = [];
+  for (const [index, item] of list.data.entries()) {
+    const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(item));
+    if (!result.success) {
+      const issues = result.error.issues.map(issue => ({ ...issue, path: [index, ...issue.path] }));
+      rejectSection({ name, json, error: new z.ZodError(issues), logger });
+    }
+    const owner = `chat:${chatOf(result.data)}`;
+    const into = owners.get(owner) ?? new Map<string, number>();
+    addCounts({ into, counts });
+    owners.set(owner, into);
+    records.push(result.data);
   }
-  const [first] = result.error.issues;
-  const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
-  logger.warn('Data import rejected an export section', {
-    section: name,
-    issue_count: result.error.issues.length,
-    // Paths and issue kinds only: the archive's own values never reach the log.
-    issues: result.error.issues
-      .slice(0, MAX_LOGGED_ISSUES)
-      .map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
-    ...ids,
-  });
-  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
-  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
-    cause: result.error,
-  });
+  leftOut.set(name, owners);
+  return records;
 }
 
 /**
@@ -271,6 +380,8 @@ interface ArchiveSessions {
   ids: string[];
   /** Agent names the chats refer to. */
   agentNames: ReadonlySet<string>;
+  /** Chat titles by id, for telling the person which chat lost a detail. */
+  titles: ReadonlyMap<string, string | null>;
   entries: () => Iterable<ImportSessionEntry>;
 }
 
@@ -288,8 +399,8 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
-  /** Internal details from an older version that were repaired or left out, across every section read. */
-  leftOutDetails: () => number;
+  /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
+  leftOutReport: LeftOutReport;
 }
 
 /** The sessions/ file names in order; a gap in the numbering is a missing file. */
@@ -310,7 +421,7 @@ function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
 function readSessionEntries(input: {
   files: ReadonlyMap<string, Buffer>;
   logger: DataImportDeps<never>['logger'];
-  leftOut: LeftOutCounts;
+  leftOut: LeftOutReport;
 }): () => Iterable<ImportSessionEntry> {
   const { files, logger, leftOut } = input;
   const partNames = sessionPartNames(files);
@@ -318,7 +429,14 @@ function readSessionEntries(input: {
     if (partNames.length > 0) {
       throw damagedExportError('it holds chats both in sessions.json and in sessions/ files.');
     }
-    const entries = parseSection({ files, name: 'sessions.json', schema: ImportSessionsFileSchema, logger, leftOut });
+    const entries = parseChatRecords({
+      files,
+      name: 'sessions.json',
+      schema: ImportSessionEntrySchema,
+      chatOf: entry => entry.session.session_id,
+      logger,
+      leftOut,
+    });
     return () => entries;
   }
   if (partNames.length === 0) {
@@ -332,7 +450,17 @@ function readSessionEntries(input: {
   function* records() {
     for (const name of partNames) {
       if (last?.name !== name) {
-        last = { name, records: parseSection({ files, name, schema: ImportSessionPartFileSchema, logger, leftOut }) };
+        last = {
+          name,
+          records: parseChatRecords({
+            files,
+            name,
+            schema: ImportSessionPartRecordSchema,
+            chatOf: record => (record.kind === 'session' ? record.session.session_id : record.turn.session_id),
+            logger,
+            leftOut,
+          }),
+        };
       }
       yield* last.records;
     }
@@ -366,7 +494,7 @@ function loadArchive(input: {
       throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
     }
   }
-  const leftOut: LeftOutCounts = new Map();
+  const leftOut: LeftOutReport = new Map();
   const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
     parseSection({ files, name, schema, logger, leftOut });
 
@@ -404,7 +532,7 @@ function loadArchive(input: {
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
     files,
     sourceTenantId: manifest.tenant_id,
-    leftOutDetails: () => [...leftOut.values()].reduce((sum, count) => sum + count, 0),
+    leftOutReport: leftOut,
   };
   validateCrossReferences(contents);
   return contents;
@@ -414,7 +542,7 @@ function loadArchive(input: {
 function checkSessions(
   entries: Iterable<ImportSessionEntry>,
   folders: readonly ImportFolderRecord[],
-): Pick<ArchiveSessions, 'ids' | 'agentNames'> {
+): Pick<ArchiveSessions, 'ids' | 'agentNames' | 'titles'> {
   const folderIds = new Set<string>();
   for (const folder of folders) {
     if (folderIds.has(folder.folder_id)) {
@@ -425,12 +553,14 @@ function checkSessions(
 
   const sessionIds = new Set<string>();
   const agentNames = new Set<string>();
+  const titles = new Map<string, string | null>();
   for (const entry of entries) {
     const session = entry.session;
     if (sessionIds.has(session.session_id)) {
       throw damagedExportError(`chat ${session.session_id} appears twice.`);
     }
     sessionIds.add(session.session_id);
+    titles.set(session.session_id, session.title);
     if (session.agent.type === 'reference' && session.agent.name !== null) {
       agentNames.add(session.agent.name);
     }
@@ -455,7 +585,7 @@ function checkSessions(
       }
     }
   }
-  return { ids: [...sessionIds], agentNames };
+  return { ids: [...sessionIds], agentNames, titles };
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
@@ -661,14 +791,17 @@ function buildSummary({
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
-  leftOutDetails,
+  leftOut,
   trimmedSpaces,
+  dryRun,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
-  leftOutDetails: number;
+  /** One plain line per chat or section that lost internal details. */
+  leftOut: readonly string[];
+  dryRun: boolean;
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
@@ -684,7 +817,9 @@ function buildSummary({
       : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
   ];
   return [
-    `Imported ${counts.join(', ')}.`,
+    dryRun
+      ? `This was a dry run, so nothing was imported. The import would bring ${counts.join(', ')}.`
+      : `Imported ${counts.join(', ')}.`,
     'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time.',
     auditEntries === 0
       ? ''
@@ -701,7 +836,10 @@ function buildSummary({
     trimmedSpaces === 0
       ? ''
       : `The older history of ${pluralize(trimmedSpaces, 'space', 'spaces')} was trimmed before the export, so ${trimmedSpaces === 1 ? 'its' : 'their'} versions now start at 1.`,
-    leftOutDetails === 0 ? '' : 'Some behind-the-scenes details from an older version were left out.',
+    ...leftOut.slice(0, LEFT_OUT_LINES_SHOWN),
+    leftOut.length > LEFT_OUT_LINES_SHOWN
+      ? `And ${String(leftOut.length - LEFT_OUT_LINES_SHOWN)} more. The full list is in the import log.`
+      : '',
     'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
     'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
   ]
@@ -1072,6 +1210,38 @@ async function importArchive<TTransaction>(
     throw error;
   }
 
+  const leftOut = leftOutLines({ report: contents.leftOutReport, titles: sessions.titles });
+  if (leftOut.length > 0) {
+    deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
+  }
+  const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
+  if (request.dryRun === true) {
+    const result: Omit<ImportDataResult, 'summary'> = {
+      chats: sessions.ids.length,
+      memories: memoryCount,
+      personas: personas.length,
+      spaces: spaces.length,
+      schedules: schedules.length,
+      folders: folders.length,
+      agents: agentPlan.archived.length,
+      connectors: newConnectors.length,
+      schedules_off: schedules.length > 0,
+    };
+    return {
+      ...result,
+      summary: buildSummary({
+        result,
+        connectorNames: newConnectors.map(connector => connector.name),
+        auditEntries: audit.length,
+        standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
+        filesLeftBehind: 0,
+        leftOut,
+        trimmedSpaces,
+        dryRun: true,
+      }),
+    };
+  }
+
   // --- Writes. The marker names everything planned before the first one lands. ---
   const planned: ImportLedger = {
     agent_ids: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
@@ -1356,10 +1526,6 @@ async function importArchive<TTransaction>(
       connectors: connectorsImported,
       schedules_off: schedules.length > 0,
     };
-    const leftOutDetails = contents.leftOutDetails();
-    if (leftOutDetails > 0) {
-      deps.logger.info('Data import left out internal details it could not read', { details: leftOutDetails });
-    }
     return {
       ...result,
       summary: buildSummary({
@@ -1368,8 +1534,9 @@ async function importArchive<TTransaction>(
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
-        leftOutDetails,
-        trimmedSpaces: spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length,
+        leftOut,
+        trimmedSpaces,
+        dryRun: false,
       }),
     };
   } catch (cause) {
