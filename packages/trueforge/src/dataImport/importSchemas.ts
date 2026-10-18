@@ -5,6 +5,15 @@
  * written. The schemas cover the fields import consumes; store records carry
  * their owner and tenant fields along, which import checks for shape and
  * then replaces with the importing user's identity.
+ *
+ * People's own data is read strictly: chats and their dates, message roles
+ * and text, tool call ids, names, arguments and results, the agent a chat
+ * runs, uploaded files and their digests, memories, spaces, personas,
+ * schedules, connectors, audit rows, and the ids that tie them together.
+ * Everything else is Aman's own bookkeeping (tool call enrichment, turn
+ * events, turn state, metrics, thread runtime state, settings it never
+ * applies) and is read through lenient.ts, so a change to those internals in
+ * any version never stops an import.
  */
 import {
   AgentSpecSchema,
@@ -27,6 +36,7 @@ import { InternalToolCallInfoSchema, LLMToolMessageSchema } from '@truefoundry/t
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
+import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
@@ -37,6 +47,7 @@ import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedul
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
+import { internal, internalList, isRecord, noteLeftOut, readInternal } from './lenient';
 
 export const ImportManifestSchema = z.object({
   format: z.string(),
@@ -52,6 +63,19 @@ export type ImportManifest = z.infer<typeof ImportManifestSchema>;
 /** Every durable event shape this build can persist: built-in events plus the host's passthrough events. */
 export const ImportEventSchema = SessionEventWithPassthroughSchema;
 export type ImportEvent = z.infer<typeof ImportEventSchema>;
+
+/** Host-owned turn data; one this version does not store is left out. */
+function readTurnCustom(value: unknown): ReturnType<typeof parseTurnCustom> {
+  try {
+    return parseTurnCustom(value ?? null);
+  } catch {
+    noteLeftOut();
+    return null;
+  }
+}
+
+/** Turn events are Aman's own record of a turn; one this version cannot read is repaired or left out. */
+const ImportEventListSchema = internalList(ImportEventSchema);
 
 /** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
 const ArchivedInstantSchema = z.iso.datetime({ offset: true });
@@ -82,21 +106,34 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
   effect: true,
 });
 
-const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx) => {
-  if (!('tool_calls' in message) || message.tool_calls === undefined) {
+/** A message with each tool call's host-owned info read leniently; the call itself stays strict. */
+function withReadableToolInfo(message: unknown): unknown {
+  if (!isRecord(message) || !Array.isArray(message['tool_calls'])) {
     return message;
   }
-  const toolCalls: typeof message.tool_calls = [];
-  for (const call of message.tool_calls) {
-    const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
-    if (!toolInfo.success) {
-      ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
-      return z.NEVER;
-    }
-    toolCalls.push({ ...call, tool_info: toolInfo.data });
-  }
+  const toolCalls = message['tool_calls'].map((call: unknown) =>
+    isRecord(call) ? { ...call, tool_info: readInternal(InternalToolCallInfoSchema, call['tool_info']) } : call,
+  );
   return { ...message, tool_calls: toolCalls };
-});
+}
+
+const ImportContextMessageSchema = z
+  .preprocess(withReadableToolInfo, ContextMessageSchema)
+  .transform((message, ctx) => {
+    if (!('tool_calls' in message) || message.tool_calls === undefined) {
+      return message;
+    }
+    const toolCalls: typeof message.tool_calls = [];
+    for (const call of message.tool_calls) {
+      const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
+      if (!toolInfo.success) {
+        ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
+        return z.NEVER;
+      }
+      toolCalls.push({ ...call, tool_info: toolInfo.data });
+    }
+    return { ...message, tool_calls: toolCalls };
+  });
 
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
@@ -139,11 +176,11 @@ const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
  */
 const ImportThreadFieldsSchema = z.object({
   thread_id: z.string().min(1),
-  current_context_usage: CurrentContextUsageSchema,
-  parent: AgentParentSchema.nullable().optional(),
-  agent_info: ImportAgentInfoSchema.nullable().optional(),
-  completion: ImportCompletionMarkerSchema.nullable().optional(),
-  task_state: TaskStateSchema.optional(),
+  current_context_usage: internal(CurrentContextUsageSchema),
+  parent: internal(AgentParentSchema.nullable()).optional(),
+  agent_info: internal(ImportAgentInfoSchema.nullable()).optional(),
+  completion: internal(ImportCompletionMarkerSchema.nullable()).optional(),
+  task_state: internal(TaskStateSchema.optional()).optional(),
 });
 
 const ImportThreadSnapshotSchema = z.object({
@@ -165,9 +202,10 @@ const ImportTurnFieldsSchema = z.object({
   first_turn_id: z.string(),
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
-  state: TurnStateSchema,
+  // A state this version cannot read lands like a turn left running: cancelled, with nothing lost.
+  state: internal(TurnStateSchema, { status: 'running' }),
   input: z.array(TurnInputItemSchema),
-  custom: z.unknown(),
+  custom: z.unknown().transform(readTurnCustom),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
 });
@@ -187,17 +225,23 @@ export const ImportSessionRecordSchema = z.object({
   title: z.string().nullable(),
   folder_id: z.string().nullable(),
   external_id: z.string().nullable(),
-  source: SessionSourceSchema.nullable(),
-  metadata: SessionMetadataSchema,
-  custom: z.unknown(),
-  task_checklist: TaskChecklistSchema,
-  metrics: SessionMetricsSchema,
-  repository_id: z.string().nullable(),
-  workspace_cwd: z.string().nullable(),
+  source: internal(SessionSourceSchema.nullable()),
+  metadata: internal(SessionMetadataSchema),
+  // Never stored on import, so data in it is left out.
+  custom: z.unknown().transform(value => {
+    if (isRecord(value) ? Object.keys(value).length > 0 : value !== null && value !== undefined) {
+      noteLeftOut();
+    }
+    return null;
+  }),
+  task_checklist: internal(TaskChecklistSchema),
+  metrics: internal(SessionMetricsSchema),
+  repository_id: internal(z.string().nullable()),
+  workspace_cwd: internal(z.string().nullable()),
   last_turn_id: z.string().nullable(),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
-  last_activity_timestamp_ms: z.number(),
+  last_activity_timestamp_ms: internal(z.number()),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
@@ -225,7 +269,7 @@ const ImportPersonaActivationSchema = z.object(
 
 export const ImportSessionEntrySchema = z.object({
   session: ImportSessionRecordSchema,
-  turns: z.array(z.object({ turn: ImportTurnRecordSchema, events: z.array(ImportEventSchema) })),
+  turns: z.array(z.object({ turn: ImportTurnRecordSchema, events: ImportEventListSchema })),
   artifacts: z.array(ImportArtifactRecordSchema),
   /** Absent from exports made before persona choices travelled. */
   persona_activations: z.array(ImportPersonaActivationSchema).default([]),
@@ -247,7 +291,7 @@ const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
       ...ImportTurnFieldsSchema.shape,
       snapshot: z.object({ threads: z.record(z.string(), ImportThreadDeltaSchema) }),
     }),
-    events: z.array(ImportEventSchema),
+    events: ImportEventListSchema,
     artifacts: z.array(ImportArtifactRecordSchema),
   }),
 ]);
@@ -349,7 +393,8 @@ export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 export const ImportSettingsFileSchema = z.object({
   /** Instance-wide toggles; only present for an administrator's export. */
   instance: z.array(z.object({ key: z.string().min(1), value: z.string() })),
-  permission_settings: SentinelUserSettingsSchema,
+  // Never applied on import.
+  permission_settings: internal(SentinelUserSettingsSchema),
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;
 

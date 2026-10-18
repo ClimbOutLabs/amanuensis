@@ -2995,3 +2995,348 @@ describe('runDataImport dry run on a long chat', () => {
     }
   });
 });
+
+async function finishTestTurn(instance: Instance, { sessionId, turnId }: { sessionId: string; turnId: string }) {
+  const completedAt = new Date().toISOString();
+  const state = { status: 'done' as const, output: null, required_actions: [], completed_at: completedAt };
+  await instance.stores.sessionStore.updateTurnState({
+    session_id: sessionId,
+    turn_id: turnId,
+    state,
+    turn_done_event: { type: 'turn.done', id: `done-${turnId}`, created_at: completedAt, state, thread_id: null },
+  });
+}
+
+/** A chat whose first message was edited: the original first turn, the edited one, and a turn that continues it. */
+async function seedEditedFirstMessageChat(instance: Instance): Promise<void> {
+  const sessionId = 'edited-chat';
+  await instance.stores.sessionStore.createSession({
+    tenant_id: TENANT,
+    session_id: sessionId,
+    created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+    agent: {
+      type: 'inline',
+      spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+    },
+    custom: null,
+    metadata: {},
+    external_id: null,
+    source: null,
+  });
+  const turns = [
+    { turnId: 'edited-turn-1', previousTurnId: undefined, question: 'Plan a walk', answer: 'Sure.' },
+    { turnId: 'edited-turn-2', previousTurnId: undefined, question: 'Plan a bike ride', answer: 'Sure, by bike.' },
+    { turnId: 'edited-turn-3', previousTurnId: 'edited-turn-2', question: 'Which route?', answer: 'The river path.' },
+  ];
+  for (const { turnId, previousTurnId, question, answer } of turns) {
+    await instance.stores.sessionStore.createTurn(
+      makeCreateTurnInput({
+        sessionId,
+        turnId,
+        ...(previousTurnId === undefined ? {} : { previousTurnId }),
+        new_context_appends: [
+          {
+            thread_id: MAIN_THREAD_ID,
+            context: [
+              { role: 'user', content: question },
+              { role: 'assistant', content: answer },
+            ],
+            current_context_usage: { prompt_tokens: 5, completion_tokens: 2 },
+          },
+        ],
+      }),
+    );
+    await finishTestTurn(instance, { sessionId, turnId });
+  }
+}
+
+/** A turn record of sessions/0001.json, by turn id. */
+function turnRecordOf(records: JsonRecord[], turnId: string): JsonRecord {
+  return recordAt(
+    records.find(record => record['kind'] === 'turn' && recordAt(record['turn'], 'turn')['turn_id'] === turnId),
+    `turn record ${turnId}`,
+  );
+}
+
+/** Rewrites an export into the shapes an older Aman wrote. */
+function asOlderVersionExport(entries: Map<string, Buffer>): void {
+  const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+  // A recall event written before the relevance gate and the post-compaction budget existed.
+  listAt(turnRecordOf(records, 'session-1-turn-1')['events'], 'events').push({
+    type: 'aman.memory.recall',
+    id: 'evt-older-recall',
+    created_at: '2026-09-01T10:00:00.000Z',
+    injected_block: '- likes river paths',
+    stats: { items: 1, entities: 0, dropped_over_budget: 0, estimated_tokens: 6, recall_ms: 40, outcome: 'ok' },
+    sweep: { verified: 0, retried: 0, abandoned: 0, pending: 0 },
+    layers: {
+      curated: { profile: false, mental_models: 0, candidates: 0, withheld: 0, dropped: 0, outcome: 'empty' },
+      reflect: { route: 'recall', outcome: 'skipped', reflect_ms: 0, based_on: 0 },
+    },
+  });
+  // A maps call approved before its card named the outbound text and the per-mode routers existed.
+  const thread = recordAt(
+    recordAt(recordAt(turnRecordOf(records, 'edited-turn-3')['turn'], 'turn')['snapshot'], 'snapshot')['threads'],
+    'threads',
+  )['main'];
+  listAt(recordAt(thread, 'main thread')['context'], 'context').push(
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call-older-route',
+          type: 'function',
+          function: { name: 'render_route', arguments: '{"from":"Bridge","to":"Mill"}' },
+          tool_info: {
+            type: 'mcp',
+            mcp_server_id: '',
+            mcp_server_name: '',
+            original_tool_name: 'render_route',
+            maps_hosts: {
+              geocoder: 'https://geocoder.example.com',
+              router: 'https://router.example.com',
+              tile: 'https://tiles.example.com',
+            },
+            tier3_card: {
+              plain_what: 'Ask the route service for a route between two places.',
+              plain_why: null,
+              cannot_be_undone: null,
+              why_asked_again: null,
+              destination: 'router.example.com',
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+            },
+          },
+        },
+      ],
+    },
+    { role: 'tool', tool_call_id: 'call-older-route', content: 'Route drawn.' },
+  );
+  entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+
+  // A space whose early revisions the older store no longer kept: revisions 8 and 9 of 9.
+  const spaces = recordsAt(parseJson(entries.get('spaces.json'), 'spaces.json'), 'spaces.json');
+  const entry = recordAt(spaces[0], 'space entry');
+  const [kept] = recordsAt(entry['revisions'], 'revisions');
+  entry['space'] = { ...recordAt(entry['space'], 'space'), revision: 9, body: 'Draft nine.' };
+  entry['revisions'] = [
+    { ...kept, revision: 8, body: 'Draft eight.' },
+    { ...kept, revision: 9, body: 'Draft nine.' },
+  ];
+  entries.set('spaces.json', Buffer.from(JSON.stringify(spaces)));
+}
+
+describe('runDataImport with an export from an older version', () => {
+  it('imports older event, tool call and space shapes, and a chat whose first message was edited', async () => {
+    const source = await makeInstance('source-older');
+    const target = await makeInstance('target-older');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await seedEditedFirstMessageChat(source);
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const older = await repack(archive, asOlderVersionExport);
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(4);
+      expect(result.summary).toContain(
+        'Some behind-the-scenes details from an older version were left out. Your chats are complete.',
+      );
+
+      const store = target.stores.sessionStore;
+      const recalls = (
+        await store.listTurnEvents({
+          session_id: SEED_IDS.sessionMain,
+          turn_id: 'session-1-turn-1',
+          limit: 100,
+          page_token: undefined,
+          order: 'asc',
+        })
+      ).data.filter(event => event.type === 'aman.memory.recall');
+      expect(recalls).toHaveLength(1);
+      expect(recalls[0]).toMatchObject({ stats: { dropped_below_threshold: 0, budget_reason: 'normal' } });
+
+      const texts = async (turnId: string) =>
+        (
+          (await store.getTurn({ session_id: 'edited-chat', turn_id: turnId }))?.snapshot.threads[MAIN_THREAD_ID]
+            ?.context ?? []
+        ).map(message => ('content' in message ? message.content : undefined));
+      expect(await texts('edited-turn-1')).toEqual(['Plan a walk', 'Sure.']);
+      expect(await texts('edited-turn-2')).toEqual(['Plan a bike ride', 'Sure, by bike.']);
+      expect(await texts('edited-turn-3')).toEqual([
+        'Plan a bike ride',
+        'Sure, by bike.',
+        'Which route?',
+        'The river path.',
+        null,
+        'Route drawn.',
+      ]);
+      const session = await store.getSession({ tenant_id: TENANT, session_id: 'edited-chat' });
+      expect(session?.last_turn_id).toBe('edited-turn-3');
+
+      const space = { tenant_id: TENANT, created_by: 'bob', space_id: SEED_IDS.space };
+      expect(await target.stores.spaceStore.getSpaceRevision({ ...space, revision: 1 })).toMatchObject({
+        body: 'Draft eight.',
+      });
+      expect(await target.stores.spaceStore.getSpaceRevision({ ...space, revision: 2 })).toMatchObject({
+        body: 'Draft nine.',
+        revision: 2,
+      });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('still refuses a space with a gap in the middle of its revisions', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-space-gap');
+    try {
+      const gapped = await repack(archive, entries => {
+        const spaces = recordsAt(parseJson(entries.get('spaces.json'), 'spaces.json'), 'spaces.json');
+        const entry = recordAt(spaces[0], 'space entry');
+        const revisions = recordsAt(entry['revisions'], 'revisions');
+        entry['space'] = { ...recordAt(entry['space'], 'space'), revision: 4 };
+        entry['revisions'] = [...revisions, { ...revisions[1], revision: 4 }];
+        entries.set('spaces.json', Buffer.from(JSON.stringify(spaces)));
+      });
+      const error = await importError(target, gapped);
+      expect(error instanceof Error && error.message).toBe(
+        `This export is damaged: space ${SEED_IDS.space} is missing some of its revisions. Nothing was imported.`,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('says why a chat could not be read back, and logs where it failed', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-read-back');
+    try {
+      jest
+        .spyOn(InMemorySessionStore.prototype, 'createTurn')
+        .mockRejectedValueOnce(new Error('The store refused this turn'));
+      const error = await importError(target, archive);
+      expect(error instanceof Error && error.message).toBe(
+        `Chat ${SEED_IDS.sessionMain} in this export could not be read back: The store refused this turn. Nothing was imported.`,
+      );
+      expect(target.logger.warn).toHaveBeenCalledWith(
+        'Data import could not read a chat back',
+        expect.objectContaining({ stack: expect.stringContaining('The store refused this turn') }),
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+/** Changes every internal detail the way a future or past version might: fields gone, renamed, garbled or new. */
+function withChangedInternals(entries: Map<string, Buffer>): void {
+  const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+  for (const record of records) {
+    if (record['kind'] === 'session') {
+      const session = recordAt(record['session'], 'session');
+      session['metrics'] = { total_turns: 'many' };
+      delete session['task_checklist'];
+      session['future_session_field'] = { anything: true };
+      continue;
+    }
+    const turn = recordAt(record['turn'], 'turn');
+    turn['state'] = { status: 'paused-for-a-future-reason' };
+    turn['future_turn_field'] = 1;
+    for (const event of recordsAt(record['events'], 'events')) {
+      delete event['created_at'];
+      event['future_event_field'] = 'x';
+    }
+    listAt(record['events'], 'events').push({ type: 'aman.future.event', id: 'evt-future', payload: 3 });
+    for (const thread of Object.values(recordAt(recordAt(turn['snapshot'], 'snapshot')['threads'], 'threads'))) {
+      const fields = recordAt(thread, 'thread');
+      delete fields['current_context_usage'];
+      fields['task_state'] = 'garbled';
+      fields['future_runtime_state'] = {};
+      for (const message of recordsAt(fields['context'], 'context')) {
+        for (const call of Array.isArray(message['tool_calls']) ? recordsAt(message['tool_calls'], 'calls') : []) {
+          const info = recordAt(call['tool_info'], 'tool info');
+          delete info['mcp_server_name'];
+          info['tier'] = 'tier-9';
+          info['future_enrichment'] = [1, 2];
+        }
+      }
+    }
+  }
+  entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+  const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+  settings['permission_settings'] = { future_permission: true };
+  entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+}
+
+describe('runDataImport when Aman internals have changed', () => {
+  it('imports every chat whole whatever happened to the internal details around it', async () => {
+    const source = await makeInstance('source-internals');
+    const target = await makeInstance('target-internals');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await seedEditedFirstMessageChat(source);
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const changed = await repack(await repack(archive, asOlderVersionExport), withChangedInternals);
+
+      const result = await runDataImport(importDeps(target), importRequest(changed));
+      expect(result.chats).toBe(4);
+      expect(result.summary).toContain('Some behind-the-scenes details from an older version were left out.');
+      const messages = async (instance: Instance, sessionId: string, turnId: string) =>
+        (
+          (await instance.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId }))?.snapshot.threads[
+            MAIN_THREAD_ID
+          ]?.context ?? []
+        ).map(message => ('content' in message ? message.content : undefined));
+      expect(await messages(target, SEED_IDS.sessionMain, 'session-1-turn-2')).toEqual(
+        await messages(source, SEED_IDS.sessionMain, 'session-1-turn-2'),
+      );
+      const routed = (
+        await target.stores.sessionStore.getTurn({ session_id: 'edited-chat', turn_id: 'edited-turn-3' })
+      )?.snapshot.threads[MAIN_THREAD_ID]?.context.find(message => 'tool_calls' in message);
+      expect(routed).toMatchObject({
+        tool_calls: [{ id: 'call-older-route', function: { name: 'render_route' } }],
+      });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('still refuses a chat message that is itself broken', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-broken-message');
+    try {
+      const broken = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        const turn = recordAt(turnRecordOf(records, 'session-1-turn-1')['turn'], 'turn');
+        const thread = recordAt(recordAt(recordAt(turn['snapshot'], 'snapshot')['threads'], 'threads')['main'], 'main');
+        recordAt(listAt(thread['context'], 'context')[0], 'first message')['content'] = 42;
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const error = await importError(target, broken);
+      expect(error instanceof Error && error.message).toMatch(
+        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.turn\.snapshot\.threads\.main\.context\[0\]/,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
