@@ -891,8 +891,24 @@ cmd_instance_refresh() {
   print_instance_block "$name"
 }
 
+# A name typed for a new instance must also be free; naming an existing one is only for re-running instance add on it.
+new_instance_name_problem() {
+  local problem
+  problem=$(name_problem "$1")
+  if [ -n "$problem" ]; then
+    echo "$problem"
+  elif reg_exists "$1"; then
+    echo "An instance called $1 already exists. Pick another name."
+  fi
+}
+
 cmd_instance_add() {
-  [ -n "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance add <name> [--email ...]"
+  if [ -z "${OPT_NAME:-}" ]; then
+    # Only a person at a terminal can answer; anything else still needs the name on the command line.
+    [ -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] || usage_die "usage: install.sh instance add <name> [--email ...]"
+    require_installed
+    ask_valid OPT_NAME "Name for this instance:" "" "" new_instance_name_problem
+  fi
   valid_name "$OPT_NAME" || usage_die "$(name_problem "$OPT_NAME")"
   require_installed
   docker_prepare
