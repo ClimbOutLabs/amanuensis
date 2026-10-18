@@ -1226,7 +1226,7 @@ describe("SessionsClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { "stream" : true };
-        const rawResponseBody = "event: \ndata: {\"created_at\":\"created_at\",\"id\":\"id\",\"mode\":\"coding\",\"outcome\":\"applied\",\"reason\":\"missing_block\",\"summary_chars\":1,\"thread_id\":\"thread_id\",\"tokens_after\":1,\"tokens_before\":1,\"type\":\"agent.context.compaction\"}\n\n";
+        const rawResponseBody = "event: \ndata: {\"created_at\":\"created_at\",\"id\":\"id\",\"mode\":\"coding\",\"outcome\":\"applied\",\"reason\":\"missing_block\",\"summary_chars\":1,\"thread_id\":\"thread_id\",\"tokens_after\":1.1,\"tokens_before\":1.1,\"type\":\"agent.context.compaction\"}\n\n";
         
         server
             .mockEndpoint()
@@ -1249,8 +1249,8 @@ describe("SessionsClient", () => {
     reason: "missing_block",
     summaryChars: 1,
     threadId: "thread_id",
-    tokensAfter: 1,
-    tokensBefore: 1,
+    tokensAfter: 1.1,
+    tokensBefore: 1.1,
     type: "agent.context.compaction"
 } ]);
     });
@@ -1905,7 +1905,7 @@ describe("SessionsClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = "event: \ndata: {\"created_at\":\"created_at\",\"id\":\"id\",\"mode\":\"coding\",\"outcome\":\"applied\",\"reason\":\"missing_block\",\"summary_chars\":1,\"thread_id\":\"thread_id\",\"tokens_after\":1,\"tokens_before\":1,\"type\":\"agent.context.compaction\"}\n\n";
+        const rawResponseBody = "event: \ndata: {\"created_at\":\"created_at\",\"id\":\"id\",\"mode\":\"coding\",\"outcome\":\"applied\",\"reason\":\"missing_block\",\"summary_chars\":1,\"thread_id\":\"thread_id\",\"tokens_after\":1.1,\"tokens_before\":1.1,\"type\":\"agent.context.compaction\"}\n\n";
         
         server
             .mockEndpoint()
@@ -1927,8 +1927,8 @@ describe("SessionsClient", () => {
     reason: "missing_block",
     summaryChars: 1,
     threadId: "thread_id",
-    tokensAfter: 1,
-    tokensBefore: 1,
+    tokensAfter: 1.1,
+    tokensBefore: 1.1,
     type: "agent.context.compaction"
 } ]);
     });

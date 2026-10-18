@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectorSettings from '@/containers/SettingsBuilder/ConnectorSettings.js';
 import type { ConnectorWithMemoryProvider } from '@/containers/SettingsBuilder/memoryProvider.js';
 import type { ConnectorChecks, ConnectorConnectionTest } from '@/server/connectorChecks.js';
+import type { GoogleConnectionStatus, GoogleSetupPort } from '@/server/googleSetup.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentSpec, CatalogServer, ConnectorBase } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -98,7 +99,7 @@ vi.mock('@/server/ShellModeContext.js', () => ({
  * Neither check is on the runtime's connector port: the Harness adapter adds both, and the
  * component reads them through the same optional widening.
  */
-type MockConnectorCatalog = CatalogServer['connectorCatalog'] & Partial<ConnectorChecks>;
+type MockConnectorCatalog = CatalogServer['connectorCatalog'] & Partial<ConnectorChecks> & Partial<GoogleSetupPort>;
 
 function renderSettings(
   connectors: ConnectorBase[] = configuredConnectors,
@@ -637,5 +638,90 @@ describe('ConnectorSettings web search provider role', () => {
     await waitFor(() => {
       expect(updateConnector).toHaveBeenCalledWith(expect.objectContaining({ id: 'finder', searchProvider: true }));
     });
+  });
+});
+
+describe('ConnectorSettings Google row', () => {
+  beforeEach(() => {
+    mutableChat = true;
+    agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
+  });
+
+  function googleStatus(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnectionStatus {
+    return {
+      state: 'not_connected',
+      accountEmail: null,
+      features: [],
+      hasSavedClient: false,
+      locked: false,
+      setup: { mode: 'paste', clientType: 'desktop', redirectUri: 'http://127.0.0.1:53682/callback' },
+      ...overrides,
+    };
+  }
+
+  function googlePort(status: GoogleConnectionStatus): Partial<GoogleSetupPort> {
+    return {
+      getGoogleStatus: async () => status,
+      checkGoogleClient: async () => ({ ok: true, problems: [] }),
+      beginGoogleConsent: async () => ({ authorizationUrl: 'https://accounts.example.test', setup: status.setup }),
+      completeGoogleConsent: async () => status,
+      testGoogleConnection: async () => ({ result: 'ok', accountEmail: null }),
+      disconnectGoogle: async () => ({ revocationConfirmed: true }),
+    };
+  }
+
+  it('says what the row needs from the user in plain words', async () => {
+    renderSettings([parallelWeb], googlePort(googleStatus()));
+    expect(
+      await screen.findByText(/Uses a Google app you set up once, in your own Google account\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
+  });
+
+  it('says Reconnect needed, with a Reconnect button, when Google no longer accepts the login', async () => {
+    renderSettings([parallelWeb], googlePort(googleStatus({ state: 'needs_reconnect' })));
+    expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+  });
+
+  it('shows the row with a plain message, and a way to try again, when the status cannot be read', async () => {
+    let calls = 0;
+    const port: Partial<GoogleSetupPort> = {
+      ...googlePort(googleStatus()),
+      getGoogleStatus: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('boom');
+        return googleStatus({ state: 'connected', accountEmail: 'ada@example.com' });
+      },
+    };
+    renderSettings([parallelWeb], port);
+    expect(await screen.findByText("Couldn't check Google right now")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('button', { name: 'Manage' })).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't check Google right now")).not.toBeInTheDocument();
+  });
+
+  it('uses a neutral G tile for Google, not a generic server icon', async () => {
+    renderSettings([parallelWeb], googlePort(googleStatus()));
+    await screen.findByText('Not connected');
+    const tile = screen.getByText('G');
+    expect(tile).toHaveAttribute('aria-hidden', 'true');
+    expect(tile.querySelector('svg')).toBeNull();
+  });
+
+  it('on a locked demo says so and offers neither Connect, Reconnect nor Manage', async () => {
+    for (const state of ['connected', 'needs_reconnect', 'not_connected'] as const) {
+      const { unmount } = renderSettings([parallelWeb], googlePort(googleStatus({ state, locked: true })));
+      expect(
+        await screen.findByText(
+          "This demo uses a sample Google account. Aman can only send to the demo's own addresses.",
+        ),
+      ).toBeInTheDocument();
+      for (const name of ['Connect', 'Reconnect', 'Manage']) {
+        expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+      }
+      unmount();
+    }
   });
 });

@@ -37,6 +37,30 @@ If a role names a model that is no longer configured, the turn fails and says so
 never quietly answered by a different model: work attributed to a model that did not do it
 is worse than a visible error.
 
+## What each model did
+
+Under each answer a quiet line names the model that answered, its provider, and the tokens and cost
+of the whole turn, with any helper calls folded into the total:
+
+```text
+Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano
+```
+
+With **Show agent details** on for the chat, each role that ran (the answer, sub-agents, compaction,
+turn summarization, profile learning, the library relevance check) is listed with its model, calls,
+tokens and cost. Token counts are the usage the provider reported for each call. A call whose
+provider reported none is shown as `usage not reported`, never as zero or an estimate.
+
+Cost is an estimate from a price table in USD per million tokens, shown "at list price" because it
+is not your bill. Token Factory models have built-in list prices read on 2026-10-15; set
+`TOKEN_FACTORY_PRICES` to change them or to price a model on another provider. A model with no
+price shows tokens only. **Settings, Themes, Answers** hides the line and the helper rows
+for you without stopping usage from being counted, and **Settings, Models** shows today's tokens
+and cost per Token Factory model with the daily cap remaining.
+
+Compaction that inherits the chat model is counted with the chat calls. Set a compaction model to
+see it as its own row.
+
 ## Personas
 
 A persona is a name, a concise role, and a model — configured under **Settings → Model

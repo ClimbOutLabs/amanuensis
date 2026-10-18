@@ -28,7 +28,7 @@ import {
 } from './world.mjs';
 
 // The document a healthy world prints: same shape and keys as before the text report was restyled.
-const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading email attachments is not available.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 28.0.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
 `;
 
 let world;
@@ -150,7 +150,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 27\.1\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -170,7 +170,7 @@ describe('document and exit codes', () => {
     assert.match(flat, /This computer x Only 1\.0 GB is free for Docker data/);
     assert.match(flat, /\d+ other checks passed\. Full report: aman doctor/);
     assert.doesNotMatch(flat, /All \d+ checks passed/);
-    assert.doesNotMatch(flat, /Docker 27\.1\.1 is running/);
+    assert.doesNotMatch(flat, /Docker 28\.0\.1 is running/);
     assert.doesNotMatch(flat, /Instance main/);
   });
 
@@ -394,6 +394,23 @@ describe('unsupported runtimes', () => {
     world.set('version', { out: 'Docker Engine - Community;\n' });
     world.set('cli_version', { out: 'podman version 5.0.0\n' });
     assert.equal(machine(world.json(), 'runtime').state, 'fail');
+  });
+
+  it('fails on native Linux with an Engine older than 28, and passes for 28, Docker Desktop and WSL2', () => {
+    make();
+    const info = (version, os) => ({ out: `${version}|x86_64|[]|${world.dockerRoot}|${DAEMON_TIME}|${os}\n`, rc: 0 });
+    world.set('info', info('27.5.1', 'Ubuntu 24.04'));
+    const check = machine(world.json(), 'runtime');
+    assert.equal(check.state, 'fail');
+    assert.match(
+      check.detail,
+      /Docker Engine 27\.5\.1 lets other devices on your network reach ports meant for this computer only/,
+    );
+    assertFixed(check);
+    world.set('info', info('28.0.0', 'Ubuntu 24.04'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
+    world.set('info', info('27.5.1', 'Docker Desktop'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
   });
 });
 
@@ -651,46 +668,128 @@ describe('instance settings file', () => {
     assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
   });
 
-  it('reports the sign-in user count without printing a hash', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(
-      file,
-      [
-        "DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
-        '',
-      ].join('\n'),
-    );
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid,a@x.invalid,b@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'ok');
-    assert.match(check.detail, /3 sign-in user\(s\): the owner and 2 member\(s\)/);
-    assert.doesNotMatch(world.json().stdout, /SENTINEL/);
-  });
+  describe('one account per instance', () => {
+    const OWNER = 'owner@x.invalid';
+    const fixCommand = 'Run aman doctor instance --fix';
 
-  it('warns when fewer emails are allowed than there are users', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'warn');
-    assert.match(check.detail, /2 sign-in user\(s\)/);
-    assert.match(check.detail, /Fewer emails are allowed/);
-    assert.match(check.fix, /add-user/);
-  });
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+      world?.dispose();
+      make();
+      const file = path.join(world.instanceDir('main'), 'dex.env');
+      writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
+      chmodSync(file, 0o600);
+      world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
+      if (registered) {
+        const dir = path.join(world.home, 'state', 'instances');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n${records}`);
+      }
+      return find(world.json().doc.instances.main, 'config');
+    }
 
-  it('does not warn about a wildcard allowlist', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=*@x.invalid\n');
-    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+    it('is quiet when only the owner can sign in', () => {
+      const check = setUp({ allowed: OWNER });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('warns with the fix command and names the extra emails left from add-user', () => {
+      const check = setUp({
+        allowed: `${OWNER},a@x.invalid,B@x.invalid`,
+        hashes: [
+          "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
+          "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
+        ],
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: a@x.invalid, b@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('does not mistake the owner in another case or with spaces for an extra user', () => {
+      const check = setUp({ allowed: ` ${OWNER.toUpperCase()} ` });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('takes the first allowed email for the owner when the record is gone', () => {
+      assert.equal(setUp({ allowed: OWNER, registered: false }).state, 'ok');
+      const check = setUp({ allowed: `${OWNER},a@x.invalid`, registered: false });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /: a@x\.invalid\./);
+    });
+
+    it('warns about a pattern, which lets more than the owner in', () => {
+      const check = setUp({ allowed: '*@x.invalid' });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /\*@x\.invalid/);
+      assert.equal(check.fix, fixCommand);
+    });
+
+    it('warns about left-over password hashes even when the emails are already the owner only', () => {
+      const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('reads every allowed-emails line, since Compose takes the last one', () => {
+      const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+    });
+
+    for (const [what, line] of [
+      ['an indented line', '  OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['a tab-indented line', '\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and a tab', 'export\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and several spaces', '  export   OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['blanks around the equals sign', 'OIDC_ALLOWED_EMAILS = late@x.invalid'],
+      ['a colon for the equals sign', 'OIDC_ALLOWED_EMAILS: late@x.invalid'],
+      ['a no-break space before it', '\u00a0OIDC_ALLOWED_EMAILS=late@x.invalid'],
+    ]) {
+      it(`reads an allowed-emails line Compose also reads: ${what}`, () => {
+        const check = setUp({ envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n${line}\n` });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+        assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    it('warns about a user record left in the registry when the emails are the owner only', () => {
+      const check = setUp({ allowed: OWNER, records: 'user_judge1=member:judge1@x.invalid\n' });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+    });
+
+    for (const [what, value] of [
+      ['double quotes', `"${OWNER}"`],
+      ['single quotes', `'${OWNER}'`],
+      ['quotes and a comment', `"${OWNER}" # the owner`],
+      ['a comment', `${OWNER} # the owner`],
+      ['a Windows line ending', `${OWNER}\r`],
+    ]) {
+      it(`is quiet when the owner-only value has ${what}`, () => {
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `  export OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n`, registered: false }).state, 'ok');
+      });
+    }
+
+    it('does not take a comment or a longer name for the allowed emails', () => {
+      const check = setUp({
+        envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n# OIDC_ALLOWED_EMAILS=late@x.invalid\nOIDC_ALLOWED_EMAILS_NOTE=late@x.invalid\n`,
+      });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('no longer mentions members or add-user', () => {
+      const check = setUp({ allowed: `${OWNER},a@x.invalid` });
+      assert.doesNotMatch(`${check.detail} ${check.fix}`, /member|add-user|list-users/i);
+    });
   });
 
   it('fails when the file is missing', () => {
@@ -1216,6 +1315,19 @@ describe('why an instance does not run', () => {
     assert.match(fixed.stdout, /Instance main is fixed/);
   });
 
+  it('--fix renders again when the containers are healthy but more than the owner can sign in', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=owner@x.invalid,extra@x.invalid\n');
+    const dir = path.join(world.home, 'state', 'instances');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'main.conf'), 'name=main\nowner_email=owner@x.invalid\n');
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
+  });
+
   it('fix asks first and changes nothing when the answer is not yes', () => {
     make();
     const repo = world.sandbox();
@@ -1528,6 +1640,25 @@ describe('aman backup and aman upgrade', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
   });
 
+  it('aman password runs the installer to set a new owner password, with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['password']).code, 0);
+    assert.equal(world.shim(['password', '--instance', 'main', '--password-stdin']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password`));
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} instance password --instance main --password-stdin`),
+    );
+  });
+
+  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+    make();
+    const result = world.shim(['--help']);
+    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stderr, /on the computer where Aman is installed/);
+  });
+
   it('say plainly when the folder Aman was installed from is gone', () => {
     make();
     const result = world.shim(['backup']);
@@ -1543,6 +1674,41 @@ describe('aman backup and aman upgrade', () => {
     const result = runInstalled(['backup']);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+});
+
+describe('aman import and aman migrate', () => {
+  it('import into the one instance through the installer, with the display name passed on', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--display-name', 'Sam Example']).code, 0);
+    assert.ok(
+      world
+        .calls()
+        .includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --display-name Sam Example`),
+    );
+  });
+
+  it('import needs --instance when this computer has more than one, and a file always', () => {
+    make({ instances: ['main', 'second'] });
+    world.installerStub(world.sandbox());
+    const several = world.shim(['import', '/x/aman-export.zip']);
+    assert.equal(several.code, 2);
+    assert.match(several.stderr, /has 2 instances, so Aman cannot tell which one to import into\. Run aman import/);
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--instance', 'second']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance import second /x/aman-export.zip`));
+    const none = world.shim(['import']);
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /aman import needs the export file\. Run aman import FILE\./);
+  });
+
+  it('migrate runs the installer with the folder and the options given', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['migrate', '--from-compose', '/x/old-aman', '--user', 'sam-id']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} migrate --from-compose /x/old-aman --user sam-id`),
+    );
   });
 });
 
@@ -1874,13 +2040,43 @@ describe('sandbox settings that are incomplete', () => {
     assert.ok(slots > refresh, 'the sandboxes were repaired after the settings were rewritten');
   });
 
-  it('an instance installed without the sandbox is left alone', () => {
+  it('tells an instance installed without the sandbox how to turn it on', () => {
     make();
     world.sandbox({ wired: [] });
     mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
     writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
     const result = world.shim(['doctor', 'sandbox']);
-    assert.equal(result.code, 0);
-    assert.match(result.stdout, /No instance has the sandbox/);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stdout.replace(/\s+/g, ' '),
+      /Instance main was installed without the sandbox, so running code and reading PDFs are off\. Next: Run aman doctor sandbox --fix/,
+    );
+    assert.doesNotMatch(result.stdout, /install\.sh --name/);
+    assert.doesNotMatch(result.stdout, /sandbox tools are not installed/);
+  });
+
+  it('says the same when the sandbox tools were never installed, and --fix runs the installer for that instance', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    const plain = world.shim(['doctor', 'sandbox']);
+    assert.match(plain.stdout, /Instance main was installed without the sandbox/);
+    assert.doesNotMatch(plain.stdout, /sandbox tools are not installed/);
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.ok(world.calls().some(line => line.includes(`install.sh --home ${world.home} --yes --name main`)));
+  });
+
+  it('--fix without --yes lets the installer show its own plan and ask', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'instances', 'main.conf'), 'name=main\nsandbox=off\n');
+    world.installerStub(world.sandbox({ wired: [] }));
+    const fixed = world.shim(['doctor', 'sandbox', '--fix'], { input: 'y\n' });
+    const install = world.calls().find(line => line.includes('install.sh --home'));
+    assert.ok(install, fixed.stdout + fixed.stderr);
+    assert.ok(install.includes('--name main'));
+    assert.ok(!install.includes('--yes'), install);
   });
 });

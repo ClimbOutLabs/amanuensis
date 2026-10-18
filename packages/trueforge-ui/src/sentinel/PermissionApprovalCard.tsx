@@ -5,7 +5,7 @@ import { useState, type FC } from 'react';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard } from './types.js';
+import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
@@ -13,6 +13,12 @@ type ApprovalCardTier = 2 | 3;
 const FOLD_PREVIEW_CHARS = 500;
 
 const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
+
+const EMAIL_BADGES: Record<SentinelApprovalEmailAction, string> = {
+  send: 'Send email',
+  save: 'Save draft',
+  change: 'Change draft',
+};
 
 export type PermissionApprovalCardProps = {
   toolName: string;
@@ -66,9 +72,52 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
         <FoldedText
           text={value}
           as="span"
-          className={`break-all text-text-primary ${mono ? 'font-mono text-xs' : ''}`}
+          className={`text-text-primary ${mono ? 'break-all font-mono text-xs' : 'break-words'}`}
         />
       </dd>
+    </div>
+  );
+}
+
+/** What a change replaces; the recipients are in the box below, which is the one place they are listed. */
+function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
+  return (
+    <dl className="rounded border border-border bg-primary-bg px-3 py-2">
+      <DetailRow label="Replaces" value={`${replaces.subject} (to ${replaces.to.join(', ')})`} />
+    </dl>
+  );
+}
+
+/** The whole message, never cut: the body scrolls in its own box instead of being folded. */
+function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
+  return (
+    <div className="rounded border border-border bg-primary-bg px-3 py-2">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      {email.reply_in_thread !== null && (
+        <dl className="mb-1">
+          <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
+          <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
+        </dl>
+      )}
+      <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
+      {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
+      {email.bcc.length > 0 && (
+        <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
+      )}
+      <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
+      <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        Message, exactly as sent
+      </p>
+      <div
+        role="region"
+        aria-label="Message, exactly as sent"
+        tabIndex={0}
+        className="max-h-80 overflow-auto rounded border border-border bg-card-bg px-3 py-2"
+      >
+        <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
+          {email.body === '' ? 'This message has no text.' : email.body}
+        </p>
+      </div>
     </div>
   );
 }
@@ -112,17 +161,24 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
+  const { email } = card;
   return (
-    <div className="rounded-lg border border-primary-button-bg/30 bg-primary-button-bg/10">
-      <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-primary-button-bg/30 px-4 py-2">
+    <div className="rounded-lg border border-border bg-card-bg">
+      <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
           <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
-          <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
-            {toolName}
-          </span>
+          {email === null ? (
+            <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
+              {toolName}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 text-xs text-text-secondary">
+              {EMAIL_BADGES[email.action]}
+            </span>
+          )}
         </div>
-        <span className="shrink-0 rounded border border-primary-button-bg/40 bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
+        <span className="shrink-0 rounded border border-border bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
           {TIER_LABELS[tier]}
         </span>
       </div>
@@ -142,6 +198,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
+        {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
+
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
             {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
@@ -151,6 +209,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
           </dl>
         )}
+
+        {email !== null && <EmailMessage email={email} />}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 

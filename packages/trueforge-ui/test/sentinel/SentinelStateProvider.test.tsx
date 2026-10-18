@@ -39,6 +39,7 @@ const CARD = {
   outbound_text: null,
   destination_host: null,
   outbound_truncated: false,
+  email: null,
 };
 
 describe('SentinelStateProvider', () => {

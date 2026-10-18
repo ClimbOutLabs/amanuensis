@@ -429,6 +429,32 @@ describe('auth router (auth enabled)', () => {
     expect(setCookies(callbackRes).some(cookie => cookie.startsWith(`${ID_TOKEN_COOKIE}=`))).toBe(false);
   });
 
+  it('GET /callback tells a refused person only the owner can sign in, in standalone', async () => {
+    const restrictedClient = await initOidc({
+      ...configuredOidc,
+      OIDC_ALLOWED_EMAILS: ['owner@company.com'],
+    });
+    if (!restrictedClient) {
+      throw new Error('OIDC client was not initialized');
+    }
+    Object.defineProperty(configuration, 'STANDALONE', { value: true, configurable: true });
+    try {
+      const router = createTestAuthRouter({ oidcClient: restrictedClient });
+      const loginRes = await router.request('/login', { redirect: 'manual' });
+      const stateCookieRaw = cookieValue(setCookies(loginRes), STATE_COOKIE) ?? '';
+      const state = new URL(loginRes.headers.get('location') ?? '').searchParams.get('state') ?? '';
+      const callbackRes = await router.request(
+        `/callback?code=abc123&state=${state}&iss=${encodeURIComponent(ISSUER)}`,
+        { redirect: 'manual', headers: { Cookie: `${STATE_COOKIE}=${stateCookieRaw}` } },
+      );
+      expect(callbackRes.headers.get('location')).toBe(
+        `/?error=${encodeURIComponent('Only the owner can sign in to this instance.')}`,
+      );
+    } finally {
+      Object.defineProperty(configuration, 'STANDALONE', { value: false, configurable: true });
+    }
+  });
+
   it('GET /callback redirects home with error when the IdP returns an error', async () => {
     const res = await createTestAuthRouter({ oidcClient }).request(
       '/callback?state=any&error=access_denied&error_description=user%20cancelled',

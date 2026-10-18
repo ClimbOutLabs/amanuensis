@@ -444,6 +444,43 @@ describe('buildBugReportBundle', () => {
     expect(bundle.chat?.notes).toContain(`oldest ${String(bounded.omittedMessages)} messages were left out`);
   });
 
+  it('carries nothing of a held search card, masked or not', () => {
+    const card = {
+      plain_what:
+        "Search the web through finder for: debug sy••••••11. Held because it contains one of this computer's keys.",
+      outbound_text: 'query: debug sy••••••11',
+    };
+    const rows = [
+      {
+        turn_id: 't1',
+        event: {
+          type: 'tool.approval_required',
+          created_at: '2026-01-01T00:00:01.000Z',
+          tool_calls: [{ id: 'c1', tier: 3, tier3_card: card }],
+        },
+      },
+    ];
+    const bundle = buildBugReportBundle({
+      build: { version: '0.1.4' },
+      session: {
+        id: 's3',
+        agentName: null,
+        model: 'local/qwen',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        connectors: [],
+        skills: [],
+        sandboxEnabled: false,
+      },
+      description: undefined,
+      events: rows,
+      configFlags: { sandbox_enabled: false, skill_enabled: false, settings_enabled: false },
+      includeChat: false,
+    });
+    const serialized = JSON.stringify(bundle);
+    expect(serialized).not.toContain('debug');
+    expect(serialized).not.toContain('sy••••••11');
+  });
+
   it('says in plain words what happened, with timing, tool names, exit codes, and every failed step', () => {
     const turnId = 'turn-2';
     const at = (seconds: number) => `2026-01-01T00:01:${String(seconds).padStart(2, '0')}.000Z`;

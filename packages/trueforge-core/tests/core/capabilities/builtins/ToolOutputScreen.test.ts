@@ -10,22 +10,25 @@ function makeResult(input: {
   rawContent?: string;
   openWorldHint?: boolean | undefined;
   memoized?: boolean;
+  serverName?: string;
+  toolName?: string;
 }): ToolCallResult {
   const rawContent = input.rawContent ?? ATTACK;
-  const toolSet = makeMockIMCPServer({ name: 'external-web', preload: true });
+  const toolSet = makeMockIMCPServer({ name: input.serverName ?? 'external-web', preload: true });
   return {
     message: { role: 'tool', tool_call_id: 'call-1', content: rawContent },
+    images: [],
     rawContent,
     toolCallInfo: {
       type: 'mcp',
       mcp_server_id: toolSet.id,
       mcp_server_name: toolSet.name,
-      original_tool_name: 'fetch_url',
+      original_tool_name: input.toolName ?? 'fetch_url',
       is_approval_required: false,
       ...(input.openWorldHint === undefined ? {} : { open_world_hint: input.openWorldHint }),
     },
     screen: undefined,
-    info: { toolSet, originalToolName: 'fetch_url' },
+    info: { toolSet, originalToolName: input.toolName ?? 'fetch_url' },
     failure: false,
     isStructuredContent: false,
     completedAt: '2026-09-04T00:00:00.000Z',
@@ -145,5 +148,17 @@ describe('ToolOutputScreen', () => {
     expect(classify).toHaveBeenCalledWith({ text: ATTACK, timeoutMs: 250 });
     expect(result.message.content).not.toContain('Preview only');
     expect(result.message.content).not.toContain('RED-TEAM-CANARY-7Q2X9');
+  });
+
+  it('screens text read from a file by the document tool, which is read-only and not open-world', async () => {
+    const classify = jest.fn().mockResolvedValue({ ok: true, flagged: true, score: 0.99, reasonCode: null });
+    const fileText = makeResult({ serverName: 'documents', toolName: 'extract_document_text', rawContent: ATTACK });
+    const otherDocumentTool = makeResult({ serverName: 'documents', toolName: 'create_document_report' });
+
+    await screenProcessor(classify).process([fileText, otherDocumentTool], executionContext());
+
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(fileText.message.content).not.toContain('RED-TEAM-CANARY-7Q2X9');
+    expect(otherDocumentTool.screen).toBeUndefined();
   });
 });

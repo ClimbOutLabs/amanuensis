@@ -30,7 +30,7 @@ describe('maps tool schema bounds', () => {
     const server = getServer();
     return server.listTools().then(response => {
       const tools = 'result' in response ? response.result.tools : [];
-      expect(tools.map(t => t.name).sort()).toEqual(['render_map', 'render_route']);
+      expect(tools.map(t => t.name).sort()).toEqual(['render_map', 'render_places', 'render_route']);
       for (const tool of tools) {
         const schema = JSON.stringify(tool.inputSchema);
         expect(schema).not.toMatch(/"pattern"/);

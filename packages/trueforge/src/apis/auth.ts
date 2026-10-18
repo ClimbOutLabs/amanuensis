@@ -4,11 +4,12 @@ import type { Context, MiddlewareHandler } from 'hono';
 import type { Logger } from 'winston';
 import { ADDRESS_NOT_LISTED_MESSAGE, requestAllowedOrigin } from '../auth/allowedOrigins';
 import { clearAuthCookie, ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, readOAuthStateCookie } from '../auth/cookies';
+import { EmailNotAllowedError } from '../auth/emailAllowlist';
 import { resolveRequestContext } from '../auth/identity';
 import { resolveOidcRequestContext } from '../auth/middleware';
 import { buildLoginAuthorization, exchangeAuthorizationCode, type OidcDiscoveryHandle } from '../auth/oidc';
 import { safeReturnTo } from '../auth/safeReturnTo';
-import { getAllowedOrigins, getPublicUiBasePath, isTrueFoundryModeEnabled } from '../config';
+import configuration, { getAllowedOrigins, getPublicUiBasePath, isTrueFoundryModeEnabled } from '../config';
 import { authLoginRoute, authLogoutRoute, meRoute, oAuthCallbackRoute } from '../routes/authRoutes';
 import type { GetMeResponse } from '../schemas/auth';
 import { buildTrueFoundryExternalLoginHref, resolveTrueFoundryLoginReturnTo } from '../truefoundry/externalLogin';
@@ -19,6 +20,7 @@ function oauthErrorRedirect(reason: string): string {
 }
 
 const LOGIN_RETRY_SECONDS = 5;
+const OWNER_ONLY_MESSAGE = 'Only the owner can sign in to this instance.';
 
 /** Plain page (no script) shown while the identity provider is unreachable; it refreshes itself. */
 const LOGIN_UNAVAILABLE_PAGE = `<!doctype html>
@@ -161,7 +163,13 @@ export function createAuthRouter(params: {
       if (soft) {
         return soft;
       }
-      const reason = error instanceof Error ? error.message : 'login_failed';
+      // Standalone has one account, so a refused person is told why; a shared allowlist stays undisclosed.
+      const reason =
+        error instanceof EmailNotAllowedError && configuration.STANDALONE
+          ? OWNER_ONLY_MESSAGE
+          : error instanceof Error
+            ? error.message
+            : 'login_failed';
       return c.redirect(oauthErrorRedirect(reason), 302);
     }
   });

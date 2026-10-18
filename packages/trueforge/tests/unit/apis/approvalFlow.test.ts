@@ -1285,6 +1285,31 @@ describe('web search provider over an inert connector', () => {
       });
       expect(requiredActions(approved)).toEqual([]);
       expect(server.mcp.echoInvocations()).toBe(1);
+      const entries = await auditEntries({ server, sessionId });
+      expect(entries).not.toEqual([]);
+      expect(JSON.stringify(entries)).not.toContain(syntheticAwsKeyId);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'keeps the held query out of the audit log when the user turns it down',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const held = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+      const pending = pendingApproval(held);
+      if (pending === undefined) {
+        throw new Error('expected the query to wait for approval');
+      }
+      await runTurn({
+        server,
+        sessionId,
+        previousTurnId: held.id,
+        input: approvalInput({ ...pending, approval: { status: 'deny' } }),
+      });
+      const entries = await auditEntries({ server, sessionId });
+      expect(entries).not.toEqual([]);
+      expect(JSON.stringify(entries)).not.toContain(syntheticAwsKeyId);
     },
     TURN_TIMEOUT_MS,
   );

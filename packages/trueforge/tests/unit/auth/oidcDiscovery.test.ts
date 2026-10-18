@@ -23,6 +23,7 @@ function oidcConfig(issuerUrl: string): OIDCConfig {
     OIDC_ADMIN_ROLE_VALUE: 'owner@example.com',
     OIDC_SCOPES: ['openid', 'profile', 'email'],
     OIDC_ALLOWED_EMAILS: ['owner@example.com'],
+    OIDC_REQUIRE_VERIFIED_EMAIL: false,
   };
 }
 

@@ -36,6 +36,19 @@ export interface SentinelAuditRecord {
   created_at: string;
 }
 
+export interface ListOwnedSentinelAuditInput {
+  tenant_id: string;
+  created_by: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ImportSentinelAuditInput {
+  tenant_id: string;
+  created_by: string;
+  records: readonly SentinelAuditRecord[];
+}
+
 export interface ListSentinelAuditInput {
   tenant_id: string;
   created_by: string;
@@ -85,7 +98,14 @@ export interface ISentinelAuditStore extends AuditLogWriter {
   list(input: ListSentinelAuditInput): Promise<SentinelAuditRecord[]>;
   /** Every chat's entries for one user, newest first, including chats since deleted. */
   listForUser(input: ListUserSentinelAuditInput): Promise<UserSentinelAuditPage>;
+  /** Every row one owner has, oldest first, for the data export. */
+  listOwned(input: ListOwnedSentinelAuditInput): Promise<SentinelAuditRecord[]>;
+  /** Writes exported rows under the importing owner with their original dates; pass the import transaction. */
+  importRecords(input: ImportSentinelAuditInput, transaction?: Kysely<SentinelAuditDatabase>): Promise<void>;
 }
+
+/** Rows written per insert statement; keeps each statement under the parameter limit of either database. */
+const IMPORT_BATCH_SIZE = 50;
 
 /**
  * Durable Sentinel permission audit log. Implements the AuditLogWriter
@@ -174,5 +194,43 @@ export class SentinelAuditStore implements ISentinelAuditStore {
           ? encodePageToken(UserAuditCursorSchema, { created_at: last.created_at, id: last.id })
           : undefined,
     };
+  }
+
+  async listOwned(input: ListOwnedSentinelAuditInput): Promise<SentinelAuditRecord[]> {
+    const rows = await this.#db
+      .selectFrom('sentinel_audit')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc')
+      .limit(input.limit)
+      .offset(input.offset)
+      .execute();
+    return rows.map(toRecord);
+  }
+
+  async importRecords(input: ImportSentinelAuditInput, transaction?: Kysely<SentinelAuditDatabase>): Promise<void> {
+    const db = transaction ?? this.#db;
+    for (let start = 0; start < input.records.length; start += IMPORT_BATCH_SIZE) {
+      const batch = input.records.slice(start, start + IMPORT_BATCH_SIZE);
+      await db
+        .insertInto('sentinel_audit')
+        .values(
+          batch.map(record => ({
+            id: newId(),
+            tenant_id: input.tenant_id,
+            created_by: input.created_by,
+            conversation_id: record.conversation_id,
+            tier: record.tier,
+            tool_name: record.tool_name,
+            description: record.description,
+            outcome: record.outcome,
+            auto_deny_reason: record.auto_deny_reason,
+            created_at: record.created_at,
+          })),
+        )
+        .execute();
+    }
   }
 }

@@ -40,6 +40,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   // Embedded maps: geocoding, routing, and tiles all leave the machine.
   render_map: true,
   render_route: true,
+  render_places: true,
 };
 
 /**

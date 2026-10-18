@@ -9,6 +9,8 @@
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
+#   aman import FILE [--instance NAME] [--display-name NAME]
+#   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -70,6 +72,7 @@ DOCKER_ROOT=""
 DOCKER_SYSTEM_TIME=""
 DOCKER_SECURITY=""
 DOCKER_OS=""
+DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
@@ -81,6 +84,10 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
+       aman password [--instance NAME] [--password-stdin]
+         sets a new owner password; run it on the computer where Aman is installed
+       aman import FILE [--instance NAME] [--display-name NAME]
+       aman migrate --from-compose FOLDER [--user ID]
 USAGE
 }
 
@@ -357,6 +364,7 @@ check_docker() {
   DOCKER_SECURITY=$security
   DOCKER_OS=$os
   DOCKER_MEM=$mem
+  DOCKER_VERSION=$version
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
@@ -400,6 +408,11 @@ check_runtime() {
       return
       ;;
   esac
+  if docker_engine_leaks_loopback "$DOCKER_VERSION" "$DOCKER_OS"; then
+    record machine runtime fail "$(docker_leaks_loopback_text "$DOCKER_VERSION")" \
+      "Install a current Docker Engine (install.sh --print-root-steps shows the steps), then run aman doctor."
+    return
+  fi
   record machine runtime ok "A supported Docker runtime is in use." ""
 }
 
@@ -708,7 +721,7 @@ fix_checkout() {
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
-  local name=$1 file mode dir
+  local name=$1 file mode dir extra
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
@@ -725,32 +738,13 @@ check_instance_config() {
       return
     fi
   done
-  summarize_users "$dir"
-  if [ "$USERS_SHORT" = 1 ]; then
-    record "$name" config warn "The settings files are private to you.${USERS_SUMMARY} Fewer emails are allowed to sign in than there are users." \
-      "Run install.sh instance list-users, then instance add-user again for each member; it repairs the allowed emails."
+  extra=$(extra_sign_in_users "${AMAN_HOME}/state/instances/${name}.conf" "$dir")
+  if [ -n "$extra" ]; then
+    record "$name" config warn "More than the owner can sign in: ${extra}." \
+      "$INSTANCE_FIX"
     return
   fi
-  record "$name" config ok "The settings files exist and are private to you.${USERS_SUMMARY}" ""
-}
-
-# Sets USERS_SUMMARY (" N sign-in user(s): the owner and M member(s).") from the hash variables in dex.env, and
-# USERS_SHORT=1 when fewer emails are allowed than there are users. Hashes are counted, never printed.
-summarize_users() { # instance dir
-  local users members allowed
-  USERS_SUMMARY=""
-  USERS_SHORT=0
-  [ -f "${1}/dex.env" ] || return 0
-  users=$(awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
-  users=${users:-0}
-  members=0
-  if [ "$users" -gt 0 ]; then members=$((users - 1)); fi
-  USERS_SUMMARY=" ${users} sign-in user(s): the owner and ${members} member(s)."
-  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null | awk 'END { print }')
-  case "$allowed" in
-    '' | *'*'*) return 0 ;;
-  esac
-  if [ "$(printf '%s' "$allowed" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')" -lt "$users" ]; then USERS_SHORT=1; fi
+  record "$name" config ok "The settings files exist and are private to you." ""
 }
 
 # What a container is, in words for a person: "the main app" for the app of instance main.
@@ -1249,6 +1243,36 @@ sandbox_instances() {
   done
 }
 
+# The instances whose record says they were installed without the sandbox and whose app is not wired to it.
+sandbox_off_instances() {
+  local name
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    if [ "$(registry_value "$name" sandbox)" = off ] &&
+      ! grep -q 'SANDBOX_BACKEND: slots' "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null; then
+      printf '%s\n' "$name"
+    fi
+  done
+}
+
+# --fix for instances without the sandbox: the installer turns it on and keeps the data. Returns 1 if any failed.
+turn_on_sandbox() { # names...
+  local name installer rc=0 yes_flag=()
+  if [ "$UI_ASSUME_YES" = 1 ]; then yes_flag=(--yes); fi
+  if ! installer=$(checkout_installer); then
+    fail_no_installer
+    return 1
+  fi
+  for name in "$@"; do
+    if ui_confirm "Turn on the sandbox for instance $name and restart it? Its data is kept." y; then
+      # Without --yes the installer shows its own plan, which includes any update, and asks.
+      bash "$installer" --home "$AMAN_HOME" ${yes_flag[@]+"${yes_flag[@]}"} --name "$name" || rc=1
+    else
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 # True when the settings that connect the app to its sandboxes are all there.
 sandbox_settings_complete() { # name
   local compose
@@ -1260,7 +1284,7 @@ sandbox_settings_complete() { # name
 }
 
 doctor_sandbox() {
-  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin installer
+  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin installer off=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --fix) fix=1 ;;
@@ -1291,6 +1315,20 @@ doctor_sandbox() {
   UI_ASSUME_YES=$yes
   bundle="${AMAN_HOME}/bin/aman-sandbox.mjs"
   source="${AMAN_HOME}/state/source"
+  while IFS= read -r name; do
+    [ -n "$name" ] && off+=("$name")
+  done < <(sandbox_off_instances)
+  if [ "${#off[@]}" -gt 0 ]; then
+    for name in "${off[@]}"; do
+      ui_warn "Instance $name was installed without the sandbox, so running code and reading PDFs are off." "Run aman doctor sandbox --fix"
+    done
+    if [ "$fix" = 1 ]; then
+      turn_on_sandbox "${off[@]}" || failed=1
+    else
+      failed=1
+    fi
+    if [ "${#off[@]}" -eq "${#INSTANCES[@]}" ]; then exit "$failed"; fi
+  fi
   if [ ! -f "$bundle" ] || [ ! -r "$source" ]; then
     UI_FD=2 ui_fail "The sandbox tools are not installed under $(ui_path "$AMAN_HOME")." "Run install.sh again from the folder Aman was installed from."
     exit 1
@@ -1422,6 +1460,7 @@ doctor_repair() { # kind
         continue
       fi
     else
+      check_instance_config "$name"
       check_instance_containers "$name"
     fi
     text_checks "$name"
@@ -1541,7 +1580,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1550,6 +1589,48 @@ run_installer() { # command args...
     exit 1
   fi
   exec bash "$installer" --home "$AMAN_HOME" "$@"
+}
+
+# aman import FILE: the installer's import into the one instance on this computer, or the one --instance names.
+run_import() {
+  local file="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --display-name)
+        [ $# -ge 2 ] || die_usage "--display-name needs a name."
+        rest+=("$1" "$2")
+        shift
+        ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$file" ] || die_usage "Unexpected argument: $1"
+        file=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$file" ] || die_usage "aman import needs the export file. Run aman import FILE."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one to import into. Run aman import %s --instance NAME.\n' "$count" "$file" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
 }
 
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
@@ -1576,12 +1657,20 @@ renew_tls_if_due() {
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
-  doctor | backup | upgrade) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade) run_installer "$@" ;;
+  backup | upgrade | migrate) run_installer "$@" ;;
+  import)
+    shift
+    run_import "$@"
+    ;;
+  password)
+    shift
+    run_installer instance password "$@"
+    ;;
   -h | --help)
     usage
     exit 0

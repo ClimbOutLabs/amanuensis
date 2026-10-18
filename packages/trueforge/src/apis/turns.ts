@@ -27,6 +27,7 @@ import {
   rawSandboxId,
   redisKey,
   SandboxError,
+  SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
@@ -39,10 +40,12 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import type { ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -69,6 +72,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -78,6 +82,14 @@ import { submitRetainWithVerification, type SummarizeTurnContext } from '../runt
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
+import {
+  flushModelUsage,
+  modelIdentity,
+  TurnModelUsageLedger,
+  UsageRecordingLLM,
+  type ModelUsageDrainMember,
+  type TurnModelUsage,
+} from '../runtime/modelUsage';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
@@ -115,6 +127,16 @@ import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
 
+/** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
+function turnHelperModelFqn(): string | undefined {
+  return envManagedHelperModelFqn({
+    apiKey: configuration.NEBIUS_API_KEY,
+    managedByTrueFoundry: isTrueFoundryModeEnabled(),
+    model: configuration.TOKEN_FACTORY_MODEL,
+    cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
+  });
+}
+
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
     id: record.turn_id,
@@ -136,6 +158,10 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   new Uint8Array(buffer).set(content);
   return buffer;
 }
+
+/** What a person is told when a file was never copied out of a workspace that has since been cleared. */
+const CLEARED_WORKSPACE_MESSAGE =
+  'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.';
 
 /**
  * Builds the Content-Disposition telling the browser to save the file under its sandbox name.
@@ -189,6 +215,8 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
 }
 
 export interface TurnsRouterDeps {
+  /** Shipped MCP catalog: tells a designated search provider's search tools and plumbing arguments. */
+  mcpCatalog: McpCatalog;
   sessions: Sessions<SessionCustom, TurnCustom>;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
@@ -204,11 +232,13 @@ export interface TurnsRouterDeps {
   personalizationStore: IPersonalizationStore;
   personaStore: IPersonaStore;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
-  /** Per-instance daily Token Factory cap; a no-op without `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
+  /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
@@ -230,7 +260,13 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
+  | 'activeTurns'
+  | 'turnDrains'
+  | 'eventSubscriptions'
+  | 'logger'
+  | 'globalSettingsStore'
+  | 'mcpCatalog'
+  | 'tokenFactoryBudget'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -240,8 +276,10 @@ export type BeginTurnExecutionDeps = Pick<
   /** Fork-only: required unconditionally by createTurnResolver's memory/repository wiring. */
   tokenStore: IOAuthTokenStore;
   repositoryStore: IRepositoryStore;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -255,7 +293,7 @@ export type BeginTurnExecutionDeps = Pick<
   memorySettings?: MemoryProviderSettings | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
-  /** From CreateTurnRequest.client_timezone; absent for callers with no HTTP client (e.g. schedule run-now). */
+  /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
 };
 
@@ -264,6 +302,7 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
+  mcpCatalog: McpCatalog;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -292,6 +331,8 @@ function createTurnResolver(deps: {
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
+  /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -305,8 +346,11 @@ function createTurnResolver(deps: {
   toolOutputScreenEnabled: boolean;
   /** Limits and counts the turn's Token Factory calls against the daily cap. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Receives every model call the turn makes, for the usage shown under the answer. */
+  modelUsage: TurnModelUsage;
 }): SpaceTurnResourceResolver {
   const {
+    mcpCatalog,
     mcpServerStore,
     tokenStore,
     skillStore,
@@ -334,10 +378,12 @@ function createTurnResolver(deps: {
     previousTurnId,
     sessionTitle,
     spaceStore,
+    googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
     toolOutputScreenEnabled,
     tokenFactoryBudget,
+    modelUsage,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -346,7 +392,7 @@ function createTurnResolver(deps: {
     : {};
   return new SpaceTurnResourceResolver(
     {
-      llm: async name => {
+      llm: async (name, role) => {
         const resolved = await getModelDetails({
           tenant_id,
           name,
@@ -368,30 +414,61 @@ function createTurnResolver(deps: {
             ...(providerConfig.provider.type === 'tokenfactory' ? {} : metadataHeaders),
           },
         });
-        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) =>
-          new VercelAILLM({
+        const primaryIdentity = modelIdentity({ name, providerConfig: routed.providerConfig });
+        const fallbackConfig = routed.fallbackProviderConfig;
+        const fallbackIdentity =
+          fallbackConfig === undefined ? undefined : modelIdentity({ name, providerConfig: fallbackConfig });
+        // The identity is settled per call, because a call that failed over was answered by the fallback.
+        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) => {
+          let served = primaryIdentity;
+          const client = new VercelAILLM({
             providerConfig: withMetadataHeaders(routed.providerConfig),
-            ...(withFailover && routed.fallbackProviderConfig !== undefined
-              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig), onFallback: onFailover }
+            ...(withFailover && fallbackConfig !== undefined && fallbackIdentity !== undefined
+              ? {
+                  fallbackProviderConfig: withMetadataHeaders(fallbackConfig),
+                  onFallback: () => {
+                    served = fallbackIdentity;
+                    onFailover();
+                  },
+                }
               : {}),
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
           });
-        const role = tokenFactoryRole({
+          return new UsageRecordingLLM({
+            llm: client,
+            onCall: usage => {
+              modelUsage.record({ role, identity: served, usage });
+            },
+          });
+        };
+        const tokenFactoryRoleOfModel = tokenFactoryRole({
           primaryType: routed.providerConfig.provider.type,
-          fallbackType: routed.fallbackProviderConfig?.provider.type,
+          fallbackType: fallbackConfig?.provider.type,
         });
+        const tokenFactoryConfig =
+          tokenFactoryRoleOfModel === 'primary'
+            ? routed.providerConfig
+            : tokenFactoryRoleOfModel === 'fallback'
+              ? fallbackConfig
+              : undefined;
         // A new turn on a Token Factory model is refused up front once today's budget is gone; the
         // metered client re-checks before every model call after that.
-        if (role === 'primary') {
+        if (tokenFactoryRoleOfModel === 'primary') {
           await tokenFactoryBudget.assertWithinCap();
         }
         return {
           modelClient:
-            role === undefined
+            tokenFactoryRoleOfModel === undefined || tokenFactoryConfig === undefined
               ? buildClient({ withFailover: true, onFailover: () => undefined })
-              : new TokenFactoryMeteredLLM({ role, budget: tokenFactoryBudget, logger, build: buildClient }),
+              : new TokenFactoryMeteredLLM({
+                  role: tokenFactoryRoleOfModel,
+                  modelId: tokenFactoryConfig.model.id,
+                  budget: tokenFactoryBudget,
+                  logger,
+                  build: buildClient,
+                }),
           defaultModelParams: resolved.defaultModelParams,
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
@@ -422,7 +499,10 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
-          search_provider: connection.search_provider,
+          search_provider:
+            connection.search_provider === undefined
+              ? undefined
+              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -599,6 +679,11 @@ function createTurnResolver(deps: {
       previousTurnId: previousTurnId ?? null,
       sessionTitle,
       providerServerName: memoryProviderServerName,
+      searchProviderServerName: async () => {
+        const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
+        return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
+          ?.name;
+      },
       // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
       recallEnabled: undefined,
       internalSourceState,
@@ -615,10 +700,12 @@ function createTurnResolver(deps: {
     switchNotice,
     {
       store: spaceStore,
+      googleConnections: googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       logger,
     },
+    { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
   );
 }
 
@@ -675,6 +762,13 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
+}
+
+/** True when any user message in a create-turn input carries an attached file. */
+function inputAttachesFiles(input: TurnInputItem[]): boolean {
+  return input
+    .filter(isAgentInputUserMessage)
+    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
 }
 
 /**
@@ -829,6 +923,8 @@ export interface DrainTurnEventsInput {
     | {
         client: MemoryClient;
         userText: string;
+        /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
+        attachedFiles: boolean;
         sessionTitle: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
@@ -838,6 +934,8 @@ export interface DrainTurnEventsInput {
         summarize?: SummarizeTurnContext | undefined;
       }
     | undefined;
+  /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
+  modelUsage?: ModelUsageDrainMember | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
@@ -874,14 +972,15 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
     memory,
     artifacts,
     profileLearning,
+    modelUsage,
   } = input;
   // Provenance for the memory the retain below writes. All tool output is untrusted data (the
   // host says so in the system prompt), and the retained assistant reply is produced after seeing
   // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. This is the honest taint signal available at this chokepoint: the
-  // harness classifies no tool output as trusted, so "saw a tool result" is exactly "ingested
-  // untrusted content". A turn with no tool result is the user's own voice: `user_stated`.
-  let ingestedToolOutput = false;
+  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
+  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
+  // `user_stated`.
+  let ingestedToolOutput = memory?.attachedFiles === true;
   try {
     for await (const event of trackedStream) {
       if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
@@ -893,6 +992,13 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
       });
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
+        // First, so the answer's usage is visible before the slower follow-up work below.
+        const flushUsage = async () => {
+          if (modelUsage !== undefined) {
+            await flushModelUsage({ member: modelUsage, sessionId, turnId, turnEventStream, logger });
+          }
+        };
+        await flushUsage();
         if (memory !== undefined) {
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
@@ -923,6 +1029,8 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             logger,
           });
         }
+        // The summarization and profile learning calls above record after the first flush.
+        await flushUsage();
         if (artifacts !== undefined) {
           await resolveAndSubmitArtifactPersistence({
             ...artifacts,
@@ -962,19 +1070,8 @@ export interface TurnEventDrainInput {
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
-  memory?:
-    | {
-        client: MemoryClient;
-        userText: string;
-        sessionTitle: string | undefined;
-        /**
-         * Present only when turn summarization is enabled (the Settings toggle's
-         * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
-         * summarizes the turn via the LLM before writing. Absent means verbatim (the default).
-         */
-        summarize?: SummarizeTurnContext | undefined;
-      }
-    | undefined;
+  modelUsage: ModelUsageDrainMember;
+  memory?: DrainTurnEventsInput['memory'];
 }
 
 /**
@@ -1001,6 +1098,7 @@ export async function beginTurnExecution(params: {
     finalization_buffer_ms: 30_000,
   });
   const tenant_id = session.tenant_id;
+  const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
   // One read per turn: the persisted override (or env default) applies to the whole turn.
   const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
     globalSettingsStore: deps.globalSettingsStore,
@@ -1016,10 +1114,12 @@ export async function beginTurnExecution(params: {
     tenantId: tenant_id,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
     agentStore: deps.agentStore,
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
     memoryClientPresent: deps.memoryClient !== undefined,
+    helperFqn: turnHelperModelFqn(),
   });
   // Same one-read-per-turn contract for the recall screen: the Settings toggle's
   // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -1043,9 +1143,12 @@ export async function beginTurnExecution(params: {
     modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
     modelProviderStore: deps.modelProviderStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
+    helperFqn: turnHelperModelFqn(),
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
+    mcpCatalog: deps.mcpCatalog,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1056,6 +1159,7 @@ export async function beginTurnExecution(params: {
     repositoryStore: deps.repositoryStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
+    googleConnectionStore: deps.googleConnectionStore,
     logger: deps.logger,
     signal: abortController.signal,
     userRef,
@@ -1076,6 +1180,7 @@ export async function beginTurnExecution(params: {
     toolOutputScreenEnabled,
     turnArtifactStore: deps.turnArtifactStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    modelUsage,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1119,12 +1224,14 @@ export async function beginTurnExecution(params: {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
+      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
       memory:
         deps.memoryClient === undefined
           ? undefined
           : {
               client: deps.memoryClient,
               userText: extractUserMessageText(input ?? []),
+              attachedFiles: inputAttachesFiles(input ?? []),
               sessionTitle: deps.sessionTitle,
               summarize: memorySummarize,
             },
@@ -1453,7 +1560,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
 
       sandboxId = turn.record.snapshot.sandbox_info?.sandbox_id;
       if (sandboxId === undefined) {
-        return c.json({ error: { message: `Turn has no sandbox: ${turnId}` } }, 412);
+        return c.json({ error: { message: CLEARED_WORKSPACE_MESSAGE } }, 412);
       }
 
       const provider = await (deps.sandboxProviderResolver ?? resolveSandboxProvider)({
@@ -1476,14 +1583,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           'Cache-Control': 'private, no-store',
         });
       } catch (error) {
-        // No persisted copy and the live sandbox is gone: say what happened instead of the raw
-        // provider error, which reads as if the whole session vanished rather than this one file.
-        if (error instanceof SandboxNotAvailableError) {
+        // No persisted copy and the temporary workspace is gone: say what happened to this one file
+        // instead of the raw provider error, which reads as if the whole chat had vanished.
+        if (error instanceof SandboxNotAvailableError || error instanceof SandboxFileNotFoundError) {
           const reason =
             persisted?.status === 'skipped_missing'
-              ? (persisted.skip_reason ?? 'it was not found in the sandbox when this turn finished.')
-              : 'the sandbox was stopped after this turn finished, and no persisted copy was found for this file.';
-          return c.json({ error: { message: `This file was not kept: ${reason}` } }, 410);
+              ? `This file was not kept: ${persisted.skip_reason ?? 'it was not found when this turn finished.'}`
+              : CLEARED_WORKSPACE_MESSAGE;
+          return c.json({ error: { message: reason } }, 410);
         }
         throw error;
       }
@@ -1658,6 +1765,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       legacyParentActivation,
       latestManualActivationAfterParent,
     });
+    const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
     const internalSources = await resolveTurnInternalSources({
       session,
       previousTurnId,
@@ -1669,6 +1777,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      helperFqn: turnHelperModelFqn(),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1773,10 +1883,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           eventStore: deps.sessionStore,
           modelProviderStore,
           tokenFactoryBudget: deps.tokenFactoryBudget,
+          modelUsage,
           memoryClient,
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
           userText: extractUserMessageText(body.input),
+          helperFqn: turnHelperModelFqn(),
           turnModelFqn: await resolveTurnModelFqn({
             tenantId: requestContext.tenant_id,
             personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
@@ -1803,10 +1915,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       tenantId: requestContext.tenant_id,
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
+      helperFqn: turnHelperModelFqn(),
     });
 
     const abortController = new AbortController();
@@ -1831,6 +1945,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
+      mcpCatalog: deps.mcpCatalog,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,
@@ -1858,10 +1973,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
+      googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
     });
 
     // First turn only: derive the title from the first user message. The store
@@ -2139,12 +2256,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
+      modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
       memory:
         memoryClient === undefined
           ? undefined
           : {
               client: memoryClient,
               userText: extractUserMessageText(body.input),
+              attachedFiles: inputAttachesFiles(body.input ?? []),
               sessionTitle: sessionTitleForMemory,
               // Resolved once on the create-turn path above; absent means verbatim.
               summarize: memorySummarize,

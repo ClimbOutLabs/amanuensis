@@ -11,6 +11,7 @@ import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
@@ -20,6 +21,7 @@ import { useToasterOptional } from '../ToasterContainer.js';
 import AddMcpServerForm, { type AddMcpServerDraft } from './AddMcpServerForm.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
 import ConnectorDetails from './ConnectorDetails.js';
+import GoogleSetupPanel from './GoogleSetupPanel.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
 import { searchProviderForNewConnector } from './searchProvider.js';
 
@@ -105,6 +107,11 @@ const ConnectorSettings = () => {
   // write a result for the credentials (or connector) it was actually run against.
   const checkGenerationById = useRef<Map<string, number>>(new Map());
 
+  const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
+  // The status is advisory, but a failed read must show: a missing row reads as "Google is not offered here".
+  const [googleStatusFailed, setGoogleStatusFailed] = useState(false);
+  const [googlePanelOpen, setGooglePanelOpen] = useState(false);
+
   const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
@@ -149,6 +156,13 @@ const ConnectorSettings = () => {
         ),
       });
       setSelectedConnector(current => (current ? (listed.find(item => item.id === current.id) ?? null) : null));
+      // Google is optional on the port and its status is advisory: a failure here must not hide the
+      // rest of the connectors.
+      if (hasGoogleSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getGoogleStatus().catch(() => null);
+        setGoogleStatus(next);
+        setGoogleStatusFailed(next === null);
+      }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load connectors'));
     } finally {
@@ -592,6 +606,65 @@ const ConnectorSettings = () => {
     );
   };
 
+  const googleMatchesQuery = normalizedQuery === '' || 'google gmail email mail'.includes(normalizedQuery);
+
+  const renderGoogle = () => {
+    const connected = googleStatus?.state === 'connected';
+    const needsReconnect = googleStatus?.state === 'needs_reconnect';
+    const locked = googleStatus?.locked === true;
+    const label = googleStatusFailed
+      ? "Couldn't check Google right now"
+      : needsReconnect
+        ? 'Reconnect needed'
+        : connected
+          ? 'Connected'
+          : 'Not connected';
+    return (
+      <article className="flex min-h-16 w-full items-center gap-3 p-3">
+        <span
+          className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg text-sm font-semibold text-text-primary"
+          aria-hidden
+        >
+          G
+        </span>
+        <div className="min-w-0 flex-1">
+          <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
+          <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
+            {locked
+              ? "This demo uses a sample Google account. Aman can only send to the demo's own addresses."
+              : 'Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own Google account.'}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              'rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 text-xs font-medium',
+              needsReconnect ? 'text-failure-bg' : connected ? 'text-success-bg' : 'text-text-primary',
+            )}
+          >
+            {label}
+          </span>
+          {locked && !googleStatusFailed ? null : (
+            <Button
+              variant="secondary"
+              size="small"
+              type="button"
+              onClick={() => {
+                if (googleStatusFailed) {
+                  void refresh();
+                } else {
+                  setGooglePanelOpen(true);
+                }
+              }}
+            >
+              {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
+            </Button>
+          )}
+        </div>
+      </article>
+    );
+  };
+
   const renderCatalogEntry = (entry: ConnectorCatalogEntry) => {
     const logoSrc = connectorIconMap[entry.name];
     return (
@@ -687,13 +760,11 @@ const ConnectorSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Connectors</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Connected tools are ready to use. Choose the ones a chat uses from the composer. Test connection dials a
-        connector and reports the tools it answered with.
+        Connected tools are ready to use. Choose which ones a chat uses from the message box. Test connection shows
+        which tools the connector offers.
       </p>
       {isPlainDraft ? (
-        <p className="mt-1 text-xs text-text-secondary">
-          Selections in a new draft are remembered for future new chats.
-        </p>
+        <p className="mt-1 text-xs text-text-secondary">Choices in a new chat are remembered for future new chats.</p>
       ) : null}
 
       {!loading && matchingConnected.length === 0 ? (
@@ -705,12 +776,12 @@ const ConnectorSettings = () => {
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect — most need an API key or token from that service.
+              Connect. Most need an API key or token from that service.
             </li>
-            <li>Choose it in the composer so Aman can use its tools in that chat.</li>
+            <li>Choose it in the message box so Aman can use its tools in that chat.</li>
             <li>
-              Use <span className="font-medium text-text-primary">Test connection</span> to dial the connector and see
-              which tools answered.
+              Use <span className="font-medium text-text-primary">Test connection</span> to see which tools the
+              connector offers.
             </li>
           </ol>
         </section>
@@ -743,6 +814,21 @@ const ConnectorSettings = () => {
 
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
+
+            {!loading &&
+            (googleStatus !== null || googleStatusFailed) &&
+            googleMatchesQuery &&
+            hasGoogleSetup(connectorCatalog) ? (
+              <section aria-labelledby="google-connector-heading">
+                <h4
+                  id="google-connector-heading"
+                  className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
+                >
+                  Google
+                </h4>
+                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">{renderGoogle()}</div>
+              </section>
+            ) : null}
 
             {!loading && matchingConnected.length > 0 ? (
               <section aria-labelledby="connected-connectors-heading">
@@ -838,6 +924,17 @@ const ConnectorSettings = () => {
             </form>
           </CenteredModal>
 
+          {hasGoogleSetup(connectorCatalog) ? (
+            <GoogleSetupPanel
+              open={googlePanelOpen}
+              onOpenChange={setGooglePanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
           <AddMcpServerForm
             open={addMcpServerFormOpen || editingConnector !== null}
             onOpenChange={open => {
@@ -864,7 +961,7 @@ const ConnectorSettings = () => {
           >
             <div className="px-5 py-5">
               <p className="text-sm text-text-secondary">
-                Chats that still reference it will show it as unavailable until it is removed from them.
+                Chats using it will show it as unavailable until you remove it there.
               </p>
             </div>
             <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">

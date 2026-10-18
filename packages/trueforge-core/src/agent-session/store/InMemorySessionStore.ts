@@ -59,6 +59,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
@@ -303,6 +304,28 @@ export class InMemorySessionStore<
     };
     this.sessions.set(key, { record, turnIds: [] });
     return;
+  }
+
+  async stampImportedSession(input: StampImportedSessionInput): Promise<void> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    const stamped = input.turns.map(entry => {
+      const turn = this.turns.get(turnKey({ session_id: input.session_id, turn_id: entry.turn_id }));
+      if (turn === undefined) {
+        throw new TurnNotFoundError(entry.turn_id);
+      }
+      return { turn, entry };
+    });
+    for (const { turn, entry } of stamped) {
+      turn.created_at = new Date(entry.created_at);
+      turn.updated_at = new Date(entry.updated_at);
+    }
+    stored.record.created_at = new Date(input.created_at);
+    stored.record.updated_at = new Date(input.updated_at);
+    stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
+    stored.record.metrics = deepCopy(input.metrics);
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {

@@ -45,6 +45,7 @@ import {
 } from './hindsightClient';
 import {
   appendVaultTombstone,
+  entryMetadata,
   estimateTokens,
   formatRetainEntry,
   latestTombstonesByEntry,
@@ -246,7 +247,8 @@ export class MarkdownMemoryClient implements MemoryClient {
         ),
       );
       for (const item of interleaveRanked(rankedLists)) {
-        const ok = take({ id: item.id, text: item.text, type: 'markdown' });
+        const metadata = entryMetadata(item.text);
+        const ok = take({ id: item.id, text: item.text, type: 'markdown', ...(metadata && { metadata }) });
         if (!ok) {
           break;
         }

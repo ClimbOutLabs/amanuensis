@@ -5,6 +5,7 @@
  * human-readable standalone format to keep local logs terse.
  */
 import winston, { type Logger } from 'winston';
+import { isLogCredentialField, normalizeFieldName, REDACTED, redactSecretShapes } from './dataExport/secretScrub';
 
 const STANDALONE_META_SKIP = new Set(['level', 'message', 'timestamp', 'version', 'component', 'stack', 'splat']);
 
@@ -22,6 +23,108 @@ export function shouldColorize(): boolean {
   }
   return process.stderr.isTTY;
 }
+
+const REDACTION_EXEMPT_KEYS = new Set(['level', 'timestamp', 'version', 'component']);
+
+/** Email and calendar content is dropped by exact field name. */
+const CONTENT_KEYS = new Set([
+  'body',
+  'bodytext',
+  'bodyhtml',
+  'textbody',
+  'htmlbody',
+  'html',
+  'snippet',
+  'raw',
+  'content',
+  'description',
+  'attendees',
+]);
+
+/** Credentials written into free text under fixed names: header lines, OAuth codes, Basic credentials. */
+const TEXT_REDACTIONS: readonly (readonly [RegExp, string])[] = [
+  [
+    /\b((?:proxy-)?authorization|cookie|set-cookie|x-api-key|api-key)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r\n"'}]+)/gi,
+    `$1$2${REDACTED}`,
+  ],
+  // An OAuth authorization code only counts as one inside a query string, not `exit code=1`.
+  [/([?&])code=[^&\s"'#]+/g, `$1code=${REDACTED}`],
+  [/\bBasic\s+[A-Za-z0-9+/=]{8,}/g, `Basic ${REDACTED}`],
+];
+
+function isContentField(key: string, value: unknown): boolean {
+  const holdsText = typeof value === 'string' || (typeof value === 'object' && value !== null);
+  return holdsText && CONTENT_KEYS.has(normalizeFieldName(key));
+}
+
+/** The one name rule for a log field, applied at every depth. */
+function redactField(key: string, value: unknown, seen: WeakSet<object>): unknown {
+  return isLogCredentialField(key, value) || isContentField(key, value) ? REDACTED : redactValue(value, seen);
+}
+
+// Quotes are optional on the value: a JSON parse error may quote only part of a value, or a bare one.
+const QUOTED_JSON_FIELD = /("([^"\\]*)"\s*:\s*)("(?:[^"\\]|\\.)*"?|[^\s,}"\]]+)/g;
+// The lead is one character outside the name class, so a long run of name characters is scanned once.
+const QUERY_PARAMETER = /(^|[^A-Za-z0-9_.-])([A-Za-z0-9_.-]+)=([^&\s"'#]+)/g;
+
+/** In free text a value's type is unknown, so any value under a credential name is redacted. */
+function redactText(text: string): string {
+  let out = redactSecretShapes(text);
+  for (const [pattern, replacement] of TEXT_REDACTIONS) {
+    out = out.replace(pattern, replacement);
+  }
+  out = out.replace(QUOTED_JSON_FIELD, (field: string, prefix: string, name: string, value: string) =>
+    isLogCredentialField(name, value) ? `${prefix}"${REDACTED}"` : field,
+  );
+  // A bare `key` parameter is an API key in a query string, though not as a JSON field name.
+  return out.replace(QUERY_PARAMETER, (parameter: string, lead: string, name: string, value: string) =>
+    name.toLowerCase() === 'key' || isLogCredentialField(name, value) ? `${lead}${name}=${REDACTED}` : parameter,
+  );
+}
+
+function redactValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (typeof value === 'string') {
+    return redactText(value);
+  }
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  if (seen.has(value)) {
+    return '[circular]';
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map(entry => redactValue(entry, seen));
+  }
+  if (value instanceof Error) {
+    // A nested Error would serialize to `{}`; keep what explains the failure, redacted.
+    return {
+      name: value.name,
+      message: redactText(value.message),
+      ...(value.stack === undefined ? {} : { stack: redactText(value.stack) }),
+      ...(value.cause === undefined ? {} : { cause: redactValue(value.cause, seen) }),
+    };
+  }
+  const entries = value instanceof Headers ? [...value.entries()] : Object.entries(value);
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of entries) {
+    out[key] = redactField(key, entry, seen);
+  }
+  return out;
+}
+
+/**
+ * Credentials and email or calendar content never reach a log line: every entry passes here.
+ * Runs after `errors()`, so an Error's message and stack are plain fields by then.
+ */
+const redactFormat = winston.format(info => {
+  for (const key of Object.keys(info)) {
+    if (!REDACTION_EXEMPT_KEYS.has(key)) {
+      info[key] = redactField(key, info[key], new WeakSet());
+    }
+  }
+  return info;
+});
 
 function standaloneMeta(info: object): string {
   const copied: Record<string, unknown> = { ...info };
@@ -42,6 +145,7 @@ function standaloneFormat(color: boolean): winston.Logform.Format {
   const parts: winston.Logform.Format[] = [
     winston.format.timestamp({ format: 'HH:mm:ss' }),
     winston.format.errors({ stack: true }),
+    redactFormat(),
   ];
   if (color) {
     parts.push(winston.format.colorize({ level: true }));
@@ -60,6 +164,7 @@ function jsonFormat(): winston.Logform.Format {
   return winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
+    redactFormat(),
     winston.format.json(),
   );
 }

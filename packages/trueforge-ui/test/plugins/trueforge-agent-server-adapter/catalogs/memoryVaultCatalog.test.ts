@@ -77,6 +77,6 @@ describe('createMemoryVaultCatalog', () => {
     const catalog = createMemoryVaultCatalog({
       fetch: vi.fn(async () => Response.json({ data: [{ id: 1 }] })),
     });
-    await assert.rejects(() => catalog.listEntries(), /unexpected memory vault payload/);
+    await assert.rejects(() => catalog.listEntries(), /unexpected memory payload/);
   });
 });

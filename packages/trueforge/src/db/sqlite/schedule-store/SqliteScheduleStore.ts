@@ -153,7 +153,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
       row = await db
         .insertInto('schedule')
         .values({
-          id: newId(),
+          id: input.id ?? newId(),
           tenant_id: input.tenant_id,
           agent_id: input.agent_id,
           agent_name: input.agent_name,

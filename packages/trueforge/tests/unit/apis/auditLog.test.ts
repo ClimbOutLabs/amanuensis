@@ -3,6 +3,7 @@ import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
+import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { ListUserAuditLogResponseSchema } from '../../../src/schemas/sentinelAudit';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
@@ -61,7 +62,7 @@ describe('per-user audit log route', () => {
   }
 
   async function record(input: Partial<AuditRecordInput> & Pick<AuditRecordInput, 'created_by'>): Promise<void> {
-    await server.sentinelAuditStore().record({
+    await new SentinelAuditStore(server.db()).record({
       tenant_id: 'default',
       conversation_id: 'unused',
       tier: 3,

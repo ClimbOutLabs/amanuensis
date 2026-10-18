@@ -1,7 +1,7 @@
 # Amanuensis
 
 Agent server and chat UI, started with one command. No clone, no database to set up. Login is mandatory, so
-you point it at an OIDC identity provider first (see [Login](#login)).
+you set up Aman's own sign-in first (see [Login](#login)).
 
 ```sh
 npx amanuensis
@@ -20,18 +20,19 @@ Requires Node.js 22.14 or newer.
 
 ## Login
 
-Amanuensis always requires sign-in and refuses to start without it. Set these before the first run:
+Amanuensis always requires sign-in and refuses to start without it. Aman uses its own sign-in service; outside sign-in services are not supported. Set these before the first run:
 
 ```sh
-export OIDC_ISSUER_URL=https://login.example.com/dex   # http is accepted only for localhost, 127.0.0.1, ::1
-export OIDC_CLIENT_ID=<client id>
-export OIDC_CLIENT_SECRET=<client secret>
+export OIDC_ISSUER_URL=https://login.example.com/dex   # Aman's sign-in service, path /dex; http only for localhost, 127.0.0.1, ::1
+export OIDC_CLIENT_ID=<client id from the sign-in service>
+export OIDC_CLIENT_SECRET=<client secret from the sign-in service>
+export OIDC_ALLOWED_EMAILS=<your email>                # exactly one address, no wildcard
 ```
 
-Register `<public url>/api/v1/auth/callback` as the redirect URI, where the public URL is
+Give the sign-in service `<public url>/api/v1/auth/callback` as the redirect address, where the public URL is
 `http://localhost:8790` unless you set `PUBLIC_BASE_URL` (an origin with no path; use `https` behind a
-reverse proxy). To limit sign-in to one account, also set `OIDC_USER_ROLE_CLAIM=email`,
-`OIDC_ADMIN_ROLE_VALUE=<email>` and `OIDC_ALLOWED_EMAILS=<email>`. Running several instances on one
+reverse proxy). It refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one address, and it accepts only sign-ins with a verified email, which Aman's own sign-in always gives. So that you can change server settings, also set
+`OIDC_USER_ROLE_CLAIM=email` and `OIDC_ADMIN_ROLE_VALUE=<your email>`. Running several instances on one
 hostname? Give each its own `AUTH_COOKIE_SUFFIX`. From a repository checkout, `pnpm dev:login` starts a
 local Dex in Docker and prints these lines. See the authentication docs for details.
 

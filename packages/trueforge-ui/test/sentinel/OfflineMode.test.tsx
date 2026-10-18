@@ -33,6 +33,17 @@ describe('OfflineIndicator', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Offline mode');
   });
 
+  it('keeps a short reminder in compact form', async () => {
+    const { api } = stubApi({ offline_mode: true, tier2_auto_allow: [], search_without_asking: true });
+    render(
+      <SentinelApiProvider api={api}>
+        <OfflineIndicator compact />
+      </SentinelApiProvider>,
+    );
+    const status = await screen.findByRole('status', { name: 'Offline mode is on' });
+    expect(status).not.toHaveTextContent('Offline mode');
+  });
+
   it('hides while offline mode is off', () => {
     const { api } = stubApi({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
     const { container } = render(
@@ -94,6 +105,23 @@ describe('SentinelSettings', () => {
     });
     expect(screen.getByText(/Every web search shows an approval card/)).toBeInTheDocument();
   });
+
+  it.each([true, false])(
+    'says what the search service sees, whether searches run without asking (%s) or ask',
+    async on => {
+      const { api } = stubApi({ offline_mode: false, tier2_auto_allow: [], search_without_asking: on });
+      render(
+        <SentinelApiProvider api={api}>
+          <SentinelSettings />
+        </SentinelApiProvider>,
+      );
+      expect(
+        await screen.findByText(
+          "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.",
+        ),
+      ).toBeInTheDocument();
+    },
+  );
 
   it('reports a failed search setting save beside the switch', async () => {
     const { api, updateUserSettings } = stubApi({

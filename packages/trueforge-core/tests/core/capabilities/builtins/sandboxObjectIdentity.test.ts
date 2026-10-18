@@ -21,6 +21,7 @@ function makeToolResult(
       content: LARGE_CONTENT,
     },
     rawContent: LARGE_CONTENT,
+    images: [],
     toolCallInfo: undefined,
     screen: undefined,
     info: {

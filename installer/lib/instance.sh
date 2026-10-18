@@ -92,9 +92,9 @@ machine_running() {
   [ -n "$(D ps -q --filter label=com.docker.compose.project=aman-machine --filter status=running 2>/dev/null || true)" ]
 }
 
-# Rewrites compose.yaml and dex.yaml from the registry (owner and added users) and the given images. Both hold no secrets.
+# Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 origins redirects app_ports tls_on=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -124,6 +124,9 @@ instance_render() {
       done < <(network_bind_addresses "$origins")
     fi
   fi
+  # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
+  # published sign-in port directly needs the service on every address of the namespace.
+  if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
   edge_on=0
   login_host=
   if edge_wanted "$name"; then
@@ -139,12 +142,9 @@ instance_render() {
     "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
-  members=$(dex_members_yaml "$name")
-  if [ -n "$members" ]; then members_on=1; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
-    "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
-    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" \
-    "IF_MEMBERS=$members_on" "MEMBER_USERS=$members" | write_if_changed "$dir/dex.yaml" 644 || true
+    "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
+    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" | write_if_changed "$dir/dex.yaml" 644 || true
 }
 
 # running, partial or stopped, from the containers Compose labelled for the project.
@@ -321,7 +321,7 @@ instance_collect() {
   I_TLS=${OPT_TLS:-}
   I_SANDBOX=slots
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
-  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person or team gets one instance. Example: main" name_problem
+  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person gets a new instance. Example: main" name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
     I_EMAIL="owner@example.invalid"
   fi
@@ -393,7 +393,10 @@ instance_derive() {
     # The sign-in service is only ever reached on this computer: other devices go through the app.
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
     I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
-    if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+    if reach_default_local; then
+      # Plain http is fine on this computer only; a --tls meant for the network side does not apply.
+      I_TLS=
+    else
       I_TLS=${I_TLS:-local}
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
       I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
@@ -418,16 +421,21 @@ issuer_check() {
 
 # ---- addresses of an existing instance ----------------------------------------------------------
 
-# An instance from before addresses were listed has no `origins` record at all. A plain re-run opens it on the network
-# like a new one; --local-only keeps it (or puts it back) on this computer only.
-instance_address_change() { # name; prints open, close or nothing
-  local name=$1 recorded=0
-  grep -q '^origins=' "$(reg_file "$name")" && recorded=1
+# An instance from before addresses were listed has no `origins` record at all.
+reach_recorded() { grep -q '^origins=' "$(reg_file "$1")"; }
+
+# Where an instance whose reach is not recorded yet stays on this computer: --local-only, or the cloud server default.
+reach_default_local() { [ "$OPT_LOCAL_ONLY" = 1 ] || [ "$CLOUD_DEFAULT_LOCAL" = 1 ]; }
+
+# An unrecorded instance opens on the network like a new one unless it stays on this computer by default. A recorded
+# reach changes only when --local-only puts it back on this computer.
+instance_address_change() { # name; prints open, close, refresh or nothing
+  local name=$1
   is_loopback_origin "$(reg_get "$name" public_url)" || return 0
-  if [ "$OPT_LOCAL_ONLY" = 1 ]; then
-    if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
-  elif [ "$recorded" = 0 ]; then
-    printf 'open'
+  if ! reach_recorded "$name"; then
+    if reach_default_local; then printf 'close'; else printf 'open'; fi
+  elif [ "$OPT_LOCAL_ONLY" = 1 ]; then
+    if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
   fi
@@ -576,10 +584,10 @@ print_instance_summary() {
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
       *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
-      *) ui_check_row ok "Run code" "on, in a sandbox" ;;
+      *) ui_check_row ok "Run code" "on, in a sandbox, with PDF and image reading" ;;
     esac
   else
-    ui_check_row skip "Run code" "off (installed with --no-sandbox)"
+    ui_check_row skip "Run code" "off, with no PDF or image reading (installed with --no-sandbox)"
   fi
   ui_check_row ok "Data" "saved in Docker"
   print_backups_row
@@ -693,7 +701,6 @@ instance_env_repair() {
     key=${line%%=*}
     value=${line#*=}
     [ "$key" = NEBIUS_API_KEY ] && continue
-    if [ "$key" = OIDC_ALLOWED_EMAILS ]; then value=$(users_allowed_emails "$name"); fi
     if [ "$fresh" = 1 ]; then
       ensure_private_dir "$(dirname "$env")"
       printf '# >>> managed by the installer: written once, never regenerated by re-runs or upgrades\n# <<< end of managed block; add your own settings below this line\n' | write_if_changed "$env" 600 || true
@@ -710,6 +717,105 @@ instance_env_repair() {
     "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "API_KEY=$(rand_hex 32)" \
     "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
+}
+
+# Removes every sign-in user but the owner from instance NAME, says which and logs it. Returns 1 when there was nothing
+# to remove. The order keeps a crash safe: records, then the allowed emails, then dex.yaml with the owner only, and only
+# then the hashes dex.env still holds, so Dex never points at a hash that is gone. The caller restarts the instance.
+instance_enforce_single_owner() { # name
+  local name=$1 dir list key line env
+  dir=$(instance_dir "$name")
+  env="$dir/.env"
+  list=$(extra_sign_in_users "$(reg_file "$name")" "$dir")
+  [ -n "$list" ] || return 1
+  while IFS= read -r key; do
+    reg_unset "$name" "$key"
+  done < <(sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")
+  if [ -f "$env" ]; then
+    env_managed_set "$env" OIDC_ALLOWED_EMAILS "$(reg_get "$name" owner_email)"
+    env_drop_outside_block "$env" OIDC_ALLOWED_EMAILS
+  fi
+  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  if [ -f "$dir/dex.env" ]; then
+    {
+      while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+          'DEX_USER_PASSWORD_HASH_'* | '# >>> sign-in users added with'* | '# <<< end of user hashes'*) ;;
+          *) printf '%s\n' "$line" ;;
+        esac
+      done <"$dir/dex.env"
+    } | write_if_changed "$dir/dex.env" 600 || true
+  fi
+  say "Removed $list from instance $name."
+  log_event "removed $list from instance $name; an upgrade rollback restores the database but not these accounts"
+}
+
+# The one instance a command targets: the name after the command, else --instance, else the only one.
+instance_pick() {
+  local name=${OPT_NAME:-${OPT_INSTANCE:-}} names
+  if [ -n "${OPT_NAME:-}" ] && [ -n "${OPT_INSTANCE:-}" ] && [ "$OPT_NAME" != "$OPT_INSTANCE" ]; then
+    usage_die "two different instances were named ($OPT_NAME and $OPT_INSTANCE); name one"
+  fi
+  if [ -z "$name" ]; then
+    names=$(reg_names)
+    case "$names" in
+      '') die "no instance exists yet; run install.sh first" ;;
+      *$'\n'*) usage_die "several instances exist ($(printf '%s' "$names" | tr '\n' ' ')); say which with --instance NAME" ;;
+    esac
+    name=$names
+  fi
+  valid_name "$name" || usage_die "invalid instance name"
+  reg_exists "$name" || die "instance $name does not exist"
+  printf '%s' "$name"
+}
+
+# Starts the sign-in service again, so a failed step does not leave the instance without sign-in.
+instance_dex_up() { # name
+  dc "$1" up -d --force-recreate --no-deps --wait --wait-timeout 240 dex >/dev/null 2>&1
+}
+
+# Sessions are signed with the sign-in service's keys, which it keeps in its database. Clearing the database while the
+# service is stopped makes it start with new keys, and the app starts again so it forgets the old ones: every earlier
+# sign-in ends. The volume belongs to the Dex user, so the delete runs as that user in the Dex image. The new hash is
+# written only after the delete worked, and a failure before that starts the service again with the old password.
+instance_set_password() { # name, new dex.env content, new hash
+  local name=$1 content=$2 hash=$3 dir
+  dir=$(instance_dir "$name")
+  dc "$name" stop dex >/dev/null 2>&1 ||
+    die "The sign-in service of instance $name did not stop. Nothing was changed: the old password and the old sign-ins still work. Run: aman doctor instance --fix, then run aman password again."
+  if ! D run --rm --network none --user 1001:1001 -v "aman_${name}_dex:/var/dex" --entrypoint sh "$REL_DEX_IMAGE" -c 'rm -f /var/dex/dex.db /var/dex/dex.db-wal /var/dex/dex.db-shm' >/dev/null 2>&1; then
+    instance_dex_up "$name" || true
+    die "The old sign-ins could not be ended. Nothing was changed: the old password and every old sign-in still work. Run aman password again; if it fails again, run: aman doctor instance --fix"
+  fi
+  printf '%s\n' "$content" | write_if_changed "$dir/dex.env" 600 || true
+  if ! grep -qF -- "$hash" "$dir/dex.env"; then
+    instance_dex_up "$name" || true
+    die "Everyone was signed out, but the new password could not be saved, so the old password still works. Run aman password again."
+  fi
+  instance_dex_up "$name" ||
+    die "The password was changed and the old sign-ins ended, but the sign-in service did not start again. Run: aman doctor instance --fix"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app >/dev/null 2>&1 ||
+    die "The password was changed, but the app of instance $name did not start again, so old sign-ins can keep working for up to ten minutes. Run: aman doctor instance --fix"
+}
+
+# Changes the owner's password. Running it on this computer is the proof of ownership; the old password is not asked for.
+cmd_instance_password() {
+  local name email hash content
+  require_installed
+  name=$(instance_pick)
+  email=$(reg_get "$name" owner_email)
+  docker_prepare
+  lock_acquire
+  load_installed_release
+  AMAN_PASSWORD=
+  ask_password AMAN_PASSWORD "New password for $email, 8 to 72 characters" "Repeat the new password"
+  hash=$(hash_password "$REL_APP_TAG")
+  AMAN_PASSWORD=
+  content=$(render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash")
+  instance_set_password "$name" "$content" "$hash"
+  log_event "owner password changed for instance $name; every sign-in ended"
+  say "Everyone is signed out of instance $name."
+  say "Password changed. Sign in again with the new password."
 }
 
 # Renders an instance again from its record and restarts it. For an instance opened on the network the addresses are read
@@ -730,6 +836,7 @@ cmd_instance_refresh() {
     instance_apply_addresses "$name" refresh
   fi
   instance_env_repair "$name"
+  instance_enforce_single_owner "$name" || true
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate
   print_instance_block "$name"

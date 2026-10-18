@@ -5,11 +5,15 @@ import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MemoryRecallProvider } from '@/components/MemoryRecallContext.js';
+import { ModelUsageProvider, type ModelUsageTurnContext } from '@/components/ModelUsageContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { MemoryTurnContextProvider } from '@/containers/MemoryTurnContextProvider.js';
+import { ModelUsageTurnProvider } from '@/containers/ModelUsageTurnProvider.js';
 import { resetWaitQueueTurnClocks } from '@/hooks/useWaitQueue.js';
 import { AgentDetailsPreferenceProvider } from '@/server/AgentDetailsPreferenceContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { setModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
+import { NANO_COMPACTION_EVENT, NANO_SUMMARY_EVENT, SUPER_EVENT } from '../fixtures/modelUsageEvents.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -28,19 +32,26 @@ vi.mock('@/components/MapCard.js', () => ({
   ),
 }));
 
-function renderAssistantMessage(
+function assistantMessageTree(
   messages: ThreadMessageLike[],
   options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
 ) {
-  return render(
+  return (
     <RuntimeHarness
       messages={messages}
       isRunning={options?.isRunning}
       onRespondToToolApproval={options?.onRespondToToolApproval}
     >
       <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-    </RuntimeHarness>,
+    </RuntimeHarness>
   );
+}
+
+function renderAssistantMessage(
+  messages: ThreadMessageLike[],
+  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
+) {
+  return render(assistantMessageTree(messages, options));
 }
 
 function getAgentInternals(): HTMLElement {
@@ -405,7 +416,7 @@ describe('AssistantMessageContainer', () => {
       expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('keeps short narration folded and hidden', () => {
+    it('keeps short text before a tool call visible', () => {
       renderAssistantMessage([
         {
           role: 'assistant',
@@ -417,9 +428,70 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      const narration = screen.getByText('Let me search for that.');
-      expect(narration.closest('[hidden]')).not.toBeNull();
+      expect(screen.getByText('Let me search for that.').closest('[hidden]')).toBeNull();
       expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
+      expect(getAgentInternals().querySelector('[hidden]')).not.toBeNull();
+    });
+
+    it('shows the sentence before a run_code call and the result after it', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            { ...toolCall, toolCallId: 'tool-run', toolName: 'run_code' },
+            { type: 'text', text: 'The result is **20**.' },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
+      expect(screen.getByText('20').closest('[hidden]')).toBeNull();
+    });
+
+    it('shows the sentence before an undecided approval while the turn waits', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          status: { type: 'requires-action', reason: 'tool-calls' },
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-run',
+              toolName: 'run_code',
+              args: { language: 'python', code: 'print(4 * 5)' },
+              argsText: '{"language":"python","code":"print(4 * 5)"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-run',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.").closest('[hidden]')).toBeNull();
+      expect(getAgentInternals()).toHaveTextContent(/Waiting for approval/);
+    });
+
+    it('shows the answer after a tool call while the message is still running', async () => {
+      renderAssistantMessage(
+        [
+          {
+            role: 'assistant',
+            status: { type: 'running' },
+            content: [toolCall, { type: 'text', text: 'The result is 2' }],
+          },
+        ],
+        { isRunning: true },
+      );
+
+      expect((await screen.findByText('The result is 2')).closest('[hidden]')).toBeNull();
     });
 
     it('renders one disclosure per folded run with its own counts', () => {
@@ -493,6 +565,36 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer images without a chat image scope', () => {
+  const DATA_PNG = 'data:image/png;base64,iVBORw0KGgo=';
+
+  it('shows a model data: image as not shown when the turn has no session id', () => {
+    const server = Object.assign(createMockAgentUIServer(), {
+      chatImages: {
+        listTurnImages: vi.fn(() => Promise.resolve({ artifacts: [], emails: [] })),
+        showTurnImages: vi.fn(() => Promise.resolve({ status: 'done' as const, images: [] })),
+        imageUrl: ({ sessionId, imageId }: { sessionId: string; imageId: string }) =>
+          `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
+      },
+    });
+    const { container } = render(
+      <ServerProvider server={server}>
+        {assistantMessageTree([
+          { role: 'assistant', content: `Here: ![model pixel](${DATA_PNG})`, metadata: { custom: { turnId: 't1' } } },
+        ])}
+      </ServerProvider>,
+    );
+    expect(container.querySelector(`img[src="${DATA_PNG}"]`)).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toHaveTextContent('model pixel (image not shown)');
+  });
+
+  it('shows a model data: image as not shown when there is no chat images port', () => {
+    const { container } = renderAssistantMessage([{ role: 'assistant', content: `![x](${DATA_PNG})` }]);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toBeInTheDocument();
   });
 });
 
@@ -797,6 +899,80 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
   });
 
+  function placesCallPart(
+    extra: Pick<ToolCallPart, 'toolCallId'> & Partial<Pick<ToolCallPart, 'result' | 'approval'>>,
+  ) {
+    return {
+      type: 'tool-call',
+      toolName: 'render_places',
+      args: { places: [] },
+      argsText: '{"places":[]}',
+      ...extra,
+    } satisfies ToolCallPart;
+  }
+
+  it('renders the pinned places inline once the pin call has run', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-1',
+            result: JSON.stringify({
+              status: 'ok',
+              places: [
+                {
+                  name: 'Harbour Family Clinic',
+                  address: '12 Example Street, Lisbon 1100-000',
+                  languages: 'English, Portuguese',
+                  hours: null,
+                  price: null,
+                  phone: null,
+                  source_url: 'https://harbour-clinic.example/en',
+                  source_site: 'harbour-clinic.example',
+                  fetched_at: '2026-10-17T10:00:00.000Z',
+                  lat: 38.7,
+                  lng: -9.1,
+                  already_in_calendar: false,
+                },
+              ],
+              refused: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          }),
+          { type: 'text', text: 'I found one place.' },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-map-card')).toHaveTextContent('1 place found');
+  });
+
+  it('asks first for the pin call and shows no map until it is approved', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-approval',
+            approval: {
+              id: 'approval-places',
+              options: [
+                { id: 'allow-once', kind: 'allow-once' },
+                { id: 'deny', kind: 'reject-once' },
+              ],
+            },
+          }),
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      },
+    ]);
+
+    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_places' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+  });
+
   it('shows a quiet loading state while the maps call runs', () => {
     renderAssistantMessage([
       {
@@ -835,5 +1011,168 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.getByText('This request expired.')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer model and cost line', () => {
+  const messages: ThreadMessageLike[] = [
+    { role: 'assistant', content: 'here you go', metadata: { custom: { turnId: 'trn_1' } } },
+  ];
+
+  beforeEach(() => {
+    setModelUsageVisible(true);
+  });
+
+  async function renderWithUsage(options: {
+    usage: ModelUsageTurnContext[];
+    agentDetails?: 'expanded' | 'collapsed';
+    isRunning?: boolean;
+    threadMessages?: ThreadMessageLike[];
+  }) {
+    const { usage, agentDetails = 'collapsed', isRunning = false, threadMessages = messages } = options;
+    const session = {
+      id: 'sess-1',
+      isMutable: true,
+      createdAt: '2026-10-15T00:00:00.000Z',
+      updatedAt: '2026-10-15T00:00:00.000Z',
+      metadata: { agent_details: agentDetails },
+    };
+    const server = createMockAgentUIServer({
+      getSession: vi.fn(async () => session),
+      updateSession: vi.fn(async () => session),
+    });
+    const listModelUsage = vi.fn(async () => usage);
+
+    const result = render(
+      <ServerProvider server={server}>
+        <AgentDetailsPreferenceProvider>
+          <ModelUsageProvider api={{ listModelUsage }}>
+            <RuntimeHarness messages={threadMessages} threadId="t1" remoteId="sess-1" isRunning={isRunning}>
+              <ModelUsageTurnProvider>
+                <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+              </ModelUsageTurnProvider>
+            </RuntimeHarness>
+          </ModelUsageProvider>
+        </AgentDetailsPreferenceProvider>
+      </ServerProvider>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return { ...result, listModelUsage };
+  }
+
+  it('shows the model, provider, tokens and cost of the turn under the answer', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }] });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
+      'Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0008',
+    );
+  });
+
+  it('folds helper calls into the total and names the model they ran on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+    });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent('6,990 tokens');
+    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
+  });
+
+  it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    const internals = getAgentInternals();
+    expect(within(internals).getByText(/2 helper calls/)).toBeInTheDocument();
+    const rows = within(internals).getAllByTestId('model-usage-row');
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('Answer·Nemotron 3 Super'),
+      expect.stringContaining('Memory summary'),
+      expect.stringContaining('Compaction'),
+    ]);
+    expect(rows[2]).toHaveTextContent('4,300 tokens (4,000 in, 300 out) · $0.0003');
+  });
+
+  it('keeps the helper rows out of the details while agent details are off, leaving the line', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
+      agentDetails: 'collapsed',
+    });
+
+    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('model-usage-helpers')).toBeInTheDocument();
+  });
+
+  it('adds no details row for a turn that had only its answer', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }], agentDetails: 'expanded' });
+
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('says usage was not reported when the provider reported none', async () => {
+    await renderWithUsage({
+      usage: [
+        {
+          turnId: 'trn_1',
+          events: [{ ...SUPER_EVENT, reportedCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: null }],
+        },
+      ],
+    });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
+      'Nemotron 3 Super · Token Factory · usage not reported',
+    );
+  });
+
+  it('shows nothing for a turn with no recorded usage', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_other', events: [SUPER_EVENT] }] });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+  });
+
+  it('hides the line and the helper rows when the display switch is off', async () => {
+    setModelUsageVisible(false);
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+  });
+
+  it('does not draw the line while the turn is still running', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      isRunning: true,
+      threadMessages: [
+        {
+          role: 'assistant',
+          content: 'here you go',
+          status: { type: 'running' },
+          metadata: { custom: { turnId: 'trn_1' } },
+        },
+      ],
+    });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+  });
+
+  it('draws no line without a host usage provider', async () => {
+    render(
+      <RuntimeHarness messages={messages} threadId="t1" remoteId="sess-1">
+        <ModelUsageTurnProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </ModelUsageTurnProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
   });
 });

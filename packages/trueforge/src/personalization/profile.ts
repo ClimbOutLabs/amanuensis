@@ -9,6 +9,10 @@ export interface PersonalizationProfileContent {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  /** What the user is called; the first thing a new user is asked to fill in. */
+  user_name: string | null;
+  /** How the assistant should address the user: a short form, a title, pronouns. */
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: string[];
   /** Host-maintained learned document (markdown); null until the learning pass writes one. */
@@ -63,6 +67,8 @@ export function normalizePersonalizationContent(input: PersonalizationProfileCon
     assistant_name: normalized(input.assistant_name),
     assistant_identity: normalized(input.assistant_identity),
     voice_guidance: normalized(input.voice_guidance),
+    user_name: normalized(input.user_name),
+    address_as: normalized(input.address_as),
     user_profile: normalized(input.user_profile),
     pinned_preferences: input.pinned_preferences.map(preference => preference.trim()).filter(Boolean),
     learned_profile: normalized(input.learned_profile),
@@ -87,6 +93,9 @@ export function personalizationDigest(input: PersonalizationProfileContent): str
     // A null learned document hashes identically to the pre-learned-profile content shape, so
     // digests stored before the column existed stay valid and never force a spurious revision.
     ...(normalizedContent.learned_profile === null ? {} : { learned_profile: normalizedContent.learned_profile }),
+    // Same rule for the two name fields, which arrived later still.
+    ...(normalizedContent.user_name === null ? {} : { user_name: normalizedContent.user_name }),
+    ...(normalizedContent.address_as === null ? {} : { address_as: normalizedContent.address_as }),
   };
   return createHash('sha256').update(JSON.stringify(content)).digest('hex');
 }
@@ -179,6 +188,12 @@ export function buildPersonalizationContext(
     if (profile.voice_guidance) {
       sections.push(`<voice-guidance>${profile.voice_guidance}</voice-guidance>`);
     }
+  }
+  if (profile.user_name) {
+    sections.push(`<user-name>${profile.user_name}</user-name>`);
+  }
+  if (profile.address_as) {
+    sections.push(`<address-user-as>${profile.address_as}</address-user-as>`);
   }
   if (profile.user_profile) {
     sections.push(`<user-profile>${profile.user_profile}</user-profile>`);

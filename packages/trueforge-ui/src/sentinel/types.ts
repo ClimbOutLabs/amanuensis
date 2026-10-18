@@ -13,6 +13,11 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import {
+  heldBecause,
+  savedSearchHoldReason,
+  SERVER_SECRET_REASON,
+} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -39,6 +44,24 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
   }
   return undefined;
 }
+
+const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
+
+export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
+
+/** The whole message of a mail card, so what is approved is everything that is sent. */
+export type SentinelApprovalEmail = {
+  action: SentinelApprovalEmailAction;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  /** The saved draft a change replaces, or null. */
+  replaces: { subject: string; to: string[] } | null;
+  /** The message a reply answers in its thread, or null when the message is not a reply. */
+  reply_in_thread: { subject: string; from: string } | null;
+};
 
 /**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
@@ -69,6 +92,8 @@ export type SentinelApprovalCard = {
   destination_host: string | null;
   /** True when part of outbound_text is cut and not shown in full. */
   outbound_truncated: boolean;
+  /** The whole message when the action is sending or saving mail, or null. */
+  email: SentinelApprovalEmail | null;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -88,6 +113,8 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** False when the server refuses chat scope for this call; absent from servers that do not say. */
+  chatAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -232,11 +259,73 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
   return record[snake] === true || record[camel] === true;
 }
 
+const SEARCH_QUERY_MARKER = ' for: ';
+
+// Search cards saved before the hold reason moved into plain_what: the reason was filed as
+// "seen before", and a held key was written out in full. The key is not recoverable here, so the
+// whole query is dropped for that case.
+function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
+  const because = savedSearchHoldReason(card.why_asked_again);
+  if (because === undefined) return card;
+  if (because === SERVER_SECRET_REASON) {
+    const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
+    const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
+    return {
+      ...card,
+      plain_what: `${heading}${heldBecause(SERVER_SECRET_REASON)}`,
+      why_asked_again: null,
+      outbound_text: null,
+    };
+  }
+  return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value.filter((item): item is string => typeof item === 'string')
+    : undefined;
+}
+
+function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefined {
+  return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
+}
+
+function parseEmail(value: unknown): SentinelApprovalEmail | null {
+  if (!isRecord(value)) return null;
+  const action = parseEmailAction(value.action);
+  const to = stringList(value.to);
+  const cc = stringList(value.cc);
+  const bcc = stringList(value.bcc);
+  const subject = optionalString(value, 'subject');
+  const body = optionalString(value, 'body');
+  if (action === undefined || to === undefined || cc === undefined || bcc === undefined) return null;
+  if (subject === undefined || body === undefined) return null;
+  const replaced = value.replaces;
+  const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
+  const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
+  // The SDK camel-cases the keys it knows, so a card that came through it names this one replyInThread.
+  const thread = value.reply_in_thread ?? value.replyInThread;
+  const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
+  const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
+  return {
+    action,
+    to,
+    cc,
+    bcc,
+    subject,
+    body,
+    replaces:
+      replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
+    reply_in_thread:
+      threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
+  };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
-  return {
+  return readSavedHoldReason({
     plain_what,
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
@@ -248,7 +337,8 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
-  };
+    email: parseEmail(value.email),
+  });
 }
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
@@ -280,11 +370,13 @@ function parseApprovalInfo(
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
+  const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };

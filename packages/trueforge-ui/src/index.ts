@@ -139,6 +139,10 @@ export { UserMessageEdit } from './atoms/UserMessageEdit.js';
 export type { UserMessageEditProps } from './atoms/UserMessageEdit.js';
 export { WelcomeScreen } from './atoms/WelcomeScreen.js';
 export type { WelcomeScreenProps } from './atoms/WelcomeScreen.js';
+export { TurnImages } from './chatImages/ChatImages.js';
+export { ChatImageScope } from './chatImages/chatImageScope.js';
+export type { ChatImageScopeValue } from './chatImages/chatImageScope.js';
+export type { ChatImagesCatalog } from './plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 
 export { AgentStepsCard } from './atoms/adapters/AgentStepsCardAdapter.js';
 export type { AgentStepsCardProps } from './atoms/adapters/AgentStepsCardAdapter.js';
@@ -210,11 +214,13 @@ export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
+export { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from './components/AmanFirstRunGuide.js';
+export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './components/AmanFirstRunGuide.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
-export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupContext.js';
-export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
+export type { AmanSetupState, FirstRunGuideState, MemoryBankStatus } from './components/AmanSetupContext.js';
+export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
   AppBugReportBundle,
@@ -246,6 +252,8 @@ export type {
 } from './components/ImplementationPlanGrantContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
+export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
+export type { ModelUsageApi, ModelUsageTurnContext } from './components/ModelUsageContext.js';
 export { EMPTY_PERSONA_DRAFT, PersonaProvider, useOptionalPersonas, usePersonas } from './components/PersonaContext.js';
 export type {
   NewPersonaKnowledgeDocument,

@@ -151,6 +151,10 @@ export function measureFrameContentHeight(
   return Math.max(documentElementHeight, bodyHeight);
 }
 
+/** Nothing a space page loads or submits may leave the frame; its images are inline `data:` rasters. */
+const SPACE_FRAME_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
 /** Base styles injected into every space srcdoc, ahead of anything the model authored. */
 const SPACE_FRAME_BASE_STYLE = [
   'html,body{margin:0;padding:0;height:auto;overflow:visible;}',
@@ -199,6 +203,7 @@ function SpaceHtmlFrame({ html }: { html: string }) {
       '<!doctype html>',
       '<html>',
       '<head>',
+      `<meta http-equiv="Content-Security-Policy" content="${SPACE_FRAME_CSP}">`,
       '<meta charset="utf-8">',
       `<style>${SPACE_FRAME_BASE_STYLE}</style>`,
       `<style>${SPACE_PAGE_BASE_STYLE}</style>`,

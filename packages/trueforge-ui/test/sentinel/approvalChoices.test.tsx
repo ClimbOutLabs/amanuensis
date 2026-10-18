@@ -20,6 +20,7 @@ const card: SentinelApprovalCard = {
   outbound_text: null,
   destination_host: null,
   outbound_truncated: false,
+  email: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);

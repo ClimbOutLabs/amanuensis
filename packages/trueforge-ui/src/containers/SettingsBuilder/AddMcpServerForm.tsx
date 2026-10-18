@@ -55,9 +55,9 @@ type AddMcpServerFormProps = {
 
 const AUTH_OPTIONS: Array<{ value: McpAuthType; label: string }> = [
   { value: 'none', label: 'None' },
-  { value: 'header', label: 'API Key' },
-  { value: 'dcr', label: 'OAuth Dynamic' },
-  { value: 'oauth_client', label: 'OAuth Client' },
+  { value: 'header', label: 'API key' },
+  { value: 'dcr', label: 'OAuth (automatic)' },
+  { value: 'oauth_client', label: 'OAuth (manual)' },
 ];
 
 const inputClassName = auiInputClass('h-11 shadow-sm');
@@ -312,7 +312,7 @@ const AddMcpServerForm = ({
             <div className="flex gap-1.5 bg-secondary-bg/40 p-2 rounded-md">
               <Icon name="info" className="size-3.5 mt-1 text-text-secondary" />
               <div className="text-xs text-text-secondary leading-5.5">
-                Sign-in only — the server must support dynamic client registration.
+                Sign-in only, for servers that register apps automatically.
               </div>
             </div>
           ) : null}
@@ -332,7 +332,7 @@ const AddMcpServerForm = ({
                   onChange={event => {
                     setClientId(event.target.value);
                   }}
-                  placeholder="OAuth client ID from authorization server"
+                  placeholder="Client ID from the service"
                   className={inputClassName}
                 />
               </div>
