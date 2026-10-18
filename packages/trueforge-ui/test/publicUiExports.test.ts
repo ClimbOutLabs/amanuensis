@@ -219,6 +219,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'extractSentinelSessionContext',
   'parseAuditEntries',
   'parseToolTier',
+  'parseUserAuditPage',
   'parseUserSettings',
   'preloadMarkdownOpenUI',
   'readSessionIsCreateAgent',

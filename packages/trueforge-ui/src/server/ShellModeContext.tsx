@@ -80,7 +80,8 @@ export type SettingsSection =
   | 'sandbox'
   | 'personalization'
   | 'themes'
-  | 'permissions';
+  | 'permissions'
+  | 'audit';
 
 /** Sub-tabs inside the Memory settings section. */
 export type SettingsMemoryTab = 'memories' | 'sharing' | 'settings';

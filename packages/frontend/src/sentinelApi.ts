@@ -1,6 +1,7 @@
 import {
   extractSentinelSessionContext,
   parseAuditEntries,
+  parseUserAuditPage,
   parseUserSettings,
   type SentinelApi,
   type SentinelSessionContext,
@@ -12,6 +13,7 @@ import {
 // response bodies are parsed defensively: unknown shapes are dropped, never asserted.
 const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
+const USER_AUDIT_LOG_URL = '/api/v1/user/audit-log';
 
 async function readError(response: Response): Promise<Error> {
   const body: unknown = await response.json().catch(() => null);
@@ -86,6 +88,21 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
         throw await readError(response);
       }
       return parseAuditEntries(await response.json());
+    },
+
+    async listUserAuditEntries({ limit = 50, pageToken, outcome }) {
+      const query = new URLSearchParams({ limit: String(limit) });
+      if (pageToken !== undefined) {
+        query.set('page_token', pageToken);
+      }
+      if (outcome !== undefined) {
+        query.set('outcome', outcome);
+      }
+      const response = await fetcher(`${USER_AUDIT_LOG_URL}?${query.toString()}`);
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseUserAuditPage(await response.json());
     },
 
     async getUserSettings() {

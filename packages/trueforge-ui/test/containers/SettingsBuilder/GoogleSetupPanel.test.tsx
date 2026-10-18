@@ -664,6 +664,7 @@ describe('GoogleSetupPanel', () => {
     const OFFLINE = 'Gmail needs network access. Turn off offline mode in Settings to connect.';
     const offlineApi = (offlineMode: boolean): SentinelApi => ({
       listAuditEntries: async () => [],
+      listUserAuditEntries: async () => ({ entries: [] }),
       getUserSettings: async () => ({ offline_mode: offlineMode, tier2_auto_allow: [], search_without_asking: true }),
       updateUserSettings: async () => ({
         offline_mode: offlineMode,

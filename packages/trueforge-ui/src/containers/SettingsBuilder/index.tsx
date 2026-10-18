@@ -32,6 +32,25 @@ const PersonalizationSettings = lazy(() =>
 const SentinelSettings = lazy(() =>
   import('@/sentinel/SentinelSettings.js').then(module => ({ default: module.SentinelSettings })),
 );
+const AuditLogSettings = lazy(() =>
+  import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
+);
+
+type SettingsNavItem = {
+  id: SettingsSection;
+  label: string;
+  icon:
+    | 'cpu'
+    | 'brain'
+    | 'plug'
+    | 'box-archive'
+    | 'lightbulb'
+    | 'cube'
+    | 'robot'
+    | 'palette'
+    | 'lock'
+    | 'clock-rotate-left';
+};
 
 function SettingsSectionFallback() {
   return (
@@ -79,7 +98,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasSentinel && section === 'permissions') {
+    if (!hasSentinel && (section === 'permissions' || section === 'audit')) {
       setSettingsOpen(settingsOpen, 'models');
     }
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
@@ -96,18 +115,8 @@ const TruefoundrySettingsBuilder = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [closeSettings, settingsOpen]);
 
-  const sections = useMemo<
-    Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'lock';
-    }>
-  >(() => {
-    const baseSections: Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'lock';
-    }> = [
+  const sections = useMemo<SettingsNavItem[]>(() => {
+    const baseSections: SettingsNavItem[] = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
       { id: 'connectors', label: 'Connectors', icon: 'plug' },
@@ -127,6 +136,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
+      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
     return baseSections;
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
@@ -194,6 +204,7 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
               {section === 'permissions' && hasSentinel ? <SentinelSettings /> : null}
+              {section === 'audit' && hasSentinel ? <AuditLogSettings /> : null}
             </Suspense>
           </div>
         </section>

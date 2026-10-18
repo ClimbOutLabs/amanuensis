@@ -74,6 +74,7 @@ describe('SentinelStateProvider', () => {
     let finishHistory: (context: SentinelSessionContext) => void = () => {};
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -113,6 +114,7 @@ describe('SentinelStateProvider', () => {
   it('fills in a card from saved history that the live stream never delivered', async () => {
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
       getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,

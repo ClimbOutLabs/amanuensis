@@ -375,6 +375,7 @@ export {
   extractSentinelSessionContext,
   parseAuditEntries,
   parseToolTier,
+  parseUserAuditPage,
   parseUserSettings,
 } from './sentinel/types.js';
 export type {
@@ -384,6 +385,8 @@ export type {
   SentinelAuditEntry,
   SentinelAuditOutcome,
   SentinelSessionContext,
+  SentinelUserAuditEntry,
+  SentinelUserAuditPage,
   SentinelUserSettings,
   ToolTier,
 } from './sentinel/types.js';

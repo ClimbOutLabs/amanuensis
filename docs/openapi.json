@@ -4692,6 +4692,25 @@
         ],
         "type": "object"
       },
+      "ListUserAuditLogResponse": {
+        "properties": {
+          "data": {
+            "description": "Entries from every chat, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/UserAuditRecord"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TokenPagination"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "type": "object"
+      },
       "ListVerifyCommandProposalsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -11978,6 +11997,62 @@
           "purpose",
           "command",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "UserAuditRecord": {
+        "properties": {
+          "auto_deny_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chat_exists": {
+            "description": "False once the chat the entry came from has been deleted.",
+            "type": "boolean"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "logged",
+              "ran",
+              "approved",
+              "denied",
+              "auto_denied"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "tier",
+          "tool_name",
+          "description",
+          "outcome",
+          "auto_deny_reason",
+          "created_at",
+          "chat_exists"
         ],
         "type": "object"
       },
@@ -21425,6 +21500,97 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/user/audit-log": {
+      "get": {
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the newest entries.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the newest entries.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries with this outcome.",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "description": "Only entries with this outcome.",
+              "enum": [
+                "logged",
+                "ran",
+                "approved",
+                "denied",
+                "auto_denied"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUserAuditLogResponse"
+                }
+              }
+            },
+            "description": "One page of audit entries."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters or page token."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List the Sentinel audit log across all chats",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-pagination": {
+          "cursor": "$request.page_token",
+          "next_cursor": "$response.pagination.next_page_token",
+          "results": "$response.data"
+        },
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "auditLog"
+        ],
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

@@ -160,6 +160,15 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
+/** Plain-word outcome labels for the owner. `logged` covers held actions and noted sensitive reads. */
+export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
+  logged: 'Held or noted',
+  ran: 'Ran',
+  approved: 'Approved',
+  denied: 'Denied',
+  auto_denied: 'Refused',
+};
+
 function parseAuditOutcome(value: unknown): SentinelAuditOutcome | undefined {
   for (const outcome of SENTINEL_AUDIT_OUTCOMES) {
     if (value === outcome) return outcome;
@@ -183,6 +192,18 @@ export type SentinelAuditEntry = {
   reason?: string;
 };
 
+/** One row of the owner's audit log across every chat. */
+export type SentinelUserAuditEntry = SentinelAuditEntry & {
+  /** False once the chat the entry came from has been deleted. */
+  chat_exists: boolean;
+};
+
+/** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
+export type SentinelUserAuditPage = {
+  entries: SentinelUserAuditEntry[];
+  nextPageToken?: string | undefined;
+};
+
 /** User-level Sentinel preferences. */
 export type SentinelUserSettings = {
   /** While on, actions that reach outside this machine are auto-denied without an approval card. */
@@ -198,11 +219,17 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
+  listUserAuditEntries: (input: {
+    limit?: number;
+    pageToken?: string | undefined;
+    outcome?: SentinelAuditOutcome | undefined;
+  }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
   /**
@@ -547,6 +574,20 @@ export function parseAuditEntries(body: unknown): SentinelAuditEntry[] {
     if (entry !== undefined) entries.push(entry);
   }
   return entries;
+}
+
+/** Parses a per-user audit page (`{ data: [...], pagination }`); rows that fail to parse are dropped. */
+export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
+  if (!isRecord(body) || !Array.isArray(body.data)) return { entries: [] };
+  const entries: SentinelUserAuditEntry[] = [];
+  for (const item of body.data) {
+    const entry = parseAuditEntry(item);
+    if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
+    entries.push({ ...entry, chat_exists: item.chat_exists });
+  }
+  const pagination = isRecord(body.pagination) ? body.pagination : undefined;
+  const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');
+  return nextPageToken === undefined || nextPageToken === '' ? { entries } : { entries, nextPageToken };
 }
 
 /** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
