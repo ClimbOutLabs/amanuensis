@@ -300,7 +300,8 @@ function hostNoteTag(kind: PendingHostNoteKind, signature: string): string {
 }
 
 /** Breaks any internal-tag delimiter inside untrusted text so it cannot close the tag early. */
-const INTERNAL_TAG_DELIMITER = /<(?=\s*\/?\s*tfy-internal)/gi;
+// Spacing after the slash is matched only with the slash, so a long run of spaces scans in linear time.
+const INTERNAL_TAG_DELIMITER = /<(?=\s*(?:\/\s*)?tfy-internal)/gi;
 
 export function internalSystemTag(m: string): string {
   return SYSTEM_TAG_START + m.replace(INTERNAL_TAG_DELIMITER, '&lt;') + SYSTEM_TAG_END;
