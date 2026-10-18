@@ -488,6 +488,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JsonbColumn<AgentSpec>;
   external_id: string | null;
+  /** 1 for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<number>;
   created_by_subject: JsonbColumn<CreatedBySubject>;
   created_at: string;
   updated_at: string;

@@ -200,6 +200,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
   const agentSpec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' });
 
   const agent = await stores.agentStore.createAgent({
+    host_managed: false,
     tenant_id: tenantId,
     created_by_subject: subject(userId),
     name: SEED_IDS.agentName,

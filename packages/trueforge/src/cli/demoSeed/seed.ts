@@ -348,6 +348,7 @@ async function seedAgent<TTransaction>({
       description: world.agentDescription,
       manifest,
       external_id: null,
+      host_managed: false,
       created_by_subject: subjectFor(scope.userId),
     });
     return { outcome: 'created', agentId: created.id };

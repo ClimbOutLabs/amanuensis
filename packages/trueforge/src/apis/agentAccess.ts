@@ -41,6 +41,8 @@ export async function listAccessibleAgents<TTransaction>(input: {
     return input.store.listAgents({
       tenant_id: input.context.tenant_id,
       agent_name: input.agent_name,
+      // People pick from this list, so the agents the host made for chat schedules stay out.
+      include_host_managed: false,
       limit: input.limit,
       page_token: input.page_token,
     });
@@ -49,6 +51,7 @@ export async function listAccessibleAgents<TTransaction>(input: {
     tenant_id: input.context.tenant_id,
     external_ids: access.agent_external_ids,
     agent_name: input.agent_name,
+    include_host_managed: false,
     limit: input.limit,
     page_token: input.page_token,
   });
@@ -72,6 +75,7 @@ export async function resolveManagedAgentIds<TTransaction>(input: {
     tenant_id: context.tenant_id,
     external_ids: access.agent_external_ids,
     agent_name: undefined,
+    include_host_managed: true,
     limit: undefined,
     page_token: undefined,
   });
@@ -97,6 +101,7 @@ export async function listManageableAgents<TTransaction>(input: {
       tenant_id: context.tenant_id,
       ...(access.kind === 'agent_external_ids' ? { external_ids: access.agent_external_ids } : {}),
       agent_name: undefined,
+      include_host_managed: true,
       limit: 200,
       page_token: pageToken,
     });

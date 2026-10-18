@@ -6,7 +6,7 @@ import type { IPersonaStore } from '../db/personaStore';
 import type { ScheduleRecord } from '../db/scheduleStore';
 import type { Persona } from '../personas/persona';
 
-/** Marks an agent the host made so a plain chat's schedules can run; such an agent shows as the assistant. */
+/** The description on the agent the host makes so a plain chat's schedules can run. */
 export const CHAT_ASSISTANT_DESCRIPTION = 'Runs the schedules you make in a chat.';
 
 const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
@@ -37,13 +37,8 @@ export class ChatAssistantUnavailableError extends Error {
   }
 }
 
-/** An agent the host made for a chat's schedules. People never pick it, so agent lists leave it out. */
-export function isHostMadeChatAssistant(agent: Pick<AgentRecord, 'name' | 'description'>): boolean {
-  return agent.name.startsWith(CHAT_ASSISTANT_NAME_PREFIX) && agent.description === CHAT_ASSISTANT_DESCRIPTION;
-}
-
 function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
-  return isHostMadeChatAssistant(input.agent) && input.agent.created_by_subject.subject_id === input.owner.subject_id;
+  return input.agent.host_managed && input.agent.created_by_subject.subject_id === input.owner.subject_id;
 }
 
 /** One name per owner and setup, so chats set up alike share one stored agent and a changed setup gets its own. */
@@ -83,6 +78,7 @@ async function getOrCreateChatAssistantAgent(input: {
       description: CHAT_ASSISTANT_DESCRIPTION,
       manifest: spec,
       external_id: null,
+      host_managed: true,
       created_by_subject: owner,
     });
   } catch (error) {
@@ -168,9 +164,6 @@ export function scheduleRunsAs(input: {
       if (persona !== undefined) {
         return persona.display_name;
       }
-    }
-    if (!schedule.agent_name.startsWith(CHAT_ASSISTANT_NAME_PREFIX)) {
-      return schedule.agent_name;
     }
     const agent = await cached(agents, schedule.agent_id, () =>
       input.agentStore.getAgent({ tenant_id, id: schedule.agent_id }),

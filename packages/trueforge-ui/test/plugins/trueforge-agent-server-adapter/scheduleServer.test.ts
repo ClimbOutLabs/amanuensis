@@ -114,6 +114,36 @@ describe('createScheduleServer.listSchedules', () => {
     expect(page.nextPageToken).toBe('tok');
   });
 
+  it('resolves a schedule made in a chat, whose agent the agents list leaves out', async () => {
+    const list = vi.fn(async () => ({
+      data: [
+        {
+          id: 's2',
+          name: 'lobster-joke',
+          agentName: 'assistant-0123456789abcdef',
+          runsAs: 'Bender',
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+          createdBySubject: { subjectId: 'user-1', subjectType: 'user', subjectDisplayName: 'alice@example.com' },
+          manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' as const },
+        },
+      ],
+      response: { pagination: { limit: 25 } },
+      hasNextPage: () => false,
+      getNextPage: async () => undefined,
+    }));
+    const server = createScheduleServer({ client: mockClient({ list }) });
+
+    const page = await server.listSchedules({});
+    const [schedule] = page.data;
+    expect(schedule).toMatchObject({ agentId: 'assistant-0123456789abcdef', runsAs: 'Bender' });
+
+    await expect(server.listSchedules({ agentIds: [schedule?.agentId ?? ''] })).resolves.toMatchObject({
+      data: [{ runsAs: 'Bender' }],
+    });
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ agentNames: 'assistant-0123456789abcdef' }));
+  });
+
   it('caps limit at 25', async () => {
     const list = vi.fn(async () => ({
       data: [],

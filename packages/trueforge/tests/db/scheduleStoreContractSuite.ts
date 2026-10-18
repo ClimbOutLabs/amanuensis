@@ -28,6 +28,7 @@ export function runScheduleStoreContractSuite(deps: {
 }): void {
   async function seedAgent(): Promise<{ id: string; name: string }> {
     const agent = await deps.getAgentStore().createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: USER_SUBJECT,
       name: `agent-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,

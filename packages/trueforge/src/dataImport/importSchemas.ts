@@ -271,6 +271,8 @@ export const ImportAgentRecordSchema = z.object({
   description: z.string(),
   manifest: AgentSpecSchema,
   external_id: z.string().nullable(),
+  /** Absent from exports made before host-made schedule agents were marked. */
+  host_managed: z.boolean().default(false),
   created_by_subject: CreatedBySubjectSchema,
   created_at: z.string(),
   updated_at: z.string(),

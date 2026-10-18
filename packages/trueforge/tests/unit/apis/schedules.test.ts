@@ -111,6 +111,7 @@ async function setup(authorizer: Authorizer = new TrueForgeAuthorizer()) {
   const agentStore = new SqliteAgentStore(db);
   const scheduleStore = new SqliteScheduleStore(db);
   await agentStore.createAgent({
+    host_managed: false,
     tenant_id: 'default',
     created_by_subject: {
       subject_id: 'alice',
@@ -276,6 +277,7 @@ describe('who a schedule runs as', () => {
 
     const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
     const chatAgent = await agentStore.createAgent({
+      host_managed: true,
       tenant_id: 'default',
       created_by_subject: alice,
       name: 'assistant-0123456789abcdef',
@@ -305,6 +307,7 @@ describe('schedule list agent_names filter', () => {
   it('filters by a single agent_names value and by comma-separated agent_names', async () => {
     const { app, asUser, agentStore, postJson } = await setup();
     await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: 'alice',
@@ -496,6 +499,7 @@ describe('internal schedule execution', () => {
     const scheduleStore = new SqliteScheduleStore(db);
     const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: alice,
       name: 'reporter',

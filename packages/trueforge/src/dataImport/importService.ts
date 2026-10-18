@@ -1072,6 +1072,7 @@ async function importArchive<TTransaction>(
         description: agent.description,
         manifest: detachConnectors({ spec: agent.manifest, names: connectorNames }),
         external_id: agent.external_id,
+        host_managed: agent.host_managed,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(agent.id);
@@ -1088,6 +1089,7 @@ async function importArchive<TTransaction>(
           instructions: 'This agent was created by a data import. Set its instructions before use.',
         }),
         external_id: null,
+        host_managed: false,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(placeholder.id);

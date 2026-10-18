@@ -56,6 +56,7 @@ async function setup(
   const personaStore = new SqlitePersonaStore(db);
   const store = new SqliteScheduleStore(db);
   const researcher = await agentStore.createAgent({
+    host_managed: false,
     tenant_id: 'default',
     created_by_subject: OWNER,
     name: 'researcher',
@@ -234,6 +235,7 @@ describe('create_schedule', () => {
     const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
     expect(runsAs).toMatchObject({
       name: saved?.agent_name,
+      host_managed: true,
       description: CHAT_ASSISTANT_DESCRIPTION,
       manifest: CHAT_SPEC,
       created_by_subject: OWNER,
@@ -254,12 +256,13 @@ describe('create_schedule', () => {
     expect(saved).toHaveLength(2);
     expect(new Set(saved.map(schedule => schedule.agent_id)).size).toBe(1);
     const agents = await built.agentStore.listAgents({
+      include_host_managed: true,
       tenant_id: 'default',
       agent_name: undefined,
       limit: undefined,
       page_token: undefined,
     });
-    expect(agents.data.filter(agent => agent.description === CHAT_ASSISTANT_DESCRIPTION)).toHaveLength(1);
+    expect(agents.data.filter(agent => agent.host_managed)).toHaveLength(1);
   });
 
   it("runs as the chat's saved agent when the chat has one", async () => {

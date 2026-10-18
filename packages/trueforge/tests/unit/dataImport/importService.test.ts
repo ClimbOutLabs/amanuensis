@@ -644,6 +644,7 @@ describe('export and import round trip', () => {
       });
       const owner = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
       await source.stores.agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT,
         created_by_subject: owner,
         name: 'trueforge-helper',
@@ -679,6 +680,7 @@ describe('export and import round trip', () => {
 
       await runDataImport(importDeps(target), importRequest(archive));
       const agents = await target.stores.agentStore.listAgents({
+        include_host_managed: false,
         tenant_id: TENANT,
         agent_name: undefined,
         limit: undefined,

@@ -301,6 +301,7 @@ describe('demo seed against the real stores', () => {
         sourceLabel: 'Pasted text',
       });
       const agent = await stores.agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: 'real-agent',
         description: 'Mine.',
@@ -344,6 +345,7 @@ describe('demo seed against the real stores', () => {
     /** What an earlier demo seed left: a briefing schedule under its old name and a prewritten briefing chat. */
     async function plantLegacyWorld(): Promise<{ sessionId: string }> {
       const agent = await stores.agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: DEMO_AGENT_NAME,
         description: `Synthetic demo assistant (${DEMO_MARKER}).`,
