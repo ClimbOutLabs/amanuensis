@@ -1302,7 +1302,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
+        mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
       ],

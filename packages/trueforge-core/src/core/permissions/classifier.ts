@@ -50,6 +50,7 @@ import {
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
+import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import { isMapsToolName, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
@@ -221,8 +222,32 @@ function mapsHost(url: string | undefined): string {
  * working once any maps upstream points elsewhere.
  */
 export function mapsDestinationHosts(hosts: MapsHosts): string {
-  const parts = [mapsHost(hosts.geocoder), mapsHost(hosts.router), mapsHost(hosts.tile)];
+  const parts = [
+    mapsHost(hosts.geocoder),
+    mapsHost(hosts.router),
+    mapsHost(hosts.walking),
+    mapsHost(hosts.cycling),
+    mapsHost(hosts.transit),
+    mapsHost(hosts.tile),
+  ];
   return [...new Set(parts)].join(', ');
+}
+
+/** The route service the card names for the call's travel mode, and what it is asked for. */
+function mapsRouteService({ mode, hosts }: { mode: unknown; hosts: MapsHosts | undefined }): string {
+  const parsed = mode === undefined ? DEFAULT_MAPS_TRAVEL_MODE : MapsTravelModeSchema.safeParse(mode).data;
+  switch (parsed) {
+    case 'walking':
+      return `ask ${mapsHost(hosts?.walking)} for a walking route between them`;
+    case 'cycling':
+      return `ask ${mapsHost(hosts?.cycling)} for a cycling route between them`;
+    case 'transit':
+      return `ask ${mapsHost(hosts?.transit)} for a public transport route between them`;
+    case 'driving':
+      return `ask ${mapsHost(hosts?.router)} for a driving route between them`;
+    default:
+      return `ask ${mapsHost(hosts?.router)}, ${mapsHost(hosts?.walking)}, ${mapsHost(hosts?.cycling)} or ${mapsHost(hosts?.transit)} for a route between them`;
+  }
 }
 
 /** Most addresses one pin call may send; the tool schema caps the list at the same number. */
@@ -263,12 +288,11 @@ function mapsPlainWhat(action: SentinelAction): string {
   const params = action.canonical_params;
   const hosts = action.maps_hosts;
   const geocoder = mapsHost(hosts?.geocoder);
-  const router = mapsHost(hosts?.router);
   const tile = mapsHost(hosts?.tile);
   if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
     return (
       `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
-      `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
+      `${mapsRouteService({ mode: params['mode'], hosts })}, then load map tiles for that area from ${tile}.`
     );
   }
   if (action.tool_name === RENDER_PLACES_TOOL_NAME) {

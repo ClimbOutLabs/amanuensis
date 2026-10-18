@@ -25,6 +25,9 @@ function makeCtx(services?: SentinelServices): ClassifyContext {
 const DEFAULT_MAPS_HOSTS = {
   geocoder: 'https://nominatim.openstreetmap.org',
   router: 'https://router.project-osrm.org',
+  walking: 'https://foot.example.test/routed-foot',
+  cycling: 'https://bike.example.test/routed-bike',
+  transit: 'https://transit.example.test/api/v6',
   tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
 };
 
@@ -106,6 +109,9 @@ describe('maps classifier branch', () => {
     const hosts = decision.card?.destination_host ?? '';
     expect(hosts).toContain('nominatim.openstreetmap.org');
     expect(hosts).toContain('router.project-osrm.org');
+    expect(hosts).toContain('foot.example.test');
+    expect(hosts).toContain('bike.example.test');
+    expect(hosts).toContain('transit.example.test');
     expect(hosts).toContain('tile.openstreetmap.org');
     // Never echoes the place string as the destination.
     expect(hosts).not.toContain('Paris');
@@ -159,6 +165,65 @@ describe('maps classifier branch', () => {
     expect(await verdict(hosts)).toBeUndefined();
   });
 
+  it('names the service for the travel mode on a route card', async () => {
+    const card = async (mode?: unknown) =>
+      (
+        await classifyTier(
+          mapsAction('render_route', {
+            from_place: 'Chiado',
+            to_place: 'Estrela',
+            ...(mode === undefined ? {} : { mode }),
+          }),
+          makeCtx(),
+        )
+      ).card?.plain_what ?? '';
+    expect(await card('walking')).toContain('ask foot.example.test for a walking route');
+    expect(await card('cycling')).toContain('ask bike.example.test for a cycling route');
+    expect(await card('transit')).toContain('ask transit.example.test for a public transport route');
+    expect(await card('driving')).toContain('ask router.project-osrm.org for a driving route');
+    expect(await card()).toContain('ask router.project-osrm.org for a driving route');
+    expect(await card('teleport')).not.toContain('driving route');
+  });
+
+  it('asks again for an approval bound to the old map services', async () => {
+    const { walking: _w, cycling: _c, transit: _t, ...before } = DEFAULT_MAPS_HOSTS;
+    const oldHosts = [before.geocoder, before.router, before.tile].map(url => new URL(url).host).join(', ');
+    const newHosts = mapsDestinationHosts(DEFAULT_MAPS_HOSTS);
+    expect(newHosts).not.toBe(oldHosts);
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const action: SentinelAction = {
+      ...mapsAction('render_route', { from_place: 'A', to_place: 'B', mode: 'transit' }),
+      mcp_server_id: 'maps',
+      mcp_server_host: newHosts,
+    };
+    const tokenFor = async () => (await classifyTier(action, makeCtx(services))).approval_token_id;
+    const verdict = async (host: string) =>
+      verifyPreDispatch({
+        call: {
+          tool_name: 'render_route',
+          tool_type: 'truefoundry-system',
+          canonical_params: { from_place: 'A', to_place: 'B', mode: 'transit' },
+          tier: 3,
+          approval_token_id: await tokenFor(),
+          approval_binding: null,
+          shell_binding: null,
+          connector: { server_id: 'maps', destination_host: host },
+        },
+        ctx: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: 'r1',
+          workspace_cwd: null,
+          agent_intent: null,
+          services,
+          offline: false,
+        },
+      });
+    expect(await verdict(oldHosts)).toContain('Approval invalid');
+    expect(await verdict(newHosts)).toBeUndefined();
+  });
+
   it('leaves cannot_be_undone, recipient, amount and parsed_command null', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx());
     expect(decision.card?.cannot_be_undone).toBeNull();
@@ -172,6 +237,9 @@ describe('maps classifier branch', () => {
     action.maps_hosts = {
       geocoder: 'https://geocode.example.internal',
       router: 'https://routes.example.internal',
+      walking: 'https://routes.example.internal/foot',
+      cycling: 'https://routes.example.internal/bike',
+      transit: 'https://transit.example.internal',
       tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
     };
     const decision = await classifyTier(action, makeCtx());

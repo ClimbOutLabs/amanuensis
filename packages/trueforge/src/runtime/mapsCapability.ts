@@ -1,9 +1,9 @@
 /**
- * Embedded maps: `render_map` and `render_route` model-callable tools.
+ * Embedded maps: `render_map`, `render_route` and `render_places` model-callable tools.
  *
  * The tools run in the server process, not the sandbox. Each call geocodes
  * place names through the configured geocoder and (for routes) asks the
- * configured routing provider for a driving route. Map tiles reach the browser
+ * routing service for the chosen travel mode. Map tiles reach the browser
  * only through the same-origin tile proxy (`/api/maps/tiles/{z}/{x}/{y}.png`);
  * the tool results carry coordinates and metadata, never tile URLs.
  *
@@ -13,22 +13,35 @@
  */
 import type { AgentCapability, AgentTracing, ConnectorBinding } from '@truefoundry/trueforge-core/core';
 import {
+  DEFAULT_MAPS_TRAVEL_MODE,
   defineTool,
   fetchedPages,
   groundPlace,
   isInCalendar,
   LocalToolMCP,
   mapsDestinationHosts,
+  MapsTravelModeSchema,
   RENDER_MAP_TOOL_NAME,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
+  resolveLocalTime,
   toolResultResponse,
   type FetchedPageStore,
+  type MapsRouteResult as MapsRouteResultBody,
+  type MapsTravelMode,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
+import { MapsUpstreamError, type MapsErrorBody } from './mapsErrors';
+import { MAX_GEOMETRY_CHARS, thinPolyline } from './mapsPolyline';
+import {
+  MotisTransitProvider,
+  resolveTransitTime,
+  type MapsTransitPlan,
+  type MapsTransitProvider,
+} from './mapsTransit';
 import { fetchSameOrigin, readCappedJson } from './mapsUpstream';
 
 export const MAPS_SERVER_ID = 'maps';
@@ -55,9 +68,10 @@ const UPSTREAM_TIMEOUT_MS = 10_000;
 const GEOCODE_CACHE_MAX_ENTRIES = 500;
 const GEOCODE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+const MAPS_ATTRIBUTION = '© OpenStreetMap contributors';
+
 const DEFAULT_ZOOM = 13;
 const MAX_POI_PINS = 5;
-const MAX_GEOMETRY_CHARS = 8000;
 
 /** Input schemas are .strict(); every bound is 128 or under; no regex. */
 const RENDER_MAP_INPUT_SCHEMA = z
@@ -72,6 +86,9 @@ const RENDER_ROUTE_INPUT_SCHEMA = z
   .object({
     from_place: z.string().min(1).max(128),
     to_place: z.string().min(1).max(128),
+    mode: MapsTravelModeSchema.default(DEFAULT_MAPS_TRAVEL_MODE),
+    depart_at: z.string().min(1).max(40).optional(),
+    arrive_by: z.string().min(1).max(40).optional(),
   })
   .strict();
 
@@ -102,15 +119,6 @@ const RENDER_PLACES_INPUT_SCHEMA = z
 export type RenderMapInput = z.infer<typeof RENDER_MAP_INPUT_SCHEMA>;
 export type RenderRouteInput = z.infer<typeof RENDER_ROUTE_INPUT_SCHEMA>;
 export type RenderPlacesInput = z.infer<typeof RENDER_PLACES_INPUT_SCHEMA>;
-
-export type MapsErrorCode = 'not_found' | 'no_route' | 'service_unavailable' | 'rate_limited' | 'not_grounded';
-
-export interface MapsErrorBody {
-  status: 'error';
-  code: MapsErrorCode;
-  field?: string | undefined;
-  service?: 'geocoder' | 'router' | undefined;
-}
 
 export interface GeocodedPlace {
   resolved_name: string;
@@ -144,10 +152,11 @@ export interface MapsRoutingProvider {
   route(input: MapsRouteRequest): Promise<MapsRouteResult>;
 }
 
-/** OSRM routing provider: the first implementation of the interface. */
+/** OSRM-compatible routing provider. The profile comes from the server the base URL points at. */
 class OsrmRoutingProvider implements MapsRoutingProvider {
   readonly provider_id = 'osrm';
 
+  // The driving path segment is kept for every profile: FOSSGIS selects foot or bike by base path.
   constructor(
     private readonly base_url: string,
     private readonly fetch_limited: (url: string) => Promise<Response>,
@@ -201,22 +210,6 @@ export function createMapsRoutingProvider(input: {
   throw new Error(`Unknown maps routing provider: ${input.provider_id}`);
 }
 
-/** Upstream failure with a maps error code for the tool result body. */
-export class MapsUpstreamError extends Error {
-  readonly code: MapsErrorCode;
-  readonly service: 'geocoder' | 'router' | undefined;
-
-  constructor(code: MapsErrorCode, service?: 'geocoder' | 'router', cause?: unknown) {
-    super(
-      `Maps upstream failure: ${code}${service ? ` (${service})` : ''}`,
-      cause === undefined ? undefined : { cause },
-    );
-    this.name = 'MapsUpstreamError';
-    this.code = code;
-    this.service = service;
-  }
-}
-
 const osrmRouteSchema = z.object({
   code: z.string(),
   routes: z.array(
@@ -235,109 +228,6 @@ const nominatimResultSchema = z.object({
   address: z.record(z.string(), z.unknown()).optional(),
   boundingbox: z.array(z.string()).optional(),
 });
-
-/**
- * Thin an encoded polyline to at most maxChars by dropping points evenly,
- * always keeping both endpoints so the line still draws.
- */
-export function thinPolyline(encoded: string, maxChars: number): string {
-  if (encoded.length <= maxChars) {
-    return encoded;
-  }
-  // Decode to points, thin, re-encode. Precision 5.
-  const points = decodePolyline(encoded);
-  if (points.length <= 2) {
-    return encoded;
-  }
-  // Binary search the stride that fits.
-  let low = 2;
-  let high = points.length;
-  let best = encoded;
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (first === undefined || last === undefined) {
-    return encoded;
-  }
-  while (low <= high) {
-    const stride = Math.floor((low + high) / 2);
-    const thinned: [number, number][] = [first];
-    for (let i = stride; i < points.length - 1; i += stride) {
-      const point = points[i];
-      if (point !== undefined) {
-        thinned.push(point);
-      }
-    }
-    thinned.push(last);
-    const candidate = encodePolyline(thinned);
-    if (candidate.length <= maxChars) {
-      best = candidate;
-      high = stride - 1;
-    } else {
-      low = stride + 1;
-    }
-  }
-  return best;
-}
-
-/** Decode a precision-5 encoded polyline to [lat, lng] pairs. */
-export function decodePolyline(encoded: string): [number, number][] {
-  const points: [number, number][] = [];
-  let lat = 0;
-  let lng = 0;
-  let index = 0;
-  while (index < encoded.length) {
-    const latResult = decodePolylineValue(encoded, { index });
-    lat += latResult.value;
-    index = latResult.nextIndex;
-    const lngResult = decodePolylineValue(encoded, { index });
-    lng += lngResult.value;
-    index = lngResult.nextIndex;
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-  return points;
-}
-
-function decodePolylineValue(encoded: string, state: { index: number }): { value: number; nextIndex: number } {
-  let shift = 0;
-  let result = 0;
-  let index = state.index;
-  let byte: number;
-  do {
-    byte = encoded.charCodeAt(index) - 63;
-    index += 1;
-    result |= (byte & 0x1f) << shift;
-    shift += 5;
-  } while (byte >= 0x20);
-  const value = (result & 1) === 1 ? ~(result >> 1) : result >> 1;
-  return { value, nextIndex: index };
-}
-
-/** Encode [lat, lng] pairs as a precision-5 polyline. */
-export function encodePolyline(points: [number, number][]): string {
-  let lastLat = 0;
-  let lastLng = 0;
-  let out = '';
-  for (const [lat, lng] of points) {
-    const latInt = Math.round(lat * 1e5);
-    const lngInt = Math.round(lng * 1e5);
-    out += encodePolylineValue(latInt - lastLat);
-    out += encodePolylineValue(lngInt - lastLng);
-    lastLat = latInt;
-    lastLng = lngInt;
-  }
-  return out;
-}
-
-function encodePolylineValue(value: number): string {
-  let v = value < 0 ? ~(value << 1) : value << 1;
-  let out = '';
-  while (v >= 0x20) {
-    out += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
-    v >>= 5;
-  }
-  out += String.fromCharCode(v + 63);
-  return out;
-}
 
 /** One in-process limiter per instance: at most one request per second, queued in order. */
 export class UpstreamLimiter {
@@ -395,17 +285,21 @@ export class GeocodeCache {
   }
 }
 
+export type MapsRoadMode = Exclude<MapsTravelMode, 'transit'>;
+
 export interface MapsServiceDeps {
   geocoder_url: string;
-  router_provider: MapsRoutingProvider;
+  road_providers: Record<MapsRoadMode, MapsRoutingProvider>;
+  transit_provider: MapsTransitProvider;
   logger: Logger;
   fetch_limited: (url: string) => Promise<Response>;
 }
 
-/** Server-side maps service: geocoding, POI search, routing. */
+/** Server-side maps service: geocoding, POI search, road and public transport routing. */
 export class MapsService {
   private readonly geocodeLimiter = new UpstreamLimiter();
   private readonly routeLimiter = new UpstreamLimiter();
+  private readonly transitLimiter = new UpstreamLimiter();
   private readonly geocodeCache = new GeocodeCache();
 
   constructor(private readonly deps: MapsServiceDeps) {}
@@ -490,16 +384,58 @@ export class MapsService {
     return places;
   }
 
-  /** Route between two geocoded places via the configured provider. */
-  async route(from: GeocodedPlace, to: GeocodedPlace): Promise<MapsRouteResult> {
+  /** Road route between two geocoded places for walking, cycling or driving. */
+  async route({
+    from,
+    to,
+    mode,
+  }: {
+    from: GeocodedPlace;
+    to: GeocodedPlace;
+    mode: MapsRoadMode;
+  }): Promise<MapsRouteResult> {
     try {
       return await this.routeLimiter.run(() =>
-        this.deps.router_provider.route({
+        this.deps.road_providers[mode].route({
           // Origin privacy: round the origin before any provider can send it off the machine.
           from_lat: roundOriginCoordinate(from.lat),
           from_lng: roundOriginCoordinate(from.lng),
           to_lat: to.lat,
           to_lng: to.lng,
+        }),
+      );
+    } catch (error) {
+      if (error instanceof MapsUpstreamError) {
+        throw error;
+      }
+      throw new MapsUpstreamError('service_unavailable', 'router', error);
+    }
+  }
+
+  /** Public transport itinerary between two geocoded places. */
+  async planTransit({
+    from,
+    to,
+    time,
+    arrive_by,
+    timezone,
+  }: {
+    from: GeocodedPlace;
+    to: GeocodedPlace;
+    time: string | null;
+    arrive_by: boolean;
+    timezone: string;
+  }): Promise<MapsTransitPlan> {
+    try {
+      return await this.transitLimiter.run(() =>
+        this.deps.transit_provider.plan({
+          from_lat: roundOriginCoordinate(from.lat),
+          from_lng: roundOriginCoordinate(from.lng),
+          to_lat: to.lat,
+          to_lng: to.lng,
+          time,
+          arrive_by,
+          fallback_timezone: timezone,
         }),
       );
     } catch (error) {
@@ -534,13 +470,27 @@ function toGeocodedPlace(data: z.infer<typeof nominatimResultSchema>): GeocodedP
   };
 }
 
-function mapsErrorResult(error: MapsUpstreamError, field?: string): ReturnType<typeof toolResultResponse> {
+function mapsErrorResult({
+  error,
+  field,
+  mode,
+}: {
+  error: MapsUpstreamError;
+  field?: string;
+  mode?: MapsTravelMode;
+}): ReturnType<typeof toolResultResponse> {
   const body: MapsErrorBody = { status: 'error', code: error.code };
   if (field !== undefined) {
     body.field = field;
   }
   if (error.service !== undefined) {
     body.service = error.service;
+  }
+  if (mode !== undefined) {
+    body.mode = mode;
+    if (error.code === 'no_route' && mode === 'transit') {
+      body.try_instead = 'walking';
+    }
   }
   return toolResultResponse({ text: JSON.stringify(body), isError: true });
 }
@@ -587,7 +537,7 @@ export async function renderPlaces({
     }
   }
   if (grounded.length === 0) {
-    return mapsErrorResult(new MapsUpstreamError('not_grounded'));
+    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded') });
   }
   try {
     const places = [];
@@ -601,11 +551,11 @@ export async function renderPlaces({
       });
     }
     return toolResultResponse({
-      text: JSON.stringify({ status: 'ok', places, refused, attribution: '© OpenStreetMap contributors' }),
+      text: JSON.stringify({ status: 'ok', places, refused, attribution: MAPS_ATTRIBUTION }),
     });
   } catch (error) {
     if (error instanceof MapsUpstreamError) {
-      return mapsErrorResult(error);
+      return mapsErrorResult({ error });
     }
     throw error;
   }
@@ -618,6 +568,7 @@ class MapsTool extends LocalToolMCP {
   constructor(
     private readonly service: MapsService,
     private readonly logger: Logger,
+    private readonly timezone: string,
     tracing: AgentTracing,
   ) {
     super({ tracing });
@@ -627,6 +578,9 @@ class MapsTool extends LocalToolMCP {
     return {
       geocoder: configuration.MAPS_GEOCODER_URL,
       router: configuration.MAPS_ROUTER_URL,
+      walking: configuration.MAPS_WALKING_ROUTER_URL,
+      cycling: configuration.MAPS_CYCLING_ROUTER_URL,
+      transit: configuration.MAPS_TRANSIT_URL,
       tile: configuration.MAPS_TILE_URL,
     };
   }
@@ -659,7 +613,7 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_ROUTE_TOOL_NAME,
       description:
-        "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'); never pass coordinates. The tool geocodes both endpoints, routes by road, and returns an inline map card with the route, distance, and duration; the user is asked to approve each call. Use only when the user has named both the origin and the destination; there is no current-location mode.",
+        "Render a route map between two named places, by walking, cycling, driving or public transport (transit). Pass both place names as the user gave them (e.g. from_place 'Chiado, Lisboa', to_place 'Basilica da Estrela, Lisboa'); never pass coordinates. Pick mode from the user's words; when they do not say, in a city prefer walking for a short trip and transit for a longer one, and mention the other options in the answer. For transit, depart_at or arrive_by (local time like 2026-10-19T09:20, in the user's timezone) answers 'I need to be there at 9:20'; leave both out to leave now. The tool geocodes both endpoints and returns an inline map card with the route, distance, and duration; transit also lists the steps. If no transit route is found, say so and offer walking. The user is asked to approve each call. Use only when the user has named both the origin and the destination; there is no current-location mode.",
       schema: RENDER_ROUTE_INPUT_SCHEMA,
       handler: async input => this.renderRoute(input),
     }),
@@ -680,7 +634,7 @@ class MapsTool extends LocalToolMCP {
     try {
       const place = await this.service.geocode(input.place_name);
       if (place === null) {
-        return mapsErrorResult(new MapsUpstreamError('not_found'));
+        return mapsErrorResult({ error: new MapsUpstreamError('not_found') });
       }
       const pins = input.poi === undefined ? [] : await this.service.searchPoi(place, input.poi);
       return toolResultResponse({
@@ -692,54 +646,97 @@ class MapsTool extends LocalToolMCP {
           lng: place.lng,
           zoom: input.zoom,
           pins: pins.map(pin => ({ name: pin.resolved_name, lat: pin.lat, lng: pin.lng })),
-          attribution: '© OpenStreetMap contributors',
+          attribution: MAPS_ATTRIBUTION,
         }),
       });
     } catch (error) {
       if (error instanceof MapsUpstreamError) {
-        return mapsErrorResult(error);
+        return mapsErrorResult({ error });
       }
       this.logger.error('render_map failed', { error });
-      return mapsErrorResult(new MapsUpstreamError('service_unavailable', 'geocoder', error));
+      return mapsErrorResult({ error: new MapsUpstreamError('service_unavailable', 'geocoder', error) });
     }
   }
 
   private async renderRoute(input: RenderRouteInput): Promise<ReturnType<typeof toolResultResponse>> {
+    const { mode } = input;
     try {
+      const when = this.resolveWhen(input);
+      if (when instanceof MapsUpstreamError) {
+        return mapsErrorResult({ error: when, mode, field: input.arrive_by === undefined ? 'depart_at' : 'arrive_by' });
+      }
       const from = await this.service.geocode(input.from_place);
       if (from === null) {
-        return mapsErrorResult(new MapsUpstreamError('not_found'), 'from_place');
+        return mapsErrorResult({ error: new MapsUpstreamError('not_found'), mode, field: 'from_place' });
       }
       const to = await this.service.geocode(input.to_place);
       if (to === null) {
-        return mapsErrorResult(new MapsUpstreamError('not_found'), 'to_place');
+        return mapsErrorResult({ error: new MapsUpstreamError('not_found'), mode, field: 'to_place' });
       }
-      const route = await this.service.route(from, to);
-      return toolResultResponse({
-        text: JSON.stringify({
+      const endpoints = {
+        from: { resolved_name: from.resolved_name, lat: from.lat, lng: from.lng },
+        to: { resolved_name: to.resolved_name, lat: to.lat, lng: to.lng },
+      };
+      let body: MapsRouteResultBody;
+      if (mode === 'transit') {
+        const plan = await this.service.planTransit({ from, to, ...when, timezone: this.timezone });
+        body = {
           status: 'ok',
-          from: { resolved_name: from.resolved_name, lat: from.lat, lng: from.lng },
-          to: { resolved_name: to.resolved_name, lat: to.lat, lng: to.lng },
+          mode,
+          ...endpoints,
+          distance_km: plan.distance_km,
+          duration_min: plan.duration_min,
+          departs: plan.departs,
+          arrives: plan.arrives,
+          transfers: plan.transfers,
+          steps: plan.steps,
+          route_geometry: plan.geometry,
+          attribution: MAPS_ATTRIBUTION,
+        };
+      } else {
+        const route = await this.service.route({ from, to, mode });
+        const road = {
+          status: 'ok',
+          ...endpoints,
           distance_km: route.distance_km,
           duration_min: route.duration_min,
-          ...(route.traffic ? { traffic: true } : {}),
           route_geometry: route.geometry,
-          attribution: '© OpenStreetMap contributors',
-        }),
-      });
+          attribution: MAPS_ATTRIBUTION,
+        } as const;
+        body = mode === 'driving' ? { ...road, mode, ...(route.traffic ? { traffic: true } : {}) } : { ...road, mode };
+      }
+      return toolResultResponse({ text: JSON.stringify(body) });
     } catch (error) {
       if (error instanceof MapsUpstreamError) {
-        return mapsErrorResult(error);
+        return mapsErrorResult({ error, mode });
       }
       this.logger.error('render_route failed', { error });
-      return mapsErrorResult(new MapsUpstreamError('service_unavailable', 'router', error));
+      return mapsErrorResult({ error: new MapsUpstreamError('service_unavailable', 'router', error), mode });
     }
+  }
+
+  /** The transit time as an offset ISO string, or an invalid_time error. Other modes ignore times. */
+  private resolveWhen(input: RenderRouteInput): { time: string | null; arrive_by: boolean } | MapsUpstreamError {
+    if (input.mode !== 'transit') {
+      return { time: null, arrive_by: false };
+    }
+    if (input.depart_at !== undefined && input.arrive_by !== undefined) {
+      return new MapsUpstreamError('invalid_time');
+    }
+    const requested = input.arrive_by ?? input.depart_at;
+    if (requested === undefined) {
+      return { time: null, arrive_by: false };
+    }
+    const time = resolveTransitTime({ local: requested, timezone: this.timezone });
+    return time === null ? new MapsUpstreamError('invalid_time') : { time, arrive_by: input.arrive_by !== undefined };
   }
 }
 
 export interface MapsCapabilityOptions {
   tracing: AgentTracing;
   logger: Logger;
+  /** IANA zone the user's local times are read in; UTC when the client sent none. */
+  timezone?: string | undefined;
 }
 
 /** Build the maps capability from server config. One instance per server. */
@@ -753,18 +750,33 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
       headers: { 'User-Agent': user_agent, Accept: 'application/json' },
       timeoutMs: UPSTREAM_TIMEOUT_MS,
     });
-  const router_provider = createMapsRoutingProvider({
-    provider_id: configuration.MAPS_ROUTER_PROVIDER,
-    router_url: configuration.MAPS_ROUTER_URL,
-    fetch_limited,
-  });
+  const road_providers: Record<MapsRoadMode, MapsRoutingProvider> = {
+    driving: createMapsRoutingProvider({
+      provider_id: configuration.MAPS_ROUTER_PROVIDER,
+      router_url: configuration.MAPS_ROUTER_URL,
+      fetch_limited,
+    }),
+    walking: createMapsRoutingProvider({
+      provider_id: configuration.MAPS_ROUTER_PROVIDER,
+      router_url: configuration.MAPS_WALKING_ROUTER_URL,
+      fetch_limited,
+    }),
+    cycling: createMapsRoutingProvider({
+      provider_id: configuration.MAPS_ROUTER_PROVIDER,
+      router_url: configuration.MAPS_CYCLING_ROUTER_URL,
+      fetch_limited,
+    }),
+  };
   const service = new MapsService({
     geocoder_url: configuration.MAPS_GEOCODER_URL,
-    router_provider,
+    road_providers,
+    transit_provider: new MotisTransitProvider(configuration.MAPS_TRANSIT_URL, fetch_limited),
     logger: options.logger,
     fetch_limited,
   });
   return {
-    systemToolSets: [new MapsTool(service, options.logger, options.tracing)],
+    systemToolSets: [
+      new MapsTool(service, options.logger, resolveLocalTime(new Date(), options.timezone).zone, options.tracing),
+    ],
   };
 }

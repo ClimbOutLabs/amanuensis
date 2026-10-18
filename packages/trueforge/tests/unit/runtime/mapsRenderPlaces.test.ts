@@ -2,12 +2,8 @@ import { FetchedPageStore } from '@truefoundry/trueforge-core/core';
 import { isCallToolResponseResult, type CallToolResponse } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
-import {
-  MapsService,
-  createMapsRoutingProvider,
-  mapsCapability,
-  renderPlaces,
-} from '../../../src/runtime/mapsCapability';
+import { MapsService, mapsCapability, renderPlaces } from '../../../src/runtime/mapsCapability';
+import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
 
 const HARBOUR_URL = 'https://harbour-clinic.example/en';
 const GARDEN_URL = 'https://garden-health.example/doctors';
@@ -36,11 +32,8 @@ function setup(geocode: (query: string) => unknown[]) {
   const asked: string[] = [];
   const service = new MapsService({
     geocoder_url: 'https://geocode.example',
-    router_provider: createMapsRoutingProvider({
-      provider_id: 'osrm',
-      router_url: 'https://router.example',
-      fetch_limited: () => Promise.reject(new Error('unused')),
-    }),
+    road_providers: unusedRoadProviders(),
+    transit_provider: unusedTransitProvider(),
     logger: createLogger({ silent: true }),
     fetch_limited: url => {
       const query = new URL(url).searchParams.get('q') ?? '';
@@ -163,11 +156,8 @@ describe('render_places', () => {
   it('reports an unreachable geocoder as a maps error', async () => {
     const service = new MapsService({
       geocoder_url: 'https://geocode.example',
-      router_provider: createMapsRoutingProvider({
-        provider_id: 'osrm',
-        router_url: 'https://router.example',
-        fetch_limited: () => Promise.reject(new Error('unused')),
-      }),
+      road_providers: unusedRoadProviders(),
+      transit_provider: unusedTransitProvider(),
       logger: createLogger({ silent: true }),
       fetch_limited: () => Promise.reject(new Error('down')),
     });

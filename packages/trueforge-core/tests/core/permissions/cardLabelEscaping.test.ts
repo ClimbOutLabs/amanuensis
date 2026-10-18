@@ -66,6 +66,9 @@ function mapsAction(tool_name: string, canonical_params: Record<string, unknown>
     maps_hosts: {
       geocoder: 'https://nominatim.openstreetmap.org',
       router: 'https://router.project-osrm.org',
+      walking: 'https://routing.openstreetmap.de/routed-foot',
+      cycling: 'https://routing.openstreetmap.de/routed-bike',
+      transit: 'https://api.transitous.org/api/v6',
       tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     },
   });
