@@ -8,11 +8,12 @@ import { join, resolve } from 'node:path';
  * cannot use and asserts the fail-fast boot check: non-zero exit and output
  * naming the env var instead of a bare EACCES/ENOTDIR.
  */
-// Standalone refuses to boot without login, and that gate runs before the storage check under test.
+// Standalone refuses to boot without login and without its one owner, and those gates run before the storage check under test.
 const BOOT_OIDC_ENV = {
   OIDC_ISSUER_URL: 'http://127.0.0.1:1/dex',
   OIDC_CLIENT_ID: 'boot-storage-test',
   OIDC_CLIENT_SECRET: 'boot-storage-test-secret',
+  OIDC_ALLOWED_EMAILS: 'owner@example.invalid',
 };
 
 describe('server boot storage check', () => {

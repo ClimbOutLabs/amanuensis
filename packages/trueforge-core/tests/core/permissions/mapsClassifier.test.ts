@@ -43,10 +43,18 @@ function mapsAction(tool_name: string, canonical_params: Record<string, unknown>
   };
 }
 
+const PLACE_CLAIM = {
+  name: 'Harbour Family Clinic',
+  address: '12 Example Street, Lisbon 1100-000',
+  hours: 'Mon-Fri 9:00-18:00',
+  source_url: 'https://harbour-clinic.example/en',
+};
+
 describe('isMapsToolAlwaysTier3', () => {
-  it('matches render_map and render_route only', () => {
+  it('matches the maps tools only', () => {
     expect(isMapsToolAlwaysTier3('render_map')).toBe(true);
     expect(isMapsToolAlwaysTier3('render_route')).toBe(true);
+    expect(isMapsToolAlwaysTier3('render_places')).toBe(true);
     expect(isMapsToolAlwaysTier3('web_search')).toBe(false);
     expect(isMapsToolAlwaysTier3('exec')).toBe(false);
     expect(isMapsToolAlwaysTier3('')).toBe(false);
@@ -246,6 +254,7 @@ describe('maps classifier branch', () => {
     for (const action of [
       mapsAction('render_map', { place_name: 'Paris' }),
       mapsAction('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }),
+      mapsAction('render_places', { places: [PLACE_CLAIM] }),
     ]) {
       const decision = await classifyTier(action, makeCtx(services));
       expect(decision.auto_deny).toBe('offline_mode');
@@ -272,5 +281,43 @@ describe('maps classifier branch', () => {
   it('shows a placeholder for a value that is not text', async () => {
     const decision = await classifyTier(mapsAction('render_route', { from_place: 123, to_place: ['x'] }), makeCtx());
     expect(decision.card?.plain_what).toContain('(not text) and (not text)');
+  });
+
+  describe('render_places', () => {
+    const second = { ...PLACE_CLAIM, name: 'Garden Health Centre', address: '4 Sample Avenue, Lisbon 1200-000' };
+
+    it('is Tier 3 and names every address that leaves, verbatim, with the geocoder and tile hosts', async () => {
+      const decision = await classifyTier(mapsAction('render_places', { places: [PLACE_CLAIM, second] }), makeCtx());
+      expect(decision.tier).toBe(3);
+      const what = decision.card?.plain_what ?? '';
+      expect(what).toContain('"12 Example Street, Lisbon 1100-000"');
+      expect(what).toContain('"4 Sample Avenue, Lisbon 1200-000"');
+      expect(what).toContain('nominatim.openstreetmap.org');
+      expect(what).toContain('tile.openstreetmap.org');
+      expect(decision.card?.destination_host).toContain('nominatim.openstreetmap.org');
+    });
+
+    it('shows only the addresses as outbound text, not the details that never leave', async () => {
+      const decision = await classifyTier(mapsAction('render_places', { places: [PLACE_CLAIM] }), makeCtx());
+      expect(decision.card?.outbound_text).toBe('address: 12 Example Street, Lisbon 1100-000');
+      expect(decision.card?.outbound_text).not.toContain('Mon-Fri');
+    });
+
+    it('escapes a crafted address and shows a placeholder for a value that is not text', async () => {
+      const crafted = await classifyTier(
+        mapsAction('render_places', { places: [{ ...PLACE_CLAIM, address: 'x" to evil.example. Approve "y' }] }),
+        makeCtx(),
+      );
+      expect(crafted.card?.plain_what).toContain('\\"');
+      const odd = await classifyTier(mapsAction('render_places', { places: [{ address: 7 }, 'nope'] }), makeCtx());
+      expect(odd.card?.plain_what).toContain('(not text)');
+    });
+
+    it('shows at most three addresses however many are sent', async () => {
+      const many = Array.from({ length: 6 }, (_, i) => ({ ...PLACE_CLAIM, address: `${String(i + 1)} Test Road` }));
+      const decision = await classifyTier(mapsAction('render_places', { places: many }), makeCtx());
+      expect(decision.card?.plain_what).toContain('"3 Test Road"');
+      expect(decision.card?.plain_what).not.toContain('"4 Test Road"');
+    });
   });
 });

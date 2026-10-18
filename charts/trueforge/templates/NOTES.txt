@@ -46,7 +46,7 @@ or switch to external passworded Redis via externalRedis.url.
 
 WARNING: configs.oidc.enabled is true but server.publicBaseUrl is empty.
 OIDC callbacks require PUBLIC_BASE_URL. Register
-https://<your-public-origin>/api/v1/auth/callback at your IdP.
+https://<your-public-origin>/api/v1/auth/callback with Aman's sign-in service.
 {{- else if not .Values.server.publicBaseUrl }}
 
 WARNING: server.publicBaseUrl is empty. MCP OAuth and OIDC callbacks will fail until you set it to the public application URL (e.g. https://trueforge.example.com or https://host/custom/proxy/path).

@@ -31,6 +31,25 @@ import { getDownloadsDir } from "../config-paths.js";
 import { apiOpts } from "../api.js";
 
 type DownloadEmailOutput = z.infer<typeof DownloadEmailOutputSchema>;
+
+/** Largest attachment also returned inline as an image block for the host to show. */
+const INLINE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * The image MIME type of a picture attachment, from its leading bytes, or null. Only these four types
+ * are returned inline; the host re-encodes them in its sandbox before anything is shown.
+ */
+function inlineImageMime(buffer: Buffer): string | null {
+  if (buffer.length > INLINE_IMAGE_MAX_BYTES) return null;
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "image/jpeg";
+  const head = buffer.subarray(0, 6).toString("latin1");
+  if (head === "GIF87a" || head === "GIF89a") return "image/gif";
+  if (buffer.subarray(0, 4).toString("latin1") === "RIFF" && buffer.subarray(8, 12).toString("latin1") === "WEBP") {
+    return "image/webp";
+  }
+  return null;
+}
 type DownloadAttachmentOutput = z.infer<typeof DownloadAttachmentOutputSchema>;
 
 const downloadEmail: Operation<unknown, DownloadEmailOutput> = {
@@ -176,12 +195,14 @@ const downloadAttachment: Operation<unknown, DownloadAttachmentOutput> = {
       // redirect the attachment bytes outside the sandbox.
       writeFileNoFollow(fullPath, buffer);
 
+      const imageMime = inlineImageMime(buffer);
       return {
         content: [
           {
             type: "text",
             text: `Attachment downloaded successfully:\nFile: ${filename}\nSize: ${buffer.length} bytes\nSaved to: ${fullPath}`,
           },
+          ...(imageMime === null ? [] : [{ type: "image" as const, data: buffer.toString("base64"), mimeType: imageMime }]),
         ],
         structuredContent: {
           status: "saved",

@@ -668,46 +668,128 @@ describe('instance settings file', () => {
     assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
   });
 
-  it('reports the sign-in user count without printing a hash', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(
-      file,
-      [
-        "DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
-        '',
-      ].join('\n'),
-    );
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid,a@x.invalid,b@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'ok');
-    assert.match(check.detail, /3 sign-in user\(s\): the owner and 2 member\(s\)/);
-    assert.doesNotMatch(world.json().stdout, /SENTINEL/);
-  });
+  describe('one account per instance', () => {
+    const OWNER = 'owner@x.invalid';
+    const fixCommand = 'Run aman doctor instance --fix';
 
-  it('warns when fewer emails are allowed than there are users', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'warn');
-    assert.match(check.detail, /2 sign-in user\(s\)/);
-    assert.match(check.detail, /Fewer emails are allowed/);
-    assert.match(check.fix, /add-user/);
-  });
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+      world?.dispose();
+      make();
+      const file = path.join(world.instanceDir('main'), 'dex.env');
+      writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
+      chmodSync(file, 0o600);
+      world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
+      if (registered) {
+        const dir = path.join(world.home, 'state', 'instances');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n${records}`);
+      }
+      return find(world.json().doc.instances.main, 'config');
+    }
 
-  it('does not warn about a wildcard allowlist', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=*@x.invalid\n');
-    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+    it('is quiet when only the owner can sign in', () => {
+      const check = setUp({ allowed: OWNER });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('warns with the fix command and names the extra emails left from add-user', () => {
+      const check = setUp({
+        allowed: `${OWNER},a@x.invalid,B@x.invalid`,
+        hashes: [
+          "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
+          "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
+        ],
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: a@x.invalid, b@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('does not mistake the owner in another case or with spaces for an extra user', () => {
+      const check = setUp({ allowed: ` ${OWNER.toUpperCase()} ` });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('takes the first allowed email for the owner when the record is gone', () => {
+      assert.equal(setUp({ allowed: OWNER, registered: false }).state, 'ok');
+      const check = setUp({ allowed: `${OWNER},a@x.invalid`, registered: false });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /: a@x\.invalid\./);
+    });
+
+    it('warns about a pattern, which lets more than the owner in', () => {
+      const check = setUp({ allowed: '*@x.invalid' });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /\*@x\.invalid/);
+      assert.equal(check.fix, fixCommand);
+    });
+
+    it('warns about left-over password hashes even when the emails are already the owner only', () => {
+      const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('reads every allowed-emails line, since Compose takes the last one', () => {
+      const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+    });
+
+    for (const [what, line] of [
+      ['an indented line', '  OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['a tab-indented line', '\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and a tab', 'export\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and several spaces', '  export   OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['blanks around the equals sign', 'OIDC_ALLOWED_EMAILS = late@x.invalid'],
+      ['a colon for the equals sign', 'OIDC_ALLOWED_EMAILS: late@x.invalid'],
+      ['a no-break space before it', '\u00a0OIDC_ALLOWED_EMAILS=late@x.invalid'],
+    ]) {
+      it(`reads an allowed-emails line Compose also reads: ${what}`, () => {
+        const check = setUp({ envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n${line}\n` });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+        assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    it('warns about a user record left in the registry when the emails are the owner only', () => {
+      const check = setUp({ allowed: OWNER, records: 'user_judge1=member:judge1@x.invalid\n' });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+    });
+
+    for (const [what, value] of [
+      ['double quotes', `"${OWNER}"`],
+      ['single quotes', `'${OWNER}'`],
+      ['quotes and a comment', `"${OWNER}" # the owner`],
+      ['a comment', `${OWNER} # the owner`],
+      ['a Windows line ending', `${OWNER}\r`],
+    ]) {
+      it(`is quiet when the owner-only value has ${what}`, () => {
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `  export OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n`, registered: false }).state, 'ok');
+      });
+    }
+
+    it('does not take a comment or a longer name for the allowed emails', () => {
+      const check = setUp({
+        envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n# OIDC_ALLOWED_EMAILS=late@x.invalid\nOIDC_ALLOWED_EMAILS_NOTE=late@x.invalid\n`,
+      });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('no longer mentions members or add-user', () => {
+      const check = setUp({ allowed: `${OWNER},a@x.invalid` });
+      assert.doesNotMatch(`${check.detail} ${check.fix}`, /member|add-user|list-users/i);
+    });
   });
 
   it('fails when the file is missing', () => {
@@ -1231,6 +1313,19 @@ describe('why an instance does not run', () => {
     assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
     assert.match(fixed.stdout, /Instance main is fixed/);
+  });
+
+  it('--fix renders again when the containers are healthy but more than the owner can sign in', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=owner@x.invalid,extra@x.invalid\n');
+    const dir = path.join(world.home, 'state', 'instances');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'main.conf'), 'name=main\nowner_email=owner@x.invalid\n');
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
   });
 
   it('fix asks first and changes nothing when the answer is not yes', () => {

@@ -16,6 +16,7 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createChatImagesRouter } from './apis/chatImages';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createGoogleRouter } from './apis/google';
@@ -92,6 +93,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
+import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import type { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -276,6 +278,8 @@ export interface ServerDeps<TTransaction> {
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
+  /** Re-encoded images shown in chat. */
+  chatImages: ChatImageService;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
   turnDrains: TurnDrainRegistry;
@@ -682,6 +686,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createMapsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Chat images, browser session only like the tile proxy: no agent or API token can approve a card.
+  app.route(
+    '/api/chat-images',
+    withAuth(
+      createChatImagesRouter({
+        sessions: deps.sessions,
+        chatImages: deps.chatImages,
         resolveRequestContext,
         logger: deps.logger,
       }),

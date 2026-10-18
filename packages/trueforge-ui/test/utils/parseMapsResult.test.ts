@@ -158,4 +158,77 @@ describe('parseMapsResult', () => {
     expect(parseMapsResult(undefined, 'render_map').state).toBe('unavailable');
     expect(parseMapsResult('not json', 'render_map').state).toBe('unavailable');
   });
+
+  describe('render_places', () => {
+    const okBody = {
+      status: 'ok',
+      places: [
+        {
+          name: 'Harbour Family Clinic',
+          address: '12 Example Street, Lisbon 1100-000',
+          languages: 'English, Portuguese',
+          hours: null,
+          price: null,
+          phone: '+351 210 000 111',
+          source_url: 'https://harbour-clinic.example/en',
+          source_site: 'harbour-clinic.example',
+          fetched_at: '2026-10-17T10:00:00.000Z',
+          lat: 38.7,
+          lng: -9.1,
+          already_in_calendar: true,
+        },
+        {
+          name: 'Garden Health Centre',
+          address: '4 Sample Avenue, Lisbon 1200-000',
+          languages: null,
+          hours: null,
+          price: null,
+          phone: null,
+          source_url: 'https://garden-health.example/doctors',
+          source_site: 'garden-health.example',
+          fetched_at: '2026-10-17T10:00:00.000Z',
+          lat: null,
+          lng: null,
+          already_in_calendar: false,
+        },
+      ],
+      refused: [],
+      attribution: '© OpenStreetMap contributors',
+    };
+
+    it('parses places with their found fields, sources and calendar mark', () => {
+      const parsed = parseMapsResult(JSON.stringify(okBody), 'render_places');
+      expect(parsed.state).toBe('ready');
+      expect(parsed.data?.kind).toBe('places');
+      expect(parsed.data?.places).toHaveLength(2);
+      expect(parsed.data?.places?.[0]).toMatchObject({
+        name: 'Harbour Family Clinic',
+        languages: 'English, Portuguese',
+        hours: null,
+        source_site: 'harbour-clinic.example',
+        already_in_calendar: true,
+      });
+      expect(parsed.data?.pins).toEqual([{ name: 'Harbour Family Clinic', lat: 38.7, lng: -9.1 }]);
+    });
+
+    it('centres the map on the pinned places', () => {
+      const parsed = parseMapsResult(JSON.stringify(okBody), 'render_places');
+      expect(parsed.data).toMatchObject({ lat: 38.7, lng: -9.1 });
+    });
+
+    it('drops a place whose link is not an ordinary web address', () => {
+      const hostile = {
+        ...okBody,
+        places: [{ ...okBody.places[0], source_url: 'javascript:alert(1)' }, okBody.places[1]],
+      };
+      const parsed = parseMapsResult(JSON.stringify(hostile), 'render_places');
+      expect(parsed.data?.places?.map(place => place.name)).toEqual(['Garden Health Centre']);
+    });
+
+    it('explains in plain words when nothing could be checked', () => {
+      const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'not_grounded' }), 'render_places');
+      expect(parsed.state).toBe('unavailable');
+      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
+    });
+  });
 });

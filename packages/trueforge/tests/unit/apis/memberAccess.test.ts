@@ -1,7 +1,7 @@
 /**
- * What a signed-in member (non-admin) can and cannot do over the real HTTP surface. Hosted-demo judges are members:
- * they chat, but cannot change server settings, connectors, providers or the sandbox, and never see another
- * person's sessions.
+ * What a signed-in member (non-admin) can and cannot do over the real HTTP surface of a hosted deployment, where
+ * several people share one server: they chat, but cannot change server settings, connectors, providers or the
+ * sandbox, and never see another person's sessions.
  */
 import { z } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
@@ -13,7 +13,7 @@ const OWNER = 'owner@demo.example';
 const JUDGE = 'judge1@demo.example';
 const OTHER_JUDGE = 'judge2@demo.example';
 
-/** The caller is named by `x-test-user`; only the owner carries the admin role, as under the installer's settings. */
+/** The caller is named by `x-test-user`; only the owner carries the admin role. */
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
     const user = c.req.header('x-test-user');

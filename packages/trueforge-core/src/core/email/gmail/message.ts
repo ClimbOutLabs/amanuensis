@@ -1,6 +1,6 @@
 /** Reads a Gmail message into the plain fields the tools return. Mail text is data and is never interpreted here. */
 import type { GmailMessage, MessagePart } from './gmailWire';
-import { htmlToText } from './htmlText';
+import { htmlImageLinks, htmlToText, MAX_HTML_CHARS } from './htmlText';
 import {
   contentTypeCharset,
   decodeBytes,
@@ -250,6 +250,15 @@ export function readBody(input: { message: GmailMessage; maxChars: number }): { 
   const plain = found.plain.join('\n');
   const body = plain.trim() !== '' ? plain : htmlToText(found.html.join('\n'));
   return { body: stripInvisible(body).trim(), cut: found.cut };
+}
+
+/** The web addresses of a message's HTML images, at most `max`; the HTML is read up to its usual limit. */
+export function linkedImagesOf(input: { message: GmailMessage; max: number }): string[] {
+  const found = walk({
+    message: input.message,
+    limits: { text: true, maxPlainChars: Number.POSITIVE_INFINITY, maxHtmlChars: MAX_HTML_CHARS, maxAttachments: 0 },
+  });
+  return htmlImageLinks({ source: found.html.join('\n'), max: input.max });
 }
 
 /** The first `max` attachments of a message and how many it has, found without decoding any text. */

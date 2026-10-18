@@ -32,19 +32,26 @@ vi.mock('@/components/MapCard.js', () => ({
   ),
 }));
 
-function renderAssistantMessage(
+function assistantMessageTree(
   messages: ThreadMessageLike[],
   options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
 ) {
-  return render(
+  return (
     <RuntimeHarness
       messages={messages}
       isRunning={options?.isRunning}
       onRespondToToolApproval={options?.onRespondToToolApproval}
     >
       <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-    </RuntimeHarness>,
+    </RuntimeHarness>
   );
+}
+
+function renderAssistantMessage(
+  messages: ThreadMessageLike[],
+  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
+) {
+  return render(assistantMessageTree(messages, options));
 }
 
 function getAgentInternals(): HTMLElement {
@@ -561,6 +568,36 @@ describe('AssistantMessageContainer', () => {
   });
 });
 
+describe('AssistantMessageContainer images without a chat image scope', () => {
+  const DATA_PNG = 'data:image/png;base64,iVBORw0KGgo=';
+
+  it('shows a model data: image as not shown when the turn has no session id', () => {
+    const server = Object.assign(createMockAgentUIServer(), {
+      chatImages: {
+        listTurnImages: vi.fn(() => Promise.resolve({ artifacts: [], emails: [] })),
+        showTurnImages: vi.fn(() => Promise.resolve({ status: 'done' as const, images: [] })),
+        imageUrl: ({ sessionId, imageId }: { sessionId: string; imageId: string }) =>
+          `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
+      },
+    });
+    const { container } = render(
+      <ServerProvider server={server}>
+        {assistantMessageTree([
+          { role: 'assistant', content: `Here: ![model pixel](${DATA_PNG})`, metadata: { custom: { turnId: 't1' } } },
+        ])}
+      </ServerProvider>,
+    );
+    expect(container.querySelector(`img[src="${DATA_PNG}"]`)).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toHaveTextContent('model pixel (image not shown)');
+  });
+
+  it('shows a model data: image as not shown when there is no chat images port', () => {
+    const { container } = renderAssistantMessage([{ role: 'assistant', content: `![x](${DATA_PNG})` }]);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toBeInTheDocument();
+  });
+});
+
 describe('AssistantMessageContainer memory recall visibility', () => {
   const recallEvent: TrueForgeApi.MemoryRecallPersistedEvent = {
     type: 'aman.memory.recall',
@@ -860,6 +897,80 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     // No map card and no loading state anywhere while approval is pending.
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+
+  function placesCallPart(
+    extra: Pick<ToolCallPart, 'toolCallId'> & Partial<Pick<ToolCallPart, 'result' | 'approval'>>,
+  ) {
+    return {
+      type: 'tool-call',
+      toolName: 'render_places',
+      args: { places: [] },
+      argsText: '{"places":[]}',
+      ...extra,
+    } satisfies ToolCallPart;
+  }
+
+  it('renders the pinned places inline once the pin call has run', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-1',
+            result: JSON.stringify({
+              status: 'ok',
+              places: [
+                {
+                  name: 'Harbour Family Clinic',
+                  address: '12 Example Street, Lisbon 1100-000',
+                  languages: 'English, Portuguese',
+                  hours: null,
+                  price: null,
+                  phone: null,
+                  source_url: 'https://harbour-clinic.example/en',
+                  source_site: 'harbour-clinic.example',
+                  fetched_at: '2026-10-17T10:00:00.000Z',
+                  lat: 38.7,
+                  lng: -9.1,
+                  already_in_calendar: false,
+                },
+              ],
+              refused: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          }),
+          { type: 'text', text: 'I found one place.' },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-map-card')).toHaveTextContent('1 place found');
+  });
+
+  it('asks first for the pin call and shows no map until it is approved', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-approval',
+            approval: {
+              id: 'approval-places',
+              options: [
+                { id: 'allow-once', kind: 'allow-once' },
+                { id: 'deny', kind: 'reject-once' },
+              ],
+            },
+          }),
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      },
+    ]);
+
+    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_places' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
   });
 
   it('shows a quiet loading state while the maps call runs', () => {

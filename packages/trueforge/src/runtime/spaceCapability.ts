@@ -39,6 +39,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
@@ -1255,7 +1256,13 @@ export interface SpaceTurnContext {
  * Spaces view to see, so it gets no space tools of its own.
  */
 export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
-  constructor(...args: [...ConstructorParameters<typeof MemoryTurnResourceResolver>, space: SpaceTurnContext]) {
+  constructor(
+    ...args: [
+      ...ConstructorParameters<typeof MemoryTurnResourceResolver>,
+      space: SpaceTurnContext,
+      toolImages: ToolImagesOptions,
+    ]
+  ) {
     const [
       deps,
       profile,
@@ -1266,12 +1273,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       personaKnowledgeHits,
       switchNotice,
       space,
+      toolImages,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
+    this.#toolImages = toolImages;
   }
 
   readonly #space: SpaceTurnContext;
+  readonly #toolImages: ToolImagesOptions;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -1293,6 +1303,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
+        toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
       ],
     };

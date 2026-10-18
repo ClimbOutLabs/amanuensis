@@ -59,6 +59,8 @@ export type SentinelApprovalEmail = {
   body: string;
   /** The saved draft a change replaces, or null. */
   replaces: { subject: string; to: string[] } | null;
+  /** The message a reply answers in its thread, or null when the message is not a reply. */
+  reply_in_thread: { subject: string; from: string } | null;
 };
 
 /**
@@ -274,6 +276,9 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const replaced = value.replaces;
   const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
   const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
+  const thread = value.reply_in_thread;
+  const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
+  const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
   return {
     action,
     to,
@@ -283,6 +288,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     body,
     replaces:
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
+    reply_in_thread:
+      threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
   };
 }
 

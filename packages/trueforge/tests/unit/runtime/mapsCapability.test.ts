@@ -15,26 +15,14 @@ import {
   type MapsRoutingProvider,
 } from '../../../src/runtime/mapsCapability';
 import { MapsUpstreamError } from '../../../src/runtime/mapsErrors';
-import type { MapsTransitProvider } from '../../../src/runtime/mapsTransit';
 import { UPSTREAM_JSON_MAX_BODY_BYTES } from '../../../src/runtime/mapsUpstream';
+import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-function unusedRoadProviders(): Record<MapsRoadMode, MapsRoutingProvider> {
-  const unused: MapsRoutingProvider = {
-    provider_id: 'unused',
-    route: () => Promise.reject(new Error('unused')),
-  };
-  return { walking: unused, cycling: unused, driving: unused };
-}
-
-function unusedTransitProvider(): MapsTransitProvider {
-  return { plan: () => Promise.reject(new Error('unused')) };
 }
 
 function recordingProviders(received: MapsRouteRequest[]): Record<MapsRoadMode, MapsRoutingProvider> {

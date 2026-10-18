@@ -13,8 +13,24 @@ export interface MapPin {
   lng: number;
 }
 
+/** One found place: only a field the source page states is a string; the rest are null. */
+export interface MapPlace {
+  name: string;
+  address: string;
+  languages: string | null;
+  hours: string | null;
+  price: string | null;
+  phone: string | null;
+  source_url: string;
+  source_site: string;
+  fetched_at: string;
+  lat: number | null;
+  lng: number | null;
+  already_in_calendar: boolean;
+}
+
 export interface MapCardData {
-  kind: 'place' | 'route';
+  kind: 'place' | 'route' | 'places';
   /** Place card: center and pins. Route card: endpoints and geometry. */
   lat: number;
   lng: number;
@@ -22,6 +38,8 @@ export interface MapCardData {
   resolved_name: string;
   address: string | null;
   pins: MapPin[];
+  /** Places card only: the found places, each with its details and source. */
+  places?: MapPlace[];
   /** Route card only. */
   from_name?: string;
   to_name?: string;
@@ -143,9 +161,11 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
   // Bumped by Retry to re-create the tile layer exactly once per click.
   const [retryKey, setRetryKey] = useState(0);
   const setupKey = data === null ? null : mapSetupKey(data);
+  // A places card whose places have no coordinates still lists them, but has nothing to draw.
+  const hasMap = data === null || data.kind !== 'places' || data.pins.length > 0;
 
   useEffect(() => {
-    if (setupKey === null || state !== 'ready' || failure !== null) {
+    if (setupKey === null || state !== 'ready' || failure !== null || !hasMap) {
       return;
     }
     const el = containerRef.current;
@@ -257,6 +277,20 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
         const bounds = L.latLngBounds(latlngs);
         map.fitBounds(bounds, ROUTE_FIT_OPTIONS);
         frame = () => map?.fitBounds(bounds, ROUTE_FIT_OPTIONS);
+      } else if (mapData.kind === 'places') {
+        // One pin per found place; two or more are framed together, one is centred.
+        const latlngs = mapData.pins.map(pin => L.latLng(pin.lat, pin.lng));
+        for (const pin of mapData.pins) {
+          bindTextPopup(L.circleMarker([pin.lat, pin.lng], pinStyle).addTo(map), pin.name);
+        }
+        if (latlngs.length > 1) {
+          const bounds = L.latLngBounds(latlngs);
+          map.fitBounds(bounds, ROUTE_FIT_OPTIONS);
+          frame = () => map?.fitBounds(bounds, ROUTE_FIT_OPTIONS);
+        } else {
+          map.setView([mapData.lat, mapData.lng], mapData.zoom);
+          frame = () => map?.setView([mapData.lat, mapData.lng], mapData.zoom);
+        }
       } else {
         map.setView([mapData.lat, mapData.lng], mapData.zoom);
         frame = () => map?.setView([mapData.lat, mapData.lng], mapData.zoom);
@@ -305,7 +339,7 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
       map = null;
       tileLayer = null;
     };
-  }, [setupKey, state, failure, retryKey]);
+  }, [setupKey, state, failure, retryKey, hasMap]);
 
   const handleRetry = () => {
     // One-shot: re-create the tile layer once. If tiles fail again the
@@ -338,7 +372,7 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
         </div>
       ) : (
         <>
-          <div ref={containerRef} className="maps-card-map" role="img" aria-label={mapSummary(data)} />
+          {hasMap && <div ref={containerRef} className="maps-card-map" role="img" aria-label={mapSummary(data)} />}
           <div className="maps-card-footer">
             <p className="maps-card-title">
               {data.kind === 'route' ? `${data.from_name ?? ''} → ${data.to_name ?? ''}` : data.resolved_name}
@@ -350,6 +384,13 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
                   <li key={`${String(index)}-${step.kind}`}>{describeTransitStep(step)}</li>
                 ))}
               </ol>
+            )}
+            {data.kind === 'places' && (
+              <div className="maps-place-list">
+                {(data.places ?? []).map(place => (
+                  <PlaceCard key={`${place.source_url}|${place.name}`} place={place} />
+                ))}
+              </div>
             )}
             <p className="maps-card-attribution">
               <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
@@ -388,8 +429,62 @@ function routeSummary(data: MapCardData): string {
   return parts.join(' · ');
 }
 
+const PLACE_FIELDS = [
+  ['Languages', 'languages'],
+  ['Hours', 'hours'],
+  ['Price', 'price'],
+  ['Phone', 'phone'],
+] as const;
+
+/** "17 Oct 2026, 10:00" in the viewer's own time zone; empty when the stamp is not a date. */
+function formatFetchedAt(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * One found place. Every string comes from a web page, so it renders as text only; a detail the
+ * page did not state is not shown at all, and the link says where each detail was read.
+ */
+function PlaceCard({ place }: { place: MapPlace }) {
+  const fetched = formatFetchedAt(place.fetched_at);
+  return (
+    <article className="maps-place-card" data-testid="place-card">
+      <header className="maps-place-header">
+        <h4 className="maps-place-name">{place.name}</h4>
+        {place.already_in_calendar && <span className="maps-place-badge">Already in your calendar</span>}
+      </header>
+      <p className="maps-place-address">{place.address}</p>
+      <dl className="maps-place-fields">
+        {PLACE_FIELDS.map(([label, key]) => {
+          const value = place[key];
+          return value === null ? null : (
+            <div key={key} className="maps-place-field">
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          );
+        })}
+      </dl>
+      {place.lat === null && <p className="maps-place-note">Could not be placed on the map</p>}
+      <p className="maps-place-source">
+        from{' '}
+        <a href={place.source_url} target="_blank" rel="noreferrer noopener">
+          {place.source_site}
+        </a>
+        {fetched === '' ? '' : `, ${fetched}`}
+      </p>
+    </article>
+  );
+}
+
 /** Accessible summary for the map region. */
 function mapSummary(data: MapCardData): string {
+  if (data.kind === 'places') {
+    return data.resolved_name;
+  }
   if (data.kind === 'route') {
     return `${data.from_name ?? ''} to ${data.to_name ?? ''}, ${routeSummary(data)}`;
   }
@@ -401,6 +496,9 @@ function mapSummary(data: MapCardData): string {
  * resolved name, so the place name never appears twice.
  */
 function mapSubtitle(data: MapCardData): string | null {
+  if (data.kind === 'places') {
+    return null;
+  }
   if (data.kind === 'route') {
     return routeSummary(data);
   }

@@ -1,7 +1,8 @@
 /** Maps tool failures: the error codes of the tool result body and the exception that carries one. */
 import type { MapsTravelMode } from '@truefoundry/trueforge-core/core';
 
-export type MapsErrorCode = 'not_found' | 'no_route' | 'service_unavailable' | 'rate_limited' | 'invalid_time';
+export type MapsErrorCode =
+  'not_found' | 'no_route' | 'service_unavailable' | 'rate_limited' | 'invalid_time' | 'not_grounded';
 
 export interface MapsErrorBody {
   status: 'error';

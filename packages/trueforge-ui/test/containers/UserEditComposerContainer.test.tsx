@@ -63,7 +63,8 @@ describe('UserEditComposerContainer', () => {
         ],
       },
     ]);
-    expect(screen.getByAltText('logo.png')).toBeInTheDocument();
+    expect(screen.getByText('logo.png')).toBeInTheDocument();
+    expect(document.querySelector('img[src^="data:"]')).toBeNull();
     expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
   });
 });

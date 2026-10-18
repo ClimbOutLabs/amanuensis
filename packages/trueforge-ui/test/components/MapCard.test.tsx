@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MapCard, type MapCardData } from '@/components/MapCard.js';
@@ -494,5 +494,108 @@ describe('MapCard', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('MapCard with several found places', () => {
+  const placesData: MapCardData = {
+    kind: 'places',
+    lat: 38.7,
+    lng: -9.1,
+    zoom: 13,
+    resolved_name: '2 places',
+    address: null,
+    pins: [{ name: 'Harbour Family Clinic', lat: 38.7, lng: -9.1 }],
+    places: [
+      {
+        name: 'Harbour Family Clinic',
+        address: '12 Example Street, Lisbon 1100-000',
+        languages: 'English, Portuguese',
+        hours: null,
+        price: null,
+        phone: '+351 210 000 111',
+        source_url: 'https://harbour-clinic.example/en',
+        source_site: 'harbour-clinic.example',
+        fetched_at: '2026-10-17T10:00:00.000Z',
+        lat: 38.7,
+        lng: -9.1,
+        already_in_calendar: true,
+      },
+      {
+        name: 'Garden Health Centre',
+        address: '4 Sample Avenue, Lisbon 1200-000',
+        languages: null,
+        hours: null,
+        price: null,
+        phone: null,
+        source_url: 'https://garden-health.example/doctors',
+        source_site: 'garden-health.example',
+        fetched_at: '2026-10-17T10:00:00.000Z',
+        lat: null,
+        lng: null,
+        already_in_calendar: false,
+      },
+    ],
+    attribution: '© OpenStreetMap contributors',
+  };
+
+  it('shows one card per place with only the fields that were found', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const cards = screen.getAllByTestId('place-card');
+    expect(cards).toHaveLength(2);
+    const first = within(cards[0] as HTMLElement);
+    expect(first.getByText('Harbour Family Clinic')).toBeInTheDocument();
+    expect(first.getByText('12 Example Street, Lisbon 1100-000')).toBeInTheDocument();
+    expect(first.getByText('English, Portuguese')).toBeInTheDocument();
+    expect(first.getByText('+351 210 000 111')).toBeInTheDocument();
+    // Fields that were not found are not shown at all, not even as a blank label.
+    expect(first.queryByText(/Hours/)).not.toBeInTheDocument();
+    expect(first.queryByText(/Price/)).not.toBeInTheDocument();
+    const second = within(cards[1] as HTMLElement);
+    expect(second.queryByText(/Languages/)).not.toBeInTheDocument();
+    expect(second.queryByText(/Phone/)).not.toBeInTheDocument();
+  });
+
+  it('cites the site and time with a link to the page', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const first = within(screen.getAllByTestId('place-card')[0] as HTMLElement);
+    const link = first.getByRole('link', { name: 'harbour-clinic.example' });
+    expect(link).toHaveAttribute('href', 'https://harbour-clinic.example/en');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(first.getByText(/^from /)).toHaveTextContent(/from harbour-clinic\.example, .*2026/);
+  });
+
+  it('marks a place that is already in the calendar and keeps the others unmarked', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const [first, second] = screen.getAllByTestId('place-card');
+    expect(within(first as HTMLElement).getByText('Already in your calendar')).toBeInTheDocument();
+    expect(within(second as HTMLElement).queryByText('Already in your calendar')).not.toBeInTheDocument();
+  });
+
+  it('says so when a place could not be put on the map, and still shows its details', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const second = within(screen.getAllByTestId('place-card')[1] as HTMLElement);
+    expect(second.getByText('Could not be placed on the map')).toBeInTheDocument();
+  });
+
+  it('draws one pin per placed place and no extra centre pin', async () => {
+    renderCard({ data: placesData, state: 'ready' });
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(1));
+    expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything());
+  });
+
+  it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const [first, second] = placesData.places ?? [];
+    if (first === undefined || second === undefined) {
+      throw new Error('fixture needs two places');
+    }
+    renderCard({
+      data: { ...placesData, places: [{ ...first, name: hostile, hours: hostile }, second] },
+      state: 'ready',
+    });
+    expect(screen.getAllByText(hostile)).toHaveLength(2);
+    expect(document.querySelector('img')).not.toBeInTheDocument();
   });
 });
