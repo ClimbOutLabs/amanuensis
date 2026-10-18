@@ -856,7 +856,7 @@ cmd_instance_password() {
   load_installed_release
   warn_if_installed_older
   AMAN_PASSWORD=
-  ask_password AMAN_PASSWORD "Enter a new password for $email" "Repeat the new password"
+  ask_password AMAN_PASSWORD "Enter a new password for $email" "Enter the new password again"
   hash=$(hash_password "$REL_APP_TAG")
   AMAN_PASSWORD=
   content=$(render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash")

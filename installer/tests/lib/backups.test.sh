@@ -63,7 +63,7 @@ Your email=>owner@example.invalid
 Back up automatically=>n
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Back up automatically every day? [Y/n]"
   assert_eq "$(mode_file)" off
@@ -78,7 +78,7 @@ Your email=>owner@example.invalid
 Back up automatically=>
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$(mode_file)" daily "Enter keeps the default, which is yes"
   sandbox_drop
 }

@@ -342,7 +342,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" --sandbox-root
+Enter password again=>$SENTINEL_PASSWORD" --sandbox-root
   unset STUB_SUDO_REFUSE
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
@@ -361,7 +361,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
@@ -380,7 +380,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>n"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT$ERR" "administrator rights that were not given"
