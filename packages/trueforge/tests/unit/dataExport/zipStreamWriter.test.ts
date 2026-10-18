@@ -6,6 +6,7 @@ import {
   ZIP_MAX_ARCHIVE_BYTES,
   ZIP_MAX_ENTRIES,
   ZipEntryLimitExceededError,
+  ZipEntrySizeCapExceededError,
   ZipOutputClosedError,
   ZipSizeCapExceededError,
   ZipStreamWriter,
@@ -69,7 +70,7 @@ describe('ZipStreamWriter', () => {
         callback();
       },
     });
-    const zip = new ZipStreamWriter(discard, { maxBytes: 2 ** 40 });
+    const zip = new ZipStreamWriter(discard, { maxBytes: 2 ** 40, maxEntryBytes: 2 ** 40 });
     const block = new Uint8Array(64 * 1024 * 1024);
     const failure = await zip
       .addEntry('huge.bin', async sink => {
@@ -83,6 +84,21 @@ describe('ZipStreamWriter', () => {
     expect(failure).toMatchObject({ capBytes: ZIP_MAX_ARCHIVE_BYTES });
     expect(ZIP_MAX_ARCHIVE_BYTES).toBeLessThan(2 ** 32);
   }, 120_000);
+
+  it('refuses an entry over the per-file cap, naming it, before its bytes are written', async () => {
+    const sink = new CollectingWritable();
+    const zip = new ZipStreamWriter(sink, { maxBytes: 1024 * 1024, maxEntryBytes: 64 * 1024 });
+    await zip.addTextEntry('small.json', 'x'.repeat(64 * 1024));
+    const failure = await zip
+      .addTextEntry('chats.json', 'x'.repeat(64 * 1024 + 1))
+      .then(() => undefined)
+      .catch((caught: unknown) => caught);
+    expect(failure).toBeInstanceOf(ZipEntrySizeCapExceededError);
+    expect(failure instanceof Error && failure.message).toBe(
+      'chats.json is over the 64 KB limit for one file in an export. Delete some long chats you no longer need, then export again.',
+    );
+    expect(Buffer.concat(sink.chunks).includes(Buffer.from('x'.repeat(64 * 1024 + 1)))).toBe(false);
+  });
 
   it('refuses the entry that would not fit the 16-bit entry count', async () => {
     const zip = new ZipStreamWriter(new CollectingWritable(), { maxBytes: 1024 * 1024 * 1024 });

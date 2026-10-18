@@ -95,8 +95,9 @@ import_wait_for_search_model() {
 # inside the image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env,
 # so it reads the same database and memory paths the app does.
 import_run() {
-  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0
+  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log
   base=$(basename -- "$file")
+  log=$(cli_log import)
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
     say "Stopping the app of instance $name for the import"
@@ -109,16 +110,19 @@ import_run() {
     -v "aman_${name}_data:/data" \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\"" \
-    import "$owner" "$display" <"$file" || rc=$?
+    import "$owner" "$display" <"$file" 2>"$log" || rc=$?
   if [ "$was_running" = 1 ]; then
     import_on_exit
   else
     say "Instance $name was not running, so it was left stopped."
   fi
   if [ "$rc" != 0 ]; then
-    warn "The import failed. The message above says what happened and what to do next."
+    warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix")"
+    UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi
+  # The CLI's summary of what it imported.
+  cat "$log" >&2
   log_event "data import into instance $name from $base"
   ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export. Set them up in Settings."
 }

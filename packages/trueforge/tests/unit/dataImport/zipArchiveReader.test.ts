@@ -1,6 +1,7 @@
 import { Writable } from 'node:stream';
 import { crc32, deflateRawSync } from 'node:zlib';
 
+import { ARCHIVE_DEFAULT_MAX_BYTES, ARCHIVE_MAX_ENTRY_BYTES } from '../../../src/dataExport/archiveLimits';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { readZipArchive, ZipArchiveError } from '../../../src/dataImport/zipArchiveReader';
 
@@ -108,18 +109,32 @@ describe('readZipArchive', () => {
 
   it('refuses a file over the per-file cap before inflating', () => {
     const zip = buildZip([{ name: 'big.json', data: Buffer.from('x'.repeat(64)), declaredSizeOverride: 2048 }]);
-    expect(() => readZipArchive(zip, LIMITS)).toThrow(/One file in the archive is larger than the import limit/);
+    expect(() => readZipArchive(zip, LIMITS)).toThrow(
+      'big.json is 2 KB, over the 1 KB limit for one file. Export again with the latest Aman, which keeps every file under this limit.',
+    );
+  });
+
+  it('names a format 1 sessions.json over the real per-file cap, with its size', () => {
+    const zip = buildZip([
+      { name: 'sessions.json', data: Buffer.from('[]'), declaredSizeOverride: 935 * 1024 * 1024 + 300 * 1024 },
+    ]);
+    const limits = { maxEntryBytes: ARCHIVE_MAX_ENTRY_BYTES, maxTotalBytes: ARCHIVE_DEFAULT_MAX_BYTES, maxEntries: 10 };
+    expect(() => readZipArchive(zip, limits)).toThrow(
+      /^sessions\.json is 935 MB, over the 256 MB limit for one file\. Export again with the latest Aman/,
+    );
   });
 
   it('refuses a total over the total cap', () => {
     const zip = buildZip([
-      { name: 'a.json', data: Buffer.from('x'.repeat(900)) },
-      { name: 'b.json', data: Buffer.from('x'.repeat(900)) },
-      { name: 'c.json', data: Buffer.from('x'.repeat(900)) },
-      { name: 'd.json', data: Buffer.from('x'.repeat(900)) },
-      { name: 'e.json', data: Buffer.from('x'.repeat(900)) },
+      { name: 'a.json', data: Buffer.from('x'.repeat(1000)) },
+      { name: 'b.json', data: Buffer.from('x'.repeat(1000)) },
+      { name: 'c.json', data: Buffer.from('x'.repeat(1000)) },
+      { name: 'd.json', data: Buffer.from('x'.repeat(1000)) },
+      { name: 'e.json', data: Buffer.from('x'.repeat(1000)) },
     ]);
-    expect(() => readZipArchive(zip, LIMITS)).toThrow(/The archive is larger than the import limit/);
+    expect(() => readZipArchive(zip, LIMITS)).toThrow(
+      'The files in the export add up to 5 KB, over the 4 KB limit for an import. Export again without uploaded files.',
+    );
   });
 
   it('refuses more entries than the entry cap', () => {
@@ -127,7 +142,9 @@ describe('readZipArchive', () => {
       name: `f${String(index)}.json`,
       data: Buffer.from('{}'),
     }));
-    expect(() => readZipArchive(buildZip(entries), LIMITS)).toThrow(/too many files/);
+    expect(() => readZipArchive(buildZip(entries), LIMITS)).toThrow(
+      'The export holds 11 files, more than the 10 an import takes. Export again without uploaded files.',
+    );
   });
 
   it('refuses a zip64 entry count', () => {

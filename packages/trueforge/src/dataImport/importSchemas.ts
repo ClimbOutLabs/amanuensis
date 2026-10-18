@@ -101,13 +101,13 @@ const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx)
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
 
-type ImportContextMessage = z.infer<typeof ImportContextMessageSchema>;
+export type ImportContextMessage = z.infer<typeof ImportContextMessageSchema>;
 
 /**
  * Keeps only conversation messages; decisions and dispatch markers are matched by call id, so an
  * archive carries none of them. Every call still open is then answered so the chat can take a new message.
  */
-function withoutArchivedAdmissions(context: ImportContextMessage[]): ImportContextMessage[] {
+export function withoutArchivedAdmissions(context: readonly ImportContextMessage[]): ImportContextMessage[] {
   const kept = context.filter(message => 'role' in message);
   const answered = new Set<string>();
   for (const message of kept) {
@@ -137,18 +137,29 @@ const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
  * What a thread may bring back. Capability state and the tool-call memo are runtime bookkeeping
  * the host rebuilds as the chat continues, so an archive's copies are left out.
  */
-const ImportThreadSnapshotSchema = z.object({
+const ImportThreadFieldsSchema = z.object({
   thread_id: z.string().min(1),
-  context: z.array(ImportContextMessageSchema).transform(withoutArchivedAdmissions),
   current_context_usage: CurrentContextUsageSchema,
   parent: AgentParentSchema.nullable().optional(),
   agent_info: ImportAgentInfoSchema.nullable().optional(),
   completion: ImportCompletionMarkerSchema.nullable().optional(),
   task_state: TaskStateSchema.optional(),
 });
+
+const ImportThreadSnapshotSchema = z.object({
+  ...ImportThreadFieldsSchema.shape,
+  context: z.array(ImportContextMessageSchema).transform(withoutArchivedAdmissions),
+});
 export type ImportThreadSnapshot = z.infer<typeof ImportThreadSnapshotSchema>;
 
-export const ImportTurnRecordSchema = z.object({
+/** A thread in a sessions/ turn record: the first `context_base` messages of the previous record's copy, then `context`. */
+const ImportThreadDeltaSchema = z.object({
+  ...ImportThreadFieldsSchema.shape,
+  context_base: z.number().int().nonnegative(),
+  context: z.array(ImportContextMessageSchema),
+});
+
+const ImportTurnFieldsSchema = z.object({
   turn_id: z.string().min(1),
   session_id: z.string().min(1),
   first_turn_id: z.string(),
@@ -156,11 +167,15 @@ export const ImportTurnRecordSchema = z.object({
   previous_turn_id: z.string().nullable(),
   state: TurnStateSchema,
   input: z.array(TurnInputItemSchema),
-  // Server connections and sandbox handles belong to the source deployment and are never restored.
-  snapshot: z.object({ threads: z.record(z.string(), ImportThreadSnapshotSchema) }),
   custom: z.unknown(),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
+});
+
+export const ImportTurnRecordSchema = z.object({
+  ...ImportTurnFieldsSchema.shape,
+  // Server connections and sandbox handles belong to the source deployment and are never restored.
+  snapshot: z.object({ threads: z.record(z.string(), ImportThreadSnapshotSchema) }),
 });
 export type ImportTurnRecord = z.infer<typeof ImportTurnRecordSchema>;
 
@@ -216,7 +231,28 @@ export const ImportSessionEntrySchema = z.object({
   persona_activations: z.array(ImportPersonaActivationSchema).default([]),
 });
 export type ImportSessionEntry = z.infer<typeof ImportSessionEntrySchema>;
+/** The single sessions.json of format version 1. */
 export const ImportSessionsFileSchema = z.array(ImportSessionEntrySchema);
+
+/** A record of a sessions/ file: a chat, then each of its turns in order. */
+const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('session'),
+    session: ImportSessionRecordSchema,
+    persona_activations: z.array(ImportPersonaActivationSchema),
+  }),
+  z.object({
+    kind: z.literal('turn'),
+    turn: z.object({
+      ...ImportTurnFieldsSchema.shape,
+      snapshot: z.object({ threads: z.record(z.string(), ImportThreadDeltaSchema) }),
+    }),
+    events: z.array(ImportEventSchema),
+    artifacts: z.array(ImportArtifactRecordSchema),
+  }),
+]);
+export type ImportSessionPartRecord = z.infer<typeof ImportSessionPartRecordSchema>;
+export const ImportSessionPartFileSchema = z.array(ImportSessionPartRecordSchema);
 
 export const ImportFolderRecordSchema = z.object({
   tenant_id: z.string(),

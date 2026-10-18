@@ -8,6 +8,7 @@ import type { Transaction } from 'kysely';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
+import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -222,7 +223,7 @@ describe('Data import route', () => {
   it('refuses an export made by a newer version', async () => {
     const newer = await repack(archive, entries => {
       const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
-      manifest['schema_version'] = 2;
+      manifest['schema_version'] = EXPORT_SCHEMA_VERSION + 1;
       entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
     });
     const response = await postImport('carol', newer);

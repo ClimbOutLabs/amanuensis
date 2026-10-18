@@ -8,11 +8,14 @@
  *
  * Classic ZIP only (no ZIP64), so the archive is capped below 4 GiB and holds
  * fewer than 65535 entries; both limits fail with a plain error instead of
- * writing an archive that readers would misparse. Exceeding the cap aborts
- * the archive and the caller fails the response.
+ * writing an archive that readers would misparse. Each entry is also held to
+ * the per-file limit import reads with. Exceeding a cap aborts the archive
+ * and the caller fails the response.
  */
 import type { Writable } from 'node:stream';
 import { crc32 } from 'node:zlib';
+
+import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from './archiveLimits';
 
 /** 0xFFFFFFFF marks ZIP64 in offset and size fields, so classic ZIP stops one short of 4 GiB. */
 export const ZIP_MAX_ARCHIVE_BYTES = 0xffff_fffe;
@@ -24,7 +27,7 @@ export class ZipSizeCapExceededError extends Error {
   readonly capBytes: number;
   constructor(capBytes: number) {
     super(
-      `The export is larger than its size limit of ${String(capBytes)} bytes. Leave uploaded files out, or raise DATA_EXPORT_MAX_BYTES (at most ${String(ZIP_MAX_ARCHIVE_BYTES)}).`,
+      `The export is over its ${formatArchiveBytes(capBytes)} limit (DATA_EXPORT_MAX_BYTES). An import takes the same size by default. Leave uploaded files out, then export again.`,
     );
     this.name = 'ZipSizeCapExceededError';
     this.capBytes = capBytes;
@@ -37,6 +40,17 @@ export class ZipEntryLimitExceededError extends Error {
       `The export has more than ${String(ZIP_MAX_ENTRIES)} files, which a zip archive cannot hold. Leave uploaded files out.`,
     );
     this.name = 'ZipEntryLimitExceededError';
+  }
+}
+
+/** One file would be over the per-file cap, which import would refuse. */
+export class ZipEntrySizeCapExceededError extends Error {
+  constructor({ subject, capBytes, bytes }: { subject: string; capBytes: number; bytes?: number }) {
+    const size = bytes === undefined ? 'over' : `${formatArchiveBytes(bytes)}, over`;
+    super(
+      `${subject} is ${size} the ${formatArchiveBytes(capBytes)} limit for one file in an export. Delete some long chats you no longer need, then export again.`,
+    );
+    this.name = 'ZipEntrySizeCapExceededError';
   }
 }
 
@@ -130,6 +144,7 @@ function waitForDrain(out: Writable): Promise<void> {
 export class ZipStreamWriter {
   readonly #out: Writable;
   readonly #capBytes: number;
+  readonly #entryCapBytes: number;
   readonly #encoder = new TextEncoder();
   readonly #usedNames = new Set<string>();
   #bytesWritten = 0;
@@ -138,9 +153,15 @@ export class ZipStreamWriter {
   #openEntry = false;
   #finished = false;
 
-  constructor(out: Writable, options: { maxBytes: number }) {
+  constructor(out: Writable, options: { maxBytes: number; maxEntryBytes?: number | undefined }) {
     this.#out = out;
     this.#capBytes = Math.min(options.maxBytes, ZIP_MAX_ARCHIVE_BYTES);
+    this.#entryCapBytes = options.maxEntryBytes ?? ARCHIVE_MAX_ENTRY_BYTES;
+  }
+
+  /** Largest single entry this archive may hold. */
+  get maxEntryBytes(): number {
+    return this.#entryCapBytes;
   }
 
   get bytesWritten(): number {
@@ -214,6 +235,9 @@ export class ZipStreamWriter {
     this.#openEntry = true;
     const sink: ZipEntrySink = {
       write: async (chunk: Uint8Array) => {
+        if (state.size + chunk.byteLength > this.#entryCapBytes) {
+          throw new ZipEntrySizeCapExceededError({ subject: storedName, capBytes: this.#entryCapBytes });
+        }
         state.crc = crc32(chunk, state.crc);
         state.size += chunk.byteLength;
         await this.#writeRaw(chunk);

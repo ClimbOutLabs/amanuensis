@@ -210,7 +210,7 @@ installer/install.sh instance remove $PERSON --purge-data
 installer/install.sh instance add $PERSON --email <owner-email>
 ```
 
-A failed import always starts the app again, and its message says what happened and what to do next. If the instance was used after an interrupted import, nothing is removed. The import only ever writes into a fresh instance and refuses any user other than the instance owner.
+A failed import always starts the app again and prints one line, `Import failed:` followed by the reason and what to do next. The full output is kept in the log file named under it. If the instance was used after an interrupted import, nothing is removed. The import only ever writes into a fresh instance and refuses any user other than the instance owner.
 
 ## 6. Check the result
 

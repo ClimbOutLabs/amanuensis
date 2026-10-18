@@ -19,6 +19,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { sanitizeNamespace, vaultWriteNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
+import { legacySessionsOf } from '../../fixtures/legacySessions';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 import { fakeIo } from './fakeIo';
 
@@ -371,7 +372,7 @@ describe('aman export-data against a real database', () => {
     expect(manifest.sections).toContain('agents.json');
     const sessions = z
       .array(z.object({ session: z.object({ session_id: z.string() }) }))
-      .parse(zipEntryJson(entries, 'sessions.json'));
+      .parse(legacySessionsOf(entries));
     expect(sessions.map(entry => entry.session.session_id)).toEqual(['s1']);
     expect(zipEntryText(entries, 'agents.json')).toContain('"mine"');
     expect(zipEntryText(entries, 'personas.json')).toContain('Researcher');
@@ -503,7 +504,7 @@ describe('aman export-data against a real database', () => {
     const chats = zipEntryText(entries, 'chats.json');
     expect(chats).toContain('my key is [redacted]');
     expect(chats).toContain('The daily cap is 20000000 tokens.');
-    expect(zipEntryText(entries, 'sessions.json')).not.toContain(modelKey);
+    expect(zipEntryText(entries, 'sessions/0001.json')).not.toContain(modelKey);
     expect(zipEntryText(entries, 'agents.json')).toContain(`"${model}"`);
     const memory = zipEntryText(entries, 'memory/default/MEMORY.md');
     expect(memory).not.toContain(modelKey);
