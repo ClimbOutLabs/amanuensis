@@ -102,12 +102,14 @@ export const Tier3CalendarEventSchema = z
 export const Tier3ScheduleSchema = z
   .object({
     action: z.enum(['create', 'delete']).describe('Whether the schedule is created or deleted.'),
-    name: z.string().describe('Schedule name.'),
+    name: z.string().describe('Schedule name in plain words.'),
     when: z.string().describe('When it runs, in plain words.'),
     time_zone: z.string().describe('IANA time zone the times are in.'),
     task: z.string().describe('The whole instruction each run gets.'),
-    runs_as: z.string().describe('The agent each run uses.'),
-    first_run: z.string().nullable().describe('First run in plain words when created, or null for a delete.'),
+    runs_as: z.string().describe('Who runs it: the assistant name, or the agent name.'),
+    next_runs: z
+      .array(z.string())
+      .describe('The next three runs in plain words for a new schedule; empty for a delete.'),
   })
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');

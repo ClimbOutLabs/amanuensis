@@ -1870,7 +1870,7 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       time_zone: show(review.time_zone),
       task: escapeDisplayText(review.task, { keepNewlines: true }),
       runs_as: show(review.runs_as),
-      first_run: review.first_run === null ? null : show(review.first_run),
+      next_runs: review.next_runs.map(show),
     },
   };
 }

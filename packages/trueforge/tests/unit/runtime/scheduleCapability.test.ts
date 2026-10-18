@@ -2,6 +2,7 @@ import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-c
 import {
   createSentinelHostContext,
   defaultSentinelServices,
+  InstructionBuilder,
   type AuditRecordInput,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
@@ -15,7 +16,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
-import { ScheduleToolSet } from '../../../src/runtime/scheduleCapability';
+import { scheduleCapability, ScheduleToolSet } from '../../../src/runtime/scheduleCapability';
 
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Test Owner' };
 /** Sunday, October 18 2026, 08:00 in New York. */
@@ -28,7 +29,7 @@ const MORNING_BRIEF = {
   time: '08:00',
 };
 
-async function setup(input: { timeZone?: string | undefined } = {}) {
+async function setup(input: { timeZone?: string | undefined; assistantName?: string | null } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const agentStore = new SqliteAgentStore(db);
@@ -55,18 +56,20 @@ async function setup(input: { timeZone?: string | undefined } = {}) {
     created_by: OWNER.subject_id,
     conversation_id: 'chat-1',
   });
-  const tools = new ScheduleToolSet({
+  const options: ConstructorParameters<typeof ScheduleToolSet>[0] = {
     tracing: NOOP_AGENT_TRACING,
     store,
     withTransaction: callback => db.transaction().execute(callback),
     tenant_id: 'default',
     owner: OWNER,
     resolveAgent: async name => (name === undefined ? assistant : agentStore.getAgent({ tenant_id: 'default', name })),
+    assistantName: 'assistantName' in input ? (input.assistantName ?? null) : 'Aman',
     logger: winston.createLogger({ silent: true }),
     timeZone: 'timeZone' in input ? input.timeZone : 'America/New_York',
     sentinel,
     now: () => NOW,
-  });
+  };
+  const tools = new ScheduleToolSet(options);
   const listAll = async () =>
     (
       await store.listSchedules({
@@ -77,7 +80,7 @@ async function setup(input: { timeZone?: string | undefined } = {}) {
         created_by_or_agent_ids: undefined,
       })
     ).data;
-  return { tools, sentinel, store, listAll, audit };
+  return { tools, options, sentinel, store, listAll, audit };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -135,16 +138,20 @@ describe('create_schedule', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'schedule_write', is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Create the schedule "morning-brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(info.tier3_card?.schedule).toEqual({
       action: 'create',
-      name: 'morning-brief',
+      name: 'Morning brief',
       when: 'Every weekday at 8:00 AM',
       time_zone: 'America/New_York',
       task: MORNING_BRIEF.task,
-      runs_as: 'assistant',
-      first_run: 'Monday, October 19 at 8:00 AM',
+      runs_as: 'Aman',
+      next_runs: [
+        'Monday, October 19 at 8:00 AM',
+        'Tuesday, October 20 at 8:00 AM',
+        'Wednesday, October 21 at 8:00 AM',
+      ],
     });
     expect(await built.listAll()).toEqual([]);
 
@@ -210,7 +217,7 @@ describe('create_schedule', () => {
     expect(tokyo.tier3_card?.schedule).toMatchObject({
       when: 'Every Monday and Wednesday at 9:30 PM',
       time_zone: 'Asia/Tokyo',
-      first_run: 'Monday, October 19 at 9:30 PM',
+      next_runs: ['Monday, October 19 at 9:30 PM', 'Wednesday, October 21 at 9:30 PM', 'Monday, October 26 at 9:30 PM'],
     });
     await dispatch({
       built,
@@ -225,6 +232,20 @@ describe('create_schedule', () => {
       decision: { status: 'allow' },
     });
     expect((await built.listAll())[0]?.manifest).toMatchObject({ cron: '30 21 * * 1,3', timezone: 'Asia/Tokyo' });
+  });
+
+  it.each([
+    ['a cron field', { ...MORNING_BRIEF, cron: '*/5 * * * *' }, 'not valid'],
+    ['cron as the time', { ...MORNING_BRIEF, time: '*/5 * * * *' }, 'What time of day should it run?'],
+    ['a UTC time', { ...MORNING_BRIEF, time: '13:00Z' }, 'What time of day should it run?'],
+    ['an ISO instant', { ...MORNING_BRIEF, time: '2026-10-19T13:00:00Z' }, 'What time of day should it run?'],
+    ['cron day numbers', { ...MORNING_BRIEF, repeat: 'weekly', days: ['1-5'] }, 'not valid'],
+  ])('never trusts %s from the model as timing', async (_label, args, message) => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: args });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain(message);
+    expect(await built.listAll()).toEqual([]);
   });
 
   it('asks for the time zone when the device sent none and the model named none', async () => {
@@ -242,6 +263,13 @@ describe('create_schedule', () => {
       arguments: { ...MORNING_BRIEF, agent: 'researcher' },
     });
     expect(named.tier3_card?.schedule?.runs_as).toBe('researcher');
+    const unnamed = await (
+      await setup({ assistantName: null })
+    ).tools.toolCallInfo({
+      name: 'create_schedule',
+      arguments: MORNING_BRIEF,
+    });
+    expect(unnamed.tier3_card?.schedule?.runs_as).toBe('assistant');
     const missing = await built.tools.toolCallInfo({
       name: 'create_schedule',
       arguments: { ...MORNING_BRIEF, agent: 'nobody' },
@@ -328,7 +356,7 @@ describe('list, pause, resume and delete', () => {
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       [
         'create_schedule',
-        'Create the schedule "morning-brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+        'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
         'approved',
       ],
       ['pause_schedule', 'Paused the schedule "morning-brief".', 'ran'],
@@ -347,7 +375,7 @@ describe('list, pause, resume and delete', () => {
     const info = await built.tools.toolCallInfo({ name: 'delete_schedule', arguments: { schedule: 'morning-brief' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Delete the schedule "morning-brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
     );
     await dispatch({
       built,
@@ -363,5 +391,18 @@ describe('list, pause, resume and delete', () => {
       decision: { status: 'allow' },
     });
     expect(await built.listAll()).toEqual([]);
+  });
+});
+
+describe('the schedule rule in the system prompt', () => {
+  it('tells the model that create_schedule is the only way to schedule', async () => {
+    const built = await setup();
+    const prompt = InstructionBuilder.createSystemPrompt('test');
+    for (const build of scheduleCapability(built.options).instructionBuilders ?? []) {
+      build(prompt);
+    }
+    expect(prompt.build()).toContain(
+      'Schedules can only be made with create_schedule. Never tell the user something is scheduled',
+    );
   });
 });

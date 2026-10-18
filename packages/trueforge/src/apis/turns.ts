@@ -2003,6 +2003,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                       action: 'use',
                       agent: await agentStore.getAgent({ tenant_id: requestContext.tenant_id, name }),
                     }),
+              assistantName: profile?.assistant_name ?? null,
               logger: deps.logger,
             },
     });

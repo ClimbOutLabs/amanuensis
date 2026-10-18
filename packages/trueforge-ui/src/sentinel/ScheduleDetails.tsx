@@ -9,6 +9,10 @@ export const SCHEDULE_BADGES: Record<SentinelApprovalScheduleAction, string> = {
   delete: 'Delete schedule',
 };
 
+/** Scheduled runs hold anything that would ask, so nobody approves it by accident while away. */
+const SCHEDULE_AWAY_NOTE =
+  "While you're away it can only read and write to chat; anything risky is skipped and waits for your OK.";
+
 function Line({ label, value }: { label: string; value: string }) {
   return (
     <p className="break-words text-sm text-text-primary">
@@ -25,17 +29,18 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
       <Line label="Name" value={schedule.name} />
       <Line label="When it runs" value={`${schedule.when} (${schedule.time_zone})`} />
       <Line label="Runs as" value={schedule.runs_as} />
-      {schedule.action === 'create' && (
-        <Line
-          label="Starts"
-          value={
-            schedule.first_run === null
-              ? 'As soon as you approve.'
-              : `As soon as you approve. First run: ${schedule.first_run}.`
-          }
-        />
-      )}
+      {schedule.action === 'create' && <Line label="Starts" value="As soon as you approve." />}
     </div>
+    {schedule.next_runs.length > 0 && (
+      <div>
+        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Next runs</p>
+        <ul className="list-disc pl-5 text-sm text-text-primary">
+          {schedule.next_runs.map(run => (
+            <li key={run}>{run}</li>
+          ))}
+        </ul>
+      </div>
+    )}
     <div>
       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">What it will do each time</p>
       <div
@@ -47,5 +52,10 @@ export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ sc
         <p className="whitespace-pre-wrap break-words text-sm text-text-primary">{schedule.task}</p>
       </div>
     </div>
+    {schedule.action === 'create' && (
+      <p className="text-sm text-text-secondary" data-role="schedule-away">
+        {SCHEDULE_AWAY_NOTE}
+      </p>
+    )}
   </div>
 );

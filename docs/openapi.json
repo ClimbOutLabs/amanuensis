@@ -9758,19 +9758,19 @@
             ],
             "type": "string"
           },
-          "first_run": {
-            "description": "First run in plain words when created, or null for a delete.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "name": {
-            "description": "Schedule name.",
+            "description": "Schedule name in plain words.",
             "type": "string"
           },
+          "next_runs": {
+            "description": "The next three runs in plain words for a new schedule; empty for a delete.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "runs_as": {
-            "description": "The agent each run uses.",
+            "description": "Who runs it: the assistant name, or the agent name.",
             "type": "string"
           },
           "task": {
@@ -9793,7 +9793,7 @@
           "time_zone",
           "task",
           "runs_as",
-          "first_run"
+          "next_runs"
         ],
         "type": [
           "object",

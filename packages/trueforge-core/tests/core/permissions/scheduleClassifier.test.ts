@@ -18,12 +18,12 @@ function makeCtx(): ClassifyContext {
 
 const MORNING_BRIEF: Tier3Schedule = {
   action: 'create',
-  name: 'morning-brief',
+  name: 'Morning brief',
   when: 'Every weekday at 8:00 AM',
   time_zone: 'America/New_York',
   task: 'Give me a morning brief.',
-  runs_as: 'assistant',
-  first_run: 'Monday, October 19 at 8:00 AM',
+  runs_as: 'Aman',
+  next_runs: ['Monday, October 19 at 8:00 AM', 'Tuesday, October 20 at 8:00 AM', 'Wednesday, October 21 at 8:00 AM'],
 };
 
 function scheduleAction(tool_name: string, schedule_write?: Tier3Schedule): SentinelAction {
@@ -43,19 +43,19 @@ describe('Schedule tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write', auto_deny: null });
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.card?.plain_what).toBe(
-      'Create the schedule "morning-brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(decision.card?.schedule).toEqual(MORNING_BRIEF);
   });
 
   it('asks before deleting and says it cannot be undone', async () => {
     const decision = await classifyTier(
-      scheduleAction('delete_schedule', { ...MORNING_BRIEF, action: 'delete', first_run: null }),
+      scheduleAction('delete_schedule', { ...MORNING_BRIEF, action: 'delete', next_runs: [] }),
       makeCtx(),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write' });
     expect(decision.card?.plain_what).toBe(
-      'Delete the schedule "morning-brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
     );
     expect(decision.card?.cannot_be_undone).toBe('Once deleted, the schedule is gone for good.');
   });

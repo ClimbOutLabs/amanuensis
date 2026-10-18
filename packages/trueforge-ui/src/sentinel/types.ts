@@ -97,16 +97,17 @@ export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[
 /** The whole schedule a chat call creates or deletes, in plain words. */
 export type SentinelApprovalSchedule = {
   action: SentinelApprovalScheduleAction;
+  /** Schedule name in plain words. */
   name: string;
   /** When it runs, in plain words. */
   when: string;
   time_zone: string;
   /** The whole instruction each run gets. */
   task: string;
-  /** The agent each run uses. */
+  /** Who runs it: the assistant name, or the agent name. */
   runs_as: string;
-  /** First run in plain words for a new schedule; null for a delete. */
-  first_run: string | null;
+  /** The next three runs in plain words for a new schedule; empty for a delete. */
+  next_runs: string[];
 };
 
 /**
@@ -439,18 +440,19 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   const time_zone = optionalString(value, 'time_zone') ?? optionalString(value, 'timeZone');
   const task = optionalString(value, 'task');
   const runs_as = optionalString(value, 'runs_as') ?? optionalString(value, 'runsAs');
-  const first_run = cardString(value, { snake: 'first_run', camel: 'firstRun' });
+  const next_runs = stringList(value.next_runs ?? value.nextRuns);
   if (
     action === undefined ||
     name === undefined ||
     when === undefined ||
     time_zone === undefined ||
     task === undefined ||
-    runs_as === undefined
+    runs_as === undefined ||
+    next_runs === undefined
   ) {
     return null;
   }
-  return { action, name, when, time_zone, task, runs_as, first_run };
+  return { action, name, when, time_zone, task, runs_as, next_runs };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {

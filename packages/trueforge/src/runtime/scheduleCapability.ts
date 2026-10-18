@@ -3,6 +3,7 @@ import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session
 import type {
   AgentCapability,
   AgentTracing,
+  InstructionBuilder,
   SentinelHostContext,
   Tier3Schedule,
 } from '@truefoundry/trueforge-core/core';
@@ -89,6 +90,8 @@ export interface ScheduleTurnContext {
   owner: CreatedBySubject;
   /** An agent the owner may use, by name; undefined names the chat's own agent. Undefined when none fits. */
   resolveAgent: (name: string | undefined) => Promise<AgentRecord | undefined>;
+  /** The name the owner gave their assistant; shown instead of the chat's own agent name. Null when unset. */
+  assistantName: string | null;
   logger: Logger;
 }
 
@@ -166,6 +169,25 @@ export function describeScheduleTiming(cron: string): string {
     return `Every ${joinedWithAnd(names)} at ${at}`;
   }
   return custom;
+}
+
+/** How many upcoming runs the create card lists. */
+const PREVIEW_RUNS = 3;
+
+/** A schedule name in plain words: "morning-brief" reads "Morning brief". */
+export function plainScheduleName(name: string): string {
+  return capitalized(name.replace(/-/g, ' '));
+}
+
+/** The next few trigger times strictly after `from`. */
+function upcomingRuns(input: { cron: string; timezone: string; from: Date; count: number }): Date[] {
+  const runs: Date[] = [];
+  let from = input.from;
+  for (let i = 0; i < input.count; i++) {
+    from = nextTriggerAfter({ cron: input.cron, timezone: input.timezone, from });
+    runs.push(from);
+  }
+  return runs;
 }
 
 /** One instant in the schedule's own zone, in plain words, e.g. "Monday, October 19 at 8:00 AM". */
@@ -382,12 +404,14 @@ export class ScheduleToolSet extends LocalToolMCP {
         approved: { ...args, [APPROVED_ZONE_KEY]: timezone, [APPROVED_AGENT_KEY]: agent.id },
         review: {
           action: 'create',
-          name: input.name,
+          name: plainScheduleName(input.name),
           when: describeScheduleTiming(timing.cron),
           time_zone: timezone,
           task: manifest.task,
-          runs_as: agent.name,
-          first_run: formatRunTime({ at: nextTriggerAfter({ cron: timing.cron, timezone, from: now }), timezone }),
+          runs_as: await this.#runsAs({ id: agent.id, name: agent.name }),
+          next_runs: upcomingRuns({ cron: timing.cron, timezone, from: now, count: PREVIEW_RUNS }).map(at =>
+            formatRunTime({ at, timezone }),
+          ),
         },
         agent,
         manifest,
@@ -411,16 +435,26 @@ export class ScheduleToolSet extends LocalToolMCP {
         approved: { ...args, [APPROVED_SCHEDULE_KEY]: schedule.id },
         review: {
           action: 'delete',
-          name: schedule.name,
+          name: plainScheduleName(schedule.name),
           when: describeScheduleTiming(schedule.manifest.cron),
           time_zone: schedule.manifest.timezone,
           task: schedule.manifest.task,
-          runs_as: schedule.agent_name,
-          first_run: null,
+          runs_as: await this.#runsAs({ id: schedule.agent_id, name: schedule.agent_name }),
+          next_runs: [],
         },
         schedule,
       },
     };
+  }
+
+  /** The assistant's own name for the chat's agent; any other agent by its name. */
+  async #runsAs(agent: { id: string; name: string }): Promise<string> {
+    const { assistantName } = this.#options;
+    if (assistantName === null) {
+      return agent.name;
+    }
+    const own = await this.#options.resolveAgent(undefined);
+    return own?.id === agent.id ? assistantName : agent.name;
   }
 
   /** The owner's own schedules, newest first, up to the lookup limit. */
@@ -597,7 +631,15 @@ export class ScheduleToolSet extends LocalToolMCP {
   }
 }
 
-/** Attaches the schedule tools to one chat turn's root thread. */
+const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
+const SCHEDULE_INSTRUCTION =
+  'Schedules can only be made with create_schedule. Never tell the user something is scheduled, set to repeat, or will run later unless create_schedule succeeded in this chat. If it did not, say so plainly.';
+
+function buildScheduleInstruction(builder: InstructionBuilder): void {
+  builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);
+}
+
+/** Attaches the schedule tools, and the rule that they are the only way to schedule, to one chat turn's root thread. */
 export function scheduleCapability(options: ScheduleToolSetOptions): AgentCapability {
-  return { systemToolSets: [new ScheduleToolSet(options)] };
+  return { systemToolSets: [new ScheduleToolSet(options)], instructionBuilders: [buildScheduleInstruction] };
 }
