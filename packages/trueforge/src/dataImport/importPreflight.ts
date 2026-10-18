@@ -55,6 +55,8 @@ function isPristineProfile(profile: {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: readonly string[];
   learned_profile: string | null;
@@ -63,6 +65,8 @@ function isPristineProfile(profile: {
     profile.assistant_name === null &&
     profile.assistant_identity === null &&
     profile.voice_guidance === null &&
+    profile.user_name === null &&
+    profile.address_as === null &&
     profile.user_profile === null &&
     profile.learned_profile === null &&
     profile.pinned_preferences.length === 0

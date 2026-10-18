@@ -9,6 +9,7 @@
  */
 import type { TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import { Sessions } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Kysely } from 'kysely';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -25,6 +26,7 @@ import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
@@ -45,6 +47,8 @@ import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usa
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
+import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
+import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
@@ -80,6 +84,7 @@ const agentStore = new SqliteAgentStore(db);
 const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
+const turnArtifactStore = new SqliteTurnArtifactStore(db);
 const app = createServerApp({
   modelCatalog: ModelCatalog.load(),
   mcpCatalog: McpCatalog.load(),
@@ -107,7 +112,7 @@ const app = createServerApp({
   resolveImportAgentStore: () => agentStore,
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
-  turnArtifactStore: new SqliteTurnArtifactStore(db),
+  turnArtifactStore,
   globalSettingsStore: new SqliteGlobalSettingsStore(db),
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,
@@ -116,6 +121,14 @@ const app = createServerApp({
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
   sessions: new Sessions({ sessionStore }),
+  chatImages: createChatImageService({
+    store: new SqliteChatImageStore(db),
+    sessionStore,
+    turnArtifactStore,
+    reencode: createImageReencoder({ resolveSandbox: () => null }),
+    sentinel: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+  }),
   activeTurns: new ActiveTurnRegistry(),
   turnDrains: new TurnDrainRegistry(),
   requestReplyRouter: new RequestReplyRouter(),

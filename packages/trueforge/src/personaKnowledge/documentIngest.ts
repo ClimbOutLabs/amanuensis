@@ -1,9 +1,9 @@
 import { extractRawText } from 'mammoth';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { inflateRawSync } from 'node:zlib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
+import type { fetch as undiciFetch } from 'undici';
+
+import { fetchPublicUrl, type PublicFetchProblem } from '../runtime/publicFetch';
 
 /**
  * Document ingestion: turns uploads and URL snapshots into plain text for
@@ -404,222 +404,27 @@ export interface FetchSnapshotOptions {
   resolveAddresses?: (hostname: string) => Promise<string[]>;
 }
 
-async function defaultResolveAddresses(hostname: string): Promise<string[]> {
-  const entries = await lookup(hostname, { all: true });
-  return entries.map(entry => entry.address);
-}
-
-/**
- * True only for global-unicast IP literals. This is an allowlist over the
- * IANA special-purpose registries: anything that isn't plain public
- * address space (private, loopback, link-local, CGNAT, multicast, reserved,
- * documentation, transition mechanisms…) fails closed. A denylist here
- * would silently miss the next special range.
- */
-function isPublicIpLiteral(ip: string): boolean {
-  if (ip.includes(':')) {
-    return isPublicIpv6Literal(ip);
+/** Library wording for each reason a link cannot be fetched. */
+function describeFetchProblem(problem: PublicFetchProblem): string {
+  switch (problem.kind) {
+    case 'invalid_url':
+      return `“${problem.url}” isn’t a valid web address.`;
+    case 'scheme':
+      return 'Knowledge links must start with http:// or https://.';
+    case 'credentials':
+      return 'Links with a username or password in them can’t be saved to the library.';
+    case 'port':
+      return 'Only standard web ports (80 and 443) can be saved to the library.';
+    case 'private_host':
+      return `“${problem.hostname}” points at a private or internal address, so it can’t be saved to the library. Public web pages only.`;
+    case 'lookup_failed':
+      return `Couldn’t look up “${problem.hostname}” — check the address and try again.`;
+    case 'unresolved':
+      return `Couldn’t resolve “${problem.hostname}” to a usable address. Try again.`;
+    case 'refused_hop':
+    case 'too_many_redirects':
+      return 'That link redirected too many times. Try the final page’s address instead.';
   }
-  const octets = ip.split('.').map(part => Number(part));
-  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
-    return false;
-  }
-  const [a, b, c] = octets;
-  if (a === undefined || b === undefined || c === undefined) {
-    return false;
-  }
-  return !(
-    a === 0 || // 0.0.0.0/8 — software scope
-    a === 10 || // 10.0.0.0/8 — private
-    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 — CGNAT
-    a === 127 || // 127.0.0.0/8 — loopback
-    (a === 169 && b === 254) || // 169.254.0.0/16 — link-local
-    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 — private
-    (a === 192 && b === 0) || // 192.0.0.0/24 — IETF protocol assignments
-    (a === 192 && b === 0 && c === 2) || // 192.0.2.0/24 — documentation (subsumed above)
-    (a === 192 && b === 88 && c === 99) || // 192.88.99.0/24 — 6to4 relay (deprecated)
-    (a === 192 && b === 168) || // 192.168.0.0/16 — private
-    (a === 198 && b >= 18 && b <= 19) || // 198.18.0.0/15 — benchmarking
-    (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 — documentation
-    (a === 203 && b === 0 && c === 113) || // 203.0.113.0/24 — documentation
-    a >= 224 // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
-  );
-}
-
-/** Parses an IPv6 literal into 8 hextets. Returns null when unparseable. */
-function ipv6Hextets(ip: string): number[] | null {
-  const lower = ip.toLowerCase();
-  // Embedded IPv4 tail (e.g. ::ffff:1.2.3.4): validate the v4 part with the
-  // v4 allowlist; the v6 prefix must be all zeros or it's a transition
-  // mechanism and fails closed.
-  if (lower.includes('.')) {
-    const lastColon = lower.lastIndexOf(':');
-    const v4 = lower.slice(lastColon + 1);
-    const prefix = lower.slice(0, lastColon).replace(/:/g, '');
-    if (prefix !== '' && prefix !== '0' && !/^0+$/.test(prefix)) {
-      return null;
-    }
-    return isPublicIpLiteral(v4) ? [0, 0, 0, 0, 0, 0xffff, 0, 0] : null;
-  }
-  const halves = lower.split('::');
-  if (halves.length > 2) {
-    return null;
-  }
-  const head = halves[0] === undefined || halves[0] === '' ? [] : halves[0].split(':');
-  const tail = halves.length < 2 || halves[1] === undefined || halves[1] === '' ? [] : halves[1].split(':');
-  const parse = (part: string): number | null => {
-    if (!/^[0-9a-f]{1,4}$/.test(part)) {
-      return null;
-    }
-    return parseInt(part, 16);
-  };
-  const headNums: number[] = [];
-  for (const part of head) {
-    const n = parse(part);
-    if (n === null) {
-      return null;
-    }
-    headNums.push(n);
-  }
-  const tailNums: number[] = [];
-  for (const part of tail) {
-    const n = parse(part);
-    if (n === null) {
-      return null;
-    }
-    tailNums.push(n);
-  }
-  if (halves.length === 1) {
-    return headNums.length === 8 ? headNums : null;
-  }
-  const zeros = 8 - headNums.length - tailNums.length;
-  if (zeros < 1) {
-    return null;
-  }
-  return [...headNums, ...new Array<number>(zeros).fill(0), ...tailNums];
-}
-
-function isPublicIpv6Literal(ip: string): boolean {
-  const h = ipv6Hextets(ip);
-  if (h?.length !== 8) {
-    return false;
-  }
-  const [h0, h1, h2, h3, h4, h5] = h;
-  if (
-    h0 === undefined ||
-    h1 === undefined ||
-    h2 === undefined ||
-    h3 === undefined ||
-    h4 === undefined ||
-    h5 === undefined
-  ) {
-    return false;
-  }
-  const allZero = h.every(part => part === 0);
-  const isLoopback = h.every((part, index) => part === (index === 7 ? 1 : 0));
-  return !(
-    allZero || // :: — unspecified
-    isLoopback || // ::1 — loopback
-    (h0 & 0xffc0) === 0xfe80 || // fe80::/10 — link-local
-    (h0 & 0xfe00) === 0xfc00 || // fc00::/7 — unique local
-    (h0 & 0xff00) === 0xff00 || // ff00::/8 — multicast
-    // ::ffff:0:0/96 — IPv4-mapped (the v4 tail was already allowlisted, but a
-    // mapped address reaching a socket API may still behave as v4)
-    (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0xffff) ||
-    // 64:ff9b::/96 — NAT64 translation prefix
-    (h0 === 0x64 && h1 === 0xff9b && h2 === 0 && h3 === 0 && h4 === 0) ||
-    h0 === 0x2002 || // 2002::/16 — 6to4
-    (h0 === 0x100 && h1 === 0 && h2 === 0 && h3 === 0) || // 100::/64 — discard
-    (h0 === 0x2001 && (h1 & 0xfe00) === 0) // 2001::/23 — IETF protocol assignments (incl. documentation)
-  );
-}
-
-function assertFetchableUrl(raw: string): URL {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`“${raw}” isn’t a valid web address.`);
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Knowledge links must start with http:// or https://.');
-  }
-  if (url.username !== '' || url.password !== '') {
-    throw new Error('Links with a username or password in them can’t be saved to the library.');
-  }
-  if (url.port !== '' && url.port !== '80' && url.port !== '443') {
-    throw new Error('Only standard web ports (80 and 443) can be saved to the library.');
-  }
-  return url;
-}
-
-async function assertPublicHost(
-  hostname: string,
-  resolveAddresses: (hostname: string) => Promise<string[]>,
-): Promise<string[]> {
-  // An IP literal is its own address: validate it directly instead of trusting
-  // a resolver to echo the literal back.
-  if (isIP(hostname) !== 0) {
-    if (!isPublicIpLiteral(hostname)) {
-      throw privateHostError(hostname);
-    }
-    return [hostname];
-  }
-  let addresses: string[];
-  try {
-    addresses = await resolveAddresses(hostname);
-  } catch (error) {
-    throw new Error(`Couldn’t look up “${hostname}” — check the address and try again.`, {
-      cause: error,
-    });
-  }
-  if (addresses.length === 0 || addresses.some(address => !isPublicIpLiteral(address))) {
-    throw privateHostError(hostname);
-  }
-  return addresses;
-}
-
-/**
- * Builds a dispatcher whose connections always go to the given validated IP
- * address, regardless of what DNS reports at connection time. The original
- * hostname is still used for TLS SNI and the Host header — only the TCP
- * destination is pinned — which closes the DNS-rebinding window between the
- * address check and the connection for every redirect hop. DNS validation
- * alone is a check, not a guarantee; this is the guarantee.
- *
- * Exported so tests can prove the pin holds against an unresolvable
- * hostname, not just assert a dispatcher object exists.
- */
-export function pinnedDispatcher(address: string): Dispatcher {
-  const family = isIP(address) === 6 ? 6 : 4;
-  return new Agent({
-    connect: {
-      // Node asks for every address (`all: true`) when autoSelectFamily is on;
-      // the lookup must answer in the shape asked for, or net.connect rejects
-      // the result and the fetch fails outright.
-      lookup: (
-        _hostname: string,
-        options: { all?: boolean | undefined },
-        callback: (
-          err: NodeJS.ErrnoException | null,
-          addresses: string | { address: string; family: number }[],
-          family?: number,
-        ) => void,
-      ) => {
-        if (options.all === true) {
-          callback(null, [{ address, family }]);
-        } else {
-          callback(null, address, family);
-        }
-      },
-    },
-  });
-}
-
-function privateHostError(hostname: string): Error {
-  return new Error(
-    `“${hostname}” points at a private or internal address, so it can’t be saved to the library. Public web pages only.`,
-  );
 }
 
 /**
@@ -631,52 +436,16 @@ function privateHostError(hostname: string): Error {
  * link is parsed as a PDF.
  */
 export async function fetchUrlSnapshot(rawUrl: string, options?: FetchSnapshotOptions): Promise<UrlSnapshot> {
-  const fetchImpl = options?.fetchImpl ?? undiciFetch;
-  const timeoutMs = options?.timeoutMs ?? URL_FETCH_TIMEOUT_MS;
   const maxBytes = options?.maxBytes ?? MAX_URL_BYTES;
-  const resolveAddresses = options?.resolveAddresses ?? defaultResolveAddresses;
-
-  let current = assertFetchableUrl(rawUrl).toString();
-  let response: Response | undefined;
-  let responseDispatcher: Dispatcher | undefined;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const url = assertFetchableUrl(current);
-    const validated = await assertPublicHost(url.hostname, resolveAddresses);
-    const address = validated[0];
-    if (address === undefined) {
-      throw new Error(`Couldn’t resolve “${url.hostname}” to a usable address. Try again.`);
-    }
-    // Pin the connection to the validated address: the hostname still drives
-    // TLS SNI and the Host header, but the TCP destination cannot move.
-    const dispatcher = pinnedDispatcher(address);
-    let fetched: Response;
-    try {
-      fetched = await fetchImpl(current, {
-        dispatcher,
-        signal: AbortSignal.timeout(timeoutMs),
-        redirect: 'manual',
-        headers: { 'user-agent': 'AmanuensisPersonaKnowledge/1.0 (+https://amanuensis.local)' },
-      });
-    } catch (error) {
-      // A throwing fetch never returns a response whose dispatcher we close
-      // later — release its sockets here instead of leaking them.
-      await dispatcher.close().catch(() => undefined);
-      throw error;
-    }
-    const location = fetched.headers.get('location');
-    if (fetched.status >= 300 && fetched.status < 400 && location !== null) {
-      await fetched.arrayBuffer().catch(() => undefined);
-      await dispatcher.close().catch(() => undefined);
-      current = new URL(location, current).toString();
-      continue;
-    }
-    response = fetched;
-    responseDispatcher = dispatcher;
-    break;
-  }
-  if (response === undefined) {
-    throw new Error(`“${rawUrl}” redirected too many times. Try the final page’s address instead.`);
-  }
+  const { response, finalUrl, release } = await fetchPublicUrl(rawUrl, {
+    fetchImpl: options?.fetchImpl,
+    resolveAddresses: options?.resolveAddresses,
+    timeoutMs: options?.timeoutMs ?? URL_FETCH_TIMEOUT_MS,
+    maxRedirects: MAX_REDIRECTS,
+    headers: { 'user-agent': 'AmanuensisPersonaKnowledge/1.0 (+https://amanuensis.local)' },
+    allowHop: undefined,
+    describe: describeFetchProblem,
+  });
   try {
     if (!response.ok) {
       throw new Error(`The page returned “${String(response.status)}”. Only pages that load normally can be saved.`);
@@ -685,7 +454,7 @@ export async function fetchUrlSnapshot(rawUrl: string, options?: FetchSnapshotOp
     const bytes = await readCappedBody(response, maxBytes);
     if (contentType === 'application/pdf') {
       const { text, note } = await extractPdfText(new Uint8Array(bytes));
-      return { finalUrl: current, title: titleFromUrl(current), text, ...(note === undefined ? {} : { note }) };
+      return { finalUrl, title: titleFromUrl(finalUrl), text, ...(note === undefined ? {} : { note }) };
     }
     if (contentType !== '' && !contentType.startsWith('text/')) {
       throw new Error(
@@ -697,12 +466,10 @@ export async function fetchUrlSnapshot(rawUrl: string, options?: FetchSnapshotOp
     if (snapshot.text.length === 0) {
       throw new Error('No readable text was found on that page.');
     }
-    return { finalUrl: current, title: snapshot.title || titleFromUrl(current), text: snapshot.text };
+    return { finalUrl, title: snapshot.title || titleFromUrl(finalUrl), text: snapshot.text };
   } finally {
-    // The body is fully consumed above; closing the pinned dispatcher releases
-    // its sockets instead of leaving them for GC.
-    await responseDispatcher?.close().catch(() => undefined);
-    await response.arrayBuffer().catch(() => undefined);
+    // Closing the pinned dispatcher releases its sockets instead of leaving them for GC.
+    await release();
   }
 }
 

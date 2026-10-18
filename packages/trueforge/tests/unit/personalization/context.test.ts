@@ -16,6 +16,8 @@ const profile: PersonalizationProfile = {
   assistant_name: 'Aman',
   assistant_identity: 'A local-first assistant.',
   voice_guidance: 'Warm and concise.',
+  user_name: null,
+  address_as: null,
   user_profile: 'Values privacy.',
   pinned_preferences: ['Use plain English.'],
   learned_profile: null,
@@ -28,6 +30,25 @@ const profile: PersonalizationProfile = {
 };
 
 describe('personalization context', () => {
+  it('carries the user name and form of address to every speaker, and hashes without them when unset', () => {
+    const named: PersonalizationProfile = { ...profile, user_name: 'Sam Rivera', address_as: 'Sam' };
+    const defaultContext = buildPersonalizationContext(named);
+    const personaContext = buildPersonalizationContext(named, { speaker: 'persona' });
+
+    expect(defaultContext.injected_context).toContain('<user-name>Sam Rivera</user-name>');
+    expect(defaultContext.injected_context).toContain('<address-user-as>Sam</address-user-as>');
+    expect(personaContext.injected_context).toContain('<user-name>Sam Rivera</user-name>');
+    expect(personaContext.injected_context).toContain('<address-user-as>Sam</address-user-as>');
+    expect(buildPersonalizationContext(profile).injected_context).not.toContain('<user-name>');
+
+    // Digests stored before the two fields existed must stay valid for rows that never set them.
+    const { user_name: _name, address_as: _address, ...withoutNameFields } = profile;
+    expect(personalizationDigest(profile)).toBe(
+      personalizationDigest({ ...withoutNameFields, user_name: null, address_as: null }),
+    );
+    expect(personalizationDigest(named)).not.toBe(personalizationDigest(profile));
+  });
+
   it('is deterministic and exposes the exact injected root-thread text', () => {
     const complete: PersonalizationProfile = { ...profile, digest: personalizationDigest(profile) };
     const context = buildPersonalizationContext(complete);

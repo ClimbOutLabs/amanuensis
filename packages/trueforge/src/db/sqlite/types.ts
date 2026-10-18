@@ -41,6 +41,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
 /**
@@ -227,6 +228,31 @@ export interface TurnArtifactTable {
   mime: string | null;
   skip_reason: string | null;
   created_at: string;
+}
+
+/** Re-encoded chat image. PRIMARY KEY (session_id, image_id); UNIQUE (session_id, source_key); session cascade. */
+export interface ChatImageTable {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  turn_id: string;
+  image_id: string;
+  source_key: string;
+  origin: ChatImageOrigin;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  data: Buffer;
+  created_at: string;
+}
+
+/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
+export interface ChatImageTurnAllowanceTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  silent_attempts: number;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -520,6 +546,8 @@ export interface PersonalizationProfileTable {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JsonbColumn<string[]>;
   /** Host-maintained learned document; null until the learning pass writes one. */
@@ -745,6 +773,8 @@ export interface Database {
   repository_workspace_verification: RepositoryWorkspaceVerificationTable;
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
+  chat_image: ChatImageTable;
+  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

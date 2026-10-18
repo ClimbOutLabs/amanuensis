@@ -70,7 +70,8 @@ function parseMimeFromFileData(fileData: string): string {
   return mime.toLowerCase();
 }
 
-function extractBase64(dataUri: string): Buffer {
+/** Decodes a file part's base64 data URI; throws InvalidFileInputError for anything malformed or over the cap. */
+export function extractBase64(dataUri: string): Buffer {
   const commaIndex = dataUri.indexOf(',');
   if (commaIndex === -1) {
     throw new InvalidFileInputError('File data URI has no base64 payload');

@@ -396,6 +396,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/exports.js"
         },
+        "./settings/firstRunGuide": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/firstRunGuide/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/firstRunGuide/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.js"
+        },
         "./settings/mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/mcpServers/exports.d.mts",

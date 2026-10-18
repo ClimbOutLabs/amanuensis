@@ -17,6 +17,7 @@ function makeResult(input: {
   const toolSet = makeMockIMCPServer({ name: input.serverName ?? 'external-web', preload: true });
   return {
     message: { role: 'tool', tool_call_id: 'call-1', content: rawContent },
+    images: [],
     rawContent,
     toolCallInfo: {
       type: 'mcp',

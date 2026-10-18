@@ -27,6 +27,8 @@ function toWireProfile(profile: PersonalizationProfile): PersonalizationProfileW
     assistant_name: profile.assistant_name,
     assistant_identity: profile.assistant_identity,
     voice_guidance: profile.voice_guidance,
+    user_name: profile.user_name,
+    address_as: profile.address_as,
     user_profile: profile.user_profile,
     pinned_preferences: profile.pinned_preferences,
     learned_profile: profile.learned_profile,

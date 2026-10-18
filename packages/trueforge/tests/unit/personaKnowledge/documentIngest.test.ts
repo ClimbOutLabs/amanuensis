@@ -7,8 +7,9 @@ import {
   extractTextFromUpload,
   fetchUrlSnapshot,
   MAX_UPLOAD_BYTES,
-  pinnedDispatcher,
 } from '../../../src/personaKnowledge/documentIngest';
+import { pinnedDispatcher } from '../../../src/runtime/publicFetch';
+import { EXAMPLE_COM_ADDRESS } from '../../fixtures/exampleComAddress';
 
 const textBytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -483,7 +484,7 @@ describe('extractTextFromUpload', () => {
 });
 
 describe('fetchUrlSnapshot SSRF guards', () => {
-  const publicResolver = async () => ['93.184.216.34'];
+  const publicResolver = async () => [EXAMPLE_COM_ADDRESS];
   const privateResolver = async () => ['10.1.2.3'];
 
   it('blocks private IP literals without any network call', async () => {

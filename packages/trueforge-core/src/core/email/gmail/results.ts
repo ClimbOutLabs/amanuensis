@@ -1,9 +1,11 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
+import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
 import {
   headerOf,
   labelIdsOf,
+  linkedImagesOf,
   listAttachments,
   MAX_RAW_HEADER_CHARS,
   rawHeaderOf,
@@ -322,6 +324,9 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
   const listed = fitAttachments({ message: input.message, budget });
   const note = attachmentsNote({ context: input.context, listed: listed.attachments.length > 0 || listed.omitted > 0 });
   budget.spend(neutralizeDeep(note));
+  // Listed so the chat can offer to show them; nothing is fetched unless the person says so.
+  const linkedImages = linkedImagesOf({ message: input.message, max: CHAT_IMAGE_MAX_PER_EMAIL });
+  budget.spend(linkedImages);
   const read = readBody({ message: input.message, maxChars: bodyChars(budget.left) });
   const bounded = fitText({ text: read.body, left: budget.left });
   return {
@@ -329,6 +334,7 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
     attachments: listed.attachments,
     ...(listed.omitted > 0 ? { attachments_omitted: listed.omitted } : {}),
     ...note,
+    ...(linkedImages.length > 0 ? { linked_images: linkedImages } : {}),
     body: bounded.text,
     body_truncated: bounded.truncated || read.cut,
   };

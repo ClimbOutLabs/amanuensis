@@ -5,22 +5,26 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
 export const PersonalizationProfileContent: core.serialization.ObjectSchema<serializers.PersonalizationProfileContent.Raw, TrueForge.PersonalizationProfileContent> = core.serialization.object({
+        "addressAs": core.serialization.property("address_as", core.serialization.string().optionalNullable()),
         "assistantIdentity": core.serialization.property("assistant_identity", core.serialization.string().nullable()),
         "assistantName": core.serialization.property("assistant_name", core.serialization.string().nullable()),
         "learnedProfile": core.serialization.property("learned_profile", core.serialization.string().optionalNullable()),
         "learningEnabled": core.serialization.property("learning_enabled", core.serialization.boolean().optional()),
         "pinnedPreferences": core.serialization.property("pinned_preferences", core.serialization.list(core.serialization.string())),
+        "userName": core.serialization.property("user_name", core.serialization.string().optionalNullable()),
         "userProfile": core.serialization.property("user_profile", core.serialization.string().nullable()),
         "voiceGuidance": core.serialization.property("voice_guidance", core.serialization.string().nullable())
     });
 
 export declare namespace PersonalizationProfileContent {
     export interface Raw {
+        address_as?: (string | null | undefined) | null;
         assistant_identity?: string | null;
         assistant_name?: string | null;
         learned_profile?: (string | null | undefined) | null;
         learning_enabled?: boolean | null;
         pinned_preferences: string[];
+        user_name?: (string | null | undefined) | null;
         user_profile?: string | null;
         voice_guidance?: string | null;
     }

@@ -2,12 +2,21 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import { AmanWelcome, amanSetupItems, amanWelcomeHeading } from '@/components/AmanWelcome.js';
+import { AmanWelcome, amanWelcomeHeading } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 
-function renderWelcome(input: { assistantName?: string | null; setup?: AmanSetupState; heading?: string }) {
+function renderWelcome(input: {
+  assistantName?: string | null;
+  userName?: string | null;
+  setup?: AmanSetupState;
+  heading?: string;
+}) {
   const api = {
-    getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: input.assistantName ?? null }),
+    getProfile: async () => ({
+      ...EMPTY_PERSONALIZATION_PROFILE,
+      assistant_name: input.assistantName ?? null,
+      user_name: input.userName ?? null,
+    }),
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
@@ -22,6 +31,8 @@ function renderWelcome(input: { assistantName?: string | null; setup?: AmanSetup
     </PersonalizationProvider>,
   );
 }
+
+const dismissed = { dismissed: true, dismiss: () => {} };
 
 describe('AmanWelcome', () => {
   it("greets in the assistant's name once the profile carries one", async () => {
@@ -44,47 +55,50 @@ describe('AmanWelcome', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
   });
 
-  it('lists what is still unset with links to settings, and nothing once setup is complete', () => {
-    const { unmount } = renderWelcome({
-      setup: { modelName: null, memoryBank: null, settingsHref: '/settings' },
+  it('shows the first-run checklist with links to settings until it is dismissed', async () => {
+    renderWelcome({
+      setup: { modelName: null, memoryBank: null, hasChatted: false, settingsHref: '/settings' },
     });
-    const list = screen.getByRole('list', { name: 'Finish setting up' });
-    expect(list).toHaveTextContent('No model chosen yet.');
-    expect(list).toHaveTextContent('Memory is off');
-    expect(screen.getByRole('link', { name: 'Choose a model in Settings › Models' })).toHaveAttribute(
-      'href',
-      '/settings',
-    );
-    expect(screen.getByRole('link', { name: 'Connect a memory bank in Settings › Memory' })).toHaveAttribute(
-      'href',
-      '/settings',
-    );
+    const list = await screen.findByRole('list', { name: 'Setup checklist' });
+    expect(list).toHaveTextContent('Add a model');
+    expect(list).toHaveTextContent('Tell Aman about you');
+    expect(list).toHaveTextContent('Try your first chat');
+    expect(screen.getByRole('link', { name: 'Choose a model' })).toHaveAttribute('href', '/settings');
+    expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByTestId('aman-name-prompt')).not.toBeInTheDocument();
+  });
+
+  it('after dismissal, shows one quiet line about the name only while it is unset', async () => {
+    const { unmount } = renderWelcome({
+      userName: null,
+      setup: { modelName: 'local-model', memoryBank: undefined, firstRunGuide: dismissed, settingsHref: '/settings' },
+    });
+    const prompt = await screen.findByTestId('aman-name-prompt');
+    expect(prompt).toHaveTextContent('Aman does not know your name yet.');
+    expect(screen.getByRole('link', { name: 'Add it in Personalization' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
     unmount();
 
-    renderWelcome({ setup: { modelName: 'local-model', memoryBank: { name: 'amantest', connected: true } } });
-    expect(screen.queryByRole('list', { name: 'Finish setting up' })).not.toBeInTheDocument();
+    renderWelcome({
+      userName: 'Sam',
+      setup: { modelName: 'local-model', memoryBank: undefined, firstRunGuide: dismissed },
+    });
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-name-prompt')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
   });
 
-  it('asks for sign-in when the bank is configured but unreachable for this user', () => {
-    const items = amanSetupItems({ modelName: 'local-model', memoryBank: { name: 'amantest', connected: false } });
-    expect(items.map(item => item.key)).toEqual(['memory']);
-    expect(items[0]?.text).toContain('amantest needs sign-in');
-    expect(items[0]?.action).toBe('Sign in under Settings › Memory');
-  });
-
-  it('says nothing about memory when the host could not find out', () => {
-    expect(amanSetupItems({ modelName: 'local-model', memoryBank: undefined })).toEqual([]);
-    expect(amanSetupItems({ modelName: '', memoryBank: undefined }).map(item => item.key)).toEqual(['model']);
-  });
-
-  it('renders the plain screen outside a setup provider', () => {
+  it('renders the plain screen outside a setup provider', async () => {
     renderWelcome({ assistantName: null });
 
-    expect(screen.queryByTestId('aman-setup-checklist')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-guide')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-name-prompt')).not.toBeInTheDocument();
   });
 
-  it('trims the name before greeting with it', () => {
+  it('builds the heading from a trimmed name', () => {
     expect(amanWelcomeHeading('  Mira ')).toBe("Hi, I'm Mira. What's on your mind?");
-    expect(amanWelcomeHeading('   ')).toBe('How can I help you today?');
+    expect(amanWelcomeHeading('')).toBe('How can I help you today?');
+    expect(amanWelcomeHeading(undefined)).toBe('How can I help you today?');
   });
 });

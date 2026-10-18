@@ -35,7 +35,12 @@ export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
 export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
-export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
+export {
+  extractBase64,
+  isAgentInputUserMessage,
+  isEmptyMessageContent,
+  isFileContentPart,
+} from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
 
 // Deterministic local document extraction/report capability.
@@ -67,6 +72,7 @@ export type {
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
 } from './capabilities/AgentContextProcessor';
+export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
 
 // Built-in factories
 export { getModelOutputExceedsContextError } from '../schemas/modelTokenLimits';
@@ -228,7 +234,7 @@ export type {
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage, ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from './llm/LLMTypes';
 export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
-export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
+export type { ToolCallMemoSnapshot, ToolCallResult } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
 export { isInternalSystemMessage } from './runtime/contextUtils';
@@ -431,6 +437,8 @@ export {
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
+export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
+export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -451,7 +459,12 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { createWebSearchTurnState } from './permissions/webSearch';
+export {
+  SILENT_SEARCH_LIMIT,
+  createWebSearchTurnState,
+  recordResultUrls,
+  remoteImageAskReason,
+} from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export { FetchedPageStore, fetchedPages } from './search/fetchedPages';
 export { groundPlace, isInCalendar } from './search/groundPlace';
