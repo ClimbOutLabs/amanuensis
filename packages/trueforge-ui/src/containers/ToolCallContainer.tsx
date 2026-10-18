@@ -13,6 +13,7 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { useCallback, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
@@ -176,7 +177,8 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
     // and taking the first allow option would silently approve every later equivalent call.
     const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
-    const allowChatId = allowChatOptionId(part.approval?.options);
+    // The server decides who may get chat scope; a declared option never overrides a refusal.
+    const allowChatId = approvalInfo.chatAllowOffered === false ? undefined : allowChatOptionId(part.approval?.options);
     const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
@@ -293,6 +295,14 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
   const approvalPart = approval === part.approval ? part : { ...part, approval };
+  // The model's own arguments are stored as written, so a held search shows the server's masked
+  // rendering of them instead, before and after the owner answers.
+  const sentinelState = useOptionalSentinelState();
+  const heldSearchCard = sentinelState?.approvalFor(part.toolCallId)?.card;
+  const heldSearchRequest =
+    heldSearchCard !== undefined && isSearchHoldCardText(heldSearchCard.plain_what)
+      ? { value: heldSearchCard.outbound_text ?? '', isJson: false }
+      : undefined;
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
   const isMaps = isMapsToolName(part.toolName);
@@ -452,7 +462,8 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       );
     }
 
-    const inputDisplay = input !== undefined ? getJsonDisplayValue(JSON.stringify(input, null, 2)) : argsDisplay;
+    const inputDisplay =
+      heldSearchRequest ?? (input !== undefined ? getJsonDisplayValue(JSON.stringify(input, null, 2)) : argsDisplay);
     const slots = RequestResponseSlots({
       request: inputDisplay,
       response: resultDisplay,
@@ -481,7 +492,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const argsDisplay = getJsonDisplayValue(part.argsText);
   const resultDisplay = getToolResultContent(part.result);
   const slots = RequestResponseSlots({
-    request: argsDisplay,
+    request: heldSearchRequest ?? argsDisplay,
     response: resultDisplay,
   });
 

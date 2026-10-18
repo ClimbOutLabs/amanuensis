@@ -15,6 +15,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter, deriveSessionTitle, extractUserMessageText, turnStreamId } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -181,6 +182,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -267,6 +269,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
@@ -485,6 +488,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -619,6 +623,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -731,6 +736,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -822,6 +828,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,

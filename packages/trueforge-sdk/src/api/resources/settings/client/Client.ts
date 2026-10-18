@@ -11,6 +11,7 @@ import { ModelProvidersClient } from "../resources/modelProviders/client/Client.
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
+import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
 
 export declare namespace SettingsClient {
@@ -26,6 +27,7 @@ export class SettingsClient {
     protected _runCode: RunCodeClient | undefined;
     protected _sandboxProviders: SandboxProvidersClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _tokenFactoryUsage: TokenFactoryUsageClient | undefined;
     protected _toolOutputScreens: ToolOutputScreensClient | undefined;
     protected _google: GoogleClient | undefined;
 
@@ -60,6 +62,10 @@ export class SettingsClient {
 
     public get skills(): SkillsClient {
         return (this._skills ??= new SkillsClient(this._options));
+    }
+
+    public get tokenFactoryUsage(): TokenFactoryUsageClient {
+        return (this._tokenFactoryUsage ??= new TokenFactoryUsageClient(this._options));
     }
 
     public get toolOutputScreens(): ToolOutputScreensClient {

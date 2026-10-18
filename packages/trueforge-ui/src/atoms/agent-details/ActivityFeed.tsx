@@ -6,6 +6,9 @@ import { buildActivityItems, type ActivityItemKind } from '../../utils/activityF
 import { cn } from '../lib/cn.js';
 import type { ActivityFeedProps } from './types.js';
 
+/** Long sessions can generate dozens of entries; keep the feed glanceable. */
+const MAX_VISIBLE_ITEMS = 10;
+
 const KIND_ICON_PATHS: Record<ActivityItemKind, string> = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
   read: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
@@ -52,7 +55,11 @@ function formatTime(timestampMs: number): string {
  */
 export function ActivityFeed({ segments, originMs, defaultExpanded = true }: ActivityFeedProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [showAll, setShowAll] = useState(false);
   const items = useMemo(() => buildActivityItems(segments, originMs), [segments, originMs]);
+  const recentFirst = useMemo(() => [...items].reverse(), [items]);
+  const visible = showAll ? recentFirst : recentFirst.slice(0, MAX_VISIBLE_ITEMS);
+  const hiddenCount = recentFirst.length - visible.length;
 
   if (items.length === 0) return null;
 
@@ -79,22 +86,33 @@ export function ActivityFeed({ segments, originMs, defaultExpanded = true }: Act
         </svg>
       </button>
       {expanded && (
-        <ul className="pb-2">
-          {items.map(item => (
-            <li key={item.id} className="flex items-start gap-3 px-3 py-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-background-secondary text-text-secondary">
-                <KindIcon kind={item.kind} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-text-primary">{item.title}</span>
-                {item.detail !== undefined && (
-                  <span className="mt-0.5 block truncate text-xs text-text-secondary">{item.detail}</span>
-                )}
-              </span>
-              <span className="shrink-0 pt-0.5 text-xs text-text-tertiary">{formatTime(item.timestampMs)}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="pb-2">
+            {visible.map(item => (
+              <li key={item.id} className="flex items-start gap-3 px-3 py-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-background-secondary text-text-secondary">
+                  <KindIcon kind={item.kind} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-text-primary">{item.title}</span>
+                  {item.detail !== undefined && (
+                    <span className="mt-0.5 block truncate text-xs text-text-secondary">{item.detail}</span>
+                  )}
+                </span>
+                <span className="shrink-0 pt-0.5 text-xs text-text-tertiary">{formatTime(item.timestampMs)}</span>
+              </li>
+            ))}
+          </ul>
+          {(hiddenCount > 0 || showAll) && (
+            <button
+              type="button"
+              onClick={() => setShowAll(previous => !previous)}
+              className="mx-3 mb-2 text-xs text-text-secondary underline-offset-2 hover:underline"
+            >
+              {showAll ? 'Show fewer' : `+${hiddenCount} more`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

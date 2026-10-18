@@ -6,6 +6,7 @@ import { SANDBOX_EXEC_TOOL_NAME, Sandbox, type BoundRepository } from '../../../
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { realCommandExec } from './realCommandExec';
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
 const TOKEN = ['ghp', 'SyntheticTokenForTestsOnly0123456789'].join('_');
@@ -29,27 +30,48 @@ function containsToken(value: unknown): boolean {
 }
 
 function isProbe(params: SandboxExecParams): boolean {
-  return params.command.includes("'config' '--local'");
+  return params.command.includes("'--name-only'");
+}
+
+/** Answers the token-free probes that read the checkout's branch and remote settings. */
+function remoteProbeAnswer(input: { command: string; remoteUrl: string }): string | undefined {
+  const { command } = input;
+  if (command.includes("'symbolic-ref'")) {
+    return 'main\n';
+  }
+  if (command.includes("'--get' 'branch.main.remote'")) {
+    return 'origin\n';
+  }
+  if (command.includes("'--get-all' 'remote.origin.url'")) {
+    return `${input.remoteUrl}\n`;
+  }
+  return undefined;
 }
 
 function isBrokered(params: SandboxExecParams): boolean {
   return params.env?.[TOKEN_ENV_KEY] !== undefined;
 }
 
-function makeProvider(input: { recorder: Recorder; localConfig?: string }): SandboxProvider {
+function makeProvider(input: { recorder: Recorder; localConfig?: string; remoteUrl?: string }): SandboxProvider {
   const exec = (params: SandboxExecParams): Promise<ExecResult> => {
     input.recorder.execs.push(params);
+    const remoteAnswer = remoteProbeAnswer({
+      command: params.command,
+      remoteUrl: input.remoteUrl ?? 'https://github.com/acme/widgets',
+    });
     const result = isProbe(params)
       ? (input.localConfig ?? SAFE_LOCAL_CONFIG)
-      : params.command === BOUND_REPOSITORY_STATE_COMMAND
-        ? '/work/repo\nmain\n0123456789abcdef\n'
-        : params.command === 'git rev-parse --show-toplevel'
-          ? '/work/repo'
-          : params.command === 'git rev-parse --absolute-git-dir'
-            ? '/work/repo/.git'
-            : params.command.startsWith('ls -di -- .git ')
-              ? '11 .git\n12 /work/repo/.git'
-              : '';
+      : remoteAnswer !== undefined
+        ? remoteAnswer
+        : params.command === BOUND_REPOSITORY_STATE_COMMAND
+          ? '/work/repo\nmain\n0123456789abcdef\n'
+          : params.command === 'git rev-parse --show-toplevel'
+            ? '/work/repo'
+            : params.command === 'git rev-parse --absolute-git-dir'
+              ? '/work/repo/.git'
+              : params.command.startsWith('ls -di -- .git ')
+                ? '11 .git\n12 /work/repo/.git'
+                : '';
     return Promise.resolve({ success: true, response: { exitCode: 0, result } });
   };
   return {
@@ -73,7 +95,7 @@ function makeProvider(input: { recorder: Recorder; localConfig?: string }): Sand
     },
     createCodeModeTransport: jest.fn(),
     createSandbox: () => Promise.resolve({ sandboxId: '/tmp/host-auth-git' }),
-    exec,
+    exec: realCommandExec(exec),
   };
 }
 
@@ -113,21 +135,28 @@ async function run(input: {
   purpose?: 'inspect' | 'edit' | 'push';
   env?: Record<string, string>;
   cwd?: string;
+  /** False simulates an approval that reaches the host without the remotes it observed. */
+  observed?: boolean;
 }): Promise<{ isError: boolean; text: string }> {
   const approval: ApprovalDecision = { status: 'allow', scope: 'once' };
-  const result = await input.sandbox.callTool(
-    {
-      name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: {
-        intent: 'git work',
-        purpose: input.purpose ?? 'edit',
-        command: input.command,
-        cwd: input.cwd ?? '/work/repo',
-        ...(input.env === undefined ? {} : { env: input.env }),
-      },
+  const call = {
+    name: SANDBOX_EXEC_TOOL_NAME,
+    arguments: {
+      intent: 'git work',
+      purpose: input.purpose ?? 'edit',
+      command: input.command,
+      cwd: input.cwd ?? '/work/repo',
+      ...(input.env === undefined ? {} : { env: input.env }),
     },
-    approval,
-  );
+  };
+  // The proposal is what the user is shown; the approved call then carries what the host observed in it.
+  const proposed = await input.sandbox.toolCallInfo(call);
+  const result = await input.sandbox.callTool(call, approval, {
+    admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+    ...(proposed.git_remote_precondition === undefined || input.observed === false
+      ? {}
+      : { git_remote_precondition: proposed.git_remote_precondition }),
+  });
   if (!isCallToolResponseResult(result)) {
     throw new Error('expected a tool result');
   }
@@ -207,10 +236,11 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const base = makeProvider({ recorder });
     const provider: SandboxProvider = {
       ...base,
-      exec: params =>
+      exec: realCommandExec(params =>
         isProbe(params)
           ? Promise.resolve({ success: true, response: { exitCode: 128, result: 'fatal: not a git repository' } })
           : base.exec(params),
+      ),
     };
     const sandbox = makeSandbox({ provider, token: TOKEN });
     await run({ sandbox, command: 'git ls-remote https://github.com/acme/widgets', purpose: 'inspect' });
@@ -244,6 +274,25 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     expect(recorder.execs.some(params => params.command.includes(command))).toBe(true);
   });
 
+  test.each(['git push origin main', 'git fetch origin', 'git pull', 'git fetch --all'])(
+    'an approval that carries no observed remote runs %s without any token',
+    async command => {
+      const recorder: Recorder = { execs: [], uploads: [] };
+      const sandbox = makeSandbox({ provider: makeProvider({ recorder }), token: TOKEN });
+      await run({ sandbox, command, observed: false });
+      expect(containsToken(recorder.execs)).toBe(false);
+      expect(recorder.execs.some(params => params.command.includes(command))).toBe(true);
+    },
+  );
+
+  test('a remote that is not a plain github.com repository is never authenticated', async () => {
+    const recorder: Recorder = { execs: [], uploads: [] };
+    const provider = makeProvider({ recorder, remoteUrl: 'https://github.com.evil.test/acme/widgets' });
+    const sandbox = makeSandbox({ provider, token: TOKEN });
+    await run({ sandbox, command: 'git push origin main' });
+    expect(containsToken(recorder.execs)).toBe(false);
+  });
+
   test('model-supplied env disqualifies host authentication', async () => {
     const recorder: Recorder = { execs: [], uploads: [] };
     const sandbox = makeSandbox({ provider: makeProvider({ recorder }), token: TOKEN });
@@ -264,13 +313,14 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const base = makeProvider({ recorder });
     const provider: SandboxProvider = {
       ...base,
-      exec: params =>
+      exec: realCommandExec(params =>
         params.command.includes('git -c')
           ? Promise.resolve({
               success: true,
               response: { exitCode: 128, result: "fatal: could not read Username for 'https://github.com'" },
             })
           : base.exec(params),
+      ),
     };
     const sandbox = makeSandbox({ provider, token: TOKEN });
     const result = await run({ sandbox, command: 'git -c a=b clone https://github.com/acme/widgets' });

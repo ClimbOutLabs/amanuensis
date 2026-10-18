@@ -7,6 +7,8 @@ import type {
   VerifiedWorkspaceCommitParams,
   VerifiedWorkspaceCommitResult,
 } from '@truefoundry/trueforge-core/core';
+import { fakeTrackedState } from '../../../../trueforge-core/tests/core/sandbox/fakeTrackedState';
+import { realCommand } from '../../../../trueforge-core/tests/core/sandbox/realCommandExec';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -57,7 +59,8 @@ class VerificationSandboxProvider implements SandboxProvider {
   }
 
   exec(params: SandboxExecParams): Promise<ExecResult> {
-    if (params.command === VERIFY_COMMAND) {
+    const command = realCommand(params.command);
+    if (command === VERIFY_COMMAND) {
       this.verifyInvocations += 1;
       return successfulResult('verification passed');
     }
@@ -71,11 +74,10 @@ class VerificationSandboxProvider implements SandboxProvider {
       "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'":
         'HEAD\u00000123456789abcdef\u0000refs/heads/codex/receipt-continuation\u0000',
       'git ls-files -v -z': 'H src/verified.ts\u0000',
-      'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-      'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/verified.ts b/src/verified.ts',
+      ...fakeTrackedState([{ path: 'src/verified.ts', indexSha: '1'.repeat(40), worktreeSha: '2'.repeat(40) }]),
       'git ls-files --others --exclude-standard -z': '',
     };
-    return successfulResult(gitResults[params.command] ?? 'ok');
+    return successfulResult(gitResults[command] ?? 'ok');
   }
 
   executeVerifiedWorkspaceCommit(params: VerifiedWorkspaceCommitParams): Promise<VerifiedWorkspaceCommitResult> {

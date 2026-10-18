@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Icon } from '../icons/Icon.js';
 import { cn } from './lib/cn.js';
@@ -8,37 +8,48 @@ import { cn } from './lib/cn.js';
 export type HtmlArtifactPreviewProps = {
   /** HTML content blob to render. */
   content: Blob;
-  /** Filename for display and new tab. */
+  /** Filename for display. */
   filename: string;
   /** Called to fetch related files (CSS, JS, images) from the same directory. */
   onFetchRelatedFile?: (path: string) => Promise<Blob>;
   /** Maximum total bytes to inline for related assets before falling back to link-only. */
   maxInliningBytes?: number;
-  /** When true, only the download link is shown (no preview). */
+  /** Saves the file to the user's device; only ever called from the download button. */
+  onDownload?: () => void;
+  /** When true, the download and expand controls are hidden. */
   readOnly?: boolean;
 };
+
+const SCRIPT_TAG_RE = /<script[\s/>]/i;
 
 const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
 
 /**
  * CSP meta tag policy for the sandboxed iframe.
- * - Allows inline scripts and styles from the document itself
- * - Allows images from data: URIs only; fonts from data: URIs and https: URLs
- * - Blocks all network connections (connect-src none)
- * - Blocks framing
+ * - Allows inline styles from the document itself; scripts never run (the frame is sandboxed)
+ * - Allows images and fonts from data: URIs only; nothing here can reach the network
+ * - Blocks all network connections (connect-src falls back to default-src 'none')
+ * - Blocks form posts and a rewritten base URL
  */
 const CSP_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data: https:; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'";
+
+/**
+ * The wrapper frame carries the same policy plus a frame-src that only admits srcdoc frames. The
+ * content frame inherits it, so content that sets `location` cannot load any URL, and its own CSP
+ * meta can only tighten it.
+ */
+const WRAPPER_CSP_POLICY = `${CSP_POLICY}; frame-src about:`;
 
 interface AssetToInline {
   originalUrl: string;
-  type: 'stylesheet' | 'script' | 'image';
+  type: 'stylesheet' | 'image';
   selector: string; // CSS selector to find and replace
 }
 
 /**
  * Extracts relative asset references from HTML content.
- * Returns paths to stylesheets, scripts, and images that might need inlining.
+ * Returns paths to stylesheets and images that might need inlining (scripts never run, so they are not fetched).
  */
 function extractRelativeAssets(htmlText: string): AssetToInline[] {
   const assets: AssetToInline[] = [];
@@ -53,19 +64,6 @@ function extractRelativeAssets(htmlText: string): AssetToInline[] {
         originalUrl: href,
         type: 'stylesheet',
         selector: `link[href="${href}"]`,
-      });
-    }
-  }
-
-  // Extract scripts: <script src="...">
-  const scriptRe = /<script\s+[^>]*src=["']([^"']+)["'][^>]*><\/script>/g;
-  while ((match = scriptRe.exec(htmlText)) !== null) {
-    const src = match[1];
-    if (src && !src.startsWith('http://') && !src.startsWith('https://')) {
-      assets.push({
-        originalUrl: src,
-        type: 'script',
-        selector: `script[src="${src}"]`,
       });
     }
   }
@@ -142,22 +140,13 @@ async function inlineAssets(
         const escapedUrl = escapeRegex(asset.originalUrl);
         const linkPattern = new RegExp(`<link\\s+[^>]*href=["']([^"']*/)?${escapedUrl}["'][^>]*\\s*/?>`, 'gi');
         const styleTag = `<style>${assetText}</style>`;
-        modifiedHtml = modifiedHtml.replace(linkPattern, styleTag);
-      } else if (asset.type === 'script') {
-        // Replace <script src="..."></script> with <script>...</script>
-        const escapedUrl = escapeRegex(asset.originalUrl);
-        const scriptPattern = new RegExp(
-          `<script\\s+[^>]*src=["']([^"']*/)?${escapedUrl}["'][^>]*>\\s*</script>`,
-          'gi',
-        );
-        const scriptTag = `<script>${assetText}</script>`;
-        modifiedHtml = modifiedHtml.replace(scriptPattern, scriptTag);
+        modifiedHtml = modifiedHtml.replace(linkPattern, () => styleTag);
       } else if (asset.type === 'image') {
         // Convert image to data URI
         const dataUri = await blobToDataUri(assetBlob);
         const escapedUrl = escapeRegex(asset.originalUrl);
         const imgPattern = new RegExp(`src=["']([^"']*/)?${escapedUrl}["']`, 'gi');
-        modifiedHtml = modifiedHtml.replace(imgPattern, `src="${dataUri}"`);
+        modifiedHtml = modifiedHtml.replace(imgPattern, () => `src="${dataUri}"`);
       }
     } catch (error) {
       // Skip assets that fail to load
@@ -192,11 +181,74 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => map[char] || char);
 }
 
+const META_START_RE = /<meta/gi;
+const HTTP_EQUIV_ATTR_RE = /[\s/]http-equiv\b/i;
+
+/**
+ * Removes every `<meta http-equiv>` from the content: refresh would navigate the frame away on its
+ * own, and attribute values can be entity-encoded, so matching on "refresh" is not reliable.
+ * Single pass: each tag is walked once, honoring quotes so a ">" in a value cannot end it early,
+ * and an unterminated tag ends the scan.
+ */
+function stripHttpEquivMetas(htmlText: string): string {
+  let out = '';
+  let copied = 0;
+  META_START_RE.lastIndex = 0;
+  for (let start = META_START_RE.exec(htmlText); start !== null; start = META_START_RE.exec(htmlText)) {
+    let quote: string | null = null;
+    let end = start.index + '<meta'.length;
+    for (; end < htmlText.length; end++) {
+      const char = htmlText[end];
+      if (quote !== null) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        break;
+      }
+    }
+    if (end >= htmlText.length) break;
+    const tag = htmlText.slice(start.index, end + 1);
+    if (HTTP_EQUIV_ATTR_RE.test(tag)) {
+      out += htmlText.slice(copied, start.index);
+      copied = end + 1;
+    }
+    META_START_RE.lastIndex = end + 1;
+  }
+  return out + htmlText.slice(copied);
+}
+
+const POLICY_PREFIX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
+
+/**
+ * Puts a doctype and the app's CSP meta ahead of the content, which is appended unchanged.
+ * The content is never scanned: comment-like prefixes can hide script from any marker search.
+ * A later doctype is ignored, and later metas can only tighten this policy.
+ */
+function insertPolicyFirst(htmlText: string): string {
+  return `${POLICY_PREFIX}${htmlText}`;
+}
+
+/**
+ * Wraps the page in a frame whose CSP only admits srcdoc children, so the page cannot navigate
+ * its own frame to a URL. Both frames are fully sandboxed: scripts never run, because nothing in a
+ * CSP stops a running script from sending data out over WebRTC.
+ */
+function wrapInContainmentFrame(html: string): string {
+  return [
+    '<!doctype html>',
+    `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(WRAPPER_CSP_POLICY)}">`,
+    '<style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style>',
+    `<iframe sandbox="" referrerpolicy="no-referrer" srcdoc="${escapeHtml(html)}"></iframe>`,
+  ].join('');
+}
+
 export function HtmlArtifactPreview({
   content,
   filename,
   onFetchRelatedFile,
   maxInliningBytes = DEFAULT_MAX_INLINING_BYTES,
+  onDownload,
   readOnly,
 }: HtmlArtifactPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -204,6 +256,7 @@ export function HtmlArtifactPreview({
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [bytesInlined, setBytesInlined] = useState(0);
+  const [usesScripts, setUsesScripts] = useState(false);
 
   // Convert blob to string and inline assets
   useEffect(() => {
@@ -212,23 +265,9 @@ export function HtmlArtifactPreview({
     async function prepare() {
       try {
         let htmlText = await blobToText(content);
+        if (isMounted) setUsesScripts(SCRIPT_TAG_RE.test(htmlText));
 
-        // Inject CSP meta tag at the top of the document
-        if (!htmlText.includes('<meta http-equiv="Content-Security-Policy"')) {
-          const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(CSP_POLICY)}" />`;
-          // Find insertion point after <head> or at document start
-          const headMatch = htmlText.match(/<head[^>]*>/i);
-          if (headMatch) {
-            htmlText = htmlText.replace(headMatch[0], headMatch[0] + '\n' + cspMeta);
-          } else {
-            const htmlMatch = htmlText.match(/<html[^>]*>/i);
-            if (htmlMatch) {
-              htmlText = htmlText.replace(htmlMatch[0], htmlMatch[0] + '\n<head>' + cspMeta + '</head>');
-            } else {
-              htmlText = cspMeta + '\n' + htmlText;
-            }
-          }
-        }
+        htmlText = insertPolicyFirst(stripHttpEquivMetas(htmlText));
 
         // Inline relative assets if fetch function is provided
         if (onFetchRelatedFile) {
@@ -260,15 +299,7 @@ export function HtmlArtifactPreview({
     };
   }, [content, filename, onFetchRelatedFile, maxInliningBytes]);
 
-  // Open HTML in new tab via Blob URL
-  const handleOpenInNewTab = () => {
-    if (srcdoc == null) return;
-    const blob = new Blob([srcdoc], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    // Note: URL.revokeObjectURL is not called here to allow the tab to load;
-    // browsers clean up automatically when the tab closes
-  };
+  const framedSrcdoc = useMemo(() => (srcdoc == null ? null : wrapInContainmentFrame(srcdoc)), [srcdoc]);
 
   if (error) {
     return (
@@ -281,7 +312,7 @@ export function HtmlArtifactPreview({
     );
   }
 
-  if (srcdoc == null) {
+  if (framedSrcdoc == null) {
     return (
       <div
         className="aui-html-preview my-2 rounded-lg border border-border bg-card-bg p-3 text-sm text-text-secondary"
@@ -292,7 +323,7 @@ export function HtmlArtifactPreview({
     );
   }
 
-  const previewHeight = isExpanded ? '600px' : '400px';
+  const previewHeight = isExpanded ? '75vh' : '25rem';
 
   return (
     <div
@@ -308,17 +339,19 @@ export function HtmlArtifactPreview({
         <div className="flex shrink-0 items-center gap-1">
           {!readOnly && (
             <>
-              <button
-                onClick={handleOpenInNewTab}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
-                  'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
-                )}
-                title="Open in new tab"
-                aria-label={`Open ${filename} in new tab`}
-              >
-                <Icon name="external-link" size={12} className="shrink-0" />
-              </button>
+              {onDownload && (
+                <button
+                  onClick={onDownload}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
+                    'hover:bg-primary-button-bg/10 active:bg-primary-button-bg/20',
+                  )}
+                  title="Download"
+                  aria-label={`Download ${filename}`}
+                >
+                  <Icon name="download" size={12} className="shrink-0" />
+                </button>
+              )}
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className={cn(
@@ -339,14 +372,20 @@ export function HtmlArtifactPreview({
       <div className="relative min-h-96 bg-card-bg" style={{ height: previewHeight, overflow: 'auto' }}>
         <iframe
           ref={iframeRef}
-          srcDoc={srcdoc}
+          srcDoc={framedSrcdoc}
           title={`Preview of ${filename}`}
           className="h-full w-full border-0"
-          sandbox="allow-scripts"
+          sandbox=""
           referrerPolicy="no-referrer"
           data-testid="aui-html-preview-iframe"
         />
       </div>
+
+      {usesScripts && (
+        <div className="bg-primary-button-bg/5 px-3 py-1 text-xs text-text-secondary">
+          This page uses scripts, which previews don't run, so parts of it may look blank or unfinished.
+        </div>
+      )}
 
       {/* Footer with info */}
       {!readOnly && (

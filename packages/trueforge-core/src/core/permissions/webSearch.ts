@@ -1,11 +1,14 @@
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
- * trips the loop breaker, and the set of URLs the provider's own results returned, which is all a
+ * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
  * silent fetch may name. Both live in host memory for one turn and never reach the model.
  */
 
 /** Silent searches one turn may run before the next one asks. */
 export const SILENT_SEARCH_LIMIT = 20;
+
+/** Silent fetches of one host a turn may run before the next one asks. */
+export const SILENT_FETCHES_PER_HOST = 2;
 
 /** Cap on remembered result URLs per turn, so a huge result cannot grow host memory without bound. */
 const MAX_RESULT_URLS = 500;
@@ -19,6 +22,7 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_guard',
   'mcp_search_limit',
   'mcp_search_unreturned_url',
+  'mcp_search_host_limit',
   'mcp_search_after_private_read',
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
@@ -27,11 +31,21 @@ export function isSearchAskReason(reason: string): boolean {
   return SEARCH_ASK_REASONS.some(known => known === reason);
 }
 
+/** What the host lets the designated search provider's connector do silently, resolved for one turn. */
+export interface SearchProviderGrant {
+  /** Tools that run without asking even when the server does not declare them read-only. */
+  tools: readonly string[];
+  /** Top-level argument names that are provider plumbing, not user text. */
+  plumbing_fields: readonly string[];
+}
+
 export interface WebSearchTurnState {
   /** Searches that ran without asking this turn. */
   silentSearches: number;
   /** URLs the designated provider returned this turn, exactly as returned. */
   resultUrls: Set<string>;
+  /** Silent fetches this turn, by host. */
+  fetchesByHost: Map<string, number>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
   /** True once the session read private data (mail), after which a search asks instead of running silently. */
@@ -44,6 +58,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
   return {
     silentSearches: 0,
     resultUrls: new Set(),
+    fetchesByHost: new Map(),
     sentText: '',
     privateDataRead: false,
     admission: Promise.resolve(),
@@ -84,51 +99,47 @@ function urlsInText(text: string): string[] {
   return found;
 }
 
-function collectJsonStrings(node: unknown, into: string[], depth: number): void {
-  if (depth > 8) {
+/** Keys whose contents describe the page or what it links to, never the result itself. */
+const NON_RESULT_KEYS = new Set(['links', 'metadata', 'images', 'favicon', 'excerpts', 'content', 'raw_content']);
+const MAX_RESULT_DEPTH = 3;
+
+/** The `url` field of each result object in a provider's JSON; text inside a result is never read for links. */
+function collectResultUrls(node: unknown, into: string[], depth: number): void {
+  if (depth > MAX_RESULT_DEPTH) {
     return;
   }
-  if (typeof node === 'string') {
-    into.push(node);
-  } else if (Array.isArray(node)) {
+  if (Array.isArray(node)) {
     for (const child of node) {
-      collectJsonStrings(child, into, depth + 1);
+      collectResultUrls(child, into, depth + 1);
     }
   } else if (typeof node === 'object' && node !== null) {
-    for (const child of Object.values(node)) {
-      collectJsonStrings(child, into, depth + 1);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'url' && typeof child === 'string') {
+        into.push(child);
+      } else if (!NON_RESULT_KEYS.has(key)) {
+        collectResultUrls(child, into, depth + 1);
+      }
     }
   }
-}
-
-/** Text blocks often carry a JSON document; parse it so escaped slashes and string values read as URLs. */
-function textCandidates(text: string): string[] {
-  const trimmed = text.trimStart();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      const strings: string[] = [];
-      collectJsonStrings(JSON.parse(text), strings, 0);
-      return [text, ...strings];
-    } catch {
-      return [text];
-    }
-  }
-  return [text];
 }
 
 /**
- * Remembers every URL in a search provider result. Both the URL as found and the same URL without
- * trailing sentence punctuation count as returned; nothing else is ever added.
+ * Remembers each result's own `url` field, as returned. A link that only appears in an excerpt, a
+ * result's own links, or prose is not a result, so a fetch of it asks. Nothing else is ever added.
  */
 export function recordResultUrls(input: { state: WebSearchTurnState; texts: readonly string[] }): void {
   for (const text of input.texts) {
-    for (const candidate of textCandidates(text)) {
-      for (const url of urlsInText(candidate)) {
-        for (const variant of [url, url.replace(TRAILING_PUNCTUATION, '')]) {
-          if (variant.length > 0 && input.state.resultUrls.size < MAX_RESULT_URLS) {
-            input.state.resultUrls.add(variant);
-          }
-        }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    const urls: string[] = [];
+    collectResultUrls(parsed, urls, 0);
+    for (const url of urls) {
+      if (url.length > 0 && input.state.resultUrls.size < MAX_RESULT_URLS) {
+        input.state.resultUrls.add(url);
       }
     }
   }
@@ -165,6 +176,42 @@ export function unreturnedUrls(input: { values: readonly string[]; state: WebSea
     }
   }
   return unreturned;
+}
+
+/** Host of a URL as the fetch would reach it, or undefined when the value does not parse as one. */
+function hostOfUrl(value: string): string | undefined {
+  try {
+    return new URL(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value) ? value : `https://${value}`).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Distinct hosts of the URLs an outbound call names. */
+function fetchedHosts(values: readonly string[]): Set<string> {
+  const hosts = new Set<string>();
+  for (const value of values) {
+    for (const url of isWholeUrl(value) ? [value] : urlsInText(value)) {
+      const host = hostOfUrl(url);
+      if (host !== undefined) {
+        hosts.add(host);
+      }
+    }
+  }
+  return hosts;
+}
+
+/** Whether the call names a host the turn already fetched silently its allowance of times. */
+export function namesHostAtFetchLimit(input: { values: readonly string[]; state: WebSearchTurnState }): boolean {
+  return [...fetchedHosts(input.values)].some(
+    host => (input.state.fetchesByHost.get(host) ?? 0) >= SILENT_FETCHES_PER_HOST,
+  );
+}
+
+export function countSilentFetches(input: { values: readonly string[]; state: WebSearchTurnState }): void {
+  for (const host of fetchedHosts(input.values)) {
+    input.state.fetchesByHost.set(host, (input.state.fetchesByHost.get(host) ?? 0) + 1);
+  }
 }
 
 /**

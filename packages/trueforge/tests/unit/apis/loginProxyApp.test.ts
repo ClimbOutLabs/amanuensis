@@ -40,7 +40,11 @@ describe('the sign-in pass-through in the running app', () => {
       const url = String(input);
       if (url.startsWith('http://127.0.0.1:5556/')) {
         upstream.push(url);
-        return Promise.resolve(new Response('<html>login</html>', { headers: { 'content-type': 'text/html' } }));
+        return Promise.resolve(
+          new Response('<form><input type="password" name="password"></form>', {
+            headers: { 'content-type': 'text/html' },
+          }),
+        );
       }
       return realFetch(input, init);
     };
@@ -69,7 +73,7 @@ describe('the sign-in pass-through in the running app', () => {
       headers: { host: '192.168.1.20:8790' },
     });
     expect(listed.status).toBe(200);
-    expect(await listed.text()).toBe('<html>login</html>');
+    expect(await listed.text()).toContain('name="password"');
     expect(listed.headers.get('x-frame-options')).toBe('DENY');
     expect(upstream).toEqual(['http://127.0.0.1:5556/dex/auth?client_id=c']);
 
@@ -117,7 +121,11 @@ describe('the sign-in pass-through in the running app', () => {
       const post = () =>
         app.request('https://login.example.com/dex/auth/local/login?state=s', {
           method: 'POST',
-          headers: { host: 'login.example.com', 'content-type': 'application/x-www-form-urlencoded' },
+          headers: {
+            host: 'login.example.com',
+            origin: 'https://login.example.com',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
           body: 'login=a%40b.c&password=x',
         });
       const statuses: number[] = [];

@@ -1,3 +1,4 @@
+import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { isCallToolResponseResult, toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -38,8 +39,10 @@ describe('DeferredTool call_tool host-tool routing', () => {
     (hostTool.callTool as jest.Mock).mockResolvedValue(
       toolResultResponse({ text: JSON.stringify({ iso: '2026-09-15T01:19:00.000Z' }) }),
     );
-    (hostTool.toolCallInfo as jest.Mock).mockResolvedValue({
+    jest.mocked(hostTool.toolCallInfo).mockResolvedValue({
       type: 'truefoundry-system',
+      mcp_server_id: 'current-datetime',
+      mcp_server_name: 'current-datetime',
       original_tool_name: 'get_current_datetime',
       tier: 1,
     });
@@ -134,7 +137,7 @@ describe('DeferredTool call_tool host-tool routing', () => {
     expect(hostTool.callTool).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<[string, Partial<InternalToolCallInfo>]>([
     ['needs an approval', { tier: 3, is_approval_required: true }],
     ['was refused before dispatch', { tier: 3, pre_dispatch_failure: { kind: 'policy_blocked', message: 'no' } }],
   ])('never runs a host tool that %s, and tells the model to call it directly', async (_name, extra) => {
@@ -148,8 +151,10 @@ describe('DeferredTool call_tool host-tool routing', () => {
       preload: true,
       tools: [{ name: 'send_draft', description: 'send', inputSchema: OBJECT_INPUT_SCHEMA, preload: true }],
     });
-    (hostTool.toolCallInfo as jest.Mock).mockResolvedValue({
+    jest.mocked(hostTool.toolCallInfo).mockResolvedValue({
       type: 'truefoundry-system',
+      mcp_server_id: 'gmail',
+      mcp_server_name: 'gmail',
       original_tool_name: 'send_draft',
       ...extra,
     });
@@ -168,5 +173,36 @@ describe('DeferredTool call_tool host-tool routing', () => {
     expect(isError).toBe(true);
     expect(hostTool.callTool).not.toHaveBeenCalled();
     expect(text).toContain('call send_draft directly');
+  });
+
+  it('refuses host routing when the call was approved against the named server', async () => {
+    const server = makeMockIMCPServer({
+      name: 'tavily',
+      preload: false,
+      tools: [{ name: 'search', description: 'search', inputSchema: OBJECT_INPUT_SCHEMA, preload: false }],
+    });
+    const hostTool = makeMockIMCPServer({
+      name: 'current-datetime',
+      preload: true,
+      tools: [
+        { name: 'get_current_datetime', description: 'datetime', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
+      ],
+    });
+    const deferredTool = new DeferredTool([server], {
+      tracing: NOOP_AGENT_TRACING,
+      logger: silentLogger,
+      hostToolSets: [hostTool],
+    });
+
+    const response = await deferredTool.callTool(
+      { name: 'call_tool', arguments: { mcp_server: 'tavily', tool_name: 'get_current_datetime', input: {} } },
+      { status: 'allow', scope: 'once' },
+    );
+
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a resolved call_tool response');
+    }
+    expect(response.result.isError).toBe(true);
+    expect(hostTool.callTool).not.toHaveBeenCalled();
   });
 });

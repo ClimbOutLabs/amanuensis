@@ -106,6 +106,7 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -633,6 +634,16 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
+  const mcpCatalog = McpCatalog.load();
+  // Offered once so the first search needs no setup.
+  await seedDefaultSearchProviderAtBoot({
+    trueFoundryMode: isTrueFoundryModeEnabled(configuration),
+    globalSettingsStore,
+    mcpServerStore: mcpOAuthStore,
+    catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -656,19 +667,20 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => getConfiguredSecretValues(configuration),
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpOAuthStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => getConfiguredSecretValues(configuration),
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpOAuthStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -729,7 +741,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     resolveModelProviderStore,
@@ -767,6 +779,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     oidcDiscovery,
     authenticator,
     authorizer,
+    outboundSecrets,
   });
 
   return {

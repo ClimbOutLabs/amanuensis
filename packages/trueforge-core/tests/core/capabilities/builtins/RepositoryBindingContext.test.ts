@@ -18,6 +18,8 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../..
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../../sandbox/fakeTrackedState';
+import { realCommandExec } from '../../sandbox/realCommandExec';
 
 const BOUND_REPOSITORY: BoundRepository = {
   repository_id: 'repo-no-sandbox',
@@ -98,7 +100,7 @@ describe('host request context', () => {
       output: {
         role: 'assistant',
         content:
-          '<summary>\n## goal\ncontinue\n## done_so_far\nnone\n## in_flight_work\nnone\n## remaining_work\nnone\n## current_blocker\nnone\n## bound_repository_state\nnone\n</summary>',
+          '<summary>\n## goal\ncontinue\n## done_so_far\nnone\n## user_request\ncontinue\n## workspace\nnone\n## findings\nnone\n## in_flight_work\nnone\n## remaining_work\nnone\n## current_blocker\nnone\n## bound_repository_state\nnone\n</summary>',
       },
       usage: getEmptyUsage(),
     });
@@ -230,14 +232,17 @@ describe('host request context', () => {
         branch = 'codex/second';
         headSha = '2222222222222222';
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: fakeTrackedState([])[params.command] ?? 'ok' },
+      });
     });
     const provider: SandboxProvider = {
       type: 'test',
       buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       createSandbox: () => Promise.resolve({ sandboxId: 'sandbox-1' }),
-      exec,
+      exec: realCommandExec(exec),
       getAdditionalInstructions: () => undefined,
       getWorkspaceDir: () => undefined,
       getToolResultDumpDir: () => '/provider/tool-results',

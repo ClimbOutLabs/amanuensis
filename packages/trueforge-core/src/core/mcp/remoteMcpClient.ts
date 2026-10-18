@@ -195,8 +195,26 @@ function toConnectError(error: unknown): McpConnectionError {
       cause: error,
     });
   }
-  const message = error instanceof Error ? error.message : String(error);
-  return new McpConnectionError(message, 502, { cause: error });
+  if (isSessionExpiredError(error)) {
+    // Still reads as session-expired, so the caller reconnects instead of failing.
+    return new McpConnectionError('upstream session expired', 502, { cause: error });
+  }
+  return new McpConnectionError(describeTransportError(error), 502, { cause: error });
+}
+
+/**
+ * The SDK puts the upstream response body into its error text, and a body can echo the
+ * request's credentials back. Keep the SDK's description and status, never the body.
+ */
+function describeTransportError(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : String(error);
+  const posting = /^(.*?Error POSTing to endpoint)(?: \(HTTP (\d+)\))?:/s.exec(message);
+  if (posting === null) {
+    return message;
+  }
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  const status = posting[2] ?? (typeof code === 'number' && code > 0 ? String(code) : undefined);
+  return status === undefined ? (posting[1] ?? message) : `${posting[1] ?? message} (HTTP ${status})`;
 }
 
 function buildConnection(
@@ -296,7 +314,7 @@ export async function connectRemoteMcp(params: {
       if (params.sessionId && isSessionExpiredError(error)) {
         throw toConnectError(error);
       }
-      failures.push({ transport: transportType, error: error instanceof Error ? error.message.trim() : String(error) });
+      failures.push({ transport: transportType, error: describeTransportError(error) });
       continue;
     }
 

@@ -99,6 +99,14 @@ describe('modelProviderCatalog mappers', () => {
     );
   });
 
+  it('serves provider logos from the app, never from the outside host', () => {
+    const entry = toUiCatalogModelProviderEntry(
+      { type: 'anthropic', logo: 'https://assets.production.truefoundry.com/anthropic.svg', models: [] },
+      { baseUrl: '/' },
+    );
+    assert.equal(entry.logo, '/catalog-logos/https/assets.production.truefoundry.com/anthropic.svg');
+  });
+
   it('maps catalog presets and names them after their type', () => {
     assert.deepEqual(
       toUiCatalogModelProviderEntry({

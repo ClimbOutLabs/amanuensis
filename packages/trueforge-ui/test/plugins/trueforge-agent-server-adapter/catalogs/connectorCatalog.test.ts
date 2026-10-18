@@ -102,6 +102,20 @@ describe('connectorCatalog mappers', () => {
     );
   });
 
+  it('serves catalog logos from the app, never from the outside host', () => {
+    const entry = toUiCatalogEntry(
+      {
+        type: 'remote',
+        name: 'linear',
+        url: 'https://mcp.linear.app/mcp',
+        description: 'Linear MCP server.',
+        logo: 'https://assets.production.truefoundry.com/linear.svg',
+      },
+      { baseUrl: '/' },
+    );
+    assert.equal(entry.logo, '/catalog-logos/https/assets.production.truefoundry.com/linear.svg');
+  });
+
   it('maps configured servers without embedding tools', () => {
     assert.deepEqual(
       toUiConnector({

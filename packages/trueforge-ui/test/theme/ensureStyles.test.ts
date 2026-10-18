@@ -28,6 +28,12 @@ describe('ensureStyles', () => {
     expect(links[0]?.getAttribute('href')).toContain('family=Google+Sans');
   });
 
+  it('skips the Google Sans stylesheet when web fonts are off', () => {
+    ensureStyles('.aui-theme-root{color:red}', { webFonts: false });
+    expect(document.getElementById(TRUEFORGE_UI_FONTS_ID)).toBeNull();
+    expect(document.getElementById(TRUEFORGE_UI_STYLE_ID)).not.toBeNull();
+  });
+
   it('still loads fonts when css is empty', () => {
     ensureStyles('');
     expect(document.getElementById(TRUEFORGE_UI_STYLE_ID)).toBeNull();

@@ -53,4 +53,30 @@ export function runGlobalSettingsStoreContractSuite(getStore: () => IGlobalSetti
 
     await expect(store.deleteSetting({ key: 'tool_output_screen_enabled' })).resolves.toBeUndefined();
   });
+
+  it('compareAndSetSetting inserts only when the key is absent', async () => {
+    const store = getStore();
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: null, value: 'first' })).toBe(true);
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: null, value: 'second' })).toBe(false);
+    expect((await store.getSetting({ key: 'lock' }))?.value).toBe('first');
+  });
+
+  it('compareAndSetSetting replaces or removes only the expected value', async () => {
+    const store = getStore();
+    await store.setSetting({ key: 'lock', value: 'first' });
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: 'other', value: 'second' })).toBe(false);
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: 'first', value: 'second' })).toBe(true);
+    expect((await store.getSetting({ key: 'lock' }))?.value).toBe('second');
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: 'first', value: null })).toBe(false);
+    expect(await store.compareAndSetSetting({ key: 'lock', expected: 'second', value: null })).toBe(true);
+    expect(await store.getSetting({ key: 'lock' })).toBeUndefined();
+  });
+
+  it('compareAndSetSetting lets exactly one of several concurrent inserts win', async () => {
+    const store = getStore();
+    const results = await Promise.all(
+      ['a', 'b', 'c', 'd'].map(value => store.compareAndSetSetting({ key: 'lock', expected: null, value })),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
 }

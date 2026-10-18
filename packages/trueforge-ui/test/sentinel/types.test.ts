@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+import {
+  heldBecause,
+  searchHoldCardText,
+  SERVER_SECRET_REASON,
+} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -73,6 +78,48 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.parsed_command).toBeNull();
     expect(first?.card.outbound_text).toBeNull();
     expect(first?.card.destination_host).toBeNull();
+  });
+
+  describe('held search cards saved before the hold reason had its own place', () => {
+    const legacy = (card: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ tool_call_id: 'call-7', tier: 3, tier3_card: { plain_what: 'x', ...card } }],
+      })[0]?.card;
+
+    it('does not show a saved key, and says what was caught', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: debug synthetic-key-000111',
+        outbound_text: 'query: debug synthetic-key-000111',
+        why_asked_again: 'Held for approval: it contains a secret this server holds.',
+      });
+      expect(card?.plain_what).toBe(`Search the web through finder${heldBecause(SERVER_SECRET_REASON)}`);
+      expect(card?.outbound_text).toBeNull();
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('moves another hold reason out of "seen before" and keeps the query', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: oslo weather',
+        outbound_text: 'query: oslo weather',
+        why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
+      });
+      expect(card?.plain_what).toBe(
+        searchHoldCardText({
+          server: 'finder',
+          query: 'oslo weather',
+          why: 'this turn already ran 8 searches without asking',
+        }),
+      );
+      expect(card?.outbound_text).toBe('query: oslo weather');
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('leaves a real "seen before" reason alone', () => {
+      expect(legacy({ why_asked_again: 'the earlier approval expired' })?.why_asked_again).toBe(
+        'the earlier approval expired',
+      );
+    });
   });
 
   it('parses outbound_text and destination_host from the card', () => {
@@ -516,5 +563,17 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
     });
+  });
+});
+
+describe('chat scope offer', () => {
+  const ref = { id: 'call-1', tier: 3, tier3_card: { plain_what: 'Read a note.' } };
+
+  it('reads the server flag in either spelling and leaves it absent when not sent', () => {
+    const read = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [{ ...ref, ...extra }] })[0];
+    expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
+    expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
+    expect(read({})).not.toHaveProperty('chatAllowOffered');
   });
 });
