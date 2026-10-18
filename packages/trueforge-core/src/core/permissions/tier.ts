@@ -57,6 +57,13 @@ export const Tier3EmailSchema = z
       })
       .nullable()
       .describe('The saved draft a change replaces, or null.'),
+    reply_in_thread: z
+      .object({
+        subject: z.string().describe('Subject of the message being answered.'),
+        from: z.string().describe('Sender of the message being answered.'),
+      })
+      .nullable()
+      .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');

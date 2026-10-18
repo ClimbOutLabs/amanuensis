@@ -83,6 +83,16 @@ export class GmailApi {
     });
   }
 
+  /** A thread with only the headers a reply is checked against, so no message text is read. */
+  async getThreadReplyHeaders(threadId: string): Promise<GmailThread> {
+    return await this.#rest.parsed(GmailThreadSchema, {
+      body: undefined,
+      method: 'GET',
+      path: `/threads/${encodeURIComponent(threadId)}`,
+      query: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Message-ID', 'References'] },
+    });
+  }
+
   async getThread(input: { threadId: string; format: 'full' | 'metadata' }): Promise<GmailThread> {
     return await this.#rest.parsed(GmailThreadSchema, {
       body: undefined,
