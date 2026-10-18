@@ -56,6 +56,14 @@ Searches go to Parallel, which sees the search words and this instance's interne
 
 Before a search leaves the server, a fixed check looks for secrets in the query: any key, token or password the server holds, private keys, API keys, long encoded strings, password labels, card numbers, and any single field over 200 characters or more than 1,000 characters in all. Short extra details a known provider adds to each search, such as Parallel's session id and model name, are shown with the search and do not count toward those limits; longer or unusual ones are checked like your query. It reads the query after normalizing look-alike characters and decoding percent escapes, and it also reads the turn's earlier searches, so a secret split over two searches is still caught. A query that trips the check asks, with the exact query on the card. In a scheduled run it is held for you instead: the run carries on without it, and the search waits under **Needs your OK** with the exact query until you approve or deny it. After 20 searches in one turn the next one asks, and the provider can only fetch a link that one of its own search results returned. To approve every search yourself, turn off **Settings → Permissions → Web searches**.
 
+## Find places with Tavily
+
+Pick the Tavily preset as your web search provider to let Aman find places for you, such as "Find me an English-speaking doctor near me". Aman runs one Tavily search, then one Tavily read of the two or three best pages, and drops a pin on the map for each place it finds. Each pin card shows only the details the page really states (name, address, languages, hours, price and phone), and "from <site>, <time>" with a link to the page. A detail a page does not state is left out, never guessed.
+
+A run uses about 3 Tavily credits: 2 for the search and 1 for reading up to 5 pages. Tavily needs a key. You can get one for free from Tavily, and it comes with 1,000 credits a month. To add it, go to **Settings → Connectors → Tavily**, choose **Connect**, paste your key, and choose **Connect** again.
+
+The same rules as every other search apply. Both Tavily calls go through the secret check, and they run without asking or ask first according to **Settings → Permissions → Web searches**. When one asks, the card shows the exact words or links, where they are sent (`api.tavily.com`), and how many credits it will use. Pages are treated as untrusted text: Aman reads them for facts and never follows instructions found inside them. Placing the pins is its own step and always asks, because the addresses are sent to the map search service. A place that is already in your calendar is marked "Already in your calendar", never left out.
+
 ## Next steps
 
 - Attach MCP servers when you [create an agent](/create-agent/overview).
