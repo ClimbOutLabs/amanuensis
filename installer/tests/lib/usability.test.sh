@@ -144,7 +144,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Name for this instance [main]:"
   assert_contains "$OUT" "Your email, used to sign in"
