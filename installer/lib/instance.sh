@@ -847,7 +847,7 @@ cmd_instance_password() {
   lock_acquire
   load_installed_release
   AMAN_PASSWORD=
-  ask_password AMAN_PASSWORD "New password for $email, 12 to 72 characters" "Repeat the new password"
+  ask_password AMAN_PASSWORD "Enter a new password for $email" "Repeat the new password"
   hash=$(hash_password "$REL_APP_TAG")
   AMAN_PASSWORD=
   content=$(render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash")

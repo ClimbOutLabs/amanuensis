@@ -6,7 +6,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 ESC=$'\033'
-PASSWORD_ANSWERS="Password for owner@example.invalid=>$SENTINEL_PASSWORD
+PASSWORD_ANSWERS="Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
 
 test_prompts_state_their_rule() {
@@ -23,7 +23,7 @@ $PASSWORD_ANSWERS"
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Example: you@example.com"
   assert_contains "$OUT" "Go ahead? [Y/n]"
-  assert_contains "$OUT" "Password for owner@example.invalid, 12 to 72 characters (not shown)"
+  assert_contains "$OUT" "Enter a password for owner@example.invalid (not shown)"
   assert_contains "$OUT" "Repeat the password (not shown)"
   sandbox_drop
 }
@@ -140,13 +140,13 @@ test_a_short_password_asks_again_and_states_the_rule_each_time() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>short
+Enter a password for owner@example.invalid=>short
 Repeat the password=>short
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_flat_contains "$OUT" "The password needs at least 12 characters."
-  assert_eq "$(printf '%s' "$OUT" | grep -c 'Password for owner@example.invalid, 12 to 72 characters')" 2 "the rule is in both questions"
+  assert_flat_contains "$OUT" "That password still needs at least 8 characters, a number and a symbol"
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'At least one symbol, like @ # \$ % ! -')" 2 "the rules are shown above both questions"
   assert_not_contains "$OUT" "short"
   assert_not_contains "$OUT" "$SENTINEL_PASSWORD"
   sandbox_drop
@@ -159,15 +159,15 @@ test_five_bad_passwords_stop() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>a1
+Enter a password for owner@example.invalid=>a1
 Repeat the password=>a1
-Password for owner@example.invalid=>a2
+Enter a password for owner@example.invalid=>a2
 Repeat the password=>a2
-Password for owner@example.invalid=>a3
+Enter a password for owner@example.invalid=>a3
 Repeat the password=>a3
-Password for owner@example.invalid=>a4
+Enter a password for owner@example.invalid=>a4
 Repeat the password=>a4
-Password for owner@example.invalid=>a5
+Enter a password for owner@example.invalid=>a5
 Repeat the password=>a5"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "No valid password after 5 tries, so nothing was changed."

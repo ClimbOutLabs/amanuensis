@@ -53,15 +53,32 @@ consent_root() {
   ui_confirm "$1" n
 }
 
-# One plain sentence when the password cannot be used, empty when it can. bcrypt ignores everything past
-# 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
+# The rules shown above the password question, the way a sign-up form lists them under the field.
+password_rules() {
+  UI_FD=2 ui_line "Your password needs:"
+  UI_FD=2 ui_line "  - At least 8 characters"
+  UI_FD=2 ui_line "  - At least one number (0-9)"
+  UI_FD=2 ui_line "  - At least one symbol, like @ # \$ % ! -"
+  UI_FD=2 ui_line "You can use letters (a-z, A-Z), numbers, symbols and spaces."
+}
+
+# One plain sentence naming what the password still lacks, empty when it can be used. bcrypt ignores everything
+# past 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
 password_problem() {
-  local LC_ALL=C
-  if [ "${#1}" -lt 12 ]; then
-    echo "The password needs at least 12 characters."
-  elif [ "${#1}" -gt 72 ]; then
+  local LC_ALL=C missing=()
+  if [ "${#1}" -gt 72 ]; then
     echo "The password can have at most 72 characters. Accented or non-Latin letters count as more than one."
+    return 0
   fi
+  if [ "${#1}" -lt 8 ]; then missing+=("at least 8 characters"); fi
+  if [[ $1 != *[0-9]* ]]; then missing+=("a number"); fi
+  if [[ $1 != *[[:punct:]]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
+  case ${#missing[@]} in
+    0) ;;
+    1) echo "That password still needs ${missing[0]}." ;;
+    2) echo "That password still needs ${missing[0]} and ${missing[1]}." ;;
+    *) echo "That password still needs ${missing[0]}, ${missing[1]} and ${missing[2]}." ;;
+  esac
 }
 
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
@@ -69,7 +86,7 @@ password_problem() {
 # (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
-  local __label_first=${2:-"Password for ${I_EMAIL:-the owner account}, 12 to 72 characters"} __label_second=${3:-"Repeat the password"}
+  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Repeat the password"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
@@ -80,6 +97,7 @@ ask_password() {
   fi
   while [ "$__tries" -lt "$UI_MAX_TRIES" ]; do
     if [ -t 0 ]; then
+      password_rules
       ui_password __first "$__label_first" || die "No password was entered, so nothing more was changed."
       ui_password __second "$__label_second" || die "No password was entered, so nothing more was changed."
     else

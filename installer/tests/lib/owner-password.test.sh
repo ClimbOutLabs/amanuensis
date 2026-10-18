@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 OWNER=owner@example.invalid
-NEW_PASSWORD='a-brand-new-secret'
+NEW_PASSWORD='a-brand-new-secret-9'
 BCRYPT='^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$'
 
 dex_env() { cat "$AMAN_HOME/instances/${1:-main}/dex.env"; }
@@ -83,9 +83,40 @@ test_short_password_is_refused() {
   change_password "short
 " instance password --password-stdin
   assert_rc 2
-  assert_flat_contains "$ERR" "The password needs at least 12 characters."
+  assert_flat_contains "$ERR" "That password still needs at least 8 characters, a number and a symbol"
   assert_eq "$(dex_env)" "$before"
   assert_eq "$(wipes)" ""
+  sandbox_drop
+}
+
+test_a_number_and_a_symbol_are_needed() {
+  t_begin "8 characters with a number and a symbol are accepted; the refusal names only what is missing"
+  sandbox_new
+  install_machine
+  change_password "seven-7
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs at least 8 characters."
+  change_password "eight-ch
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a number."
+  change_password "eightch8
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a symbol"
+  change_password "eightchr
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a number and a symbol"
+  change_password "eight ch8
+" instance password --password-stdin
+  assert_rc 2
+  assert_flat_contains "$ERR" "That password still needs a symbol"
+  change_password "eight-c8
+" instance password --password-stdin
+  assert_rc 0
+  assert_eq "$(cat "$SB_STATE/hash_stdin")" "eight-c8"
   sandbox_drop
 }
 
@@ -110,13 +141,14 @@ test_prompts_on_a_terminal() {
   t_begin "on a terminal it asks for the new password twice, not shown, and a wrong repeat asks again"
   sandbox_new
   install_machine
-  run_install_tty "New password for $OWNER, 12 to 72 characters (not shown):=>wrong-first-time
+  run_install_tty "Enter a new password for $OWNER (not shown):=>wrong-first-time-1
 Repeat the new password (not shown):=>not-the-same
-New password for $OWNER, 12 to 72 characters (not shown):=>$NEW_PASSWORD
+Enter a new password for $OWNER (not shown):=>$NEW_PASSWORD
 Repeat the new password (not shown):=>$NEW_PASSWORD" instance password
   assert_rc 0
-  assert_contains "$OUT" "New password for $OWNER, 12 to 72 characters (not shown):"
+  assert_contains "$OUT" "Enter a new password for $OWNER (not shown):"
   assert_contains "$OUT" "Repeat the new password (not shown):"
+  assert_contains "$OUT" "Your password needs:"
   assert_contains "$OUT" "The passwords do not match. Type them again."
   assert_not_contains "$OUT" "$NEW_PASSWORD" "not echoed"
   assert_eq "$(cat "$SB_STATE/hash_stdin")" "$NEW_PASSWORD"
@@ -313,6 +345,7 @@ test_password_is_changed
 test_hash_format_and_mode
 test_stdin_takes_one_line
 test_short_password_is_refused
+test_a_number_and_a_symbol_are_needed
 test_wrong_repeat_changes_nothing
 test_prompts_on_a_terminal
 test_sessions_are_signed_out

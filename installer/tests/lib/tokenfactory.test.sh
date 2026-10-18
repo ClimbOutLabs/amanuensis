@@ -116,7 +116,7 @@ test_no_model_prompts_on_a_terminal() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_not_contains "$OUT" "Token Factory key"
