@@ -2,6 +2,8 @@
 
 import { ComposerPrimitive, MessagePrimitive, useAui, useAuiState } from '@assistant-ui/react';
 
+import { useUploadImageSrc } from '../chatImages/ChatImages.js';
+import { useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { USER_MESSAGE_ATTACHMENT_PREVIEW_REM } from '../constants/attachments.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { isImageAttachment, useAttachmentPreviewSrc } from './useAttachmentPreviewSrc.js';
@@ -30,14 +32,27 @@ function ComposerAttachmentItem() {
   );
 }
 
+/** Sent attachments are numbered `<turn id>-file-<position>` by the runtime. */
+const SENT_ATTACHMENT_ID = /^(.+)-file-(\d+)$/;
+
 function MessageAttachmentItem() {
   const AttachmentPreviewDialog = useSlot('AttachmentPreviewDialog');
   const AttachmentCard = useSlot('AttachmentCard');
   const name = useAuiState(s => s.attachment.name);
   const contentType = useAuiState(s => s.attachment.contentType);
   const type = useAuiState(s => s.attachment.type);
+  const attachmentId = useAuiState(s => s.attachment.id);
+  const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
   const isImage = isImageAttachment(type, contentType);
-  const previewSrc = useAttachmentPreviewSrc();
+  const sent = isImage ? SENT_ATTACHMENT_ID.exec(attachmentId) : null;
+  // A sent picture shows only its re-encoded copy, never the stored original; until that copy is
+  // ready, or where it cannot be made, the chip shows the file name.
+  const previewSrc = useUploadImageSrc({
+    port: useChatImagesPort(),
+    sessionId,
+    turnId: sent?.[1],
+    index: sent?.[2] === undefined ? undefined : Number(sent[2]),
+  });
 
   const card = (
     <AttachmentCard

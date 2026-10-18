@@ -51,6 +51,8 @@ export const TABLES_TO_MOVE = [
   'repository_workspace_verification',
   'artifact_blob',
   'turn_artifact',
+  'chat_image',
+  'chat_image_turn_allowance',
   'global_settings',
   'token_factory_usage',
   'token_factory_model_usage',

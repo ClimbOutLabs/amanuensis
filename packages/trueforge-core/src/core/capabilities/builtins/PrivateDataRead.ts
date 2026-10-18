@@ -8,6 +8,11 @@ import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 
 const PRIVATE_READ_TOOL_NAMES = [...GMAIL_READ_TOOL_NAMES, ...CALENDAR_READ_TOOL_NAMES];
 
+/** Whether a tool reads the user's private data (mail or calendar), so later web requests ask first. */
+export function isPrivateReadToolName(tool_name: string): boolean {
+  return PRIVATE_READ_TOOL_NAMES.some(name => tool_name.endsWith(name));
+}
+
 export const PRIVATE_DATA_READ_STATE_KEY = 'tfy.private_data_read';
 
 /**
@@ -20,7 +25,7 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
     message =>
       isLLMContextMessage(message) &&
       message.role === 'assistant' &&
-      (message.tool_calls ?? []).some(call => PRIVATE_READ_TOOL_NAMES.some(name => call.function.name.endsWith(name))),
+      (message.tool_calls ?? []).some(call => isPrivateReadToolName(call.function.name)),
   );
 }
 

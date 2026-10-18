@@ -17,7 +17,7 @@ import { createContext } from "../core/context.js";
 // transitive import to populate the registry is fragile (bundlers and
 // entry-point changes can drop it), so import it directly here.
 import "../core/ops/index.js";
-import { registry } from "../core/registry.js";
+import { type OperationContent, registry } from "../core/registry.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   getAuthorizedScopes,
@@ -89,7 +89,7 @@ export type CallToolFn = (
    */
   opts?: { viaMcp?: boolean },
 ) => Promise<{
-  content: Array<{ type: string; text: string }>;
+  content: OperationContent[];
   isError?: boolean;
   structuredContent?: unknown;
 }>;

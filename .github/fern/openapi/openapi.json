@@ -2537,6 +2537,21 @@
         ],
         "type": "object"
       },
+      "FirstRunGuide": {
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True once the owner has dismissed the first-run checklist.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "type": "object"
+      },
       "GenerativeUIConfig": {
         "default": {
           "enabled": true
@@ -2598,6 +2613,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetFirstRunGuideResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FirstRunGuide"
           }
         },
         "required": [
@@ -6898,6 +6924,17 @@
       "PersonalizationProfile": {
         "additionalProperties": false,
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -6969,6 +7006,17 @@
             "minLength": 1,
             "type": "string"
           },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
             "maxLength": 2000,
@@ -7010,6 +7058,7 @@
       "PersonalizationProfileContent": {
         "additionalProperties": false,
         "example": {
+          "address_as": "Sam",
           "assistant_identity": "A thoughtful local-first personal assistant.",
           "assistant_name": "Aman",
           "learned_profile": null,
@@ -7017,10 +7066,22 @@
           "pinned_preferences": [
             "Use short bullet points."
           ],
+          "user_name": "Sam Rivera",
           "user_profile": "Prefers local-first tools and plain English.",
           "voice_guidance": "Warm, direct, and concise."
         },
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -7066,6 +7127,17 @@
             },
             "maxItems": 12,
             "type": "array"
+          },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
@@ -11586,6 +11658,22 @@
         ],
         "type": "object"
       },
+      "UpdateFirstRunGuideRequest": {
+        "additionalProperties": false,
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True to put the checklist away; false to show it again.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "type": "object"
+      },
       "UpdateMCPServerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11692,6 +11780,7 @@
         "additionalProperties": false,
         "example": {
           "profile": {
+            "address_as": "Sam",
             "assistant_identity": "A thoughtful local-first personal assistant.",
             "assistant_name": "Aman",
             "learned_profile": null,
@@ -11699,6 +11788,7 @@
             "pinned_preferences": [
               "Use short bullet points."
             ],
+            "user_name": "Sam Rivera",
             "user_profile": "Prefers local-first tools and plain English.",
             "voice_guidance": "Warm, direct, and concise."
           }
@@ -19351,6 +19441,116 @@
           "format": "sse",
           "resumable": true
         }
+      }
+    },
+    "/api/v1/settings/first-run-guide": {
+      "get": {
+        "description": "Whether the owner has dismissed the first-run checklist. Not dismissed until the owner says so.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the first-run checklist state",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists whether the first-run checklist is dismissed. The response carries the stored state.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFirstRunGuideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Dismiss or restore the first-run checklist",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/mcp-servers": {

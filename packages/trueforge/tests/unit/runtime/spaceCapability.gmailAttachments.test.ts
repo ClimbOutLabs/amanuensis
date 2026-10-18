@@ -19,6 +19,7 @@ import type { MemoryTurnContext, ToolOutputScreenConfig } from '../../../src/run
 import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -153,6 +154,13 @@ describe('download_attachment follows the chat sandbox', () => {
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
         sessionId: 's1',
         logger,
+      },
+      {
+        store: new FakeTurnArtifactStore(),
+        tenantId: OWNER.tenant_id,
+        sessionId: 's1',
+        turnId: 't1',
+        logger: createLogger({ silent: true }),
       },
     );
   }

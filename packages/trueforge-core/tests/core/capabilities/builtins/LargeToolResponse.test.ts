@@ -135,6 +135,7 @@ describe('LargeToolResponseProcessor', () => {
     return {
       message: { role: 'tool', tool_call_id: 'test-id', content: options.content },
       rawContent: options.content,
+      images: [],
       toolCallInfo: {
         type: 'mcp',
         mcp_server_id: serverId,
@@ -462,6 +463,7 @@ describe('oversized MCP results (email fetch semantics)', () => {
     return {
       message: { role: 'tool', tool_call_id: `call-${toolName}`, content },
       rawContent: content,
+      images: [],
       toolCallInfo: undefined,
       screen,
       info: {
@@ -750,6 +752,7 @@ describe('oversized MCP results (email text shape, structuredContent absent)', (
     return {
       message: { role: 'tool', tool_call_id: `call-${toolName}`, content },
       rawContent: content,
+      images: [],
       toolCallInfo: undefined,
       screen: undefined,
       info: {

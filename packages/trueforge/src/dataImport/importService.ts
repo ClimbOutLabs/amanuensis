@@ -1118,6 +1118,8 @@ async function importArchive<TTransaction>(
             assistant_name: personalization.assistant_name,
             assistant_identity: personalization.assistant_identity,
             voice_guidance: personalization.voice_guidance,
+            user_name: personalization.user_name,
+            address_as: personalization.address_as,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
             learned_profile: personalization.learned_profile,
