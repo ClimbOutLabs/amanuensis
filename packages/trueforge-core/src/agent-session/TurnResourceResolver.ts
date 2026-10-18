@@ -17,6 +17,9 @@ import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../co
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
+import { fetchedPages } from '../core/search/fetchedPages';
+import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
+import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
@@ -84,6 +87,16 @@ interface ResolvedModel {
   /** See AgentDefinition.modelSupportsVision. Every implementation must set this explicitly. */
   modelSupportsVision: boolean;
   modelProperties?: AgentDefinition['modelProperties'];
+}
+
+/** The saved Authorization header of a connector, whether its headers are static or resolved at connect. */
+async function authorizationHeaderOf(headers: RemoteMcpHeaders): Promise<string | undefined> {
+  const resolved = typeof headers === 'function' ? await headers() : { headers };
+  if (!('headers' in resolved)) {
+    return undefined;
+  }
+  const found = Object.entries(resolved.headers).find(([name]) => name.toLowerCase() === 'authorization');
+  return found?.[1];
 }
 
 export class TurnResourceResolver<
@@ -365,6 +378,17 @@ export class TurnResourceResolver<
             }
             if (search_provider !== undefined) {
               this.#searchProviderServers.set(entry.name, search_provider);
+            }
+            if (search_provider !== undefined && isTavilyConnectorUrl(url)) {
+              return new TavilySource({
+                id: entry.name,
+                name: entry.name,
+                client: new TavilyClient({
+                  auth: tavilyAuthFromHeader(await authorizationHeaderOf(headers ?? {})),
+                  fetchImpl: (target, init) => fetch(target, init),
+                }),
+                pages: fetchedPages,
+              });
             }
             return new RemoteMCP({
               id: entry.name,
