@@ -199,7 +199,7 @@ test_answering_yes_on_a_terminal() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>y" "${TLS_ARGS[@]}"
   assert_eq "$RC" 0
@@ -216,7 +216,7 @@ test_declining_on_a_terminal() {
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>n" "${TLS_ARGS[@]}"
   assert_eq "$RC" 1
