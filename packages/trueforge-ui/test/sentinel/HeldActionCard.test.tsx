@@ -21,6 +21,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     outbound_truncated: false,
     email: null,
     calendar_event: null,
+    schedule: null,
     ...overrides,
   };
 }

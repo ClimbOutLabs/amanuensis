@@ -43,6 +43,7 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 
 export const SPACE_SERVER_ID = 'space';
 export const LIST_SPACES_TOOL_NAME = 'list_spaces';
@@ -1248,6 +1249,8 @@ export interface SpaceTurnContext {
   sessionId: string;
   /** Operational log for delta-edit failures. */
   logger: Logger;
+  /** Present only where schedules run (standalone); absent, no schedule tools mount. */
+  schedules?: ScheduleTurnContext | undefined;
 }
 
 /**
@@ -1297,6 +1300,8 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const sentinel = this.#sentinel(input);
+    const schedules = this.#space.schedules;
     return {
       ...resolved,
       extraCapabilities: [
@@ -1305,8 +1310,30 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
+        ...(schedules === undefined
+          ? []
+          : [
+              scheduleCapability({
+                ...schedules,
+                tracing: input.tracing,
+                timeZone: this.clientTimezone,
+                sentinel,
+                now: () => new Date(),
+              }),
+            ]),
       ],
     };
+  }
+
+  #sentinel(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    return createSentinelHostContext({
+      services: input.sentinel_services,
+      tenant_id: input.tenant_id,
+      created_by: input.created_by,
+      conversation_id: input.session_id,
+      workspace_cwd: input.workspace_cwd ?? null,
+      web_search: this.webSearchTurn,
+    });
   }
 
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
@@ -1322,14 +1349,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,
-        sentinel: createSentinelHostContext({
-          services: input.sentinel_services,
-          tenant_id: input.tenant_id,
-          created_by: input.created_by,
-          conversation_id: input.session_id,
-          workspace_cwd: input.workspace_cwd ?? null,
-          web_search: this.webSearchTurn,
-        }),
+        sentinel: this.#sentinel(input),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
         logger: this.#space.logger,
       });

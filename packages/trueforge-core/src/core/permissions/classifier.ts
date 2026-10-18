@@ -25,6 +25,12 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
+import {
+  isScheduleStatusToolName,
+  isScheduleWriteToolName,
+  LIST_SCHEDULES_TOOL_NAME,
+  SCHEDULE_SERVER_ID,
+} from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
@@ -85,6 +91,7 @@ import {
   tier3Decision,
   type Tier2ActionKind,
   type Tier3Card,
+  type Tier3Schedule,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
@@ -165,6 +172,8 @@ export interface SentinelAction {
    * for a change, the event as Google holds it now, so the card shows what would really be written.
    */
   calendar_write?: CalendarWriteReview | undefined;
+  /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
+  schedule_write?: Tier3Schedule | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1833,6 +1842,73 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   });
 }
 
+/** The approval card for creating or deleting a schedule, built from what the host will save or remove. */
+function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  const name = cardSubject(review.name);
+  const when = `${show(review.when)} (${show(review.time_zone)})`;
+  return {
+    plain_what:
+      review.action === 'create'
+        ? `Create the schedule ${name}. It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
+        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    schedule: {
+      action: review.action,
+      name: show(review.name),
+      when: show(review.when),
+      time_zone: show(review.time_zone),
+      task: escapeDisplayText(review.task, { keepNewlines: true }),
+      runs_as: show(review.runs_as),
+      next_runs: review.next_runs.map(show),
+    },
+  };
+}
+
+/**
+ * Schedule tools are the host's own, named by server. Creating or deleting always asks with the schedule in full;
+ * listing, pausing and resuming run without asking. Any other name fails closed.
+ */
+async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (isScheduleWriteToolName(action.tool_name)) {
+    if (action.schedule_write === undefined) {
+      return autoDenyDecision({
+        reason: 'destination_unverifiable',
+        reason_detail: 'The schedule could not be loaded to show you, so it was not offered.',
+        sensitive_read: false,
+      });
+    }
+    return tier3Decision({
+      card: scheduleWriteCard({ review: action.schedule_write, agent_intent: ctx.agent_intent }),
+      reason: 'schedule_write',
+      reason_detail: 'Creating or deleting a schedule always asks.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+  }
+  if (isScheduleStatusToolName(action.tool_name)) {
+    return tier1Decision({
+      reason: 'schedule_status',
+      reason_detail: 'Pause or resume a schedule.',
+      sensitive_read: false,
+    });
+  }
+  if (action.tool_name === LIST_SCHEDULES_TOOL_NAME) {
+    return tier1Decision({ reason: 'schedule_read', reason_detail: 'Read your schedules.', sensitive_read: false });
+  }
+  return failClosedDecision({ reason_detail: 'Unknown schedule tool.' });
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -2114,6 +2190,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
+    return classifyScheduleTool(action, ctx);
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool

@@ -90,6 +90,26 @@ export type SentinelApprovalCalendarEvent = {
   before: { title: string; when: string; duration: string; location: string } | null;
 };
 
+const APPROVAL_SCHEDULE_ACTIONS = ['create', 'delete'] as const;
+
+export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[number];
+
+/** The whole schedule a chat call creates or deletes, in plain words. */
+export type SentinelApprovalSchedule = {
+  action: SentinelApprovalScheduleAction;
+  /** Schedule name in plain words. */
+  name: string;
+  /** When it runs, in plain words. */
+  when: string;
+  time_zone: string;
+  /** The whole instruction each run gets. */
+  task: string;
+  /** Who runs it: the assistant name, or the agent name. */
+  runs_as: string;
+  /** The next three runs in plain words for a new schedule; empty for a delete. */
+  next_runs: string[];
+};
+
 /**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
@@ -123,6 +143,8 @@ export type SentinelApprovalCard = {
   email: SentinelApprovalEmail | null;
   /** The whole event when the action adds or changes a calendar event, or null. */
   calendar_event: SentinelApprovalCalendarEvent | null;
+  /** The whole schedule when the action creates or deletes one, or null. */
+  schedule: SentinelApprovalSchedule | null;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -409,6 +431,30 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
+/** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
+function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
+  if (!isRecord(value)) return null;
+  const action = APPROVAL_SCHEDULE_ACTIONS.find(candidate => candidate === value.action);
+  const name = optionalString(value, 'name');
+  const when = optionalString(value, 'when');
+  const time_zone = optionalString(value, 'time_zone') ?? optionalString(value, 'timeZone');
+  const task = optionalString(value, 'task');
+  const runs_as = optionalString(value, 'runs_as') ?? optionalString(value, 'runsAs');
+  const next_runs = stringList(value.next_runs ?? value.nextRuns);
+  if (
+    action === undefined ||
+    name === undefined ||
+    when === undefined ||
+    time_zone === undefined ||
+    task === undefined ||
+    runs_as === undefined ||
+    next_runs === undefined
+  ) {
+    return null;
+  }
+  return { action, name, when, time_zone, task, runs_as, next_runs };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -427,6 +473,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
+    schedule: parseSchedule(value.schedule),
   });
 }
 
