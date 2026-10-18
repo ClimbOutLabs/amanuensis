@@ -8,6 +8,7 @@
 
 SLOT_IMAGE=amanuensis-sandbox-slot:local
 SLOT_COUNT=4
+# The slot setup always uses /var/lib/aman-slots; the override only lets tests point the checks here elsewhere.
 SLOT_DISK_ROOT=${AMAN_SLOT_DISK_ROOT:-/var/lib/aman-slots}
 SLOT_DISK_GB=16
 SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
@@ -410,7 +411,7 @@ sandbox_down() {
   fi
   if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
     sandbox_slots_left "$name" || return 0
-    die "The sandboxes of $name could not be stopped, because the sandbox tools are missing. The removal was not finished. Run aman upgrade, then run the same command again: $again"
+    die "The sandbox tools are missing, so the sandboxes of $name could not be stopped and the removal was not finished. Run aman upgrade, then run the same command again: $again"
   fi
   sandbox_run "${args[@]}" --instance "$name" ||
     die "The sandboxes of $name could not be stopped, so the removal was not finished. Run the same command again: $again"

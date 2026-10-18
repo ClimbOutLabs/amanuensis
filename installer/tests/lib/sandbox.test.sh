@@ -334,9 +334,19 @@ test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
 "
   run_install --yes --sandbox-root --password-stdin --email owner@example.invalid
   clear_input
-  unset STUB_SUDO_REFUSE
   assert_rc 1
-  assert_flat_contains "$ERR" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so instance main was not started. Run the same command again in a terminal window."
+  assert_log_lacks "sudo -v"
+  run_install_tty "Instance name=>
+Your email=>owner@example.invalid
+Back up automatically=>y
+Go ahead?=>y
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Repeat the password=>$SENTINEL_PASSWORD" --sandbox-root
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
+  assert_log_has "sudo -v"
   assert_log_lacks "--fix --yes"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
@@ -509,9 +519,12 @@ test_remove_asks_for_the_password_before_any_change() {
   : >"$STUB_LOG"
   STUB_SUDO_REFUSE=1
   run_install instance remove main --purge-data --confirm-name main
-  unset STUB_SUDO_REFUSE
   assert_rc 1
-  assert_flat_contains "$ERR" "The password was not accepted, so nothing was changed. Type the password you use to log in to this computer, then run the same command again."
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so nothing was changed. Run the same command again in a terminal window."
+  run_install_tty "" instance remove main --purge-data --confirm-name main
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so nothing was changed. Type the password you use to log in to this computer, then run the same command again."
   assert_log_has "sudo -v"
   assert_log_lacks "--down"
   assert_log_lacks "/instances/main/.env down"
@@ -563,7 +576,7 @@ test_remove_deletes_slots_left_by_a_removed_instance() {
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
   assert_log_has "aman-sandbox.mjs --down --purge --instance main"
-  assert_log_has "sudo -v"
+  assert_log_has "sudo -n true"
   assert_flat_contains "$OUT" "Deleted the sandboxes that instance main left behind."
   assert_no_path "$SB/aman-slots/main"
   run_install instance remove main --purge-data --confirm-name main

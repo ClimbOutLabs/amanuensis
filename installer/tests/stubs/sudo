@@ -3,7 +3,7 @@
 # real machine is never touched.
 printf 'sudo %s\n' "$*" >>"$STUB_LOG"
 case "$1" in
-  -v)
+  -n | -v)
     [ -z "${STUB_SUDO_REFUSE:-}" ] || exit 1
     ;;
   docker)
