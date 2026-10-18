@@ -174,7 +174,7 @@ test_migrate_refuses_what_it_cannot_read() {
   mkdir -p "$SB/empty"
   run_install migrate --from-compose "$SB/empty"
   assert_rc 1
-  assert_flat_contains "$ERR" "has neither packages/trueforge/.env nor .env. Pass --from-compose the folder that holds the old compose.yml or docker-compose.yml."
+  assert_flat_contains "$ERR" "has no .env or packages/trueforge/.env. Pass --from-compose the folder the old Aman runs from, the one with its compose.yml or docker-compose.yml."
   rm -f "$SB_STATE/old_compose_dir"
   run_install migrate --from-compose "$OLD"
   assert_rc 1

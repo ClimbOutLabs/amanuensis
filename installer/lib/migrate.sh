@@ -93,7 +93,7 @@ cmd_migrate() {
   elif [ -f "$folder/.env" ]; then
     MIGRATE_ENV=$folder/.env
   else
-    die "The folder $folder has neither packages/trueforge/.env nor .env. Pass --from-compose the folder that holds the old compose.yml or docker-compose.yml."
+    die "The folder $folder has no .env or packages/trueforge/.env. Pass --from-compose the folder the old Aman runs from, the one with its compose.yml or docker-compose.yml."
   fi
   case "$(env_get "$MIGRATE_ENV" MEMORY_BACKEND)" in
     '' | markdown) ;;
