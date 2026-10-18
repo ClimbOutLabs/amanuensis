@@ -262,22 +262,23 @@ describe('create_schedule', () => {
     expect(JSON.parse(resultText(result))).toMatchObject({ schedules: [{ runs_as: 'Zara' }] });
   });
 
-  it('runs as the default assistant under the name the user gave it, even when the model guesses that name', async () => {
+  it("ignores an agent the model passes, shows a normal card and runs as the chat's assistant by the user's name for it", async () => {
     const built = await setup({ assistantName: 'Bender' });
-    const guessed = await built.tools.toolCallInfo({
-      name: 'create_schedule',
-      arguments: { ...MORNING_BRIEF, agent: 'bender' },
-    });
-    expect(guessed.pre_dispatch_failure?.kind).toBe('pre_dispatch_failed');
+    const guessed = { ...MORNING_BRIEF, agent: 'bender' };
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: guessed });
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info.tier3_card?.schedule).toMatchObject({ name: 'Morning brief', runs_as: 'Bender' });
 
-    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
-    expect(info.tier3_card?.schedule?.runs_as).toBe('Bender');
-    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const { result } = await dispatch({ built, name: 'create_schedule', args: guessed, decision: { status: 'allow' } });
+    expect(JSON.parse(resultText(result))).toMatchObject({ created: { name: 'morning-brief', runs_as: 'Bender' } });
     const [saved] = await built.listAll();
     const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
     expect(runsAs).toMatchObject({ description: CHAT_ASSISTANT_DESCRIPTION, manifest: CHAT_SPEC });
-    const { result } = await dispatch({ built, name: 'list_schedules', args: {} });
-    expect(JSON.parse(resultText(result))).toMatchObject({ schedules: [{ name: 'morning-brief', runs_as: 'Bender' }] });
+    const listed = await dispatch({ built, name: 'list_schedules', args: {} });
+    expect(JSON.parse(resultText(listed.result))).toMatchObject({
+      schedules: [{ name: 'morning-brief', runs_as: 'Bender' }],
+    });
   });
 
   it('names the assistant in plain words when the user has not named it', async () => {
@@ -286,19 +287,22 @@ describe('create_schedule', () => {
     expect(info.tier3_card?.schedule?.runs_as).toBe('Your assistant');
   });
 
-  it('has no agent field, so the model cannot guess one', async () => {
+  it('has no agent field, so the model cannot pick one', async () => {
     const built = await setup();
     const { result } = await built.tools.listTools();
     const create = result.tools.find(tool => tool.name === 'create_schedule');
     expect(Object.keys(create?.inputSchema.properties ?? {})).not.toContain('agent');
-    const guessed = await built.tools.toolCallInfo({
+  });
+
+  it('still reports other unknown details as a fixable error', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({
       name: 'create_schedule',
-      arguments: { ...MORNING_BRIEF, agent: 'bender' },
+      arguments: { ...MORNING_BRIEF, cron: '0 8 * * *' },
     });
-    expect(guessed.tier3_card).toBeUndefined();
-    expect(guessed.pre_dispatch_failure).toMatchObject({ kind: 'pre_dispatch_failed' });
-    expect(guessed.pre_dispatch_failure?.message).toContain('agent');
-    expect(guessed.pre_dispatch_failure?.message).toContain('Fix this and try again.');
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure).toMatchObject({ kind: 'pre_dispatch_failed' });
+    expect(info.pre_dispatch_failure?.message).toContain('Fix this and try again.');
   });
 
   it('saves nothing without approval: not when denied, not when called directly', async () => {

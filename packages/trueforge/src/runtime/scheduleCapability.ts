@@ -241,6 +241,20 @@ function plainIssues(error: z.ZodError): string {
   return `These details were not valid: ${issues.join('; ')}.`;
 }
 
+/**
+ * Older tool lists offered an `agent` field. A schedule always runs as this chat's assistant, so a stray one is
+ * dropped and the person still gets the card.
+ */
+function withoutRetiredAgent(params: CallToolRequest['params']): CallToolRequest['params'] {
+  if (params.name !== CREATE_SCHEDULE_TOOL_NAME || params.arguments === undefined || !('agent' in params.arguments)) {
+    return params;
+  }
+  return {
+    ...params,
+    arguments: Object.fromEntries(Object.entries(params.arguments).filter(([key]) => key !== 'agent')),
+  };
+}
+
 function jsonResult(value: unknown) {
   return toolResultResponse({ text: JSON.stringify(value) });
 }
@@ -307,6 +321,10 @@ export class ScheduleToolSet extends LocalToolMCP {
     return this.#tools;
   }
 
+  override callTool(...[params, ...rest]: Parameters<LocalToolMCP['callTool']>): ReturnType<LocalToolMCP['callTool']> {
+    return super.callTool(withoutRetiredAgent(params), ...rest);
+  }
+
   /**
    * The host classifies every call. A create or delete card is built from what the host would really save or
    * remove, and what it was settled on joins the approved call so a later change needs a new approval.
@@ -315,8 +333,9 @@ export class ScheduleToolSet extends LocalToolMCP {
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
-    const info = await super.toolCallInfo(params, resolveUnderlyingTool);
-    const prepared = isScheduleWriteToolName(params.name) ? await this.#prepareWrite(params) : undefined;
+    const call = withoutRetiredAgent(params);
+    const info = await super.toolCallInfo(call, resolveUnderlyingTool);
+    const prepared = isScheduleWriteToolName(call.name) ? await this.#prepareWrite(call) : undefined;
     if (prepared !== undefined && !prepared.ok) {
       // Not a permission wall: the model can fix the call or ask the user. A policy block would count toward
       // the turn's "tool not allowed here" stop.
@@ -327,8 +346,8 @@ export class ScheduleToolSet extends LocalToolMCP {
       repository_id: null,
       workspace_cwd: null,
       action: {
-        tool_name: params.name,
-        canonical_params: prepared?.value.approved ?? params.arguments ?? {},
+        tool_name: call.name,
+        canonical_params: prepared?.value.approved ?? call.arguments ?? {},
         tool_type: 'truefoundry-system',
         mcp_server_name: SCHEDULE_SERVER_ID,
         mcp_hints: {
@@ -351,7 +370,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (!isScheduleWriteToolName(params.name)) {
       return undefined;
     }
-    const prepared = await this.#prepareWrite(params);
+    const prepared = await this.#prepareWrite(withoutRetiredAgent(params));
     if (!prepared.ok) {
       throw new Error(prepared.message);
     }
