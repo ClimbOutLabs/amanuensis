@@ -4,6 +4,7 @@ import {
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
   scheduleDispatchLoop,
+  SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   startScheduleRun,
@@ -43,6 +44,7 @@ function item(): ScheduleDispatchItem {
       tenant_id: 'default',
       agent_id: 'agent-1',
       agent_name: 'reporter',
+      persona_id: null,
       name: 'daily',
       manifest: ScheduleManifestSchema.parse({
         task: 'Write the report',
@@ -145,6 +147,7 @@ describe('startScheduleRun', () => {
       item: dispatchItem,
       sessions: { getOrCreateByExternalId } as never,
       agentStore: { getAgent } as never,
+      personaStore: { getPersona: jest.fn() },
     });
 
     expect(getAgent).toHaveBeenCalledWith({ tenant_id: 'default', name: 'reporter' });
@@ -161,7 +164,52 @@ describe('startScheduleRun', () => {
       previous_turn_id: 'none',
       userRef: 'tester',
       agent: { id: 'agent-1', name: 'reporter' },
+      persona: undefined,
     });
+  });
+
+  it('runs as the persona the schedule kept from its chat', async () => {
+    const dispatchItem = item();
+    const withPersona = { ...dispatchItem, schedule: { ...dispatchItem.schedule, persona_id: 'persona-1' } };
+    const persona = {
+      tenant_id: 'default',
+      id: 'persona-1',
+      display_name: 'Zara',
+      aliases: [],
+      instructions: 'Be brief.',
+      model_name: 'openai/gpt-5.2',
+      created_by: 'tester',
+      created_at: '2026-08-31T00:00:00.000Z',
+      updated_at: '2026-08-31T00:00:00.000Z',
+      updated_by: 'tester',
+    };
+    const getPersona = jest.fn().mockResolvedValue(persona);
+
+    const prepared = await startScheduleRun({
+      item: withPersona,
+      sessions: {
+        getOrCreateByExternalId: jest
+          .fn()
+          .mockResolvedValue({ session: { listTurns: jest.fn().mockResolvedValue({ data: [] }) }, created: true }),
+      } as never,
+      agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) } as never,
+      personaStore: { getPersona },
+    });
+
+    expect(getPersona).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'tester', id: 'persona-1' });
+    expect(prepared?.persona).toEqual(persona);
+  });
+
+  it('fails the run in plain words when its persona was deleted', async () => {
+    const dispatchItem = item();
+    await expect(
+      startScheduleRun({
+        item: { ...dispatchItem, schedule: { ...dispatchItem.schedule, persona_id: 'persona-gone' } },
+        sessions: { getOrCreateByExternalId: jest.fn() } as never,
+        agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) } as never,
+        personaStore: { getPersona: jest.fn().mockResolvedValue(undefined) },
+      }),
+    ).rejects.toThrow(new SchedulePersonaNotFoundError());
   });
 
   it('returns undefined when the session already has a turn', async () => {
@@ -176,6 +224,7 @@ describe('startScheduleRun', () => {
       item: item(),
       sessions: { getOrCreateByExternalId } as never,
       agentStore: { getAgent } as never,
+      personaStore: { getPersona: jest.fn() },
     });
 
     expect(prepared).toBeUndefined();
@@ -187,6 +236,7 @@ describe('startScheduleRun', () => {
         item: item(),
         sessions: { getOrCreateByExternalId: jest.fn() } as never,
         agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) } as never,
+        personaStore: { getPersona: jest.fn() },
       }),
     ).rejects.toBeInstanceOf(ScheduleAgentNotFoundError);
   });

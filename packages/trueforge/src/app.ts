@@ -316,6 +316,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     scheduleStore: deps.scheduleStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
+    personaStore: deps.personaStore,
+    personalizationStore: deps.personalizationStore,
     eventSubscriptions: deps.eventSubscriptions,
     logger: deps.logger,
     resolveModelProviderStore: deps.resolveModelProviderStore,

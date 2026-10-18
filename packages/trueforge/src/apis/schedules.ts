@@ -22,6 +22,7 @@ import {
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
   ScheduleNotFoundError,
+  SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   startScheduleRun,
@@ -32,6 +33,8 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import {
@@ -49,6 +52,7 @@ import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { buildPersonaContext } from '../personas/persona';
 import {
   createScheduleRoute,
   createScheduleRunRoute,
@@ -86,6 +90,9 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
   /** Persistence agent store (schedule agent binding is not caller-scoped). */
   agentStore: IAgentStore<TTransaction>;
+  /** A run answers as the persona its chat had, with the owner's personalization, like a chat turn. */
+  personaStore: Pick<IPersonaStore<TTransaction>, 'getPersona'>;
+  personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   /**
    * Fork-only, mirroring `TurnsRouterDeps`: not agent-scoped upstream, so these stay directly
    * injected rather than resolved per-request. Required so a scheduled run resolves memory and
@@ -129,10 +136,15 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     item,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
+    personaStore: deps.personaStore,
   });
   if (prepared === undefined) {
     return;
   }
+  const personalizationProfile = await deps.personalizationStore.getProfile({
+    tenant_id: item.schedule.tenant_id,
+    created_by: prepared.userRef,
+  });
   await startTurnInProcess({
     session: prepared.session,
     input: prepared.input,
@@ -159,6 +171,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      personalizationProfile,
+      personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       logger: deps.logger,
       // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
       clientTimezone: item.schedule.manifest.timezone,
@@ -220,7 +234,8 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
       if (
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
-        error instanceof ScheduleAgentNotFoundError
+        error instanceof ScheduleAgentNotFoundError ||
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -364,7 +379,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
       if (
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
-        error instanceof ScheduleAgentNotFoundError
+        error instanceof ScheduleAgentNotFoundError ||
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -407,6 +423,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             agent_id: agent.id,
             agent_name: agent.name,
             name: body.name,
+            persona_id: null,
             manifest: body.manifest,
             created_by_subject: createdBySubjectFromRequestContext(requestContext),
             runFrom: new Date(),

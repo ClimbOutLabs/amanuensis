@@ -450,6 +450,7 @@ async function seedSchedule<TTransaction>({
           agent_id: agentId,
           agent_name: DEMO_AGENT_NAME,
           name: DEMO_SCHEDULE_NAME,
+          persona_id: null,
           manifest: world.scheduleManifest,
           created_by_subject: subjectFor(scope.userId),
           runFrom: now,

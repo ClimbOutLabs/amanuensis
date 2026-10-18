@@ -1239,6 +1239,11 @@ async function importArchive<TTransaction>(
             agent_id: agent.id,
             agent_name: agent.name,
             name: schedule.name,
+            // Personas keep their ids on import; one the export did not carry runs as the agent's own assistant.
+            persona_id:
+              schedule.persona_id !== null && personas.some(({ persona }) => persona.id === schedule.persona_id)
+                ? schedule.persona_id
+                : null,
             manifest: { ...schedule.manifest, status: 'paused' },
             created_by_subject: importerSubject,
             runFrom: new Date(),

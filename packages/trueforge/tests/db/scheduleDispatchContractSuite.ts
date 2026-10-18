@@ -112,6 +112,7 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: `sched-${String(Date.now())}-${String(seq)}`,
       manifest: manifest({ status, cron }),
       created_by_subject: USER_SUBJECT,

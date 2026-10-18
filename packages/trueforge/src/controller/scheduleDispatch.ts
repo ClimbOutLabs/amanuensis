@@ -3,6 +3,7 @@ import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { IPersonaStore } from '../db/personaStore';
 import {
   cronRunName,
   type IScheduleStore,
@@ -12,6 +13,7 @@ import {
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
+import type { Persona } from '../personas/persona';
 import { nextTriggerAfter } from '../runtime/cron';
 import { InvalidCronError, type ScheduleRunStatus } from '../schemas/schedule';
 import type { ControlLoop } from './Controller';
@@ -71,6 +73,14 @@ export class ScheduleAgentNotFoundError extends Error {
   }
 }
 
+/** The persona a schedule runs as was deleted after the schedule was made. */
+export class SchedulePersonaNotFoundError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The persona this schedule runs as was deleted. Make the schedule again in a chat.', options);
+    this.name = 'SchedulePersonaNotFoundError';
+  }
+}
+
 /** Requested schedule run does not exist. */
 export class ScheduleRunNotFoundError extends Error {
   constructor(scheduleRunId: string, options?: ErrorOptions) {
@@ -102,22 +112,37 @@ export interface PreparedScheduleTurn {
   previous_turn_id: string;
   userRef: string;
   agent: AgentRecord;
+  /** The persona kept from the chat the schedule was made in; undefined runs the agent's own assistant. */
+  persona: Persona | undefined;
 }
 
 export async function startScheduleRun(params: {
   item: ScheduleDispatchItem;
   sessions: Sessions<SessionCustom, TurnCustom>;
   agentStore: IAgentStore;
+  personaStore: Pick<IPersonaStore, 'getPersona'>;
 }): Promise<PreparedScheduleTurn | undefined> {
   const {
     item: { run, schedule },
     sessions,
     agentStore,
+    personaStore,
   } = params;
 
   const named = await agentStore.getAgent({ tenant_id: schedule.tenant_id, name: schedule.agent_name });
   if (named === undefined) {
     throw new ScheduleAgentNotFoundError(schedule.agent_name);
+  }
+  const persona =
+    schedule.persona_id === null
+      ? undefined
+      : await personaStore.getPersona({
+          tenant_id: schedule.tenant_id,
+          created_by: schedule.created_by_subject.subject_id,
+          id: schedule.persona_id,
+        });
+  if (schedule.persona_id !== null && persona === undefined) {
+    throw new SchedulePersonaNotFoundError();
   }
 
   const { session } = await sessions.getOrCreateByExternalId({
@@ -140,6 +165,7 @@ export async function startScheduleRun(params: {
     previous_turn_id: 'none',
     userRef: schedule.created_by_subject.subject_id,
     agent: named,
+    persona,
   };
 }
 

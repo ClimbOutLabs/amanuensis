@@ -665,6 +665,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JSONColumnType<ScheduleManifest, ScheduleManifest, ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */

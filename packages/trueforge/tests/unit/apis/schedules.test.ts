@@ -83,6 +83,8 @@ function stubTurnExecutionDeps(
     scheduleStore,
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
+    personaStore: { getPersona: () => Promise.resolve(undefined) },
+    personalizationStore: { getProfile: () => Promise.resolve(undefined) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
@@ -469,6 +471,7 @@ describe('internal schedule execution', () => {
       tenant_id: 'default',
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'daily-report',
       manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active' },
       created_by_subject: alice,
@@ -522,6 +525,7 @@ describe('internal schedule execution', () => {
       previous_turn_id: 'none',
       userRef: 'alice',
       agent,
+      persona: undefined,
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -549,6 +553,7 @@ describe('internal schedule execution', () => {
       previous_turn_id: 'none',
       userRef: 'alice',
       agent,
+      persona: undefined,
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -557,6 +562,51 @@ describe('internal schedule execution', () => {
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
       expect.objectContaining({ deps: expect.objectContaining({ clientTimezone: 'Asia/Kolkata' }) }),
+    );
+  });
+
+  it('answers as the persona the schedule kept from its chat, like a chat turn would', async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-persona',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+      persona: {
+        tenant_id: 'default',
+        id: 'persona-1',
+        display_name: 'Zara',
+        aliases: [],
+        instructions: 'Be brief.',
+        model_name: 'openai/gpt-5.2',
+        created_by: 'alice',
+        created_at: '2026-08-31T00:00:00.000Z',
+        updated_at: '2026-08-31T00:00:00.000Z',
+        updated_by: 'alice',
+      },
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deps: expect.objectContaining({
+          personaContext: expect.objectContaining({ persona_id: 'persona-1', persona_name: 'Zara' }),
+        }),
+      }),
     );
   });
 
