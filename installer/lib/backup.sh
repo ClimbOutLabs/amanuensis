@@ -61,7 +61,7 @@ backup_data() {
   database_probe "$name" "$image" "$sqlite" || {
     case $? in
       1)
-        say "Instance $name has no database yet, so there is nothing to back up for it; its settings are saved."
+        say "Instance $name has no data yet, so only its settings are saved."
         return 0
         ;;
       *)
@@ -131,9 +131,9 @@ backup_run() {
   local only=${1:-} label=${2:-} stamp dir name image n=0
   LAST_BACKUP_DIR=
   [ -n "$(backup_targets "$only")" ] || return 0
-  release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
+  release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   image=$CUR_APP_TAG
-  docker_image_exists "$image" || die "image $image is missing; run install.sh to rebuild it"
+  docker_image_exists "$image" || die "Part of Aman ($image) is missing. Run install.sh to build it again."
   ensure_private_dir "$BACKUPS_DIR"
   backup_scratch_prune
   stamp=$(date -u +%Y%m%dT%H%M%SZ)${label:+-$label}
@@ -147,7 +147,7 @@ backup_run() {
     say "Backing up instance $name"
     if ! backup_instance "$name" "$dir" "$image"; then
       rm -rf "$dir"
-      warn "the backup of $name failed; the partial backup was removed"
+      warn "The backup of $name failed, so the unfinished backup was removed."
       return 1
     fi
     n=$((n + 1))
@@ -165,18 +165,19 @@ backup_run() {
   backup_prune
   log_event "backup $dir"
   if [ -n "$label" ]; then
-    say "Backup written to $dir and kept until you remove it (unencrypted; it holds secrets, keep it on this machine)"
+    say "Saved a backup to $dir, kept until you remove it."
   else
-    say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
+    say "Saved a backup to $dir."
   fi
+  say "It holds your passwords and keys, so keep it on this computer."
   if [ -f "$dir/tls/root.crt" ]; then
-    say "It does not hold the private key of this computer's certificate authority. After a restore, Aman makes a new one and each device trusts it again."
+    say "After a restore, each device needs to trust this computer again."
   fi
 }
 
 cmd_backup() {
   if [ -n "${OPT_NAME:-}" ]; then
-    reg_exists "$OPT_NAME" || die "no instance named $OPT_NAME"
+    reg_exists "$OPT_NAME" || die "There is no instance named $OPT_NAME."
   fi
   if [ -z "$(reg_names)" ]; then
     say "No instances yet; nothing to back up."
@@ -195,7 +196,7 @@ cmd_backup() {
 restore_sqlite() {
   local name=$1 dir=$2 image=$3
   if [ ! -f "$dir/$name/db.sqlite" ]; then
-    warn "no database copy of $name in $dir; skipping its restore"
+    warn "The backup in $dir has no data for instance $name, so nothing was put back for it."
     return 0
   fi
   D run --rm -i --network none -v "aman_${name}_data:/data" "$image" sh -c \
@@ -210,7 +211,7 @@ cmd_backups() {
     *) usage_die "usage: install.sh backups daily|off" ;;
   esac
   if ! backups_apply "$OPT_BACKUPS_ARG"; then
-    die "This computer has no way to schedule a backup without admin rights (no user timer, launchd or crontab)."
+    die "This computer has no way to run a backup every day without admin rights."
   fi
   if [ "$OPT_BACKUPS_ARG" = daily ]; then
     ui_ok "A backup is made every day, keeping the last $BACKUP_KEEP"

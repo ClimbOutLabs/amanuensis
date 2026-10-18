@@ -40,8 +40,8 @@ test_dry_run_plans_the_front_end() {
   assert_flat_contains "$OUT" "needs admin Install Caddy from the Ubuntu package archive"
   assert_flat_contains "$OUT" "needs admin Apply the Caddyfile for aman.example.com and login.example.com"
   assert_flat_contains "$OUT" "exactly those two names"
-  assert_flat_contains "$OUT" "Open only TCP 443"
-  assert_flat_contains "$OUT" "port 80 can stay closed"
+  assert_flat_contains "$OUT" "Open only port 443"
+  assert_flat_contains "$OUT" "Port 80 can stay closed"
   assert_contains "$OUT" "--tls-root"
   run_install --dry-run --verbose --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_contains "$OUT" "archive.ubuntu.com"
@@ -129,7 +129,7 @@ test_install_with_the_flag_runs_the_root_steps() {
   assert_contains "$OUT" "Root steps for HTTPS with Caddy" "the steps were printed before they ran"
   assert_contains "$OUT" "HTTPS answers at $APP_URL"
   assert_flat_contains "$OUT" "HTTPS on, with certificates from Let"
-  assert_flat_contains "$OUT" "Open only TCP 443"
+  assert_flat_contains "$OUT" "Open only port 443"
   assert_contains "$(grep '^curl' "$STUB_LOG")" "$APP_URL/healthz"
   assert_eq "$(sed -n 's/^tls=//p' "$AMAN_HOME/state/instances/main.conf")" caddy
   sandbox_drop
@@ -245,7 +245,7 @@ test_a_failing_root_script_is_reported() {
   STUB_SUDO_SH_FAIL=1
   install_tls --tls-root
   assert_rc 1
-  assert_flat_contains "$ERR" "the Caddy steps failed"
+  assert_flat_contains "$ERR" "The Caddy steps failed"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   unset STUB_SUDO_SH_FAIL
   sandbox_drop

@@ -31,7 +31,7 @@ test_check_reports_without_changing() {
   run_install upgrade --check
   assert_rc 0
   assert_contains "$OUT" "speech  aman-stt:"
-  assert_contains "$OUT" "sandbox PDF and image reading (rebuilds the sandbox image)"
+  assert_contains "$OUT" "sandbox PDF and image reading (builds the sandbox again)"
   assert_eq "$(log_count "docker build")" "$builds"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old"
   assert_no_path "$AMAN_HOME/backups"
@@ -72,8 +72,8 @@ test_failed_upgrade_restores_database_and_images() {
   STUB_UP_FAIL_UNLESS_TAG=$old
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "restoring the previous version"
-  assert_contains "$OUT" "Rolled back to the previous version"
+  assert_flat_contains "$ERR" "Putting the previous version back"
+  assert_contains "$OUT" "The previous version is back"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "release record restored"
   assert_eq "$(compose_image main)" "$old" "compose points at the previous image"
   assert_contains "$(cat "$SB_STATE/restores")" "restore aman_main_data"
@@ -148,7 +148,7 @@ test_doctor_failure_blocks_unless_forced() {
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "doctor reports a failure"
+  assert_flat_contains "$ERR" "has a problem now, so the upgrade did not start"
   assert_no_path "$AMAN_HOME/backups"
   run_install upgrade --force
   assert_rc 0
@@ -167,7 +167,7 @@ install_that_never_starts() {
 }
 
 test_install_rerun_updates_instead_of_reusing_old_images() {
-  t_begin "re-running install on a newer checkout says so, plans the update, backs up what has data and builds new images"
+  t_begin "re-running install on a newer copy says so, plans the update, backs up what has data and builds new images"
   sandbox_new
   install_machine
   local old new
@@ -175,9 +175,9 @@ test_install_rerun_updates_instead_of_reusing_old_images() {
   repo_commit_change "newer checkout"
   run_install --dry-run
   assert_rc 0
-  assert_flat_contains "$OUT" "This checkout is newer than the installed version, so it will be updated."
-  assert_flat_contains "$OUT" "Update the installed version to this checkout"
-  assert_flat_contains "$OUT" "Instances that have data are backed up first."
+  assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
+  assert_flat_contains "$OUT" "Update Aman to this newer copy"
+  assert_flat_contains "$OUT" "Each instance with data is backed up first."
   assert_flat_contains "$OUT" "Restart instance main on the new version"
   assert_not_contains "$OUT" "Nothing to do"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "a dry run changes nothing"
@@ -204,7 +204,7 @@ test_failed_update_through_install_rolls_back() {
   assert_rc 1
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "the old release is back"
   assert_eq "$(compose_image main)" "$old"
-  assert_flat_contains "$ERR" "restoring the previous version"
+  assert_flat_contains "$ERR" "Putting the previous version back"
   sandbox_drop
 }
 
@@ -216,7 +216,7 @@ test_install_rerun_of_an_instance_that_never_started_is_a_fresh_build() {
   repo_commit_change "the fix"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "This checkout is newer than the installed version, so it will be updated."
+  assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
   assert_not_contains "$OUT$ERR" "Backing up instance"
   assert_no_path "$AMAN_HOME/backups"
   assert_eq "$(compose_image main)" "$(app_tag "$AMAN_HOME/release/release.json")"
@@ -234,7 +234,7 @@ test_upgrade_needs_no_force_when_the_instance_never_started() {
   assert_rc 0
   assert_not_contains "$ERR" "doctor reports a failure"
   assert_no_path "$AMAN_HOME/backups"
-  assert_flat_contains "$OUT" "not needed (no instance had data)"
+  assert_flat_contains "$OUT" "No backup was needed, since no instance had data yet."
   sandbox_drop
 }
 
@@ -246,7 +246,7 @@ test_upgrade_still_needs_force_for_an_instance_with_data() {
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "The doctor reports a failure for instance main, which was healthy before."
+  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start."
   assert_flat_contains "$ERR" "upgrade --force"
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
@@ -261,7 +261,7 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "which was healthy before"
+  assert_flat_contains "$ERR" "worked before but has a problem now"
   unset STUB_DOCTOR_EXIT
   run_install upgrade
   assert_rc 0
@@ -283,7 +283,7 @@ test_backup_and_upgrade_force_cope_with_an_instance_without_a_database() {
   no_database_yet main
   run_install backup
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main has no database yet, so there is nothing to back up for it"
+  assert_flat_contains "$OUT" "Instance main has no data yet, so only its settings are saved."
   assert_not_contains "$OUT$ERR" "Cannot open database"
   assert_not_contains "$OUT$ERR" "failed"
   assert_no_path "$SB_STATE/backup_runs"

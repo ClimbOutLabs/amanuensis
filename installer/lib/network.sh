@@ -199,7 +199,7 @@ address_problem() {
   elif ! valid_ipv4 "$host" && ! { [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && [[ $host != *..* ]] && [[ ! $host =~ ^[0-9.]+$ ]] && ! has_numeric_label "$host"; }; then
     echo "$1 is not an address or a name. Examples: 192.168.1.20, spark.local"
   elif ! private_host "$host"; then
-    echo "$1 is a public address, and signing in over plain http across the internet is not safe. For access from the internet set up HTTPS with --tls caddy (with --public-url and --login-url)."
+    echo "$1 is a public address, and signing in over plain http from the internet is not safe. For the internet, use --tls caddy with --public-url and --login-url."
   fi
 }
 

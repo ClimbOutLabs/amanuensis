@@ -46,8 +46,8 @@ safe_value() {
 # through shell builtins, so a secret never reaches argv.
 env_managed_set() {
   local env=$1 key=$2 value=$3 line inblock=0 written=0
-  [ -f "$env" ] || die "$env is missing"
-  grep -q '^# >>> managed by the installer' "$env" || die "the managed block of $env is missing"
+  [ -f "$env" ] || die "The settings file $env is missing."
+  grep -q '^# >>> managed by the installer' "$env" || die "The settings file $env is missing the part the installer manages."
   {
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in

@@ -59,7 +59,7 @@ machine_up() {
   step_begin start-machine "Starting the speech-to-text service"
   dcm up -d >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
-    step_fail "The speech-to-text service could not start" "Run install.sh again once the cause in the log is fixed."
+    step_fail "The speech-to-text service could not start" "Fix what the log says, then run install.sh again."
   fi
   step_ok "The speech-to-text service is running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
@@ -89,7 +89,7 @@ stt_attach() {
       if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then return 0; fi
       ;;
   esac
-  warn "could not connect the speech-to-text service to instance $1: $out"
+  warn "The speech-to-text service could not be connected to instance $1: $out"
   return 1
 }
 
@@ -122,7 +122,7 @@ stt_forget_old_network() {
   D network disconnect -f "$old" aman-stt >/dev/null 2>&1 || true
   if out=$(D network rm "$old" 2>&1); then return 0; fi
   case "$out" in *"not found"* | *"No such network"*) return 0 ;; esac
-  warn "could not remove the old speech network $old: $out"
+  warn "An old network of the speech-to-text service ($old) could not be removed: $out"
 }
 
 machine_running() {
@@ -201,7 +201,7 @@ instance_state() {
 instance_up() {
   local name=$1 rc=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
-  step_begin "start-$name" "Starting instance $name and waiting for it to be healthy"
+  step_begin "start-$name" "Starting instance $name and waiting until it answers"
   dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     instance_unhealthy "$name"
@@ -213,7 +213,7 @@ instance_up() {
   stt_forget_old_network "$name"
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
-  step_ok "Instance $name is running and healthy"
+  step_ok "Instance $name is running and answering"
   proxy_trust_sync "$name"
 }
 
@@ -229,7 +229,7 @@ proxy_trust_sync() { # name
   valid_ipv4 "$gateway" || return 0
   [ "$(env_get "$env" TRUSTED_PROXY_ADDRESSES)" != "$gateway" ] || return 0
   env_managed_set "$env" TRUSTED_PROXY_ADDRESSES "$gateway"
-  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not restart cleanly; run: aman doctor instance --fix"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
 }
 
 # False only for an instance that was created and never became healthy; a record from before this was kept counts as
@@ -254,7 +254,7 @@ instance_unhealthy() {
   elif [ -n "$cause" ]; then
     UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Fix that, then run install.sh again."
   else
-    UI_FD=2 ui_step_end fail "Instance $name did not become healthy, and the cause is not one the installer knows. This looks like a bug in Aman." "Run install.sh again; if it fails the same way, share the log below."
+    UI_FD=2 ui_step_end fail "Instance $name did not start, and the installer cannot tell why. This looks like a bug in Aman." "Run install.sh again. If it fails the same way, share the saved log below."
   fi
   UI_FD=2 ui_hint "Last 200 log lines: $(ui_path "$log")"
   return 0
@@ -285,7 +285,7 @@ aman_command_current() {
 install_doctor_shim() {
   local src="$INSTALLER_DIR/doctor/aman" lib problem words
   if [ ! -f "$src" ]; then
-    warn "The aman command was not found in the installer, so it will be unavailable."
+    warn "The installer has no aman command in it, so that command will be missing."
     return 0
   fi
   ensure_private_dir "$AMAN_HOME/bin"
@@ -311,7 +311,7 @@ install_doctor_shim() {
 
 # install.sh command: puts the aman command, its helper files and its path line back, and nothing else.
 cmd_command() {
-  [ -d "$AMAN_HOME" ] || die "Aman is not set up on this computer yet; run install.sh first"
+  [ -d "$AMAN_HOME" ] || die "Aman is not set up on this computer yet. Run install.sh first."
   install_doctor_shim
   ui_ok "The aman command is installed"
 }
@@ -365,12 +365,12 @@ instance_collect() {
   fi
   ask_valid I_EMAIL "Your email, used to sign in" "" "Example: you@example.com" email_problem
   if [ -n "$I_PUBLIC_URL" ]; then
-    valid_origin "$I_PUBLIC_URL" || usage_die "The public URL must be an origin such as https://aman.example.com, with no path."
-    case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "A public URL must be https." ;; esac
-    [ -n "$I_LOGIN_URL" ] || usage_die "--public-url needs --login-url, the sign-in service's own https address (never a path of the first one)."
-    valid_origin "$I_LOGIN_URL" || usage_die "The login URL must be an origin such as https://login.example.com, with no path."
-    case "$I_LOGIN_URL" in https://*) ;; *) usage_die "The login URL must be https." ;; esac
-    [ "$I_LOGIN_URL" != "$I_PUBLIC_URL" ] || usage_die "The app and the login service need two different origins."
+    valid_origin "$I_PUBLIC_URL" || usage_die "The public address must look like https://aman.example.com, with nothing after the name."
+    case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "The public address must start with https://." ;; esac
+    [ -n "$I_LOGIN_URL" ] || usage_die "--public-url needs --login-url, a second https address for the sign-in service."
+    valid_origin "$I_LOGIN_URL" || usage_die "The login address must look like https://login.example.com, with nothing after the name."
+    case "$I_LOGIN_URL" in https://*) ;; *) usage_die "The login address must start with https://." ;; esac
+    [ "$I_LOGIN_URL" != "$I_PUBLIC_URL" ] || usage_die "The app and the sign-in service need two different addresses."
   elif [ -n "$I_LOGIN_URL" ]; then
     usage_die "--login-url needs --public-url."
   fi
@@ -383,7 +383,7 @@ instance_collect() {
 # --address adds a name or address Aman should also answer at; each is checked as it is read, like every other flag.
 instance_collect_addresses() {
   if [ -z "$OPT_ADDRESSES" ]; then return 0; fi
-  [ -z "$I_PUBLIC_URL" ] || usage_die "--address applies to an instance opened on your network; with --public-url the public address is the only one."
+  [ -z "$I_PUBLIC_URL" ] || usage_die "--address is for an instance opened on your network. With --public-url, that public address is the only one."
   [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--address and --local-only are opposites; pick one."
 }
 
@@ -393,8 +393,8 @@ instance_collect_tls() {
   case "$I_TLS" in
     '') return 0 ;;
     local | off)
-      [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network; with --public-url use --tls caddy."
-      [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine; --tls does not apply."
+      [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network. With --public-url, use --tls caddy."
+      [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine, so --tls does not apply."
       return 0
       ;;
     caddy) ;;
@@ -402,8 +402,8 @@ instance_collect_tls() {
   esac
   [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
   [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
-  valid_edge_host "$(edge_host "$I_PUBLIC_URL")" || usage_die "--tls caddy serves port 443 under a DNS name: the public address cannot carry a port or be an IP address"
-  valid_edge_host "$(edge_host "$I_LOGIN_URL")" || usage_die "--tls caddy serves port 443 under a DNS name: the login address cannot carry a port or be an IP address"
+  valid_edge_host "$(edge_host "$I_PUBLIC_URL")" || usage_die "--tls caddy needs names: the public address cannot carry a port or be an IP address"
+  valid_edge_host "$(edge_host "$I_LOGIN_URL")" || usage_die "--tls caddy needs names: the login address cannot carry a port or be an IP address"
 }
 
 # Picks ports and derives URLs. Read-only: nothing is written, so the plan can show the result.
@@ -416,13 +416,13 @@ instance_derive() {
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT
   else
-    I_PORT=$(pick_port 8791 "$all_reserved") || die "no free port found on this computer for the app near 8791"
+    I_PORT=$(pick_port 8791 "$all_reserved") || die "No free port was found on this computer for the app near 8791."
   fi
   if [ -n "${OPT_LOGIN_PORT:-}" ]; then
     check_port_usable "$OPT_LOGIN_PORT" "$all_reserved $I_PORT" "--login-port"
     I_LOGIN_PORT=$OPT_LOGIN_PORT
   else
-    I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free port found on this computer for sign-in near 5556"
+    I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "No free port was found on this computer for sign-in near 5556."
   fi
   I_ORIGINS=
   I_TLS_PORT=
@@ -439,7 +439,7 @@ instance_derive() {
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
       I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
       if [ "$I_TLS" = local ] && origins_reach_the_network "$I_ORIGINS"; then
-        I_TLS_PORT=$(pick_port 8443 "$all_reserved $I_PORT $I_LOGIN_PORT") || die "no free port found on this computer for https near 8443"
+        I_TLS_PORT=$(pick_port 8443 "$all_reserved $I_PORT $I_LOGIN_PORT") || die "No free port was found on this computer for https near 8443."
         # shellcheck disable=SC2086
         I_ORIGINS=$(network_origin_list "$I_PORT" "$I_TLS_PORT" $OPT_ADDRESSES)
       fi
@@ -453,7 +453,7 @@ instance_derive() {
 issuer_check() {
   case "$1" in
     https://*) ;;
-    *) is_loopback_origin "${1%/dex}" || die "A sign-in address without https is only allowed on this computer; use an https address." ;;
+    *) is_loopback_origin "${1%/dex}" || die "A sign-in address without https only works on this computer. Use an https address." ;;
   esac
 }
 
@@ -493,7 +493,7 @@ instance_apply_addresses() { # name open|close|refresh
     if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
       tls_port=$(reg_get "$name" tls_port)
       if [ -z "$tls_port" ]; then
-        tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "no free port found on this computer for https near 8443"
+        tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "No free port was found on this computer for https near 8443."
       fi
       # shellcheck disable=SC2086
       origins=$(network_origin_list "$app_port" "$tls_port" $extras)
@@ -515,7 +515,7 @@ instance_create() {
   local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
-    say "Instance $I_NAME already exists; making sure it is running"
+    say "Instance $I_NAME already exists. Making sure it is running."
     if instance_sandbox_wanted "$I_NAME"; then sandbox_ensure "$I_NAME"; fi
     instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$I_NAME"
@@ -551,7 +551,7 @@ instance_create() {
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
-    warn "reusing the existing data volume aman_${I_NAME}_data from an earlier instance with this name"
+    warn "An earlier instance with this name left data behind (aman_${I_NAME}_data), which this one takes over."
   fi
   log_event "instance $I_NAME created"
   instance_up "$I_NAME"
@@ -633,7 +633,7 @@ print_instance_summary() {
     ui_check_row ok "HTTPS" "on, with certificates from Let's Encrypt"
   fi
   if demo_env_on "$name"; then
-    ui_check_row ok "Demo" "on. Reseed: $(demo_seed_command "$name") [--reset]"
+    ui_check_row ok "Demo" "on. Fill again: $(demo_seed_command "$name") [--reset]"
   fi
   if edge_wanted "$name"; then
     edge_print_firewall_hint
@@ -654,11 +654,12 @@ print_instance_summary() {
 print_trust_lines() { # name
   local link
   link=$(tls_trust_link "$1")
-  ui_line "Trust this computer on each device: $link"
-  ui_line "On an iPhone, open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Before you trust it, check that the fingerprint your device shows is $(tls_fingerprint). If it differs, stop."
+  ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
+  ui_line "Instead, open this page once on that device and follow its steps: $link"
+  ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
+  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
-    ui_line "This computer's certificate authority was made again (it did not cover a name now in use, or was from an earlier version), so each device must trust it again."
+    ui_line "This computer's root certificate was made again, so each device must trust it again."
   fi
   tls_print_qr "$link"
 }
@@ -672,7 +673,7 @@ print_backups_row() {
       if backup_schedule_present; then
         ui_check_row ok "Backups" "daily, keeps the last $BACKUP_KEEP"
       else
-        ui_check_row warn "Backups" "the daily schedule is missing: aman doctor backup --fix"
+        ui_check_row warn "Backups" "not scheduled. Fix: aman doctor backup --fix"
       fi
       ;;
     off) ui_check_row skip "Backups" "off. Turn on: aman doctor backup --fix" ;;
@@ -706,15 +707,15 @@ print_instance_block() {
 # Everything an installed machine already has: the recorded release and the shared network owner.
 require_installed() {
   [ -f "$RELEASE_DIR/release.json" ] && [ -d "$MACHINE_DIR" ] ||
-    die "this machine is not set up yet; run install.sh first"
+    die "Aman is not set up on this computer yet. Run install.sh first."
 }
 
 load_installed_release() {
-  release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
+  release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   REL_APP_TAG=$CUR_APP_TAG
   REL_STT_TAG=$CUR_STT_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
-  docker_image_exists "$REL_APP_TAG" || die "image $REL_APP_TAG is missing; run install.sh to rebuild it"
+  docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
 
 # 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.
@@ -792,12 +793,12 @@ instance_enforce_single_owner() { # name
 instance_pick() {
   local name=${OPT_NAME:-${OPT_INSTANCE:-}} names
   if [ -n "${OPT_NAME:-}" ] && [ -n "${OPT_INSTANCE:-}" ] && [ "$OPT_NAME" != "$OPT_INSTANCE" ]; then
-    usage_die "two different instances were named ($OPT_NAME and $OPT_INSTANCE); name one"
+    usage_die "Two different instances were named ($OPT_NAME and $OPT_INSTANCE). Name one."
   fi
   if [ -z "$name" ]; then
     names=$(reg_names)
     case "$names" in
-      '') die "no instance exists yet; run install.sh first" ;;
+      '') die "No instance exists yet. Run install.sh first." ;;
       *$'\n'*) usage_die "several instances exist ($(printf '%s' "$names" | tr '\n' ' ')); say which with --instance NAME" ;;
     esac
     name=$names
@@ -906,7 +907,7 @@ cmd_instance_add() {
   instance_collect "$OPT_NAME"
   instance_derive
   if [ "$DRY_RUN" = 1 ]; then
-    say "Would create instance $I_NAME for $I_EMAIL: app at ${I_ORIGINS:-$I_PUBLIC_URL} (port $I_PORT on this computer), sign-in service port $I_LOGIN_PORT. Nothing was changed."
+    say "Would create instance $I_NAME for $I_EMAIL, opening at ${I_ORIGINS:-$I_PUBLIC_URL}. Nothing was changed."
     return 0
   fi
   [ -n "$AMAN_PASSWORD" ] || ask_password AMAN_PASSWORD
@@ -945,7 +946,7 @@ cmd_instance_list() {
   docker_plan_access
   case "$DOCKER_ACCESS" in
     direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;;
-    *) warn "Docker is not reachable, so the states below are unknown" ;;
+    *) warn "Docker is not running or not reachable, so the STATE column is unknown" ;;
   esac
   {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR OWNER ADDRESS
@@ -980,7 +981,7 @@ volumes_purge() {
     fi
   done
   if [ -n "$failed" ]; then
-    warn "could not delete the volumes:$failed. Something may still be using them; check docker ps -a, then run the purge again."
+    warn "The data could not be deleted:$failed. Something may still be using it. Stop that, then run the removal with --purge-data again."
     return 1
   fi
 }
@@ -1000,7 +1001,7 @@ confirm_purge_name() {
     printf 'This permanently deletes the data of instance %s. Type its name to confirm: ' "$name" >&2
     read -r typed || true
   fi
-  [ "$typed" = "$name" ] || die "the typed name did not match; nothing was removed"
+  [ "$typed" = "$name" ] || die "The name you typed does not match, so nothing was removed."
 }
 
 cmd_instance_remove() {
@@ -1024,7 +1025,7 @@ cmd_instance_remove() {
     fi
     if [ "${OPT_PURGE:-0}" != 1 ]; then
       if [ -n "${volumes// /}" ]; then
-        say "Instance $name is already removed, but its data is still in the volumes: $volumes"
+        say "Instance $name is already removed, but its data is still here: $volumes"
         say "To delete the data: install.sh instance remove $name --purge-data"
       else
         say "Instance $name is already removed, but its sandboxes are still on this computer."
@@ -1044,7 +1045,7 @@ cmd_instance_remove() {
   if [ "$exists" = 1 ]; then
     if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
       stt_detach "$name"
-      dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
+      dc "$name" down || warn "The instance did not stop cleanly. Removing it anyway."
     fi
     if [ "$slots" = 1 ]; then sandbox_down "$name" "${OPT_PURGE:-0}"; fi
     edge_remove "$name"
@@ -1059,7 +1060,7 @@ cmd_instance_remove() {
     volumes=$(instance_volumes "$name" | tr '\n' ' ')
     if [ -z "${volumes// /}" ]; then
       if [ "$exists" = 1 ]; then
-        say "Removed instance $name. It had no data volumes left to delete."
+        say "Removed instance $name. It had no data left to delete."
       else
         say "Deleted the sandboxes that instance $name left behind."
       fi
@@ -1068,9 +1069,9 @@ cmd_instance_remove() {
     read -r -a purge_list <<<"$volumes"
     volumes_purge "${purge_list[@]}" || exit 1
     log_event "instance $name purged"
-    say "Removed instance $name and deleted its data volumes: $volumes"
+    say "Removed instance $name and deleted its data: $volumes"
   else
-    say "Removed instance $name. Its data is kept in the volumes aman_${name}_data and aman_${name}_dex."
+    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
     say "To delete the data too: install.sh instance remove $name --purge-data"
   fi
 }

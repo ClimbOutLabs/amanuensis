@@ -14,7 +14,7 @@ test_dry_run_changes_nothing() {
   assert_contains "$OUT" "Downloads: about"
   assert_contains "$OUT" "Full list of downloads and sources: --verbose"
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
-  assert_flat_contains "$OUT" "Everything is built on this computer; nothing is pushed anywhere"
+  assert_flat_contains "$OUT" "Everything is built on this computer. Nothing is sent anywhere."
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
   assert_flat_contains "$OUT" "and so does reading attachments (PDFs and images)"
   assert_contains "$OUT" "Dry run: nothing was changed."
@@ -190,7 +190,7 @@ test_concurrent_run_blocked_and_stale_lock_taken_over() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$ERR" "another installer run"
+  assert_flat_contains "$ERR" "Another install is running right now"
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   with_input "$SENTINEL_PASSWORD
