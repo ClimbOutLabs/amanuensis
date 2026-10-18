@@ -59,6 +59,23 @@ If Google no longer accepts the saved sign-in, the panel says Reconnect needed, 
 
 Select Disconnect, then confirm. This turns off both mail and calendar. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
 
+## Demo instances
+
+On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and calendar events and save drafts, but it can only send to addresses you list. Set these in the instance's `.env`, then restart:
+
+- `DEMO_GOOGLE_ACCOUNT`: the one Google account the demo accepts, for example `DEMO_GOOGLE_ACCOUNT=maya@example.com`. Left empty, no Google account can be connected.
+- `DEMO_SEND_ALLOWLIST`: the only addresses a demo may send to, comma-separated, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`. Capital letters and extra spaces do not matter. Left empty, a demo sends nothing at all.
+
+How it behaves:
+
+- Connect the demo's Google account once, before visitors arrive, signed in as the same Aman user the visitors will use. Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted, and the demo asks Google for every feature at once. After that nobody can reconnect or disconnect it from the panel, and the panel says so. If a feature was left out when you signed in, the panel stays open so the named account can connect again and add it.
+- The send list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
+- The demo refuses sends it can't fully check. Connected services other than Gmail can't be used for anything that is not read-only.
+- An entry that is not a plain email address stops Aman from starting.
+- Outside demo mode both settings are ignored.
+
+If the Google project is in Testing mode, Google signs the account out every 7 days and mail stops until it is reconnected. Publish the project to avoid this. To recover, sign in as the demo user, open Settings, Connectors, Google, and select Reconnect with the account named in `DEMO_GOOGLE_ACCOUNT`.
+
 ## What to know
 
 - Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.

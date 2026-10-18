@@ -700,8 +700,7 @@ function createTurnResolver(deps: {
     switchNotice,
     {
       store: spaceStore,
-      // A demo instance never reaches a real mailbox.
-      googleConnections: configuration.DEMO_MODE ? undefined : googleConnectionStore,
+      googleConnections: googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       logger,
