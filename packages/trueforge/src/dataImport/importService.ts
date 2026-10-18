@@ -28,7 +28,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Logger } from 'winston';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from '../dataExport/archiveLimits';
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
@@ -37,7 +37,7 @@ import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords'
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
-import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
@@ -83,6 +83,7 @@ import {
   type PreflightDeps,
 } from './importPreflight';
 import {
+  forEachToolCall,
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
   ImportConnectorsFileSchema,
@@ -91,10 +92,14 @@ import {
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportSchedulesFileSchema,
-  ImportSessionPartFileSchema,
-  ImportSessionsFileSchema,
+  ImportSessionEntrySchema,
+  ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  isToolType,
+  LEFT_OUT_PLURALS,
+  UnknownToolTypeError,
+  withToolTypeResolver,
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
@@ -107,8 +112,11 @@ import {
   type ImportSessionPartRecord,
   type ImportSettingsFile,
   type ImportSpacesFile,
+  type ToolType,
+  type ToolTypeResolver,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
+import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -138,10 +146,54 @@ export interface DataImportRequest {
   maxBytes: number;
   /** Per-file uncompressed cap; defaults to the limit export writes to. */
   maxEntryBytes?: number;
+  /** Checks the archive and reports what an import would bring, writing nothing. */
+  dryRun?: boolean;
 }
 
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
+/** Lines about left-out details shown in the summary; the import log has them all. */
+const LEFT_OUT_LINES_SHOWN = 20;
+
+const SECTION_OWNERS: Readonly<Record<string, string>> = { 'settings.json': 'Your settings' };
+
+/** "a", "a and b", "a, b and c". */
+function plainList(parts: readonly string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
+}
+
+/** One line per chat or section that lost internal details, saying how many of each kind. */
+function leftOutLines({
+  report,
+  titles,
+}: {
+  report: LeftOutReport;
+  titles: ReadonlyMap<string, string | null>;
+}): string[] {
+  const merged: LeftOutByOwner = new Map();
+  for (const owners of report.values()) {
+    for (const [owner, counts] of owners) {
+      const into = merged.get(owner) ?? new Map<string, number>();
+      addCounts({ into, counts });
+      merged.set(owner, into);
+    }
+  }
+  const lines: string[] = [];
+  for (const [owner, counts] of merged) {
+    const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    if (total === 0) {
+      continue;
+    }
+    const name = owner.startsWith('chat:')
+      ? `Chat '${titles.get(owner.slice('chat:'.length)) ?? 'Untitled chat'}'`
+      : (SECTION_OWNERS[owner.slice('section:'.length)] ?? `The ${owner.slice('section:'.length)} section`);
+    const parts = [...counts].map(
+      ([label, count]) => `${String(count)} ${count === 1 ? label : (LEFT_OUT_PLURALS[label] ?? label)}`,
+    );
+    lines.push(`${name}: ${plainList(parts)} from an older version ${total === 1 ? 'was' : 'were'} left out.`);
+  }
+  return lines;
+}
 
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
@@ -175,10 +227,6 @@ function formatIssuePath(issuePath: readonly PropertyKey[]): string {
     }
   }
   return out === '' ? 'the top level' : out;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -215,48 +263,170 @@ function isSessionsSection(name: string): boolean {
   return name === 'sessions.json' || sessionPartIndex(name) !== undefined;
 }
 
-function parseSection<TSchema extends z.ZodType>({
-  files,
-  name,
-  schema,
-  logger,
-}: {
-  files: ReadonlyMap<string, Buffer>;
-  name: string;
-  schema: TSchema;
-  logger: DataImportDeps<never>['logger'];
-}): z.infer<TSchema> {
+/** Who lost an internal detail: `chat:<id>` or `section:<file name>`, with what was lost. */
+type LeftOutByOwner = Map<string, Map<string, number>>;
+
+/** Per file read, so a file read again on a later pass replaces what it reported. */
+type LeftOutReport = Map<string, LeftOutByOwner>;
+
+function readSectionJson({ files, name }: { files: ReadonlyMap<string, Buffer>; name: string }): unknown {
   const data = files.get(name);
   if (data === undefined) {
     throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
   }
-  let json: unknown;
   try {
-    json = JSON.parse(data.toString('utf8'));
+    const json: unknown = JSON.parse(data.toString('utf8'));
+    return json;
   } catch (cause) {
     throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
       cause,
     });
   }
-  const result = schema.safeParse(json);
-  if (result.success) {
-    return result.data;
-  }
-  const [first] = result.error.issues;
+}
+
+function rejectSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): never {
+  logRejectedSection({ name, json, error, logger });
+  const [first] = error.issues;
+  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
+  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
+    cause: error,
+  });
+}
+
+/** Where a section failed, by path and issue kind only: the archive's own values never reach the log. */
+function logRejectedSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): void {
+  const [first] = error.issues;
   const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
   logger.warn('Data import rejected an export section', {
     section: name,
-    issue_count: result.error.issues.length,
-    // Paths and issue kinds only: the archive's own values never reach the log.
-    issues: result.error.issues
-      .slice(0, MAX_LOGGED_ISSUES)
-      .map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
+    issue_count: error.issues.length,
+    issues: error.issues.slice(0, MAX_LOGGED_ISSUES).map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
     ...ids,
   });
-  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
-  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
-    cause: result.error,
-  });
+}
+
+function addCounts({ into, counts }: { into: Map<string, number>; counts: LeftOutCounts }): void {
+  for (const [label, count] of counts) {
+    into.set(label, (into.get(label) ?? 0) + count);
+  }
+}
+
+function parseSection<TSchema extends z.ZodType>({
+  files,
+  name,
+  schema,
+  logger,
+  leftOut,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  name: string;
+  schema: TSchema;
+  logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+}): z.infer<TSchema> {
+  const json = readSectionJson({ files, name });
+  const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(json));
+  if (!result.success) {
+    rejectSection({ name, json, error: result.error, logger });
+  }
+  leftOut.set(name, new Map([[`section:${name}`, new Map(counts)]]));
+  return result.data;
+}
+
+/** The chat a raw sessions record belongs to, and its title as far as it is known yet. */
+function rawChat(item: unknown, titles: ReadonlyMap<string, string | null>): { id: string; title: string | null } {
+  const session = isRecord(item) ? item['session'] : undefined;
+  const turn = isRecord(item) ? item['turn'] : undefined;
+  const fromSession = isRecord(session) && typeof session['session_id'] === 'string' ? session['session_id'] : '';
+  const fromTurn = isRecord(turn) && typeof turn['session_id'] === 'string' ? turn['session_id'] : '';
+  const id = fromSession === '' ? fromTurn : fromSession;
+  const rawTitle = isRecord(session) && typeof session['title'] === 'string' ? session['title'] : null;
+  return { id, title: titles.get(id) ?? rawTitle };
+}
+
+/** A sessions file read one record at a time, so each detail left out is told against its own chat. */
+function parseChatRecords<TSchema extends z.ZodType>({
+  files,
+  name,
+  schema,
+  chatOf,
+  chats,
+  logger,
+  leftOut,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  name: string;
+  schema: TSchema;
+  chatOf: (record: z.output<TSchema>) => { id: string; title: string | null | undefined };
+  chats: ChatReading;
+  logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+}): z.output<TSchema>[] {
+  const json = readSectionJson({ files, name });
+  const list = z.array(z.unknown()).safeParse(json);
+  if (!list.success) {
+    rejectSection({ name, json, error: list.error, logger });
+  }
+  const owners: LeftOutByOwner = new Map();
+  const records: z.output<TSchema>[] = [];
+  for (const [index, item] of list.data.entries()) {
+    let parsed: { result: z.ZodSafeParseResult<z.output<TSchema>>; leftOut: LeftOutCounts };
+    try {
+      parsed = withToolTypeResolver(chats.resolveToolType, () => countingLeftOut(() => schema.safeParse(item)));
+    } catch (cause) {
+      if (!(cause instanceof UnknownToolTypeError)) {
+        throw cause;
+      }
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' uses the tool ${cause.toolName}, and this Aman cannot tell what kind of tool it was, so nothing was imported. If the file came from a newer Aman, update this one. Otherwise delete that chat in the Aman it came from, export again and import the new file.`,
+        400,
+        { cause },
+      );
+    }
+    const { result, leftOut: counts } = parsed;
+    if (!result.success) {
+      const issues = result.error.issues.map(issue => ({ ...issue, path: [index, ...issue.path] }));
+      logRejectedSection({ name, json, error: new z.ZodError(issues), logger });
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        400,
+        { cause: result.error },
+      );
+    }
+    const chat = chatOf(result.data);
+    if (chat.title !== undefined) {
+      chats.titles.set(chat.id, chat.title);
+    }
+    const owner = `chat:${chat.id}`;
+    const into = owners.get(owner) ?? new Map<string, number>();
+    addCounts({ into, counts });
+    owners.set(owner, into);
+    records.push(result.data);
+  }
+  leftOut.set(name, owners);
+  return records;
 }
 
 /**
@@ -268,6 +438,8 @@ interface ArchiveSessions {
   ids: string[];
   /** Agent names the chats refer to. */
   agentNames: ReadonlySet<string>;
+  /** Chat titles by id, for telling the person which chat lost a detail. */
+  titles: ReadonlyMap<string, string | null>;
   entries: () => Iterable<ImportSessionEntry>;
 }
 
@@ -285,6 +457,8 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
+  /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
+  leftOutReport: LeftOutReport;
 }
 
 /** The sessions/ file names in order; a gap in the numbering is a missing file. */
@@ -302,17 +476,93 @@ function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
   });
 }
 
+/** What reading chat records needs beyond the file: titles seen so far, and how to tell a tool's kind. */
+interface ChatReading {
+  titles: Map<string, string | null>;
+  resolveToolType: ToolTypeResolver;
+}
+
+/**
+ * Tells the kind of a tool call recorded with a kind this version does not know, from facts and
+ * never by guessing: a call to a connector in the export or in this Aman's connector catalog is a
+ * connector tool; otherwise every other call to the same tool on the same server in the export must
+ * agree on one kind.
+ */
+function toolTypeResolver({
+  files,
+  connectorNames,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  connectorNames: ReadonlySet<string>;
+}): ToolTypeResolver {
+  let recorded: Map<string, ToolType | 'conflicting'> | undefined;
+  const recordedTypes = (): Map<string, ToolType | 'conflicting'> => {
+    if (recorded !== undefined) {
+      return recorded;
+    }
+    const found = new Map<string, ToolType | 'conflicting'>();
+    for (const [name, data] of files) {
+      if (name !== 'sessions.json' && sessionPartIndex(name) === undefined) {
+        continue;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(data.toString('utf8'));
+      } catch {
+        // A damaged file is reported by the parse that needs it.
+        continue;
+      }
+      forEachToolCall(json, ({ toolName, serverName, toolInfo }) => {
+        const type = toolInfo['type'];
+        if (isToolType(type)) {
+          const key = toolKey({ serverName, toolName });
+          const before = found.get(key);
+          found.set(key, before === undefined || before === type ? type : 'conflicting');
+        }
+      });
+    }
+    recorded = found;
+    return found;
+  };
+  return ({ toolName, serverName }) => {
+    if (serverName !== '' && connectorNames.has(serverName)) {
+      return 'mcp';
+    }
+    const type = recordedTypes().get(toolKey({ serverName, toolName }));
+    // A connector tool always names its server, so a call without one is never taken for one.
+    if (type === undefined || type === 'conflicting' || (type === 'mcp' && serverName === '')) {
+      return undefined;
+    }
+    return type;
+  };
+}
+
+/** The same tool name on two servers is two tools. */
+function toolKey({ serverName, toolName }: { serverName: string; toolName: string }): string {
+  return `${serverName}\u0000${toolName}`;
+}
+
 function readSessionEntries(input: {
   files: ReadonlyMap<string, Buffer>;
   logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+  chats: ChatReading;
 }): () => Iterable<ImportSessionEntry> {
-  const { files, logger } = input;
+  const { files, logger, leftOut, chats } = input;
   const partNames = sessionPartNames(files);
   if (files.has('sessions.json')) {
     if (partNames.length > 0) {
       throw damagedExportError('it holds chats both in sessions.json and in sessions/ files.');
     }
-    const entries = parseSection({ files, name: 'sessions.json', schema: ImportSessionsFileSchema, logger });
+    const entries = parseChatRecords({
+      files,
+      name: 'sessions.json',
+      schema: ImportSessionEntrySchema,
+      chatOf: entry => ({ id: entry.session.session_id, title: entry.session.title }),
+      chats,
+      logger,
+      leftOut,
+    });
     return () => entries;
   }
   if (partNames.length === 0) {
@@ -326,7 +576,21 @@ function readSessionEntries(input: {
   function* records() {
     for (const name of partNames) {
       if (last?.name !== name) {
-        last = { name, records: parseSection({ files, name, schema: ImportSessionPartFileSchema, logger }) };
+        last = {
+          name,
+          records: parseChatRecords({
+            files,
+            name,
+            schema: ImportSessionPartRecordSchema,
+            chatOf: record =>
+              record.kind === 'session'
+                ? { id: record.session.session_id, title: record.session.title }
+                : { id: record.turn.session_id, title: undefined },
+            chats,
+            logger,
+            leftOut,
+          }),
+        };
       }
       yield* last.records;
     }
@@ -338,9 +602,11 @@ function loadArchive(input: {
   archive: Buffer;
   maxBytes: number;
   maxEntryBytes: number;
+  /** Connector names this Aman's catalog knows, for telling the kind of a tool call. */
+  catalogConnectorNames: ReadonlySet<string>;
   logger: DataImportDeps<never>['logger'];
 }): ArchiveContents {
-  const { archive, maxBytes, maxEntryBytes, logger } = input;
+  const { archive, maxBytes, maxEntryBytes, catalogConnectorNames, logger } = input;
   let entries: ZipArchiveEntry[];
   try {
     entries = readZipArchive(archive, {
@@ -360,8 +626,9 @@ function loadArchive(input: {
       throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
     }
   }
+  const leftOut: LeftOutReport = new Map();
   const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
-    parseSection({ files, name, schema, logger });
+    parseSection({ files, name, schema, logger, leftOut });
 
   const manifest = section('manifest.json', ImportManifestSchema);
   if (manifest.format !== 'aman-export') {
@@ -381,7 +648,19 @@ function loadArchive(input: {
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
   const folders = section('folders.json', ImportFoldersFileSchema);
-  const sessionEntries = readSessionEntries({ files, logger });
+  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const sessionEntries = readSessionEntries({
+    files,
+    logger,
+    leftOut,
+    chats: {
+      titles: new Map(),
+      resolveToolType: toolTypeResolver({
+        files,
+        connectorNames: new Set([...catalogConnectorNames, ...connectors.map(connector => connector.name)]),
+      }),
+    },
+  });
   const contents: ArchiveContents = {
     manifest,
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
@@ -391,12 +670,13 @@ function loadArchive(input: {
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
-    connectors: section('connectors.json', ImportConnectorsFileSchema),
+    connectors,
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
     files,
     sourceTenantId: manifest.tenant_id,
+    leftOutReport: leftOut,
   };
   validateCrossReferences(contents);
   return contents;
@@ -406,7 +686,7 @@ function loadArchive(input: {
 function checkSessions(
   entries: Iterable<ImportSessionEntry>,
   folders: readonly ImportFolderRecord[],
-): Pick<ArchiveSessions, 'ids' | 'agentNames'> {
+): Pick<ArchiveSessions, 'ids' | 'agentNames' | 'titles'> {
   const folderIds = new Set<string>();
   for (const folder of folders) {
     if (folderIds.has(folder.folder_id)) {
@@ -417,21 +697,19 @@ function checkSessions(
 
   const sessionIds = new Set<string>();
   const agentNames = new Set<string>();
+  const titles = new Map<string, string | null>();
   for (const entry of entries) {
     const session = entry.session;
     if (sessionIds.has(session.session_id)) {
       throw damagedExportError(`chat ${session.session_id} appears twice.`);
     }
     sessionIds.add(session.session_id);
+    titles.set(session.session_id, session.title);
     if (session.agent.type === 'reference' && session.agent.name !== null) {
       agentNames.add(session.agent.name);
     }
     if (session.folder_id !== null && !folderIds.has(session.folder_id)) {
       throw damagedExportError(`chat ${session.session_id} points at a folder that is not in the export.`);
-    }
-    const custom = session.custom;
-    if (custom !== null && custom !== undefined && !(typeof custom === 'object' && Object.keys(custom).length === 0)) {
-      throw damagedExportError(`chat ${session.session_id} has custom data that this version does not store.`);
     }
     const turnIds = new Set<string>();
     for (const { turn } of entry.turns) {
@@ -442,15 +720,6 @@ function checkSessions(
         throw damagedExportError(`turn ${turn.turn_id} appears twice in chat ${session.session_id}.`);
       }
       turnIds.add(turn.turn_id);
-      try {
-        parseTurnCustom(turn.custom ?? null);
-      } catch (cause) {
-        throw new DataImportError(
-          `This export is damaged: a turn in chat ${session.session_id} has custom data that this version does not store. Nothing was imported.`,
-          400,
-          { cause },
-        );
-      }
     }
     for (const artifact of entry.artifacts) {
       if (artifact.session_id !== session.session_id || !turnIds.has(artifact.turn_id)) {
@@ -460,7 +729,7 @@ function checkSessions(
       }
     }
   }
-  return { ids: [...sessionIds], agentNames };
+  return { ids: [...sessionIds], agentNames, titles };
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
@@ -485,8 +754,13 @@ function validateCrossReferences(contents: ArchiveContents): void {
   }
 
   for (const { space, revisions } of spaces) {
+    // Older versions pruned a space's early revisions, so the run may start late; it must still be unbroken.
     const numbers = revisions.map(revision => revision.revision).sort((a, b) => a - b);
-    const complete = numbers.length === space.revision && numbers.every((value, index) => value === index + 1);
+    const first = numbers[0] ?? 0;
+    const complete =
+      numbers.length > 0 &&
+      numbers.at(-1) === space.revision &&
+      numbers.every((value, index) => value === first + index);
     if (!complete) {
       throw damagedExportError(`space ${space.id} is missing some of its revisions.`);
     }
@@ -661,11 +935,19 @@ function buildSummary({
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
+  leftOut,
+  trimmedSpaces,
+  dryRun,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
+  /** One plain line per chat or section that lost internal details. */
+  leftOut: readonly string[];
+  dryRun: boolean;
+  /** Spaces whose history starts after revision 1 in the archive. */
+  trimmedSpaces: number;
   filesLeftBehind: number;
 }): string {
   const counts = [
@@ -679,7 +961,9 @@ function buildSummary({
       : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
   ];
   return [
-    `Imported ${counts.join(', ')}.`,
+    dryRun
+      ? `This was a dry run, so nothing was imported. The import would bring ${counts.join(', ')}.`
+      : `Imported ${counts.join(', ')}.`,
     'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time.',
     auditEntries === 0
       ? ''
@@ -693,6 +977,13 @@ function buildSummary({
     connectorNames.length === 0
       ? ''
       : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
+    trimmedSpaces === 0
+      ? ''
+      : `The older history of ${pluralize(trimmedSpaces, 'space', 'spaces')} was trimmed before the export, so ${trimmedSpaces === 1 ? 'its' : 'their'} versions now start at 1.`,
+    ...leftOut.slice(0, LEFT_OUT_LINES_SHOWN),
+    leftOut.length > LEFT_OUT_LINES_SHOWN
+      ? `And ${String(leftOut.length - LEFT_OUT_LINES_SHOWN)} more. The full list is in the import log.`
+      : '',
     'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
     'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
   ]
@@ -908,6 +1199,19 @@ export async function runDataImport<TTransaction>(
   }
   importsInFlight.add(tenantId);
   try {
+    if (request.dryRun === true) {
+      // A dry run never takes the lock, since taking it cleans up after an interrupted import.
+      const existing = await readMarkerForRecovery(deps);
+      if (existing !== undefined) {
+        throw new DataImportError(
+          isLiveImportMarker(existing.marker, Date.now())
+            ? IMPORT_BUSY_MESSAGE
+            : 'An earlier import did not finish, so this file was not checked. Run the import without --dry-run to finish cleaning up, then check again.',
+          409,
+        );
+      }
+      return await importArchive(deps, { request, lock: undefined });
+    }
     const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
     const lock = await acquireImportLock(deps, { tenantId, subjectId, scope });
     try {
@@ -922,13 +1226,15 @@ export async function runDataImport<TTransaction>(
 
 async function importArchive<TTransaction>(
   deps: DataImportDeps<TTransaction>,
-  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> },
+  /** No lock for a dry run, which writes nothing and returns before the first write. */
+  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> | undefined },
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({
     archive: request.archive,
     maxBytes: request.maxBytes,
     maxEntryBytes: request.maxEntryBytes ?? ARCHIVE_MAX_ENTRY_BYTES,
+    catalogConnectorNames: new Set(deps.mcpCatalog.list().map(preset => preset.name)),
     logger: deps.logger,
   });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
@@ -1047,10 +1353,53 @@ async function importArchive<TTransaction>(
       );
     }
   }
-  await replaySessions(restoreContext, {
-    sessions: sessions.entries(),
-    folderNames: new Map(folders.map(folder => [folder.folder_id, folder.name])),
-  });
+  try {
+    await replaySessions(restoreContext, {
+      sessions: sessions.entries(),
+      folderNames: new Map(folders.map(folder => [folder.folder_id, folder.name])),
+    });
+  } catch (error) {
+    if (error instanceof DataImportError && error.cause instanceof Error) {
+      deps.logger.warn('Data import could not read a chat back', {
+        error: error.message,
+        message: error.cause.message,
+        stack: error.cause.stack,
+      });
+    }
+    throw error;
+  }
+
+  const leftOut = leftOutLines({ report: contents.leftOutReport, titles: sessions.titles });
+  if (leftOut.length > 0) {
+    deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
+  }
+  const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
+  if (lock === undefined) {
+    const result: Omit<ImportDataResult, 'summary'> = {
+      chats: sessions.ids.length,
+      memories: memoryCount,
+      personas: personas.length,
+      spaces: spaces.length,
+      schedules: schedules.length,
+      folders: folders.length,
+      agents: agentPlan.archived.length,
+      connectors: newConnectors.length,
+      schedules_off: schedules.length > 0,
+    };
+    return {
+      ...result,
+      summary: buildSummary({
+        result,
+        connectorNames: newConnectors.map(connector => connector.name),
+        auditEntries: audit.length,
+        standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
+        filesLeftBehind: 0,
+        leftOut,
+        trimmedSpaces,
+        dryRun: true,
+      }),
+    };
+  }
 
   // --- Writes. The marker names everything planned before the first one lands. ---
   const planned: ImportLedger = {
@@ -1211,7 +1560,8 @@ async function importArchive<TTransaction>(
           },
           tx,
         );
-        for (const revision of sorted.slice(1)) {
+        // A run that starts after revision 1 lands renumbered from 1, since a new space starts there.
+        for (const [index, revision] of sorted.slice(1).entries()) {
           aggregate = await deps.spaceStore.getAggregate({ tenant_id: tenantId, created_by: subjectId }, tx);
           await deps.spaceStore.updateSpace(
             {
@@ -1219,7 +1569,7 @@ async function importArchive<TTransaction>(
               created_by: subjectId,
               space_id: space.id,
               ...contentOf(revision),
-              expected_revision: revision.revision - 1,
+              expected_revision: index + 1,
               expected_aggregate_revision: aggregate.revision,
             },
             tx,
@@ -1343,6 +1693,9 @@ async function importArchive<TTransaction>(
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
+        leftOut,
+        trimmedSpaces,
+        dryRun: false,
       }),
     };
   } catch (cause) {

@@ -95,8 +95,9 @@ import_wait_for_search_model() {
 # inside the image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env,
 # so it reads the same database and memory paths the app does.
 import_run() {
-  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log
+  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log check=()
   base=$(basename -- "$file")
+  if [ "$DRY_RUN" = 1 ]; then check=(--dry-run); fi
   log=$(cli_log import)
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
@@ -104,13 +105,17 @@ import_run() {
     IMPORT_STOPPED_APP=$name
     dc "$name" stop app >/dev/null || die "The app of instance $name did not stop, so nothing was imported."
   fi
-  say "Importing $base into instance $name for $owner"
+  if [ "$DRY_RUN" = 1 ]; then
+    say "Checking $base against instance $name for $owner. Nothing is imported."
+  else
+    say "Importing $base into instance $name for $owner"
+  fi
   D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
-    "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\"" \
-    import "$owner" "$display" <"$file" 2>"$log" || rc=$?
+    "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"}" \
+    import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file" 2>"$log" || rc=$?
   if [ "$was_running" = 1 ]; then
     import_on_exit
   else
@@ -121,8 +126,13 @@ import_run() {
     UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi
-  # The CLI's summary of what it imported.
+  # The CLI's summary of what it imported, or would import, including anything from an older version it leaves out.
   cat "$log" >&2
+  UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
+  if [ "$DRY_RUN" = 1 ]; then
+    ui_ok "Checked $base. Nothing was imported. To import it, run the same command without --dry-run."
+    return 0
+  fi
   log_event "data import into instance $name from $base"
   ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export. Set them up in Settings."
 }
@@ -142,7 +152,10 @@ cmd_instance_import() {
   load_installed_release
   import_start_once "$name" "$REL_APP_TAG"
   import_wait_for_search_model "$name" "$REL_APP_TAG"
-  # A kept backup is never pruned, so the instance as it was before the import can always be put back.
-  backup_run "$name" before-import || die "The backup before the import failed, so nothing was imported. Run: aman doctor backup"
+  # A kept backup is never pruned, so the instance as it was before the import can always be put back. A dry run writes
+  # nothing, so it needs none.
+  if [ "$DRY_RUN" != 1 ]; then
+    backup_run "$name" before-import || die "The backup before the import failed, so nothing was imported. Run: aman doctor backup"
+  fi
   import_run "$name" "$file" "$owner" "$OPT_DISPLAY_NAME" "$REL_APP_TAG" || exit 1
 }
