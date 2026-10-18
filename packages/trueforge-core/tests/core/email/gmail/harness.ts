@@ -30,7 +30,10 @@ export function scriptedGoogle(routes: Route[]) {
   const fetchImpl: typeof fetch = (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     urls.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
-    if (typeof init?.body === 'string' && url.hostname === 'gmail.googleapis.com') {
+    if (
+      typeof init?.body === 'string' &&
+      (url.hostname === 'gmail.googleapis.com' || url.hostname === 'www.googleapis.com')
+    ) {
       bodies.push(JSON.parse(init.body));
     }
     if (url.href.startsWith(GOOGLE_TOKEN_URL)) {

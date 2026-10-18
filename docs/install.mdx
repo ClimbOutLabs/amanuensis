@@ -276,6 +276,16 @@ installer/install.sh instance remove main --purge-data
 installer/install.sh instance add main --email <your-email>
 ```
 
+## Forgot your password
+
+```bash
+aman password                  # with several instances: aman password --instance NAME
+```
+
+It asks for a new password twice, signs everyone out of that instance, and restarts only its sign-in service and app. Run it on the computer where Aman is installed; that is how Aman knows you are the owner.
+
+The app restart stops a chat or task that is running. If a step fails, the command says whether the old password and old sign-ins still work, and what to run next.
+
 ## What is off in this version
 
 After a normal install the assistant can run code (Python and shell, in a sandbox with no network) and read PDFs and images you attach in a chat, including scanned pages and text in many languages (English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi, Marathi, Arabic, Russian, Chinese, Japanese and Korean). Settings → Sandbox shows whether the sandbox is ready, `aman doctor` reports code and attachments separately, and new chats have the sandbox enabled. Gmail attachments are read the same way: ask Aman to open a PDF or image from an email and it is read in the sandbox. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` can do neither. An install from before this release gets PDF and image reading with `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger) and starts it again.

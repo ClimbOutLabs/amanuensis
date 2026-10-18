@@ -19,6 +19,8 @@ const AttendeeSchema = z.object({
 
 export const CalendarEventSchema = z.object({
   id: z.string(),
+  /** Changes whenever the event does, so a change can be bound to the version that was shown. */
+  etag: z.string().optional(),
   status: z.string().optional(),
   eventType: z.string().optional(),
   summary: z.string().optional(),
@@ -33,6 +35,10 @@ export const CalendarEventSchema = z.object({
     .optional(),
   attendees: z.array(AttendeeSchema).optional(),
   attendeesOmitted: z.boolean().optional(),
+  /** Read only to tell whether a change emailed to guests would carry a call link or files the card cannot show. */
+  hangoutLink: z.string().optional(),
+  conferenceData: z.unknown().optional(),
+  attachments: z.array(z.unknown()).optional(),
 });
 export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
 

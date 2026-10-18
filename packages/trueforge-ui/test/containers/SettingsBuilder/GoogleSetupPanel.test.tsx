@@ -64,6 +64,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
       { feature: 'gmail_read', label: 'Read and search your email', granted: false },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
       { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
+      { feature: 'calendar_write', label: 'Add and change events you approve', granted: false },
     ],
     hasSavedClient: false,
     locked: false,
@@ -81,6 +82,7 @@ function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): Googl
       { feature: 'gmail_read', label: 'Read and search your email', granted: true },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
       { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
+      { feature: 'calendar_write', label: 'Add and change events you approve', granted: false },
     ],
     ...overrides,
   });
@@ -90,6 +92,13 @@ function withCalendar(status: GoogleConnectionStatus): GoogleConnectionStatus {
   return {
     ...status,
     features: status.features.map(item => (item.feature === 'calendar_read' ? { ...item, granted: true } : item)),
+  };
+}
+
+function withCalendarWrite(status: GoogleConnectionStatus): GoogleConnectionStatus {
+  return {
+    ...status,
+    features: status.features.map(item => (item.feature === 'calendar_write' ? { ...item, granted: true } : item)),
   };
 }
 
@@ -369,7 +378,7 @@ describe('GoogleSetupPanel', () => {
     renderPanel(port);
     const row = await screen.findByLabelText('Calendar');
     expect(row).toHaveTextContent('Calendar: not connected');
-    expect(row).toHaveTextContent('cannot add, change or delete');
+    expect(row).toHaveTextContent('Letting Aman add events is a separate step once Calendar is connected.');
     expect(row).toHaveTextContent('Turn on the Google Calendar API');
     expect(row).toHaveTextContent('click Enable');
     expect(row).not.toHaveTextContent(/scope|consent screen/i);
@@ -385,6 +394,25 @@ describe('GoogleSetupPanel', () => {
     renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
     expect(await screen.findByLabelText('Calendar')).toHaveTextContent('Calendar: connected');
     expect(screen.queryByRole('button', { name: 'Connect Calendar' })).not.toBeInTheDocument();
+  });
+
+  it('offers a plain step to let Aman add events, asking Google for that one more permission', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('You still approve each event before it is saved.');
+    expect(screen.queryByText(/Add and change events you approve: /)).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Allow Aman to add events' }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read', 'calendar_write'] }),
+    );
+  });
+
+  it('says what Aman may do once adding events is allowed, with nothing left to allow', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendarWrite(withCalendar(connectedStatus())) }).port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('add or change events after you approve each one. It cannot delete events.');
+    expect(screen.queryByRole('button', { name: 'Allow Aman to add events' })).not.toBeInTheDocument();
   });
 
   it('keeps the Calendar API link once Calendar is connected, so the message that names it has somewhere to point', async () => {

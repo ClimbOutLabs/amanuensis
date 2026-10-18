@@ -703,6 +703,8 @@ export interface PersonalizationProfileTable {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JSONColumnType<string[], string[] | string, string[] | string>;
   /** Host-maintained learned document; null until the learning pass writes one. */

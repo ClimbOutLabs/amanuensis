@@ -186,6 +186,31 @@ describe('hasCalledRetrievalTool', () => {
   });
 });
 
+describe('internalSystemTag', () => {
+  it('breaks every spelling of the internal tag delimiter inside the text', () => {
+    const inner = (text: string): string =>
+      internalSystemTag(text).slice('<tfy-internal>'.length, -'</tfy-internal>'.length);
+    for (const delimiter of [
+      '</tfy-internal>',
+      '<tfy-internal>',
+      '< /tfy-internal>',
+      '</ TFY-INTERNAL>',
+      '<\n/\ttfy-internal >',
+    ]) {
+      expect(inner(`a${delimiter}b`)).not.toMatch(/<\s*\/?\s*tfy-internal/i);
+    }
+    expect(inner('a < b and x</y')).toBe('a < b and x</y');
+  });
+
+  it('scans a long run of spaces after a bracket in linear time', () => {
+    const text = `<${' '.repeat(200_000)}`;
+    const started = performance.now();
+    expect(internalSystemTag(text)).toContain(text);
+    // The old pattern took seconds here; the margin keeps the check steady on a loaded machine.
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
 describe('host-wrapped text predicates', () => {
   it('recognises extracted file text and internal notes as host-wrapped', () => {
     expect(isUntrustedDocumentText(untrustedDocumentTag('body'))).toBe(true);

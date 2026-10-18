@@ -55,7 +55,7 @@ describe("PersonalizationClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
         
         server
             .mockEndpoint()
@@ -68,6 +68,7 @@ describe("PersonalizationClient", () => {
                                 const response = await client.personalization.getProfile();
                                 expect(response).toEqual({
     data: {
+        addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
         createdAt: new Date("2024-01-15T09:30:00.000Z"),
@@ -79,6 +80,7 @@ describe("PersonalizationClient", () => {
         revision: 1,
         updatedAt: new Date("2024-01-15T09:30:00.000Z"),
         updatedBy: "updated_by",
+        userName: "Sam Rivera",
         userProfile: "Prefers local-first tools and plain English.",
         voiceGuidance: "Warm, direct, and concise."
     }
@@ -108,8 +110,8 @@ describe("PersonalizationClient", () => {
     test("create_or_update_profile (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "profile" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
-        const rawResponseBody = { "data" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawRequestBody = { "profile" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawResponseBody = { "data" : { "address_as" : "Sam" , "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_name" : "Sam Rivera" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
         
         server
             .mockEndpoint()
@@ -122,16 +124,19 @@ describe("PersonalizationClient", () => {
                         
                                 const response = await client.personalization.createOrUpdateProfile({
     profile: {
+        addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
+        userName: "Sam Rivera",
         userProfile: "Prefers local-first tools and plain English.",
         voiceGuidance: "Warm, direct, and concise."
     }
 });
                                 expect(response).toEqual({
     data: {
+        addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
         createdAt: new Date("2024-01-15T09:30:00.000Z"),
@@ -143,6 +148,7 @@ describe("PersonalizationClient", () => {
         revision: 1,
         updatedAt: new Date("2024-01-15T09:30:00.000Z"),
         updatedBy: "updated_by",
+        userName: "Sam Rivera",
         userProfile: "Prefers local-first tools and plain English.",
         voiceGuidance: "Warm, direct, and concise."
     }

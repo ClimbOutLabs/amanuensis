@@ -270,6 +270,72 @@ describe('extractSentinelFromEvent', () => {
     expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
   });
 
+  const CALENDAR_EVENT = {
+    action: 'change',
+    calendar: 'ada@example.com',
+    title: 'Team sync',
+    when: 'Tuesday, October 20, 2026, 2:00 pm to 2:30 pm',
+    time_zone: 'America/New_York',
+    duration: '30 minutes',
+    location: 'Room 4',
+    description: '',
+    attendees: ['lin@example.com'],
+    guests_emailed: true,
+    one_of_repeating: false,
+    before: {
+      title: 'Team sync',
+      when: 'Monday, October 19, 2026, 8:00 am to 8:30 am',
+      duration: '30 minutes',
+      location: 'Room 4',
+    },
+  };
+
+  it('reads the whole event of a calendar card after the SDK deserializes it', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-3',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-14',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Change "Team sync" in your Google Calendar.',
+              plain_why: null,
+              cannot_be_undone: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+              calendar_event: CALENDAR_EVENT,
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    expect(extractSentinelFromEvent(parsed)[0]?.card.calendar_event).toEqual(CALENDAR_EVENT);
+  });
+
+  it('shows no event for a calendar card missing a field, so a partial event is never approved', () => {
+    const event = (calendar_event: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-15', tier: 3, tier3_card: { plain_what: 'Do it', calendar_event } }],
+      })[0]?.card.calendar_event;
+    expect(event(undefined)).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, attendees: undefined })).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, guests_emailed: 'yes' })).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, action: 'delete' })).toBeNull();
+  });
+
   it('reads a camel-cased card from a regenerated SDK shape', () => {
     const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',

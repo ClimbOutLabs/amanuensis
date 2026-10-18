@@ -84,6 +84,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
+       aman password [--instance NAME] [--password-stdin]
+         sets a new owner password; run it on the computer where Aman is installed
        aman import FILE [--instance NAME] [--display-name NAME]
        aman migrate --from-compose FOLDER [--user ID]
 USAGE
@@ -1664,6 +1666,10 @@ case "${1:-}" in
   import)
     shift
     run_import "$@"
+    ;;
+  password)
+    shift
+    run_installer instance password "$@"
     ;;
   -h | --help)
     usage

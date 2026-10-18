@@ -24,6 +24,19 @@ describe('Google features and scopes', () => {
     }
   });
 
+  it('adds events with the events scope only, never the whole calendar', () => {
+    expect(scopesForFeatures(['calendar_write'])).toEqual(['https://www.googleapis.com/auth/calendar.events']);
+    for (const scope of scopesForFeatures(['gmail_read', 'gmail_compose', 'calendar_read', 'calendar_write'])) {
+      expect(scope).not.toMatch(/auth\/calendar$|calendar\.readonly$/);
+    }
+    expect(
+      grantedFeatures([
+        'https://www.googleapis.com/auth/calendar.events.readonly',
+        'https://www.googleapis.com/auth/calendar.events',
+      ]),
+    ).toEqual(['calendar_read', 'calendar_write']);
+  });
+
   it('reads Calendar off the scopes Google returned, alongside mail', () => {
     expect(
       grantedFeatures([

@@ -6,6 +6,10 @@ export type PersonalizationProfile = {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  /** What the user is called; the first thing a new user is asked for. */
+  user_name: string | null;
+  /** How the assistant should address the user: a short form, a title, pronouns. */
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: string[];
   /** Host-learned markdown document; null until the learning pass writes one. */
@@ -34,6 +38,8 @@ export const EMPTY_PERSONALIZATION_PROFILE: PersonalizationProfile = {
   assistant_name: null,
   assistant_identity: null,
   voice_guidance: null,
+  user_name: null,
+  address_as: null,
   user_profile: null,
   pinned_preferences: [],
   learned_profile: null,

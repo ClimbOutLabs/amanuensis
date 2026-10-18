@@ -71,28 +71,12 @@ demo_install_apply() {
   { demo_enable "$name" && demo_seed_run "$name" "$(reg_get "$name" owner_email)" 0; } || DEMO_FAILED=1
 }
 
-# The one instance demo-seed targets: --instance, else the only one.
-demo_seed_instance() {
-  local name=${OPT_INSTANCE:-} names
-  if [ -z "$name" ]; then
-    names=$(reg_names)
-    case "$names" in
-      '') die "no instance exists yet; run install.sh first" ;;
-      *$'\n'*) usage_die "several instances exist ($(printf '%s' "$names" | tr '\n' ' ')); say which with --instance NAME" ;;
-    esac
-    name=$names
-  fi
-  valid_name "$name" || usage_die "invalid instance name"
-  reg_exists "$name" || die "instance $name does not exist"
-  printf '%s' "$name"
-}
-
 # The demo world is always the owner's.
 cmd_instance_demo_seed() {
   local name
   [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset] [--instance NAME]"
   require_installed
-  name=$(demo_seed_instance)
+  name=$(instance_pick)
   demo_env_on "$name" ||
     die "instance $name is not a demo instance. Turn demo mode on and seed it with: install.sh --demo --name $name"
   docker_prepare

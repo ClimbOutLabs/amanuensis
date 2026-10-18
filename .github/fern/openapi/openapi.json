@@ -2537,6 +2537,21 @@
         ],
         "type": "object"
       },
+      "FirstRunGuide": {
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True once the owner has dismissed the first-run checklist.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "type": "object"
+      },
       "GenerativeUIConfig": {
         "default": {
           "enabled": true
@@ -2598,6 +2613,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetFirstRunGuideResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FirstRunGuide"
           }
         },
         "required": [
@@ -3300,7 +3326,8 @@
         "enum": [
           "gmail_read",
           "gmail_compose",
-          "calendar_read"
+          "calendar_read",
+          "calendar_write"
         ],
         "type": "string"
       },
@@ -5126,7 +5153,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
@@ -6897,6 +6924,17 @@
       "PersonalizationProfile": {
         "additionalProperties": false,
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -6968,6 +7006,17 @@
             "minLength": 1,
             "type": "string"
           },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
             "maxLength": 2000,
@@ -7009,6 +7058,7 @@
       "PersonalizationProfileContent": {
         "additionalProperties": false,
         "example": {
+          "address_as": "Sam",
           "assistant_identity": "A thoughtful local-first personal assistant.",
           "assistant_name": "Aman",
           "learned_profile": null,
@@ -7016,10 +7066,22 @@
           "pinned_preferences": [
             "Use short bullet points."
           ],
+          "user_name": "Sam Rivera",
           "user_profile": "Prefers local-first tools and plain English.",
           "voice_guidance": "Warm, direct, and concise."
         },
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -7065,6 +7127,17 @@
             },
             "maxItems": 12,
             "type": "array"
+          },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
@@ -9347,6 +9420,114 @@
         ],
         "type": "object"
       },
+      "Tier3CalendarEvent": {
+        "description": "The calendar event a write adds or changes, shown in full.",
+        "properties": {
+          "action": {
+            "description": "Whether a new event is added or an existing one changed.",
+            "enum": [
+              "create",
+              "change"
+            ],
+            "type": "string"
+          },
+          "attendees": {
+            "description": "Every guest on the event.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "before": {
+            "$ref": "#/components/schemas/Tier3CalendarEventBefore"
+          },
+          "calendar": {
+            "description": "The Google account whose main calendar is written.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Description the write sets; empty when none.",
+            "type": "string"
+          },
+          "duration": {
+            "description": "How long the event lasts, in plain words.",
+            "type": "string"
+          },
+          "guests_emailed": {
+            "description": "True when Google emails the guests about this.",
+            "type": "boolean"
+          },
+          "location": {
+            "description": "Place; empty when none.",
+            "type": "string"
+          },
+          "one_of_repeating": {
+            "description": "True when this changes one date of a repeating event.",
+            "type": "boolean"
+          },
+          "time_zone": {
+            "description": "IANA time zone the times are in.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Event title.",
+            "type": "string"
+          },
+          "when": {
+            "description": "Local date and time in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "title",
+          "when",
+          "time_zone",
+          "duration",
+          "location",
+          "description",
+          "attendees",
+          "guests_emailed",
+          "one_of_repeating",
+          "before"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "Tier3CalendarEventBefore": {
+        "description": "The event as it is now, before a change.",
+        "properties": {
+          "duration": {
+            "description": "How long the event lasted before the change.",
+            "type": "string"
+          },
+          "location": {
+            "description": "Place before the change; empty when none.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Title before the change.",
+            "type": "string"
+          },
+          "when": {
+            "description": "Local date and time before the change, in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "when",
+          "duration",
+          "location"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "Tier3Card": {
         "properties": {
           "amount": {
@@ -9355,6 +9536,9 @@
               "string",
               "null"
             ]
+          },
+          "calendar_event": {
+            "$ref": "#/components/schemas/Tier3CalendarEvent"
           },
           "cannot_be_undone": {
             "description": "A short note on what can't be reversed, or null.",
@@ -10565,7 +10749,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
@@ -11474,6 +11658,22 @@
         ],
         "type": "object"
       },
+      "UpdateFirstRunGuideRequest": {
+        "additionalProperties": false,
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True to put the checklist away; false to show it again.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "type": "object"
+      },
       "UpdateMCPServerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11580,6 +11780,7 @@
         "additionalProperties": false,
         "example": {
           "profile": {
+            "address_as": "Sam",
             "assistant_identity": "A thoughtful local-first personal assistant.",
             "assistant_name": "Aman",
             "learned_profile": null,
@@ -11587,6 +11788,7 @@
             "pinned_preferences": [
               "Use short bullet points."
             ],
+            "user_name": "Sam Rivera",
             "user_profile": "Prefers local-first tools and plain English.",
             "voice_guidance": "Warm, direct, and concise."
           }
@@ -19239,6 +19441,116 @@
           "format": "sse",
           "resumable": true
         }
+      }
+    },
+    "/api/v1/settings/first-run-guide": {
+      "get": {
+        "description": "Whether the owner has dismissed the first-run checklist. Not dismissed until the owner says so.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the first-run checklist state",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists whether the first-run checklist is dismissed. The response carries the stored state.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFirstRunGuideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Dismiss or restore the first-run checklist",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/mcp-servers": {
