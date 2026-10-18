@@ -43,7 +43,7 @@ On Windows, keep the code inside Ubuntu (just run the lines as they are; do not 
 
 It first checks your computer, then asks:
 
-1. **Instance name [main]**: press Enter.
+1. **Name for this instance [main]:** press Enter to name it main, or type another name, such as `work`.
 2. **Your email, used to sign in**: type your email in lowercase. This is only your sign-in name; nothing is sent to it.
 3. **Back up automatically every day? [Y/n]**: press Enter.
 4. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.

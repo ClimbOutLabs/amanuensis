@@ -195,7 +195,7 @@ test_answering_yes_on_a_terminal() {
   t_begin "on a terminal the Caddy steps run after a yes"
   sandbox_new
   dns_ready
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
@@ -212,7 +212,7 @@ test_declining_on_a_terminal() {
   t_begin "on a terminal a no leaves Caddy untouched"
   sandbox_new
   dns_ready
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y

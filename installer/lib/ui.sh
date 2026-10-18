@@ -285,11 +285,15 @@ ui_summary_end() { # [total elapsed]
 
 # ---- prompts (stderr) -----------------------------------------------------------------------------
 
-# "  > Label [default] " without a newline.
+# "  > Label [default] " without a newline. A label ending in a colon keeps the colon after the default.
 ui_prompt_head() { # label [default]
-  local UI_FD=2 line
-  line="  $(_ui_s 1 "$S_PROMPT") $1"
-  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")"; fi
+  local UI_FD=2 line label=$1 colon=''
+  if [ -n "${2:-}" ] && [[ $label == *: ]]; then
+    label=${label%:}
+    colon=:
+  fi
+  line="  $(_ui_s 1 "$S_PROMPT") $label"
+  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")$colon"; fi
   printf '%s ' "$line" >&2
 }
 

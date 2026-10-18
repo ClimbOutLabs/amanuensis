@@ -41,7 +41,7 @@ The installer works in phases and shows you a printed plan before changing anyth
 
 For the first instance it asks, with defaults in brackets:
 
-- Instance name `[main]`
+- `Name for this instance [main]:` (skipped when you pass `--name` or `--yes`, or when the input is not a terminal; the name is then `main` unless `--name` gives one)
 - Your email, used to sign in (skipped when you pass `--email`)
 - Whether to back up automatically every day `[Y/n]` (skipped when you pass `--backups`)
 - `Go ahead?` `[Y/n]`, after it prints the plan
@@ -113,6 +113,8 @@ installer/install.sh instance remove <name> # stop and remove it; data volumes a
 ```
 
 `instance add` prompts for the new owner's details, picks free loopback ports by testing binds (override with `--port` and `--login-port`), generates fresh secrets, and waits for the instance to answer its health check.
+
+`instance add`, `instance refresh` and `instance password` use the installed version of Aman and never build. When the checked-out code is newer, they say so; run `installer/install.sh upgrade` to install it.
 
 `instance remove` stops the stack and its sandbox slots and deletes their containers and config, but keeps the data volumes. To delete the data too:
 

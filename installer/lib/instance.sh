@@ -359,7 +359,9 @@ instance_collect() {
   I_TLS=${OPT_TLS:-}
   I_SANDBOX=slots
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
-  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person gets a new instance. Example: main" name_problem
+  # Without a terminal nobody can answer, so the default name is kept.
+  if [ -z "$I_NAME" ] && [ ! -t 0 ]; then I_NAME=$name_default; fi
+  ask_valid I_NAME "Name for this instance:" "$name_default" "Each person gets a new instance." name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
     I_EMAIL="owner@example.invalid"
   fi
@@ -718,6 +720,12 @@ load_installed_release() {
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
 
+# The instance commands never build, so they say when this checkout holds newer code than what they run.
+warn_if_installed_older() {
+  [ "$CUR_APP_TAG" = "$(checkout_app_tag)" ] ||
+    warn "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
+}
+
 # 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.
 gateway_flag() { # origins public_url
   if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
@@ -846,6 +854,7 @@ cmd_instance_password() {
   docker_prepare
   lock_acquire
   load_installed_release
+  warn_if_installed_older
   AMAN_PASSWORD=
   ask_password AMAN_PASSWORD "Enter a new password for $email" "Repeat the new password"
   hash=$(hash_password "$REL_APP_TAG")
@@ -868,6 +877,7 @@ cmd_instance_refresh() {
   docker_prepare
   lock_acquire
   load_installed_release
+  warn_if_installed_older
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
     instance_apply_addresses "$name" "$change"
@@ -888,6 +898,7 @@ cmd_instance_add() {
   docker_prepare
   lock_acquire
   load_installed_release
+  warn_if_installed_older
   I_NAME=$OPT_NAME
   if reg_exists "$I_NAME"; then
     tf_rotation_collect
