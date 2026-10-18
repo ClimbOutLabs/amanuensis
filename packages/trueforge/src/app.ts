@@ -890,6 +890,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         logger: deps.logger,
         resolveRequestContext,
         authorizer: deps.authorizer,
+        schedules: configuration.STANDALONE
+          ? { store: deps.scheduleStore, withTransaction: deps.withTransaction }
+          : undefined,
       }),
       authMiddleware,
     ),

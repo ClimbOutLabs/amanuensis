@@ -469,6 +469,7 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';

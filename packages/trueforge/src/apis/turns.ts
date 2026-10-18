@@ -39,7 +39,7 @@ import { streamSSE } from 'hono/streaming';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
-import type { ResolveRequestContext } from '../auth/identity';
+import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
@@ -100,6 +100,7 @@ import {
 } from '../runtime/profileLearning';
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
+import type { ScheduleStoreAccess, ScheduleTurnContext } from '../runtime/scheduleCapability';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -125,7 +126,7 @@ import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { canReadAgentBoundResource } from './agentAccess';
+import { agentIfAccessible, canReadAgentBoundResource } from './agentAccess';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -248,6 +249,8 @@ export interface TurnsRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
+  /** Present only where schedules run (standalone): chat turns then get the schedule tools. */
+  schedules?: ScheduleStoreAccess | undefined;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -348,6 +351,8 @@ function createTurnResolver(deps: {
   tokenFactoryBudget: TokenFactoryBudget;
   /** Receives every model call the turn makes, for the usage shown under the answer. */
   modelUsage: TurnModelUsage;
+  /** Chat turns where schedules run; absent, no schedule tools mount. */
+  schedules?: ScheduleTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -384,6 +389,7 @@ function createTurnResolver(deps: {
     toolOutputScreenEnabled,
     tokenFactoryBudget,
     modelUsage,
+    schedules,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -703,6 +709,7 @@ function createTurnResolver(deps: {
       googleConnections: googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
+      schedules,
       logger,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
@@ -1979,6 +1986,25 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
+      schedules:
+        deps.schedules === undefined
+          ? undefined
+          : {
+              ...deps.schedules,
+              tenant_id: requestContext.tenant_id,
+              owner: createdBySubjectFromRequestContext(requestContext),
+              // The same check the Schedules page makes: the person must be allowed to use the agent.
+              resolveAgent: async name =>
+                name === undefined
+                  ? referencedAgent
+                  : agentIfAccessible({
+                      authorizer: deps.authorizer,
+                      context: requestContext,
+                      action: 'use',
+                      agent: await agentStore.getAgent({ tenant_id: requestContext.tenant_id, name }),
+                    }),
+              logger: deps.logger,
+            },
     });
 
     // First turn only: derive the title from the first user message. The store

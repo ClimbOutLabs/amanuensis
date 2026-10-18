@@ -60,18 +60,12 @@ import {
   putScheduleRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
+import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
-import {
-  InvalidCronError,
-  SCHEDULE_MIN_INTERVAL_SECONDS,
-  type Schedule,
-  type ScheduleManifest,
-  type ScheduleRun,
-} from '../schemas/schedule';
+import type { Schedule, ScheduleRun } from '../schemas/schedule';
 import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
 import { getTurnExecutionError, startTurnInProcess } from './turns';
 
@@ -197,36 +191,6 @@ function toWireScheduleRun(record: ScheduleRunRecord): ScheduleRun {
     created_at: record.created_at,
     updated_at: record.updated_at,
   };
-}
-
-export function validateManifest(manifest: Pick<ScheduleManifest, 'cron' | 'timezone'>, from: Date = new Date()): void {
-  // Reject if the cron has no upcoming trigger time (impossible / exhausted calendar).
-  // 5-field cron has no year, so a valid expression always recurs — no one-shot check.
-  try {
-    nextTriggerAfter({ cron: manifest.cron, timezone: manifest.timezone, from });
-  } catch (error) {
-    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
-      cause: error,
-    });
-  }
-
-  // Reject expressions that trigger < SCHEDULE_MIN_INTERVAL_SECONDS seconds apart.
-  let tightest: number;
-  try {
-    tightest = minIntervalSeconds(manifest, from);
-  } catch (error) {
-    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
-      cause: error,
-    });
-  }
-
-  if (tightest < SCHEDULE_MIN_INTERVAL_SECONDS) {
-    throw new InvalidCronError(
-      `Cron expression "${manifest.cron}" triggers every ${String(tightest)}s; the minimum interval is ${String(
-        SCHEDULE_MIN_INTERVAL_SECONDS,
-      )}s`,
-    );
-  }
 }
 
 const FORBIDDEN_SCHEDULE_ACCESS = 'Only the schedule creator can access this schedule';

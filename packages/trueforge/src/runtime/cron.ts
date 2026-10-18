@@ -8,7 +8,7 @@
  * exact UTC instant should prefer `timezone: "UTC"`.
  */
 import { CronExpressionParser } from 'cron-parser';
-import { InvalidCronError, type ScheduleManifest } from '../schemas/schedule';
+import { InvalidCronError, SCHEDULE_MIN_INTERVAL_SECONDS, type ScheduleManifest } from '../schemas/schedule';
 
 /** How many consecutive triggers to sample when measuring the tightest gap. */
 const INTERVAL_PROBE_TRIGGERS = 5;
@@ -58,4 +58,34 @@ export function minIntervalSeconds(
     previous = current;
   }
   return tightest;
+}
+
+export function validateManifest(manifest: Pick<ScheduleManifest, 'cron' | 'timezone'>, from: Date = new Date()): void {
+  // Reject if the cron has no upcoming trigger time (impossible / exhausted calendar).
+  // 5-field cron has no year, so a valid expression always recurs — no one-shot check.
+  try {
+    nextTriggerAfter({ cron: manifest.cron, timezone: manifest.timezone, from });
+  } catch (error) {
+    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
+      cause: error,
+    });
+  }
+
+  // Reject expressions that trigger < SCHEDULE_MIN_INTERVAL_SECONDS seconds apart.
+  let tightest: number;
+  try {
+    tightest = minIntervalSeconds(manifest, from);
+  } catch (error) {
+    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
+      cause: error,
+    });
+  }
+
+  if (tightest < SCHEDULE_MIN_INTERVAL_SECONDS) {
+    throw new InvalidCronError(
+      `Cron expression "${manifest.cron}" triggers every ${String(tightest)}s; the minimum interval is ${String(
+        SCHEDULE_MIN_INTERVAL_SECONDS,
+      )}s`,
+    );
+  }
 }
