@@ -13,7 +13,8 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import { CALENDAR_SERVER_ID, isCalendarReadToolName } from '../calendar/toolContract';
+import type { CalendarWriteReview } from '../calendar/eventWrite';
+import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
@@ -158,6 +159,11 @@ export interface SentinelAction {
   mail_replaces?: ReviewableDraft | undefined;
   /** For a reply: the message in its own thread that it answers, read by the host from Gmail. */
   mail_reply_in_thread?: AnsweredMessage | undefined;
+  /**
+   * The event a Calendar write would add or change, settled by the Calendar tool set from the validated call and,
+   * for a change, the event as Google holds it now, so the card shows what would really be written.
+   */
+  calendar_write?: CalendarWriteReview | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1677,9 +1683,65 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
 }
 
 /**
- * Calendar tools are the host's own, named by server. They only read: a read is silent but flagged as sensitive
- * (so a session that read the calendar can no longer search silently), in a chat and in a scheduled run alike,
- * and any other name fails closed.
+ * The approval card for a Calendar write, built from the request the host will send, never from model prose.
+ * Every guest is listed, and whether Google emails them is said in words.
+ */
+function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  const title = cardSubject(review.title);
+  const guests = displayList(review.attendees);
+  const guestLine =
+    review.attendees.length === 0
+      ? ''
+      : review.guests_emailed
+        ? ` Google emails ${guests} about it.`
+        : ` Guests: ${guests}. Google does not email them.`;
+  const plainWhat =
+    review.action === 'create'
+      ? `Add ${title} to your Google Calendar on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`;
+  return {
+    plain_what: plainWhat,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    calendar_event: {
+      action: review.action,
+      calendar: show(review.calendar),
+      title: show(review.title),
+      when: show(review.when),
+      time_zone: show(review.time_zone),
+      duration: show(review.duration),
+      location: show(review.location),
+      description: escapeDisplayText(review.description, { keepNewlines: true }),
+      attendees: review.attendees.map(show),
+      guests_emailed: review.guests_emailed,
+      one_of_repeating: review.one_of_repeating,
+      before:
+        review.before === null
+          ? null
+          : {
+              title: show(review.before.title),
+              when: show(review.before.when),
+              duration: show(review.before.duration),
+              location: show(review.before.location),
+            },
+    },
+  };
+}
+
+/**
+ * Calendar tools are the host's own, named by server. A read is silent but flagged as sensitive (so a session that
+ * read the calendar can no longer search silently). A write always asks with the event in full; in a scheduled run
+ * that ask is held for the owner's OK instead of running. Any other name fails closed.
  */
 async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -1687,6 +1749,53 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
       reason: 'offline_mode',
       reason_detail: 'Google Calendar needs network access, which is disabled while offline.',
       sensitive_read: false,
+    });
+  }
+  if (isCalendarWriteToolName(action.tool_name)) {
+    if (action.calendar_write === undefined) {
+      return autoDenyDecision({
+        reason: 'destination_unverifiable',
+        reason_detail: 'The event could not be loaded to show you, so it was not offered.',
+        sensitive_read: false,
+      });
+    }
+    const review = action.calendar_write;
+    // A guest is reached even without an email (Google adds invites to their calendar), so on a demo every guest
+    // must be on the send list. An event with no guests reaches no one.
+    if (
+      review.attendees.length > 0 &&
+      !recipientsAllowed({ allowlist: ctx.services.demoSendAllowlist, recipients: review.attendees })
+    ) {
+      return demoRefusal(DEMO_SEND_REFUSAL);
+    }
+    if (review.incomplete_reason !== null) {
+      return autoDenyDecision({
+        reason: 'incomplete_send_card',
+        reason_detail: review.incomplete_reason,
+        owner_message: 'Nothing was saved: the guests would get something the card could not show you.',
+        sensitive_read: false,
+      });
+    }
+    // Guests who are emailed get the event text, so it is a send and passes the same secret guard.
+    if (review.guests_emailed) {
+      const verdict = checkOutboundStrings({
+        strings: { values: [review.title, review.description, review.location], scalars: [], keys: [], plumbing: [] },
+        secrets: await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
+      });
+      if (!verdict.ok) {
+        return autoDenyDecision({
+          reason: 'outbound_guard',
+          reason_detail: `The event would be emailed to its guests, and ${describeOutboundRule(verdict.rule)}.`,
+          sensitive_read: false,
+        });
+      }
+    }
+    return tier3Decision({
+      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
+      reason: 'calendar_write',
+      reason_detail: 'Adding or changing a calendar event always asks.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
   if (!isCalendarReadToolName(action.tool_name)) {

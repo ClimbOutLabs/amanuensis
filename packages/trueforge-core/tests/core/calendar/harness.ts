@@ -7,6 +7,7 @@ import {
   createSentinelHostContext,
   defaultSentinelServices,
   forUnattendedRun,
+  type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { json, scriptedGoogle, type Route } from '../email/gmail/harness';
@@ -15,7 +16,7 @@ import { connectedRecord, FakeConnections, OWNER } from '../google/fakes';
 export { googleError, json, text } from '../email/gmail/harness';
 
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
-const EVENTS_PATH = '/calendar/v3/calendars/primary/events';
+export const EVENTS_PATH = '/calendar/v3/calendars/primary/events';
 
 /** The list endpoint, answering every request with the same page. */
 export const eventsRoute =
@@ -35,12 +36,16 @@ export async function build(input: {
   timeZone?: string | undefined;
   /** Google refuses the stored login when a new access token is asked for. */
   tokenRefused?: boolean;
+  /** Shared across builds so a held call and its later approval use one token store. */
+  services?: SentinelServices;
+  /** Shared across builds so a later turn sees what an earlier one wrote. */
+  google?: ReturnType<typeof scriptedGoogle>;
 }) {
   const connections = new FakeConnections();
   await connections.save(
     connectedRecord({ granted_scopes: ['https://www.googleapis.com/auth/gmail.readonly', CALENDAR_SCOPE] }),
   );
-  const google = scriptedGoogle(input.routes);
+  const google = input.google ?? scriptedGoogle(input.routes);
   const fetchImpl: typeof fetch = (request, init) =>
     input.tokenRefused === true &&
     (typeof request === 'string' ? request : request instanceof URL ? request.href : request.url).startsWith(
@@ -53,7 +58,7 @@ export async function build(input: {
     fetchImpl,
     sleep: () => Promise.resolve(),
   });
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  const services = input.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
   const sentinel = createSentinelHostContext({
     ...OWNER,
     conversation_id: 'c1',

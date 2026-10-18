@@ -17,6 +17,7 @@ const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const EVERY_SCOPE = scopesForFeatures(GOOGLE_FEATURES).join(' ');
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
 const LAN = 'http://192.168.1.20:8791';
 const BASE = '/api/v1/user/settings/google';
 const BeginResponse = z.object({ data: z.object({ authorization_url: z.string() }) });
@@ -399,6 +400,7 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_read', granted: true }),
       expect.objectContaining({ feature: 'gmail_compose', granted: false }),
       expect.objectContaining({ feature: 'calendar_read', granted: false }),
+      expect.objectContaining({ feature: 'calendar_write', granted: false }),
     ]);
     const statusText = (await call({ method: 'GET', path: '/status' })).text;
     for (const body of [text, statusText]) {
@@ -433,6 +435,7 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_read', granted: true }),
       expect.objectContaining({ feature: 'gmail_compose', granted: true }),
       expect.objectContaining({ feature: 'calendar_read', granted: false }),
+      expect.objectContaining({ feature: 'calendar_write', granted: false }),
     ]);
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
   });
@@ -453,6 +456,40 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_read', granted: true }),
       expect.objectContaining({ feature: 'gmail_compose', granted: false }),
       expect.objectContaining({ feature: 'calendar_read', granted: true }),
+      expect.objectContaining({ feature: 'calendar_write', granted: false }),
+    ]);
+    expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
+  });
+
+  it('lets a Calendar user allow adding events as one more consent, keeping every scope they had', async () => {
+    await connect();
+    granted = `${READ} ${CALENDAR}`;
+    const first = await call({ method: 'POST', path: '/oauth/begin', body: { features: ['calendar_read'] } });
+    const firstUrl = new URL(JSON.parse(first.text).data.authorization_url);
+    await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `http://127.0.0.1:53682/callback?state=${firstUrl.searchParams.get('state') ?? ''}&code=abc` },
+    });
+    granted = `${READ} ${CALENDAR} ${CALENDAR_WRITE}`;
+    const begin = await call({
+      method: 'POST',
+      path: '/oauth/begin',
+      body: { features: ['calendar_read', 'calendar_write'] },
+    });
+    expect(begin.status).toBe(201);
+    const url = new URL(JSON.parse(begin.text).data.authorization_url);
+    expect(url.searchParams.get('scope')).toBe(`${READ} ${CALENDAR} ${CALENDAR_WRITE}`);
+    const done = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `http://127.0.0.1:53682/callback?state=${url.searchParams.get('state') ?? ''}&code=abc` },
+    });
+    expect(JSON.parse(done.text).data.features).toEqual([
+      expect.objectContaining({ feature: 'gmail_read', granted: true }),
+      expect.objectContaining({ feature: 'gmail_compose', granted: false }),
+      expect.objectContaining({ feature: 'calendar_read', granted: true }),
+      expect.objectContaining({ feature: 'calendar_write', granted: true, label: 'Add and change events you approve' }),
     ]);
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
   });

@@ -175,6 +175,11 @@ export class GoogleConnectService {
           : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
       );
     }
+    if (features.includes('calendar_write') && !features.includes('calendar_read')) {
+      throw new GoogleFeatureError(
+        'Adding events needs Calendar too. Connect Calendar, then allow Aman to add events.',
+      );
+    }
     const scopes = scopesForFeatures(features);
     const state = generateOAuthState();
     const pkceVerifier = generatePkceVerifier();

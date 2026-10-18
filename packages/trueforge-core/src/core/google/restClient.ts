@@ -74,15 +74,15 @@ async function readJsonCapped(input: {
   }
 }
 
-type RequestMethod = 'GET' | 'POST' | 'PUT';
+type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
 
 /**
- * Whether trying a request again is safe. A request that creates or sends is never repeated after a failure
+ * Whether trying a request again is safe. A request that creates, changes or sends is never repeated after a failure
  * that may have happened after Google acted (a server error, a timeout); only a refusal for going too fast,
  * which Google answers before doing anything, is retried.
  */
 function isRetryable(input: { status: number; reason: string; method: RequestMethod }): boolean {
-  if (input.method === 'POST') {
+  if (input.method === 'POST' || input.method === 'PATCH') {
     return input.status === 429 || RATE_LIMIT_REASONS.has(input.reason);
   }
   return input.status === 429 || input.status >= 500 || BUSY_REASONS.has(input.reason);
