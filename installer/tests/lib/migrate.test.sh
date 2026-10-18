@@ -174,7 +174,7 @@ test_migrate_refuses_what_it_cannot_read() {
   mkdir -p "$SB/empty"
   run_install migrate --from-compose "$SB/empty"
   assert_rc 1
-  assert_flat_contains "$ERR" "has no packages/trueforge/.env."
+  assert_flat_contains "$ERR" "has neither packages/trueforge/.env nor .env. Pass --from-compose the folder that holds the old compose.yml or docker-compose.yml."
   rm -f "$SB_STATE/old_compose_dir"
   run_install migrate --from-compose "$OLD"
   assert_rc 1
@@ -200,6 +200,27 @@ test_migrate_refuses_what_it_cannot_read() {
   assert_rc 1
   assert_flat_contains "$ERR" "The old Aman keeps its memory outside its files"
   assert_eq "$(exports | wc -l | tr -d ' ')" 0
+  sandbox_drop
+}
+
+test_migrate_reads_a_top_level_env() {
+  t_begin "a folder with only compose.yml and .env is read from that .env; packages/trueforge/.env wins when both exist"
+  setup_machine
+  rm -rf "$OLD/packages"
+  : >"$OLD/compose.yml"
+  printf '%s\n' "$OLD_ENV_TEXT" >"$OLD/.env"
+  chmod 600 "$OLD/.env"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 0
+  assert_eq "$(exports | wc -l | tr -d ' ')" 1
+  assert_eq "$(cat "$SB_STATE/export_stdin")" "$OLD_ENV_TEXT"
+  assert_cleaned_and_old_untouched
+  rm -f "$AMAN_HOME"/exports/aman-export-*.zip
+  mkdir -p "$OLD/packages/trueforge"
+  printf 'POSTGRES_USER=trueforge\nNEBIUS_API_KEY=invented-checkout-key-4444\n' >"$OLD/packages/trueforge/.env"
+  run_install migrate --from-compose "$OLD"
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/export_stdin")" "invented-checkout-key-4444" "the checkout's settings file is used first"
   sandbox_drop
 }
 
@@ -258,6 +279,7 @@ test_migrate_finds_the_app_by_its_memory_folder
 test_migrate_refuses_two_old_apps
 test_migrate_asks_which_person_when_several_have_chats
 test_migrate_refuses_what_it_cannot_read
+test_migrate_reads_a_top_level_env
 test_a_failed_copy_or_export_still_cleans_up
 test_an_interrupted_copy_leaves_nothing_behind
 test_migrate_options_belong_to_migrate
