@@ -20,12 +20,14 @@ instance=
 mode=up
 fix=0
 json=0
+purge=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --instance) instance=$2; shift ;;
     --check) mode=check ;;
     --build-only) mode=build ;;
     --down) mode=down ;;
+    --purge) purge=1 ;;
     --fix) fix=1 ;;
     --json) json=1 ;;
     --repo-root | --log-file | --command-name) shift ;;
@@ -41,6 +43,9 @@ case "$mode" in
     ;;
   down)
     rm -f "$S/up/$instance-slots"
+    # The disks go last and need sudo, so a refused password leaves only them behind.
+    [ -z "${STUB_SLOT_DISK_FAIL:-}" ] || exit 1
+    if [ "$purge" = 1 ] && [ -n "${AMAN_SLOT_DISK_ROOT:-}" ]; then rm -rf "${AMAN_SLOT_DISK_ROOT:?}/$instance"; fi
     exit 0
     ;;
   check)

@@ -3,6 +3,9 @@
 # real machine is never touched.
 printf 'sudo %s\n' "$*" >>"$STUB_LOG"
 case "$1" in
+  -v)
+    [ -z "${STUB_SUDO_REFUSE:-}" ] || exit 1
+    ;;
   docker)
     STUB_VIA_SUDO=1 exec "${STUB_BIN}/docker" "${@:2}"
     ;;
