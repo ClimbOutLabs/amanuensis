@@ -1,6 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { flattenProviderModels } from '../../db/modelProviderStore';
+import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
+import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
 
 /**
@@ -32,11 +34,24 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     await migrateSqliteToLatest(db);
     const { TENANT_ID } = await import('../../tenancy');
     const providers = await new SqliteModelProviderStore(db).listProviders({ tenant_id: TENANT_ID });
+    // The seed indexes the personas' libraries itself; the logger is quiet because the status of each document is reported.
+    const indexer = getPersonaKnowledgeIndexer({
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    });
     return buildDemoSession({
       db,
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
       models: flattenProviderModels(providers).map(model => model.name),
+      knowledge: createKnowledgeLibrary({
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        tenantId: TENANT_ID,
+        enqueue: ({ personaId, documentId }) => {
+          indexer.enqueue({ tenantId: TENANT_ID, personaId, documentId });
+        },
+      }),
     });
   } catch (error) {
     await db.destroy();

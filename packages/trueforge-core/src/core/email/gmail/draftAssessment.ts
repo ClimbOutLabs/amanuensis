@@ -68,7 +68,7 @@ type DraftAssessment = { ok: true; draft: ReviewableDraft } | { ok: false; reaso
  */
 const PLAIN_ASCII_ADDRESS = /^[!#-'*+\--9=?-Z^-~]+$/;
 
-function fromAddress(raw: string): string | null {
+export function fromAddress(raw: string): string | null {
   const value = raw.trim();
   if (value.split('"').length % 2 === 0) {
     return null;

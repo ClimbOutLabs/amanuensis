@@ -104,6 +104,12 @@ export const route =
   url =>
     url.pathname === `/gmail/v1/users/me${path}` ? json(body, status) : undefined;
 
+/** Gmail's answer for one thread, filtered by the headers a request names, as the real API does. */
+export const threadRoute =
+  (thread: GmailThread): Route =>
+  url =>
+    url.pathname === `/gmail/v1/users/me/threads/${thread.id}` ? json(gmailThreadResponse({ thread, url })) : undefined;
+
 const escapeSnippet = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**

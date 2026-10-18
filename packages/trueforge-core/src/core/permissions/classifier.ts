@@ -15,6 +15,7 @@ import { realpathSync } from 'fs';
 import path from 'path';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
+import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
   isGmailReadToolName,
@@ -23,6 +24,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
+import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -47,7 +49,7 @@ import {
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
-import { isMapsToolName, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
+import { isMapsToolName, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   checkOutboundStrings,
@@ -58,6 +60,7 @@ import {
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
 import {
+  heldBecause,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
@@ -153,6 +156,8 @@ export interface SentinelAction {
   mail_draft?: ReviewableDraft | undefined;
   /** For a draft change: the saved draft it replaces, as Gmail holds it now. */
   mail_replaces?: ReviewableDraft | undefined;
+  /** For a reply: the message in its own thread that it answers, read by the host from Gmail. */
+  mail_reply_in_thread?: AnsweredMessage | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -214,6 +219,39 @@ export function mapsDestinationHosts(hosts: MapsHosts): string {
   return [...new Set(parts)].join(', ');
 }
 
+/** Most addresses one pin call may send; the tool schema caps the list at the same number. */
+const PLACES_CARD_MAX = 3;
+
+/** The addresses a render_places call would send to the geocoder, as the model wrote them. */
+function placeAddresses(params: Record<string, unknown>): unknown[] {
+  const places = params['places'];
+  if (!Array.isArray(places)) {
+    return [];
+  }
+  return places
+    .slice(0, PLACES_CARD_MAX)
+    .map((place: unknown) =>
+      typeof place === 'object' && place !== null && 'address' in place ? place.address : undefined,
+    );
+}
+
+/** Only the addresses leave the machine, so only they are the outbound text of a pin call. */
+function placesOutboundArguments(params: Record<string, unknown>): Record<string, unknown> {
+  const addresses = placeAddresses(params);
+  return Object.fromEntries(
+    addresses.map((address, index) => [
+      addresses.length === 1 ? 'address' : `address_${String(index + 1)}`,
+      address === undefined ? '(not text)' : address,
+    ]),
+  );
+}
+
+function joinedLabels(values: readonly unknown[]): string {
+  const labels = values.map(mapsCardLabel);
+  const last = labels.pop();
+  return labels.length === 0 ? (last ?? '') : `${labels.join(', ')} and ${last ?? ''}`;
+}
+
 /** Card plain_what naming the quoted place strings and the configured hosts. */
 function mapsPlainWhat(action: SentinelAction): string {
   const params = action.canonical_params;
@@ -225,6 +263,12 @@ function mapsPlainWhat(action: SentinelAction): string {
     return (
       `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
       `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
+    );
+  }
+  if (action.tool_name === RENDER_PLACES_TOOL_NAME) {
+    return (
+      `Send the addresses ${joinedLabels(placeAddresses(params))} to ${geocoder} to find where they are, ` +
+      `then load map tiles for that area from ${tile}. The details on each pin come from pages Aman already read.`
     );
   }
   const placeName = mapsCardLabel(params['place_name']);
@@ -1294,6 +1338,8 @@ async function holdSearchCall(input: {
   reason: SearchAskReason;
   why: string;
   queryText: string;
+  /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
+  params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
@@ -1302,13 +1348,28 @@ async function holdSearchCall(input: {
       ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
       : input.queryText;
   const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
+  const tavilyText =
+    input.params === undefined
+      ? null
+      : tavilyApprovalWhat({
+          server_host: action.mcp_server_host,
+          tool_name: action.tool_name,
+          canonical_params: input.params,
+          max_chars: SEARCH_CARD_TEXT_MAX,
+        });
+  const tavily = tavilyText === null ? null : escapeDisplayText(tavilyText);
   const decision = tier3Decision({
     card: {
-      plain_what: searchHoldCardText({
-        server: escapeDisplayText(server),
-        query: escapeDisplayText(shown),
-        why: input.why,
-      }),
+      plain_what:
+        tavily === null
+          ? searchHoldCardText({
+              server: escapeDisplayText(server),
+              query: escapeDisplayText(shown),
+              why: input.why,
+            })
+          : input.why === ''
+            ? tavily
+            : `${tavily.replace(/\.$/, '')}${heldBecause(input.why)}`,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -1364,7 +1425,7 @@ async function classifySearchProviderTool(input: {
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields });
+    holdSearchCall({ action, ctx, reason, why, queryText, params: action.canonical_params, fields: extraction.fields });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1382,6 +1443,7 @@ async function classifySearchProviderTool(input: {
       reason: 'mcp_search_guard',
       why: SERVER_SECRET_REASON,
       queryText: maskedStrings === undefined ? HIDDEN_QUERY : searchQueryText(maskedStrings),
+      params: masked,
       fields: {
         ...extraction.fields,
         outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
@@ -1452,13 +1514,15 @@ function displayList(addresses: readonly string[]): string {
   return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
 }
 
+function cardText(text: string): string {
+  const chars = Array.from(escapeDisplayText(text));
+  return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
+    ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
+    : chars.join('');
+}
+
 function cardSubject(subject: string): string {
-  const chars = Array.from(escapeDisplayText(subject));
-  const cut =
-    chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
-      ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
-      : chars.join('');
-  return `"${cut.replace(/"/g, '\\"')}"`;
+  return `"${cardText(subject).replace(/"/g, '\\"')}"`;
 }
 
 /**
@@ -1491,12 +1555,17 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       ? []
       : [`Sent as "${escapeDisplayText(content.fromName).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]),
   ].join('. ');
+  const answered = action.mail_reply_in_thread;
+  const threadLine =
+    answered === undefined
+      ? ''
+      : ` Reply in the thread: ${cardSubject(answered.subject)}, from ${cardText(answered.from)}.`;
   const plainWhat =
-    kind === 'send'
+    (kind === 'send'
       ? `Send ${subject} from your Gmail ${recipientsLine}.`
       : kind === 'change'
         ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${displayList(replaces.to) === '' ? 'no one' : displayList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`;
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) + threadLine;
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1523,6 +1592,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
               subject: escapeDisplayText(replaces.subject),
               to: replaces.to.map(address => escapeDisplayText(address)),
             },
+      reply_in_thread:
+        answered === undefined
+          ? null
+          : { subject: escapeDisplayText(answered.subject), from: escapeDisplayText(answered.from) },
     },
   };
 }
@@ -1966,7 +2039,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           sensitive_read: false,
         });
       }
-      const outbound = renderOutboundArguments(action.canonical_params);
+      const outbound = renderOutboundArguments(
+        action.tool_name === RENDER_PLACES_TOOL_NAME
+          ? placesOutboundArguments(action.canonical_params)
+          : action.canonical_params,
+      );
       return tier3Decision({
         card: {
           plain_what: mapsPlainWhat(action),

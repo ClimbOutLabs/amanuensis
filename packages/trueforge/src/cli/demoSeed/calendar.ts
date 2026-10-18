@@ -1,5 +1,5 @@
 /** Calendar days in the demo user's time zone; the seed never reads the machine's zone. */
-import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { addDays, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 
 function partValue({ parts, type }: { parts: Intl.DateTimeFormatPart[]; type: Intl.DateTimeFormatPartTypes }): number {
   const part = parts.find(candidate => candidate.type === type);
@@ -34,9 +34,27 @@ export function longDayLabel(day: CalendarDay): string {
   }).format(new Date(Date.UTC(day.year, day.month - 1, day.day, 12)));
 }
 
-/** `3:20 pm` */
-export function clockLabel({ hour, minute }: { hour: number; minute: number }): string {
-  const suffix = hour >= 12 ? 'pm' : 'am';
-  const twelveHour = hour % 12 === 0 ? 12 : hour % 12;
-  return `${String(twelveHour)}:${String(minute).padStart(2, '0')} ${suffix}`;
+/** Calendar labels for the days around a seed day, by offset from it. */
+export interface DayLabels {
+  /** `Tuesday` */
+  weekday(offset: number): string;
+  /** `Oct 27` */
+  monthDay(offset: number): string;
+  /** `Tuesday, October 27` */
+  long(offset: number): string;
+}
+
+function formatUtcNoon({ day, options }: { day: CalendarDay; options: Intl.DateTimeFormatOptions }): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...options }).format(
+    new Date(Date.UTC(day.year, day.month - 1, day.day, 12)),
+  );
+}
+
+export function dayLabels(today: CalendarDay): DayLabels {
+  const at = (offset: number): CalendarDay => addDays({ day: today, days: offset });
+  return {
+    weekday: offset => formatUtcNoon({ day: at(offset), options: { weekday: 'long' } }),
+    monthDay: offset => formatUtcNoon({ day: at(offset), options: { month: 'short', day: 'numeric' } }),
+    long: offset => longDayLabel(at(offset)),
+  };
 }
