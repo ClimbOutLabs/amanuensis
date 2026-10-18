@@ -1,4 +1,4 @@
-import { validateManifest } from '../../../src/apis/schedules';
+import { validateManifest } from '../../../src/runtime/cron';
 import { CronExpressionSchema, InvalidCronError, TimezoneSchema } from '../../../src/schemas/schedule';
 
 const WEEKDAY_1PM = { cron: '0 13 * * 1-5', timezone: 'America/New_York' };

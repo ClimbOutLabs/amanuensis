@@ -22,6 +22,7 @@ const card: SentinelApprovalCard = {
   outbound_truncated: false,
   email: null,
   calendar_event: null,
+  schedule: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);

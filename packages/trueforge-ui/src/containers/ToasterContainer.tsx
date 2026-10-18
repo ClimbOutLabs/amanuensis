@@ -20,7 +20,8 @@ type ToastContent = { title: string; description?: string };
 type ToastItem = ToastContent & { id: string; variant: 'error' | 'success' };
 
 type ToasterContextValue = {
-  showError: (error: unknown) => void;
+  /** `title` replaces the generic heading when the caller knows what the person was doing. */
+  showError: (error: unknown, options?: { title: string }) => void;
   showSuccess: (content: ToastContent) => void;
 };
 
@@ -92,9 +93,15 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const showError = useCallback((error: unknown) => {
+  const showError = useCallback((error: unknown, options?: { title: string }) => {
     console.error('[trueforge-ui]', error);
-    const item: ToastItem = { id: nextToastId(), variant: 'error', ...normalizeError(error) };
+    const content = normalizeError(error);
+    const item: ToastItem = {
+      id: nextToastId(),
+      variant: 'error',
+      ...content,
+      ...(options === undefined ? {} : { title: options.title }),
+    };
     setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
   }, []);
 

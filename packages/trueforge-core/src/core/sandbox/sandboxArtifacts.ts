@@ -192,19 +192,77 @@ export function parseSandboxArtifacts(raw: string): SandboxArtifact[] {
     .filter((artifact): artifact is SandboxArtifact => artifact !== null);
 }
 
+/** One `sandbox_artifacts` block found in a message, with where it sits in the text. */
+interface SandboxArtifactBlock {
+  start: number;
+  end: number;
+  body: string;
+  closed: boolean;
+}
+
 /**
- * Extracts every `sandbox_artifacts` fenced code block from a full assistant message and parses
- * each one, in order. Used at turn completion to find what to persist from the sandbox, and by
- * the UI to find what to render: same extraction, same parse, so persistence and download always
- * agree on what the model declared.
+ * A `sandbox_artifacts` opener anywhere in the text: models indent it, glue it to the end of a
+ * sentence, wrap it in another fence, or spell it `sandbox-artifacts`, and every one of those
+ * still declares a file the user should get.
+ */
+const BLOCK_OPEN_RE = /(`{3,}|~{3,})[ \t]*sandbox[_-]artifacts\b/gi;
+
+function findSandboxArtifactBlocks(text: string): SandboxArtifactBlock[] {
+  const blocks: SandboxArtifactBlock[] = [];
+  BLOCK_OPEN_RE.lastIndex = 0;
+  for (let open = BLOCK_OPEN_RE.exec(text); open !== null; open = BLOCK_OPEN_RE.exec(text)) {
+    const fence = open[1] ?? '```';
+    const bodyStart = open.index + open[0].length;
+    const closeAt = text.indexOf(fence, bodyStart);
+    const closed = closeAt !== -1;
+    const bodyEnd = closed ? closeAt : text.length;
+    const end = closed ? closeAt + fence.length : text.length;
+    blocks.push({ start: open.index, end, body: text.slice(bodyStart, bodyEnd), closed });
+    BLOCK_OPEN_RE.lastIndex = end;
+  }
+  return blocks;
+}
+
+/**
+ * Extracts every `sandbox_artifacts` block from a full assistant message and parses each one, in
+ * order. Used at turn completion to find what to persist from the sandbox, and by the UI (through
+ * `normalizeSandboxArtifactBlocks`) to find what to render: same extraction, same parse, so
+ * persistence and download always agree on what the model declared. A block the model never
+ * closed still counts, since the message is final.
  */
 export function extractSandboxArtifactsFromMessage(messageText: string): SandboxArtifact[] {
-  const fenceRe = /```sandbox_artifacts[ \t]*\r?\n([\s\S]*?)```/g;
-  const artifacts: SandboxArtifact[] = [];
-  let match: RegExpExecArray | null = fenceRe.exec(messageText);
-  while (match !== null) {
-    artifacts.push(...parseSandboxArtifacts(match[1] ?? ''));
-    match = fenceRe.exec(messageText);
+  return findSandboxArtifactBlocks(messageText).flatMap(block => parseSandboxArtifacts(block.body));
+}
+
+/** Removes a fence left holding nothing but whitespace once a block inside it was taken out. */
+const EMPTY_FENCE_RE = /(^|\n)[ \t]*(`{3,}|~{3,})[^\n`~]*\n(?:[ \t]*\n)*[ \t]*\2[ \t]*(?=\n|$)/g;
+
+/**
+ * Rewrites a message so every `sandbox_artifacts` block, however the model formatted it, becomes
+ * one well-formed fence at the end that a markdown renderer turns into a file card. A block that
+ * names no file is dropped, so its raw text never shows. While the message is still streaming
+ * (`complete: false`) an unclosed block is hidden until it closes.
+ */
+export function normalizeSandboxArtifactBlocks({ text, complete }: { text: string; complete: boolean }): string {
+  const blocks = findSandboxArtifactBlocks(text);
+  if (blocks.length === 0) {
+    return text;
   }
-  return artifacts;
+  let rest = '';
+  let cursor = 0;
+  const artifacts: SandboxArtifact[] = [];
+  for (const block of blocks) {
+    rest += text.slice(cursor, block.start);
+    cursor = block.end;
+    if (block.closed || complete) {
+      artifacts.push(...parseSandboxArtifacts(block.body));
+    }
+  }
+  rest += text.slice(cursor);
+  const prose = rest.replace(EMPTY_FENCE_RE, '$1').trimEnd();
+  if (artifacts.length === 0) {
+    return prose;
+  }
+  const lines = artifacts.map(artifact => `[${artifact.name.replace(/[[\]]/g, '')}](${artifact.path})`);
+  return `${prose}\n\n\`\`\`sandbox_artifacts\n${lines.join('\n')}\n\`\`\`\n`;
 }

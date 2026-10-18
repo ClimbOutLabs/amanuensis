@@ -38,6 +38,7 @@ function card(plain_what: string): SentinelApprovalCard {
     outbound_truncated: false,
     email: null,
     calendar_event: null,
+    schedule: null,
   };
 }
 

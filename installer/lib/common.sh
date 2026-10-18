@@ -86,7 +86,7 @@ password_problem() {
 # (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
-  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Repeat the password"}
+  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Enter password again"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
@@ -154,6 +154,27 @@ step_fail() {
   UI_FD=2 ui_step_end fail "$1" "${2:-}" "${3:-}"
   step_log_tail
   exit 1
+}
+
+# ---- the app's own reason when one of its commands fails -------------------------------------------
+
+# cli_log NAME: an emptied private file to send a CLI run's error output to; prints its path.
+cli_log() {
+  ensure_private_dir "$STATE_DIR/logs"
+  : >"$STATE_DIR/logs/$1.log"
+  printf '%s' "$STATE_DIR/logs/$1.log"
+}
+
+# cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
+# or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump instead, so it is named here.
+cli_reason() {
+  local line
+  if grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
+    printf '%s' "Aman ran out of memory. Give Docker more memory, then run this again."
+    return 0
+  fi
+  line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)
+  printf '%s' "${line:-$2}"
 }
 
 sha256_stdin() {

@@ -200,7 +200,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>y" "${TLS_ARGS[@]}"
   assert_eq "$RC" 0
   assert_eq "$(sudo_calls)" 1
@@ -217,7 +217,7 @@ Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>n" "${TLS_ARGS[@]}"
   assert_eq "$RC" 1
   assert_eq "$(sudo_calls)" 0

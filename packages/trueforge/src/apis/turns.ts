@@ -39,7 +39,7 @@ import { streamSSE } from 'hono/streaming';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
-import type { ResolveRequestContext } from '../auth/identity';
+import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
@@ -70,6 +70,7 @@ import {
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
@@ -100,6 +101,7 @@ import {
 } from '../runtime/profileLearning';
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
+import type { ScheduleStoreAccess, ScheduleTurnContext } from '../runtime/scheduleCapability';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -125,7 +127,7 @@ import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { canReadAgentBoundResource } from './agentAccess';
+import { agentIfAccessible, canReadAgentBoundResource } from './agentAccess';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -158,6 +160,12 @@ function toArrayBuffer(content: Buffer): ArrayBuffer {
   new Uint8Array(buffer).set(content);
   return buffer;
 }
+
+/** What a person is told when the reply that offered a file is not in this chat. */
+const MISSING_REPLY_MESSAGE = 'This reply could not be found. Reload the chat, then try again.';
+
+/** What a person is told when no sandbox is set up to hold the file. */
+const NO_SANDBOX_MESSAGE = 'The sandbox is turned off, so this file is not available. Turn on the sandbox in Settings.';
 
 /** What a person is told when a file was never copied out of a workspace that has since been cleared. */
 const CLEARED_WORKSPACE_MESSAGE =
@@ -248,6 +256,8 @@ export interface TurnsRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
+  /** Present only where schedules run (standalone): chat turns then get the schedule tools. */
+  schedules?: ScheduleStoreAccess | undefined;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -348,6 +358,8 @@ function createTurnResolver(deps: {
   tokenFactoryBudget: TokenFactoryBudget;
   /** Receives every model call the turn makes, for the usage shown under the answer. */
   modelUsage: TurnModelUsage;
+  /** Chat turns where schedules run; absent, no schedule tools mount. */
+  schedules?: ScheduleTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -384,6 +396,7 @@ function createTurnResolver(deps: {
     toolOutputScreenEnabled,
     tokenFactoryBudget,
     modelUsage,
+    schedules,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -703,6 +716,7 @@ function createTurnResolver(deps: {
       googleConnections: googleConnectionStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
+      schedules,
       logger,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
@@ -1517,18 +1531,20 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       // session cannot be used to reach this session's sandbox.
       const turn = await session.getTurn(turnId);
       if (!turn) {
-        return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+        return c.json({ error: { message: MISSING_REPLY_MESSAGE } }, 404);
       }
 
       // Persisted copy first: the sandbox that produced this file is likely long gone by the time
       // anyone clicks download (the provider auto-stops it minutes after the turn ends, then
       // deletes it later). Only a turn still running, or one that predates this feature, has no
       // row here, and those fall through to the live sandbox below, unchanged from before.
-      const persisted = await deps.turnArtifactStore.getArtifact({
-        tenant_id: requestContext.tenant_id,
-        session_id: sessionId,
-        turn_id: turnId,
+      const persisted = await findTurnArtifact({
+        store: deps.turnArtifactStore,
+        tenantId: requestContext.tenant_id,
+        sessionId,
+        turn: turn.record,
         path,
+        getTurn: async previousTurnId => (await session.getTurn(previousTurnId))?.record,
       });
       if (persisted?.status === 'stored' && persisted.digest !== null) {
         const blob = await deps.turnArtifactStore.getBlob({
@@ -1570,7 +1586,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         sessionId,
       });
       if (provider === undefined) {
-        return c.json({ error: { message: 'No sandbox provider configured' } }, 412);
+        return c.json({ error: { message: NO_SANDBOX_MESSAGE } }, 412);
       }
 
       try {
@@ -1979,6 +1995,26 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
+      schedules:
+        deps.schedules === undefined
+          ? undefined
+          : {
+              ...deps.schedules,
+              tenant_id: requestContext.tenant_id,
+              owner: createdBySubjectFromRequestContext(requestContext),
+              // The same check the Schedules page makes: the person must be allowed to use the agent.
+              resolveAgent: async name =>
+                name === undefined
+                  ? referencedAgent
+                  : agentIfAccessible({
+                      authorizer: deps.authorizer,
+                      context: requestContext,
+                      action: 'use',
+                      agent: await agentStore.getAgent({ tenant_id: requestContext.tenant_id, name }),
+                    }),
+              assistantName: profile?.assistant_name ?? null,
+              logger: deps.logger,
+            },
     });
 
     // First turn only: derive the title from the first user message. The store

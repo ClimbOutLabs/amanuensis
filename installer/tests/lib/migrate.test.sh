@@ -237,10 +237,18 @@ test_a_failed_copy_or_export_still_cleans_up() {
   run_install migrate --from-compose "$OLD"
   unset STUB_EXPORT_FAIL
   assert_rc 1
-  assert_flat_contains "$ERR" "Memory export failed for a namespace"
-  assert_flat_contains "$ERR" "The export from the copy failed"
+  assert_flat_contains "$ERR" "Export failed: Memory export failed for a namespace: stub."
+  assert_not_contains "$ERR" "message above"
   assert_eq "$(exports | wc -l | tr -d ' ')" 0
   assert_eq "$(find "$AMAN_HOME/exports" -name '*.part' 2>/dev/null | wc -l | tr -d ' ')" 0
+  assert_cleaned_and_old_untouched
+  export STUB_EXPORT_LIST_FAIL="The database looks older than this version; back it up and retry with --migrate."
+  run_install migrate --from-compose "$OLD"
+  unset STUB_EXPORT_LIST_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "Reading the copy of the old database failed: The database looks older than this version; back it up and retry with --migrate."
+  assert_not_contains "$ERR" "message above"
+  assert_eq "$(exports | wc -l | tr -d ' ')" 0
   assert_cleaned_and_old_untouched
   sandbox_drop
 }

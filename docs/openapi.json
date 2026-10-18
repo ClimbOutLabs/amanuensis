@@ -9619,6 +9619,9 @@
               "null"
             ]
           },
+          "schedule": {
+            "$ref": "#/components/schemas/Tier3Schedule"
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -9738,6 +9741,59 @@
           "body",
           "replaces",
           "reply_in_thread"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "Tier3Schedule": {
+        "description": "The schedule a chat call creates or deletes, shown in full.",
+        "properties": {
+          "action": {
+            "description": "Whether the schedule is created or deleted.",
+            "enum": [
+              "create",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Schedule name in plain words.",
+            "type": "string"
+          },
+          "next_runs": {
+            "description": "The next three runs in plain words for a new schedule; empty for a delete.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runs_as": {
+            "description": "Who runs it: the assistant name, or the agent name.",
+            "type": "string"
+          },
+          "task": {
+            "description": "The whole instruction each run gets.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA time zone the times are in.",
+            "type": "string"
+          },
+          "when": {
+            "description": "When it runs, in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "name",
+          "when",
+          "time_zone",
+          "task",
+          "runs_as",
+          "next_runs"
         ],
         "type": [
           "object",
