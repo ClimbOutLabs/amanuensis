@@ -3,7 +3,17 @@ import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/ap
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
-import { approvalProblem, approvedContext, build, json, route, sentDraft, text, type Route } from './harness';
+import {
+  approvalProblem,
+  approvedContext,
+  build,
+  json,
+  route,
+  sentDraft,
+  text,
+  threadRoute,
+  type Route,
+} from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 
@@ -112,7 +122,12 @@ describe('draft_email', () => {
     });
 
     it('does not stack "Re:" on a subject that already has it', async () => {
-      const answering = message({ id: 'orig', threadId: 't5', subject: 'Re: Lease renewal' });
+      const answering = message({
+        id: 'orig',
+        threadId: 't5',
+        subject: 'Re: Lease renewal',
+        extraHeaders: [{ name: 'Message-ID', value: '<orig@mail.example.com>' }],
+      });
       const { tools, google } = await build({
         features: [...COMPOSE],
         routes: [route('/messages/orig', answering), created],
@@ -200,6 +215,16 @@ describe('update_draft', () => {
       features: [...COMPOSE],
       routes: [
         draftRoute(threaded),
+        threadRoute({
+          id: 't9',
+          messages: [
+            message({
+              id: 'orig',
+              threadId: 't9',
+              extraHeaders: [{ name: 'Message-ID', value: '<orig@mail.example.com>' }],
+            }),
+          ],
+        }),
         url =>
           url.pathname === '/gmail/v1/users/me/drafts/d1' && url.search === ''
             ? json({ id: 'd1', message: { id: 'm', threadId: 't9' } })

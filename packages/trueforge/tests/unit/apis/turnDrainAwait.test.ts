@@ -183,7 +183,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         executionDeadline,
         logger: winston.createLogger({ silent: true }),
         turnDrains,
-        memory: { client: memoryClient, userText: 'hi', sessionTitle: undefined },
+        memory: { client: memoryClient, userText: 'hi', attachedFiles: false, sessionTitle: undefined },
         profileLearning,
         artifacts: {
           turnArtifactStore: new SqliteTurnArtifactStore(db),
@@ -291,7 +291,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       logger: winston.createLogger({ silent: true }),
       turnDrains: new TurnDrainRegistry(),
       modelUsage: { ledger, eventStore },
-      memory: { client: memoryClient, userText: 'hi', sessionTitle: undefined },
+      memory: { client: memoryClient, userText: 'hi', attachedFiles: false, sessionTitle: undefined },
     });
 
     expect(appendsWhenRetainStarted).toEqual([1]);

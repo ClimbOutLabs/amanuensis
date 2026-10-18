@@ -11,6 +11,7 @@
  * a tool that takes one (default `inert`).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -23,6 +24,8 @@ export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
 /** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
 export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
 export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
+/** Searches with Tavily, reads two result pages, then pins the places it found, then answers. */
+export const FIND_PLACES_DIRECTIVE = 'find_places';
 /** Calls the unannotated connector tool three times in one model message, then answers. */
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
@@ -343,6 +346,13 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         progress.toolResults === 0
           ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
           : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === FIND_PLACES_DIRECTIVE && progress.toolResults < 3) {
+      const steps = [
+        { match: 'tavily_search', argumentsJson: JSON.stringify({ query: FIND_PLACES_QUERY }) },
+        { match: 'tavily_extract', argumentsJson: JSON.stringify({ urls: [HARBOUR_URL, GARDEN_URL] }) },
+        { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
+      ];
+      requestedTool = steps[progress.toolResults];
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }

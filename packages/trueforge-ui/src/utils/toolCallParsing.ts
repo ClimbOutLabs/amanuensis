@@ -2,7 +2,7 @@ import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartPr
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
-import type { MapCardData, MapPin } from '../components/MapCard.js';
+import type { MapCardData, MapPin, MapPlace } from '../components/MapCard.js';
 import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 
 export type ApprovalOptionView = {
@@ -637,8 +637,77 @@ function unwrapMapsPayload(resultString: string): unknown {
   }
 }
 
+function isWebLink(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** A found place as the card shows it; a place without a name, address or ordinary web link is dropped. */
+function parsePlace(value: unknown): MapPlace | undefined {
+  if (!isUnknownRecord(value)) return undefined;
+  const { name, address, source_url: sourceUrl, source_site: sourceSite, fetched_at: fetchedAt } = value;
+  if (
+    typeof name !== 'string' ||
+    typeof address !== 'string' ||
+    typeof sourceUrl !== 'string' ||
+    !isWebLink(sourceUrl) ||
+    typeof sourceSite !== 'string' ||
+    typeof fetchedAt !== 'string'
+  ) {
+    return undefined;
+  }
+  const { lat, lng } = value;
+  const placed = typeof lat === 'number' && typeof lng === 'number';
+  return {
+    name,
+    address,
+    languages: textOrNull(value.languages),
+    hours: textOrNull(value.hours),
+    price: textOrNull(value.price),
+    phone: textOrNull(value.phone),
+    source_url: sourceUrl,
+    source_site: sourceSite,
+    fetched_at: fetchedAt,
+    lat: placed ? lat : null,
+    lng: placed ? lng : null,
+    already_in_calendar: value.already_in_calendar === true,
+  };
+}
+
+function parsePlacesResult(body: Record<string, unknown>, attribution: string): ParsedMapsResult {
+  const places = Array.isArray(body.places) ? body.places.flatMap(candidate => parsePlace(candidate) ?? []) : [];
+  if (places.length === 0) {
+    return { state: 'unavailable', data: null };
+  }
+  const pins: MapPin[] = places.flatMap(place =>
+    place.lat === null || place.lng === null ? [] : [{ name: place.name, lat: place.lat, lng: place.lng }],
+  );
+  const centre = pins.length === 0 ? { lat: 0, lng: 0 } : { lat: pins[0]?.lat ?? 0, lng: pins[0]?.lng ?? 0 };
+  return {
+    state: 'ready',
+    data: {
+      kind: 'places',
+      ...centre,
+      zoom: pins.length > 1 ? 13 : 15,
+      resolved_name: places.length === 1 ? '1 place found' : `${String(places.length)} places found`,
+      address: null,
+      pins,
+      places,
+      attribution,
+    },
+  };
+}
+
 /**
- * Parse a render_map / render_route tool result into map card data.
+ * Parse a render_map / render_route / render_places tool result into map card data.
  * Error results map to blocked/unavailable states; no card renders raw errors.
  */
 export function parseMapsResult(resultString: string | undefined, toolName: string): ParsedMapsResult {
@@ -656,6 +725,13 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
     }
     if (code === 'no_route') {
       return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
+    }
+    if (code === 'not_grounded') {
+      return {
+        state: 'unavailable',
+        data: null,
+        blockedMessage: 'The details could not be checked against the pages Aman read, so no places were pinned.',
+      };
     }
     if (code === 'rate_limited') {
       return {
@@ -698,6 +774,9 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
         attribution,
       },
     };
+  }
+  if (toolName === 'render_places') {
+    return parsePlacesResult(body, attribution);
   }
   const pins: MapPin[] = [];
   if (Array.isArray(body.pins)) {

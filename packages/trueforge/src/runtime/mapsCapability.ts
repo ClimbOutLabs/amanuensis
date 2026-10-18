@@ -14,11 +14,16 @@
 import type { AgentCapability, AgentTracing, ConnectorBinding } from '@truefoundry/trueforge-core/core';
 import {
   defineTool,
+  fetchedPages,
+  groundPlace,
+  isInCalendar,
   LocalToolMCP,
   mapsDestinationHosts,
   RENDER_MAP_TOOL_NAME,
+  RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
   toolResultResponse,
+  type FetchedPageStore,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -70,10 +75,35 @@ const RENDER_ROUTE_INPUT_SCHEMA = z
   })
   .strict();
 
+const PLACE_TEXT_SCHEMA = z.string().min(1).max(128);
+const MAX_PLACES = 3;
+const MAX_CALENDAR_LOCATIONS = 10;
+
+/** One place as the model read it off a fetched page; the host keeps only what that page really says. */
+const PLACE_CLAIM_SCHEMA = z
+  .object({
+    name: PLACE_TEXT_SCHEMA,
+    address: PLACE_TEXT_SCHEMA,
+    languages: PLACE_TEXT_SCHEMA.optional(),
+    hours: PLACE_TEXT_SCHEMA.optional(),
+    price: PLACE_TEXT_SCHEMA.optional(),
+    phone: PLACE_TEXT_SCHEMA.optional(),
+    source_url: z.string().min(1),
+  })
+  .strict();
+
+const RENDER_PLACES_INPUT_SCHEMA = z
+  .object({
+    places: z.array(PLACE_CLAIM_SCHEMA).min(1).max(MAX_PLACES),
+    calendar_locations: z.array(PLACE_TEXT_SCHEMA).max(MAX_CALENDAR_LOCATIONS).default([]),
+  })
+  .strict();
+
 export type RenderMapInput = z.infer<typeof RENDER_MAP_INPUT_SCHEMA>;
 export type RenderRouteInput = z.infer<typeof RENDER_ROUTE_INPUT_SCHEMA>;
+export type RenderPlacesInput = z.infer<typeof RENDER_PLACES_INPUT_SCHEMA>;
 
-export type MapsErrorCode = 'not_found' | 'no_route' | 'service_unavailable' | 'rate_limited';
+export type MapsErrorCode = 'not_found' | 'no_route' | 'service_unavailable' | 'rate_limited' | 'not_grounded';
 
 export interface MapsErrorBody {
   status: 'error';
@@ -515,6 +545,72 @@ function mapsErrorResult(error: MapsUpstreamError, field?: string): ReturnType<t
   return toolResultResponse({ text: JSON.stringify(body), isError: true });
 }
 
+const REFUSAL_REASONS = {
+  source_not_fetched: 'Aman has not read that page, so the details cannot be checked.',
+  name_not_found: 'The name is not on that page.',
+  address_not_found: 'The address is not on that page.',
+} as const;
+
+/**
+ * Pins places the model found on pages this server fetched. A place is kept only when its name and
+ * address are on its source page, and each detail only when the page states it; the source and the
+ * fetch time are the server's. Only the addresses go to the geocoder.
+ */
+export async function renderPlaces({
+  service,
+  pages,
+  input,
+}: {
+  service: MapsService;
+  pages: FetchedPageStore;
+  input: RenderPlacesInput;
+}): Promise<ReturnType<typeof toolResultResponse>> {
+  const refused: { name: string; reason: string }[] = [];
+  const grounded = [];
+  for (const claim of input.places) {
+    const result = groundPlace({
+      claim: {
+        name: claim.name,
+        address: claim.address,
+        languages: claim.languages ?? null,
+        hours: claim.hours ?? null,
+        price: claim.price ?? null,
+        phone: claim.phone ?? null,
+        source_url: claim.source_url,
+      },
+      pages,
+    });
+    if (result.ok) {
+      grounded.push(result.place);
+    } else {
+      refused.push({ name: claim.name, reason: REFUSAL_REASONS[result.reason] });
+    }
+  }
+  if (grounded.length === 0) {
+    return mapsErrorResult(new MapsUpstreamError('not_grounded'));
+  }
+  try {
+    const places = [];
+    for (const place of grounded) {
+      const found = await service.geocode(place.address);
+      places.push({
+        ...place,
+        lat: found?.lat ?? null,
+        lng: found?.lng ?? null,
+        already_in_calendar: isInCalendar({ place, locations: input.calendar_locations }),
+      });
+    }
+    return toolResultResponse({
+      text: JSON.stringify({ status: 'ok', places, refused, attribution: '© OpenStreetMap contributors' }),
+    });
+  } catch (error) {
+    if (error instanceof MapsUpstreamError) {
+      return mapsErrorResult(error);
+    }
+    throw error;
+  }
+}
+
 class MapsTool extends LocalToolMCP {
   readonly name = MAPS_SERVER_ID;
   readonly displayName = 'Maps';
@@ -566,6 +662,13 @@ class MapsTool extends LocalToolMCP {
         "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'); never pass coordinates. The tool geocodes both endpoints, routes by road, and returns an inline map card with the route, distance, and duration; the user is asked to approve each call. Use only when the user has named both the origin and the destination; there is no current-location mode.",
       schema: RENDER_ROUTE_INPUT_SCHEMA,
       handler: async input => this.renderRoute(input),
+    }),
+    defineTool({
+      name: RENDER_PLACES_TOOL_NAME,
+      description:
+        "Pin places on one map card, each with the details found on the page it came from. Use only after tavily_extract has read the pages. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Pass the page's own link as source_url. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
+      schema: RENDER_PLACES_INPUT_SCHEMA,
+      handler: async input => renderPlaces({ service: this.service, pages: fetchedPages, input }),
     }),
   ];
 

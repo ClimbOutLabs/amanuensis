@@ -12,6 +12,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
+  countSilentFetches,
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
@@ -72,6 +73,7 @@ export function stampSentinelDecision(input: {
   | 'is_approval_required'
   | 'pre_dispatch_failure'
   | 'silent_search_query'
+  | 'audit_description'
 > {
   const decision = input.decision;
   return {
@@ -83,6 +85,7 @@ export function stampSentinelDecision(input: {
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
+    ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
       decision.auto_deny === null &&
       (decision.tier === 3 || (decision.tier === 2 && decision.approval_token_id !== null)),
@@ -368,6 +371,7 @@ export class ToolSet implements IToolSet {
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+        countSilentFetches({ values: sent.values, state: turn });
       }
     }
 

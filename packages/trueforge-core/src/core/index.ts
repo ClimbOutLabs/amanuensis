@@ -33,6 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
+export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
@@ -403,7 +404,7 @@ export type {
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
-export { recordClassificationAudit } from './permissions/audit';
+export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
   canonicalShellForm,
@@ -426,6 +427,7 @@ export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatc
 export {
   MAPS_TOOL_NAMES,
   RENDER_MAP_TOOL_NAME,
+  RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
@@ -451,3 +453,6 @@ export type {
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { createWebSearchTurnState } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
+export { FetchedPageStore, fetchedPages } from './search/fetchedPages';
+export { groundPlace, isInCalendar } from './search/groundPlace';
+export type { GroundedPlace, PlaceClaim } from './search/groundPlace';

@@ -140,6 +140,37 @@ test('tree scan fails closed on non-UTF-8 Git pathnames', () => {
   }
 });
 
+test('scan flags a tracked .env.test-mailbox even with placeholder-only values', () => {
+  const root = mkdtempSync(join(tmpdir(), 'aman-private-data-test-mailbox-'));
+  try {
+    git(root, ['init', '--quiet']);
+    git(root, ['config', 'user.email', 'private-data-test@example.invalid']);
+    git(root, ['config', 'user.name', 'Private Data Test']);
+
+    // Placeholder-looking values only: the generic .env value rule stays
+    // silent on this content, so a finding here can only come from the
+    // tracked-name guard.
+    writeFileSync(
+      join(root, '.env.test-mailbox'),
+      'TEST_MAILBOX_SMTP_HOST=dummy-host\nTEST_MAILBOX_SMTP_PASS=dummy-pass\n',
+    );
+    // Force-add, the way the file could get tracked despite being ignored.
+    git(root, ['add', '--force', '.env.test-mailbox']);
+    git(root, ['commit', '--quiet', '-m', 'force-added mailbox credentials fixture']);
+
+    assert.deepEqual(scanPrivateData({ rootDirectory: root }).findings, [
+      {
+        file: '.env.test-mailbox',
+        reasons: [
+          'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for demo/scripts/send-test-mailbox.mjs and must stay local and untracked',
+        ],
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function scanTailnetFixture(content) {
   const root = mkdtempSync(join(tmpdir(), 'aman-private-data-scan-'));
   try {

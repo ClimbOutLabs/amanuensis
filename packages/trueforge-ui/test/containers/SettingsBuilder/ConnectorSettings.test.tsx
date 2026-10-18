@@ -653,7 +653,7 @@ describe('ConnectorSettings Google row', () => {
       accountEmail: null,
       features: [],
       hasSavedClient: false,
-      available: true,
+      locked: false,
       setup: { mode: 'paste', clientType: 'desktop', redirectUri: 'http://127.0.0.1:53682/callback' },
       ...overrides,
     };
@@ -710,10 +710,18 @@ describe('ConnectorSettings Google row', () => {
     expect(tile.querySelector('svg')).toBeNull();
   });
 
-  it('is not shown at all on an instance where Google is unavailable', async () => {
-    renderSettings([parallelWeb], googlePort(googleStatus({ available: false })));
-    expect(await screen.findByText(parallelWeb.name)).toBeInTheDocument();
-    expect(screen.queryByText(/Uses a Google app/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
+  it('on a locked demo says so and offers neither Connect, Reconnect nor Manage', async () => {
+    for (const state of ['connected', 'needs_reconnect', 'not_connected'] as const) {
+      const { unmount } = renderSettings([parallelWeb], googlePort(googleStatus({ state, locked: true })));
+      expect(
+        await screen.findByText(
+          "This demo uses a sample Google account. Aman can only send to the demo's own addresses.",
+        ),
+      ).toBeInTheDocument();
+      for (const name of ['Connect', 'Reconnect', 'Manage']) {
+        expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+      }
+      unmount();
+    }
   });
 });

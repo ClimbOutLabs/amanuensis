@@ -74,7 +74,7 @@ describe('harnessBuilderServer', () => {
     );
   });
 
-  it('getModels joins catalog logos onto provider', async () => {
+  it('getModels joins catalog logos onto provider as same-origin paths', async () => {
     const fetchMock: typeof fetch = async input => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith('/api/v1/models')) {
@@ -115,7 +115,7 @@ describe('harnessBuilderServer', () => {
       {
         id: 'gpt-5-6-sol',
         name: 'openai/gpt-5-6-sol',
-        provider: { name: 'openai', logo: 'https://assets.example/openai.svg' },
+        provider: { name: 'openai', logo: '/catalog-logos/https/assets.example/openai.svg' },
         properties: {},
       },
       {

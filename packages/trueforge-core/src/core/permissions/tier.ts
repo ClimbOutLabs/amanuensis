@@ -57,6 +57,13 @@ export const Tier3EmailSchema = z
       })
       .nullable()
       .describe('The saved draft a change replaces, or null.'),
+    reply_in_thread: z
+      .object({
+        subject: z.string().describe('Subject of the message being answered.'),
+        from: z.string().describe('Sender of the message being answered.'),
+      })
+      .nullable()
+      .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -123,6 +130,8 @@ export interface TierDecision {
   approval_token_id: string | null;
   /** Text of a web search that runs without asking, for the chat chip and the audit row; null otherwise. */
   silent_search_query: string | null;
+  /** Audit-row text that stands in for the card sentence when that sentence quotes caught text. */
+  audit_description: string | null;
   /**
    * Full parsed shell binding for shell actions that need approval (or null).
    * Re-verified byte-for-byte immediately before invocation.
@@ -160,6 +169,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }
@@ -175,6 +185,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }

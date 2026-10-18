@@ -47,6 +47,14 @@ describe('markdownMemoryFiles', () => {
     it('drops empty parts', () => {
       expect(splitEntries('')).toEqual([]);
     });
+
+    it('still splits a legacy entry whose text has an unescaped heading', () => {
+      const legacy = '## t1\n\nHere is the email.\n\n## Action items\n\n- pay rent\n\n> Source: read content\n';
+      expect(splitEntries(legacy)).toEqual([
+        '## t1\n\nHere is the email.',
+        '## Action items\n\n- pay rent\n\n> Source: read content',
+      ]);
+    });
   });
 
   describe('formatRetainEntry', () => {
@@ -67,6 +75,20 @@ describe('markdownMemoryFiles', () => {
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    });
+
+    it('escapes body lines that would read as an entry heading or the source line', () => {
+      const text = formatRetainEntry({
+        content: '## Action items\n> Source: read content\nplain',
+        timestamp: '2026-09-19T12:00:00.000Z',
+        document_id: 'd',
+        context: 'title\n## not a heading',
+        metadata: { origin: 'tool_ingested' },
+      });
+      expect(text).toBe(
+        '## 2026-09-19T12:00:00.000Z\n\n\\## Action items\n\\> Source: read content\nplain\n\n> title\n\\## not a heading\n\n> Source: read content',
+      );
+      expect(splitEntries(`${text}\n`)).toEqual([text]);
     });
 
     it('omits the context line when there is none', () => {
