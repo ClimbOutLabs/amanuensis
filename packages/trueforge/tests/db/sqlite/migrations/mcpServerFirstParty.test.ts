@@ -13,6 +13,7 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import type { Database } from '../../../../src/db/sqlite/types';
 
 const PREVIOUS_MIGRATION = '20261010_000006_mcp_tool_grant';
+const THIS_MIGRATION = '20261010_000007_mcp_server_first_party';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -86,7 +87,8 @@ describe('20261010_000007_mcp_server_first_party migration', () => {
 
   it('rolls back by dropping the column and keeping the connectors', async () => {
     const migrator = await createMigrator(db);
-    expect((await migrator.migrateToLatest()).error).toBeUndefined();
+    // Stop at this migration so rolling back undoes only it, whatever lands after it.
+    expect((await migrator.migrateTo(THIS_MIGRATION)).error).toBeUndefined();
 
     const timestamp = new Date().toISOString();
     await sql`
