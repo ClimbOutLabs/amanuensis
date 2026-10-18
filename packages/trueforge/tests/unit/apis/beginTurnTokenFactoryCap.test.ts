@@ -155,7 +155,7 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     previous_turn_id: undefined,
     userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
     deps: {
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: options.cap, now: () => NOW }),
       sessionStore,

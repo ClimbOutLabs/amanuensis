@@ -118,7 +118,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   const embeddingModel = getSharedEmbeddingModel({ modelDir });
   const logger = stderrLogger();
   const audit = new SentinelAuditStore(db);
-  const mcpCatalog = McpCatalog.load();
+  const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
 
   return {
     owner,

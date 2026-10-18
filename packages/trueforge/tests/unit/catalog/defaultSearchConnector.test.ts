@@ -18,7 +18,7 @@ function record(manifest: McpServerRecord['manifest']): McpServerRecord {
 
 describe('defaultSearchConnector', () => {
   it("is the shipped catalog's keyless search preset with its search tools", () => {
-    expect(defaultSearchConnector(McpCatalog.load())).toEqual({
+    expect(defaultSearchConnector(McpCatalog.loadShipped())).toEqual({
       name: 'parallel-web',
       manifest: {
         type: 'remote',
@@ -53,7 +53,7 @@ describe('defaultSearchConnector', () => {
   });
 
   it('matches the stored connector only when nothing about it changed', async () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     const seeded = defaultSearchConnector(catalog);
     if (seeded === undefined) {
       throw new Error('The shipped catalog has no keyless search preset.');

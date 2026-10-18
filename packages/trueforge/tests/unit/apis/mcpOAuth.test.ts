@@ -99,7 +99,7 @@ describe('MCP OAuth authorize + callback', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
       toolGrantStore,

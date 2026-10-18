@@ -335,7 +335,7 @@ describe('getMcpConnection', () => {
         manifest: { ...base, name: 'parallel-renamed', url: 'https://search.parallel.ai/mcp/?key=invented' },
         first_party: false,
       });
-      const catalog = McpCatalog.load();
+      const catalog = McpCatalog.loadShipped();
       for (const name of ['parallel-web', 'parallel-renamed']) {
         const connection = await connectionFor(name);
         if (connection.search_provider === undefined) {

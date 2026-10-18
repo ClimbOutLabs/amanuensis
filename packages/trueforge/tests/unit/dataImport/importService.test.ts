@@ -123,7 +123,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     auditStore: instance.stores.auditStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
     memoryTarget: memoryTarget ?? { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,
@@ -1966,7 +1966,7 @@ type ConnectorEdit = Partial<Omit<RemoteMcpServerManifest, 'type' | 'name'>>;
 
 /** Saves the default web search connector the way a new instance is given it, with optional edits. */
 async function addDefaultSearchConnector(instance: Instance, edit: ConnectorEdit = {}) {
-  const seeded = defaultSearchConnector(McpCatalog.load());
+  const seeded = defaultSearchConnector(McpCatalog.loadShipped());
   if (seeded === undefined) {
     throw new Error('The shipped catalog has no keyless search preset.');
   }
