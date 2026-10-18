@@ -305,7 +305,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const replaced = value.replaces;
   const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
   const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
-  const thread = value.reply_in_thread;
+  // The SDK camel-cases the keys it knows, so a card that came through it names this one replyInThread.
+  const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
   return {
