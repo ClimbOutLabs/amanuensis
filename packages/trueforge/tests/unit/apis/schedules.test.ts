@@ -19,10 +19,12 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { CHAT_ASSISTANT_DESCRIPTION } from '../../../src/runtime/chatAssistant';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import {
   CreateScheduleRunResponseSchema,
+  GetScheduleResponseSchema,
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
@@ -262,6 +264,40 @@ describe('schedule RBAC', () => {
         row => row.id,
       ),
     ).toEqual([id]);
+  });
+});
+
+describe('who a schedule runs as', () => {
+  it('names a saved agent by its name and a chat-made schedule by its assistant, never the stored agent name', async () => {
+    const { app, asUser, postJson, agentStore, scheduleStore } = await setup();
+    asUser(ALICE);
+    const fromPage = await postJson('/', 'POST', scheduleBody);
+    expect(GetScheduleResponseSchema.parse(await fromPage.json()).data.runs_as).toBe('reporter');
+
+    const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+    const chatAgent = await agentStore.createAgent({
+      tenant_id: 'default',
+      created_by_subject: alice,
+      name: 'assistant-0123456789abcdef',
+      description: CHAT_ASSISTANT_DESCRIPTION,
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } }),
+      external_id: null,
+    });
+    await scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: chatAgent.id,
+      agent_name: chatAgent.name,
+      persona_id: null,
+      name: 'lobster-joke',
+      manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' },
+      created_by_subject: alice,
+      runFrom: new Date(),
+    });
+
+    const listed = ListSchedulesResponseSchema.parse(await (await app.request('/')).json()).data;
+    const chatMade = listed.find(schedule => schedule.name === 'lobster-joke');
+    expect(chatMade?.runs_as).toBe('Your assistant');
+    expect(listed.map(schedule => schedule.runs_as)).not.toContain(chatAgent.name);
   });
 });
 

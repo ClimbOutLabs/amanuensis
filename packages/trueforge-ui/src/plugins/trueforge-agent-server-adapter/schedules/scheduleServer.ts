@@ -64,6 +64,7 @@ function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule 
     name: wire.name,
     agentId,
     agentName: wire.agentName,
+    runsAs: wire.runsAs,
     task: wire.manifest.task,
     cron: wire.manifest.cron,
     timezone: wire.manifest.timezone ?? 'UTC',

@@ -472,7 +472,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Name</TableHead>
-                  <TableHead>Agent</TableHead>
+                  <TableHead>Runs as</TableHead>
                   {showCreatedByColumn ? <TableHead>Created by</TableHead> : null}
                   <TableHead>Frequency</TableHead>
                   <TableHead>Status</TableHead>
@@ -485,13 +485,14 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
               <TableBody>
                 {filtered.map(schedule => {
                   const cadence = formatCadenceSummary({ cron: schedule.cron, timezone: schedule.timezone });
-                  const agentLabel = schedule.agentName ?? agentLabelById[schedule.agentId] ?? schedule.agentId;
+                  const runsAs =
+                    schedule.runsAs ?? schedule.agentName ?? agentLabelById[schedule.agentId] ?? schedule.agentId;
                   return (
                     <TableRow key={schedule.id}>
                       <TableCell className="text-text-primary font-medium">
                         <span className="text-left !no-underline">{schedule.name}</span>
                       </TableCell>
-                      <TableCell>{agentLabel}</TableCell>
+                      <TableCell>{runsAs}</TableCell>
                       {showCreatedByColumn ? (
                         <TableCell>
                           <CreatedByCell subject={schedule.createdBySubject} />

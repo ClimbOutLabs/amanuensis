@@ -26,6 +26,7 @@ import {
   listAgentsRoute,
   putAgentRoute,
 } from '../routes/agentRoutes';
+import { isHostMadeChatAssistant } from '../runtime/chatAssistant';
 import { validateAgentSpec } from '../runtime/sessionResources';
 import { type Agent, type CreateAgentRequest } from '../schemas/agent';
 import { agentIfAccessible, listAccessibleAgents } from './agentAccess';
@@ -94,7 +95,8 @@ export function createAgentsRouter<TTransaction>(deps: AgentsRouterDeps<TTransac
         limit,
         page_token: pageToken,
       });
-      return c.json({ data: data.map(toWireAgent), pagination }, 200);
+      // A page can come back short: the agents the host made for chat schedules are not shown.
+      return c.json({ data: data.filter(agent => !isHostMadeChatAssistant(agent)).map(toWireAgent), pagination }, 200);
     } catch (error) {
       if (error instanceof InvalidPageTokenError) {
         return c.json({ error: { message: error.message } }, 400);

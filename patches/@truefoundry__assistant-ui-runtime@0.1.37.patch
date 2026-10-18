@@ -1008,7 +1008,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..2f7423c5f8b753515f01a492248692f4
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..eabcf39e1a700c73a44f5cdfe4c09e702ed9b62f 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb52c311d6 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1169,6 +1169,15 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..eabcf39e1a700c73a44f5cdfe4c09e70
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
+@@ -994,6 +1041,8 @@ interface Schedule {
+     agentId: string;
+     /** Display name; omit when the host only has `agentId`. */
+     agentName?: string;
++    /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++    runsAs?: string;
+     task: string;
+     cron: string;
+     timezone: string;
 diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
 index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbeaf0547d7 100644
 --- a/src/convertTurnMessages.test.ts
@@ -2305,7 +2314,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad82
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..1d51c5438aad3fdc2a91fd1c628d91212763315d 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb635675b362 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2345,6 +2354,15 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..1d51c5438aad3fdc2a91fd1c628d9121
      path: string;
    }): Promise<Blob>;
  }
+@@ -970,6 +976,8 @@ export interface Schedule {
+   agentId: string;
+   /** Display name; omit when the host only has `agentId`. */
+   agentName?: string;
++  /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++  runsAs?: string;
+   task: string;
+   cron: string;
+   timezone: string;
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
 index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..e4b5770819d0a2beaec8069383b6704ac508bc5e 100644
 --- a/src/sessionSnapshot.ts

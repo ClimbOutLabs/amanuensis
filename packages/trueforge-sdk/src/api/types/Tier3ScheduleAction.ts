@@ -2,7 +2,7 @@
 
 /** Whether the schedule is created or deleted. */
 export const Tier3ScheduleAction = {
-    Create: "create",
-    Delete: "delete",
-} as const;
-export type Tier3ScheduleAction = (typeof Tier3ScheduleAction)[keyof typeof Tier3ScheduleAction];
+        Create: "create",
+        Delete: "delete"
+    } as const;
+export type Tier3ScheduleAction = typeof Tier3ScheduleAction[keyof typeof Tier3ScheduleAction];

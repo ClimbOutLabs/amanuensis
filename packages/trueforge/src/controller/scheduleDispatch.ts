@@ -118,8 +118,8 @@ export interface PreparedScheduleTurn {
 
 export async function startScheduleRun(params: {
   item: ScheduleDispatchItem;
-  sessions: Sessions<SessionCustom, TurnCustom>;
-  agentStore: IAgentStore;
+  sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'getOrCreateByExternalId'>;
+  agentStore: Pick<IAgentStore, 'getAgent'>;
   personaStore: Pick<IPersonaStore, 'getPersona'>;
 }): Promise<PreparedScheduleTurn | undefined> {
   const {

@@ -115,6 +115,27 @@ describe('SchedulesPage', () => {
     expect(searchAgents).not.toHaveBeenCalled();
   });
 
+  it('shows who each schedule runs as in plain words, never a stored agent name', async () => {
+    renderPage([
+      {
+        id: 's2',
+        name: 'lobster-joke',
+        agentId: 'agent-chat',
+        agentName: 'assistant-0123456789abcdef',
+        runsAs: 'Bender',
+        task: 'Tell me a lobster joke.',
+        cron: '0 8 * * *',
+        timezone: 'UTC',
+        status: 'active',
+        lastRunAt: null,
+      },
+    ]);
+    expect(await screen.findByRole('columnheader', { name: 'Runs as' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Agent' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Bender' })).toBeInTheDocument();
+    expect(screen.queryByText('assistant-0123456789abcdef')).not.toBeInTheDocument();
+  });
+
   it('disables schedule mutations without MANAGE or DELETE', async () => {
     const { scheduleServer } = renderPage(sampleSchedules, {}, undefined, undefined, {
       agentId: 'demo-agent',

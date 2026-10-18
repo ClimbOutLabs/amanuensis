@@ -9,6 +9,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { CHAT_ASSISTANT_DESCRIPTION } from '../../../src/runtime/chatAssistant';
 import { ListAgentsResponseSchema } from '../../../src/schemas/agent';
 
 const modelProvider = {
@@ -324,6 +325,25 @@ describe('agents router', () => {
 
     const badToken = await router.request('/?page_token=not-a-token');
     expect(badToken.status).toBe(400);
+  });
+
+  it('leaves the agents the host made for chat schedules out of the list, so a person never sees them', async () => {
+    const chatAssistant = await router.request(
+      '/',
+      jsonInit('POST', {
+        ...writeBody,
+        name: 'assistant-0123456789abcdef',
+        description: CHAT_ASSISTANT_DESCRIPTION,
+      }),
+    );
+    expect(chatAssistant.status).toBe(201);
+    const saved = await router.request('/', jsonInit('POST', { ...writeBody, name: 'zzz-saved-helper' }));
+    expect(saved.status).toBe(201);
+
+    const listed = ListAgentsResponseSchema.parse(await (await router.request('/')).json());
+    const names = listed.data.map(agent => agent.name);
+    expect(names).toContain('zzz-saved-helper');
+    expect(names).not.toContain('assistant-0123456789abcdef');
   });
 
   it('lists agents filtered by agent_name substring case-insensitively', async () => {

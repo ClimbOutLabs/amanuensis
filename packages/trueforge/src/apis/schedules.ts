@@ -64,6 +64,7 @@ import {
   putScheduleRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { scheduleRunsAs } from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
@@ -180,16 +181,44 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   });
 }
 
-function toWireSchedule(record: ScheduleRecord): Schedule {
+function toWireSchedule(record: ScheduleRecord, runsAs: string): Schedule {
   return {
     id: record.id,
     agent_name: record.agent_name,
+    runs_as: runsAs,
     name: record.name,
     manifest: record.manifest,
     created_by_subject: record.created_by_subject,
     created_at: record.created_at,
     updated_at: record.updated_at,
   };
+}
+
+/** Wire schedules with the same plain "runs as" name the chat shows. */
+async function toWireSchedules<TTransaction>(input: {
+  records: readonly ScheduleRecord[];
+  tenant_id: string;
+  deps: ScheduleTurnExecutionDeps<TTransaction>;
+}): Promise<Schedule[]> {
+  const runsAs = scheduleRunsAs({
+    tenant_id: input.tenant_id,
+    agentStore: input.deps.agentStore,
+    personaStore: input.deps.personaStore,
+    personalizationStore: input.deps.personalizationStore,
+  });
+  return Promise.all(input.records.map(async record => toWireSchedule(record, await runsAs(record))));
+}
+
+async function toWireOneSchedule<TTransaction>(input: {
+  record: ScheduleRecord;
+  tenant_id: string;
+  deps: ScheduleTurnExecutionDeps<TTransaction>;
+}): Promise<Schedule> {
+  const [wire] = await toWireSchedules({ records: [input.record], tenant_id: input.tenant_id, deps: input.deps });
+  if (wire === undefined) {
+    throw new Error('A schedule could not be shown.');
+  }
+  return wire;
 }
 
 function toWireScheduleRun(record: ScheduleRunRecord): ScheduleRun {
@@ -271,7 +300,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
           agent_ids: managedAgentIds,
         },
       });
-      return c.json({ data: data.map(toWireSchedule), pagination }, 200);
+      const wire = await toWireSchedules({ records: data, tenant_id: requestContext.tenant_id, deps });
+      return c.json({ data: wire, pagination }, 200);
     } catch (error) {
       if (error instanceof InvalidPageTokenError) {
         return c.json({ error: { message: error.message } }, 400);
@@ -442,7 +472,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
       throw error;
     }
 
-    return c.json({ data: toWireSchedule(record) }, 201);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 201);
   };
 
   const getHandler: RouteHandler<typeof getScheduleRoute> = async c => {
@@ -466,7 +496,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
     ) {
       return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
     }
-    return c.json({ data: toWireSchedule(record) }, 200);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
   };
 
   /**
@@ -525,7 +555,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
     if (record === undefined) {
       return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
     }
-    return c.json({ data: toWireSchedule(record) }, 200);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
   };
 
   const deleteHandler: RouteHandler<typeof deleteScheduleRoute> = async c => {

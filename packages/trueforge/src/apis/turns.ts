@@ -2021,10 +2021,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               }),
               runsAs: scheduleRunsAs({
                 tenant_id: requestContext.tenant_id,
-                owner: scheduleOwner,
-                assistantName: profile?.assistant_name ?? null,
                 agentStore,
                 personaStore: deps.personaStore,
+                personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
             },

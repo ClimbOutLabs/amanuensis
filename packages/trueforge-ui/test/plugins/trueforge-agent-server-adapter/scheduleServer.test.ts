@@ -23,6 +23,7 @@ function mockClient(
           id: 's1',
           name: 'job',
           agentName: 'alpha',
+          runsAs: 'Bender',
           createdAt: new Date('2024-01-01T00:00:00.000Z'),
           updatedAt: new Date('2024-01-01T00:00:00.000Z'),
           createdBySubject: {
@@ -72,6 +73,7 @@ describe('createScheduleServer.listSchedules', () => {
           id: 's1',
           name: 'job',
           agentName: 'alpha',
+          runsAs: 'Bender',
           createdAt: new Date('2024-01-01T00:00:00.000Z'),
           updatedAt: new Date('2024-01-01T00:00:00.000Z'),
           createdBySubject: {
@@ -102,6 +104,7 @@ describe('createScheduleServer.listSchedules', () => {
     });
     expect(page.data).toHaveLength(1);
     expect(page.data[0]?.agentId).toBe('a1');
+    expect(page.data[0]?.runsAs).toBe('Bender');
     expect(page.data[0]?.status).toBe('paused');
     expect(page.data[0]?.createdBySubject).toEqual({
       subjectId: 'user-1',

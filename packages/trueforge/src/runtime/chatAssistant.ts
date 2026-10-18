@@ -1,6 +1,7 @@
 import type { AgentSpec, CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import { createHash } from 'node:crypto';
 import { AgentNameConflictError, type AgentRecord, type IAgentStore } from '../db/agentStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { ScheduleRecord } from '../db/scheduleStore';
 import type { Persona } from '../personas/persona';
@@ -36,11 +37,13 @@ export class ChatAssistantUnavailableError extends Error {
   }
 }
 
+/** An agent the host made for a chat's schedules. People never pick it, so agent lists leave it out. */
+export function isHostMadeChatAssistant(agent: Pick<AgentRecord, 'name' | 'description'>): boolean {
+  return agent.name.startsWith(CHAT_ASSISTANT_NAME_PREFIX) && agent.description === CHAT_ASSISTANT_DESCRIPTION;
+}
+
 function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
-  return (
-    input.agent.description === CHAT_ASSISTANT_DESCRIPTION &&
-    input.agent.created_by_subject.subject_id === input.owner.subject_id
-  );
+  return isHostMadeChatAssistant(input.agent) && input.agent.created_by_subject.subject_id === input.owner.subject_id;
 }
 
 /** One name per owner and setup, so chats set up alike share one stored agent and a changed setup gets its own. */
@@ -132,23 +135,36 @@ export function resolveChatAssistant(input: {
   };
 }
 
-/** Who a saved schedule runs as, in plain words: its persona, the assistant for a chat-made agent, else the agent. */
+/**
+ * Who a saved schedule runs as, in plain words: its persona, the assistant for a chat-made agent, else the agent.
+ * Names come from the schedule's creator, so the chat and the Schedules page show the same thing.
+ */
 export function scheduleRunsAs(input: {
   tenant_id: string;
-  owner: CreatedBySubject;
-  assistantName: string | null;
   agentStore: Pick<IAgentStore<unknown>, 'getAgent'>;
-  personaStore: Pick<IPersonaStore<unknown>, 'listPersonas'>;
+  personaStore: Pick<IPersonaStore<unknown>, 'getPersona'>;
+  personalizationStore: Pick<IPersonalizationStore<unknown>, 'getProfile'>;
 }): (schedule: ScheduleRecord) => Promise<string> {
-  let personas: Promise<Persona[]> | undefined;
+  const { tenant_id } = input;
+  const personas = new Map<string, Promise<Persona | undefined>>();
   const agents = new Map<string, Promise<AgentRecord | undefined>>();
+  const assistantNames = new Map<string, Promise<string | null>>();
+  const cached = <T>(map: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> => {
+    const hit = map.get(key);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const loading = load();
+    map.set(key, loading);
+    return loading;
+  };
   return async schedule => {
-    if (schedule.persona_id !== null) {
-      personas ??= input.personaStore.listPersonas({
-        tenant_id: input.tenant_id,
-        created_by: input.owner.subject_id,
-      });
-      const persona = (await personas).find(candidate => candidate.id === schedule.persona_id);
+    const owner = schedule.created_by_subject;
+    const { persona_id } = schedule;
+    if (persona_id !== null) {
+      const persona = await cached(personas, `${owner.subject_id}\n${persona_id}`, () =>
+        input.personaStore.getPersona({ tenant_id, created_by: owner.subject_id, id: persona_id }),
+      );
       if (persona !== undefined) {
         return persona.display_name;
       }
@@ -156,14 +172,16 @@ export function scheduleRunsAs(input: {
     if (!schedule.agent_name.startsWith(CHAT_ASSISTANT_NAME_PREFIX)) {
       return schedule.agent_name;
     }
-    let agent = agents.get(schedule.agent_id);
-    if (agent === undefined) {
-      agent = input.agentStore.getAgent({ tenant_id: input.tenant_id, id: schedule.agent_id });
-      agents.set(schedule.agent_id, agent);
+    const agent = await cached(agents, schedule.agent_id, () =>
+      input.agentStore.getAgent({ tenant_id, id: schedule.agent_id }),
+    );
+    if (agent === undefined || !isChatAssistantAgent({ agent, owner })) {
+      return schedule.agent_name;
     }
-    const found = await agent;
-    return found !== undefined && isChatAssistantAgent({ agent: found, owner: input.owner })
-      ? (input.assistantName ?? UNNAMED_ASSISTANT)
-      : schedule.agent_name;
+    const assistantName = await cached(assistantNames, owner.subject_id, async () => {
+      const profile = await input.personalizationStore.getProfile({ tenant_id, created_by: owner.subject_id });
+      return profile?.assistant_name ?? null;
+    });
+    return assistantName ?? UNNAMED_ASSISTANT;
   };
 }

@@ -16,6 +16,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
+import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import {
   CHAT_ASSISTANT_DESCRIPTION,
@@ -76,6 +77,23 @@ async function setup(
         })
       : undefined;
   const assistantName = 'assistantName' in input ? (input.assistantName ?? null) : 'Aman';
+  const personalizationStore = new SqlitePersonalizationStore(db);
+  if (assistantName !== null) {
+    await personalizationStore.upsertProfile({
+      tenant_id: 'default',
+      created_by: OWNER.subject_id,
+      updated_by: OWNER.subject_id,
+      assistant_name: assistantName,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: null,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      learned_profile: null,
+      learning_enabled: false,
+    });
+  }
   const runner: ChatRunner =
     input.runner === 'saved' ? { kind: 'saved', agent: researcher } : { kind: 'plain', spec: CHAT_SPEC };
   const audit: AuditRecordInput[] = [];
@@ -103,7 +121,7 @@ async function setup(
       assistantName,
       agentStore,
     }),
-    runsAs: scheduleRunsAs({ tenant_id: 'default', owner: OWNER, assistantName, agentStore, personaStore }),
+    runsAs: scheduleRunsAs({ tenant_id: 'default', agentStore, personaStore, personalizationStore }),
     logger: winston.createLogger({ silent: true }),
     timeZone: 'timeZone' in input ? input.timeZone : 'America/New_York',
     sentinel,

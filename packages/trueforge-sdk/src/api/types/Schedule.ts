@@ -9,5 +9,7 @@ export interface Schedule {
     id: string;
     manifest: TrueForge.ScheduleManifest;
     name: TrueForge.ResourceName;
+    /** Who runs it, in plain words: a persona, the assistant, or a saved agent. */
+    runsAs: string;
     updatedAt: Date;
 }

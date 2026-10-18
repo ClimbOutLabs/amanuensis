@@ -145,8 +145,8 @@ describe('startScheduleRun', () => {
 
     const prepared = await startScheduleRun({
       item: dispatchItem,
-      sessions: { getOrCreateByExternalId } as never,
-      agentStore: { getAgent } as never,
+      sessions: { getOrCreateByExternalId },
+      agentStore: { getAgent },
       personaStore: { getPersona: jest.fn() },
     });
 
@@ -191,8 +191,8 @@ describe('startScheduleRun', () => {
         getOrCreateByExternalId: jest
           .fn()
           .mockResolvedValue({ session: { listTurns: jest.fn().mockResolvedValue({ data: [] }) }, created: true }),
-      } as never,
-      agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) } as never,
+      },
+      agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
       personaStore: { getPersona },
     });
 
@@ -205,8 +205,8 @@ describe('startScheduleRun', () => {
     await expect(
       startScheduleRun({
         item: { ...dispatchItem, schedule: { ...dispatchItem.schedule, persona_id: 'persona-gone' } },
-        sessions: { getOrCreateByExternalId: jest.fn() } as never,
-        agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) } as never,
+        sessions: { getOrCreateByExternalId: jest.fn() },
+        agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
         personaStore: { getPersona: jest.fn().mockResolvedValue(undefined) },
       }),
     ).rejects.toThrow(new SchedulePersonaNotFoundError());
@@ -222,8 +222,8 @@ describe('startScheduleRun', () => {
 
     const prepared = await startScheduleRun({
       item: item(),
-      sessions: { getOrCreateByExternalId } as never,
-      agentStore: { getAgent } as never,
+      sessions: { getOrCreateByExternalId },
+      agentStore: { getAgent },
       personaStore: { getPersona: jest.fn() },
     });
 
@@ -234,8 +234,8 @@ describe('startScheduleRun', () => {
     await expect(
       startScheduleRun({
         item: item(),
-        sessions: { getOrCreateByExternalId: jest.fn() } as never,
-        agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) } as never,
+        sessions: { getOrCreateByExternalId: jest.fn() },
+        agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) },
         personaStore: { getPersona: jest.fn() },
       }),
     ).rejects.toBeInstanceOf(ScheduleAgentNotFoundError);
