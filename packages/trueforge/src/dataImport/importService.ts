@@ -21,12 +21,7 @@
  * The recall and tool-output screen toggles come along; permission settings
  * and Always allow choices never do, so each tool asks again.
  */
-import {
-  AgentSpecSchema,
-  InMemorySessionStore,
-  type CreatedBySubject,
-  type ISessionStore,
-} from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -115,7 +110,7 @@ import {
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { assembleSessionParts } from './sessionParts';
-import { restoreSessions, type SessionRestoreContext } from './sessionRestore';
+import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
 
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
@@ -1052,31 +1047,10 @@ async function importArchive<TTransaction>(
       );
     }
   }
-  try {
-    const replayStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
-    for (const folder of folders) {
-      await replayStore.createSessionFolder({
-        tenant_id: tenantId,
-        folder_id: folder.folder_id,
-        created_by: subjectId,
-        name: folder.name,
-      });
-    }
-    // One chat at a time, dropped once it landed, so the replay never holds more than one.
-    for (const entry of sessions.entries()) {
-      await restoreSessions(replayStore, restoreContext, [entry]);
-      await replayStore.deleteSession({ tenant_id: tenantId, session_id: entry.session.session_id });
-    }
-  } catch (cause) {
-    if (cause instanceof DataImportError) {
-      throw cause;
-    }
-    throw new DataImportError(
-      'The chats in this export could not be read back, so nothing was imported. The export may be damaged.',
-      400,
-      { cause },
-    );
-  }
+  await replaySessions(restoreContext, {
+    sessions: sessions.entries(),
+    folderNames: new Map(folders.map(folder => [folder.folder_id, folder.name])),
+  });
 
   // --- Writes. The marker names everything planned before the first one lands. ---
   const planned: ImportLedger = {
