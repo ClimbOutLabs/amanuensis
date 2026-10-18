@@ -3,6 +3,7 @@ import { createLogger } from 'winston';
 import {
   RUN_CODE_ARTIFACT_PATH_PREFIX,
   buildRunCodeHarvestSink,
+  runCodeArtifactPathFor,
 } from '../../../../src/runtime/artifacts/persistRunCodeHarvests';
 import { FakeTurnArtifactStore } from '../../../fixtures/fakeTurnArtifactStore';
 
@@ -79,5 +80,19 @@ describe('buildRunCodeHarvestSink', () => {
 
     expect(store.records.size).toBe(0);
     expect(store.blobs.size).toBe(0);
+  });
+});
+
+describe('runCodeArtifactPathFor', () => {
+  it('maps a file named by its run folder to its stored run_code path', () => {
+    expect(runCodeArtifactPathFor('/egress/chart.pdf')).toBe('run_code/chart.pdf');
+    expect(runCodeArtifactPathFor('/scratch/chart.pdf')).toBe('run_code/chart.pdf');
+    expect(runCodeArtifactPathFor('egress/chart.pdf')).toBe('run_code/chart.pdf');
+  });
+
+  it('leaves every other path alone, including nested files run_code never keeps', () => {
+    expect(runCodeArtifactPathFor('/workspace/chart.pdf')).toBeUndefined();
+    expect(runCodeArtifactPathFor('/egress/out/chart.pdf')).toBeUndefined();
+    expect(runCodeArtifactPathFor('run_code/chart.pdf')).toBeUndefined();
   });
 });
