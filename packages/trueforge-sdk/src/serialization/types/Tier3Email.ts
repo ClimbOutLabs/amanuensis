@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 import { Tier3EmailAction } from "./Tier3EmailAction.js";
 import { Tier3EmailReplaces } from "./Tier3EmailReplaces.js";
+import { Tier3EmailReplyInThread } from "./Tier3EmailReplyInThread.js";
 
 export const Tier3Email: core.serialization.ObjectSchema<serializers.Tier3Email.Raw, TrueForge.Tier3Email> = core.serialization.object({
         "action": Tier3EmailAction,
@@ -12,6 +13,7 @@ export const Tier3Email: core.serialization.ObjectSchema<serializers.Tier3Email.
         "body": core.serialization.string(),
         "cc": core.serialization.list(core.serialization.string()),
         "replaces": Tier3EmailReplaces.nullable(),
+        "replyInThread": core.serialization.property("reply_in_thread", Tier3EmailReplyInThread.nullable()),
         "subject": core.serialization.string(),
         "to": core.serialization.list(core.serialization.string())
     });
@@ -23,6 +25,7 @@ export declare namespace Tier3Email {
         body: string;
         cc: string[];
         replaces?: Tier3EmailReplaces.Raw | null;
+        reply_in_thread?: Tier3EmailReplyInThread.Raw | null;
         subject: string;
         to: string[];
     }
