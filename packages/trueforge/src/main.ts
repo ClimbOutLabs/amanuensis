@@ -648,7 +648,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
-  const mcpCatalog = McpCatalog.load();
+  const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
   // Offered once so the first search needs no setup.
   await seedDefaultSearchProviderAtBoot({
     trueFoundryMode: isTrueFoundryModeEnabled(configuration),

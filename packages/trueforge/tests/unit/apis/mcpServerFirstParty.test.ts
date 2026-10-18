@@ -74,7 +74,7 @@ describe('first-party marker on stored connectors', () => {
       clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
     });
     router = createSettingsMcpServersRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       resolveMcpServerStore: () => store,
       tokenStore,
       toolGrantStore: new SqliteMcpToolGrantStore(db),

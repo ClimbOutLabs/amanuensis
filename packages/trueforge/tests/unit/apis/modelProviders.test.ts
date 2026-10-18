@@ -105,7 +105,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   return {
     settingsRouter: createSettingsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({
@@ -126,7 +126,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
     }),
     catalogRouter: createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       skillCatalog: SkillCatalog.load(),
       sandboxCatalog: SandboxCatalog.load(),
     }),

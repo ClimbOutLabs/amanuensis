@@ -227,7 +227,7 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,

@@ -87,8 +87,14 @@ cmd_migrate() {
   [ -n "$folder" ] || usage_die "usage: install.sh migrate --from-compose FOLDER"
   [ -d "$folder" ] || die "There is no folder at $folder. Pass --from-compose the folder the old Aman runs from."
   folder=$(cd -- "$folder" && pwd)
-  MIGRATE_ENV=$folder/packages/trueforge/.env
-  [ -f "$MIGRATE_ENV" ] || die "The folder $folder has no packages/trueforge/.env. Pass --from-compose the folder that holds the old docker-compose.yml."
+  # A checkout keeps its settings in packages/trueforge/.env; a folder with only a compose file keeps them next to it.
+  if [ -f "$folder/packages/trueforge/.env" ]; then
+    MIGRATE_ENV=$folder/packages/trueforge/.env
+  elif [ -f "$folder/.env" ]; then
+    MIGRATE_ENV=$folder/.env
+  else
+    die "The folder $folder has neither packages/trueforge/.env nor .env. Pass --from-compose the folder that holds the old compose.yml or docker-compose.yml."
+  fi
   case "$(env_get "$MIGRATE_ENV" MEMORY_BACKEND)" in
     '' | markdown) ;;
     *) die "The old Aman keeps its memory outside its files, which this move cannot read. Follow docs/migrate-from-compose.md to move by hand." ;;

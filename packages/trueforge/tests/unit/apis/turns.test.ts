@@ -182,7 +182,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -269,7 +269,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
@@ -488,7 +488,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -625,7 +625,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -738,7 +738,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -830,7 +830,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,

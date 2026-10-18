@@ -174,7 +174,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
-        mcpCatalog: McpCatalog.load(),
+        mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,

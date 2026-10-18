@@ -30,7 +30,7 @@ aman migrate --from-compose ~/aman-prod/$PERSON
 aman import ~/.amanuensis/exports/aman-export-<timestamp>.zip --display-name "<owner name>"
 ```
 
-`aman migrate` takes the folder you run `docker compose` in for the old stack. It finds the old app by its memory folder and the Postgres of that same project, whatever the services are called. It dumps the old Postgres into a temporary Postgres, copies the memory and knowledge volumes into temporary volumes, runs `export-data --migrate` from those copies as the app user (uid 10001) into a volume, copies the archive to `~/.amanuensis/exports/` (mode 600), and removes every temporary piece. The old stack is never changed: its database is only read with `pg_dump`, and its volumes are mounted read-only. The export also reads the old `packages/trueforge/.env`, so a key that lived only there (the model API key, the OIDC client secret) is blanked in chat text and memory too. It prints the `aman import` line to run next, with the old display name.
+`aman migrate` takes the folder you run `docker compose` in for the old stack. It finds the old app by its memory folder and the Postgres of that same project, whatever the services are called. It dumps the old Postgres into a temporary Postgres, copies the memory and knowledge volumes into temporary volumes, runs `export-data --migrate` from those copies as the app user (uid 10001) into a volume, copies the archive to `~/.amanuensis/exports/` (mode 600), and removes every temporary piece. The old stack is never changed: its database is only read with `pg_dump`, and its volumes are mounted read-only. The export also reads the old settings file, `packages/trueforge/.env` in a checkout or `.env` next to `compose.yml` in a folder that has only the compose file, so a key that lived only there (the model API key, the OIDC client secret) is blanked in chat text and memory too. It prints the `aman import` line to run next, with the old display name.
 
 If more than one person has chats in the stack, it lists their ids and stops: run it again with `--user <id>`. Shared memories and instance settings come along only when one person has chats there.
 
@@ -126,7 +126,9 @@ The export runs as the app user (uid 10001), which owns the copied folders, and 
 ```bash
 docker volume create "mig-$PERSON-out"
 docker run --rm -v "mig-$PERSON-out":/out alpine:3.21 chown 10001:10001 /out
-install -m 644 ~/aman-prod/$PERSON/packages/trueforge/.env "$WORK/old.env"
+OLD_ENV=~/aman-prod/$PERSON/packages/trueforge/.env
+[ -f "$OLD_ENV" ] || OLD_ENV=~/aman-prod/$PERSON/.env
+install -m 644 "$OLD_ENV" "$WORK/old.env"
 ```
 
 `$WORK` is mode 0700, so nobody else on this computer can reach the copy. Define a short helper that runs the new image against the copies:
