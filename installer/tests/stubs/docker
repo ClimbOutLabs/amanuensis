@@ -6,6 +6,10 @@ printf 'docker %s\n' "$*" >>"$STUB_LOG"
 S=$STUB_STATE
 mkdir -p "$S/up"
 touch "$S/images" "$S/volumes"
+# Fails any call whose arguments contain $STUB_FAIL_ON, to test what a command leaves behind when one step breaks.
+if [ -n "${STUB_FAIL_ON:-}" ]; then
+  case "$*" in *"$STUB_FAIL_ON"*) echo "stub: forced failure" >&2; exit 1 ;; esac
+fi
 
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$1" | head -n 1; }
 
@@ -302,12 +306,14 @@ case "$cmd" in
     ;;
   run)
     vol=
+    vol_spec=
     data_vol=
     scratch_vol=
     prev=
     for a in "$@"; do
       if [ "$prev" = -v ]; then
         vol=${a%%:*}
+        vol_spec=$a
         case "$a" in
           *:/data) data_vol=$vol ;;
           *:/backup) scratch_vol=$vol ;;
@@ -358,6 +364,32 @@ case "$cmd" in
           last=$a
         done
         exec "$STUB_REAL_NODE" "$qr" "$last"
+        ;;
+      *"rm -f /var/dex/dex.db"*)
+        # Clearing the sign-in service's saved keys, which ends every session. The volume belongs to uid 1001 (the Dex
+        # user, mode 755), so the delete works only as that user and only in an image where it can: the app image runs
+        # as 10001. It also has to name the files under the mount, as the real rm would.
+        image=
+        user=
+        target=${vol_spec#*:}
+        prev=
+        for a in "$@"; do
+          [ "$prev" = --user ] && user=$a
+          prev=$a
+        done
+        image=$(printf '%s\n' "$*" | sed -n 's/.*--entrypoint sh \([^ ]*\) -c .*/\1/p')
+        case "$image" in
+          *dex*) uid=${user%%:*}; uid=${uid:-1001} ;;
+          *) uid=${user%%:*}; uid=${uid:-10001} ;;
+        esac
+        files=$(printf '%s\n' "$*" | sed -n 's/.* -c rm -f \(.*\)$/\1/p')
+        case "$image" in *dex*) ;; *) uid=0 ;; esac
+        if [ "$uid" != 1001 ]; then
+          echo "rm: can't remove '/var/dex/dex.db': Permission denied" >&2
+          exit 1
+        fi
+        echo "$vol_spec $(for f in $files; do printf '%s ' "${f#"$target"/}"; done)" >>"$S/dex_wipes"
+        exit 0
         ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
@@ -496,6 +528,7 @@ case "$cmd" in
           echo "container is unhealthy" >&2
           exit 1
         fi
+        case " $* " in *" dex "*) rm -f "$S/dex_stopped_$proj" ;; esac
         printf '%s\n' "$img" >"$S/up/$proj"
         awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
@@ -522,9 +555,10 @@ case "$cmd" in
         exit 0
         ;;
       stop)
-        # The instance counts as down once its app is stopped (the stub models a project as up or not).
+        # Stopping only the sign-in service leaves the project up; any other stop counts the instance as down (the stub
+        # models a project as up or not).
         echo "$sub $*" >>"$S/compose_stops"
-        rm -f "$S/up/$proj"
+        case " $* " in *" dex "*) : >"$S/dex_stopped_$proj" ;; *) rm -f "$S/up/$proj" ;; esac
         exit 0
         ;;
       down)

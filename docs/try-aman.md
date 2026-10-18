@@ -103,6 +103,7 @@ A few common ones:
 - **"Docker has only 4.0 GB of memory"**: in Docker Desktop: Settings, Resources, Memory, set 8 GB, Apply.
 - **The page says the connection is not private**: you opened the https address on a device that does not trust your computer yet. Use http://localhost:8791 on the computer itself, or do the trust step above on the phone.
 - **Signing in says the email is not allowed**: use exactly the email you typed during the install, in lowercase.
+- **Forgot your password**: on the computer where Aman is installed, run `aman password`. It asks for a new password twice and signs you out everywhere.
 
 ## Updating
 
