@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { Logger } from 'winston';
 import type { z } from 'zod';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../google/errors';
 import type { GoogleFeature } from '../google/scopes';
@@ -13,6 +14,7 @@ import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
+import { extractErrorLogFields } from '../util/errorLogFields';
 import { CalendarApi } from './CalendarApi';
 import {
   hashEventWrite,
@@ -65,6 +67,8 @@ interface CalendarToolSetOptions {
   timeZone: string | undefined;
   /** Where the host classifies each call; the same turn state the web search provider reads. */
   sentinel: SentinelHostContext;
+  /** Records a permissions log row that could not be written, without failing the write it describes. */
+  logger: Logger;
 }
 
 /**
@@ -300,16 +304,26 @@ export class CalendarToolSet extends LocalToolMCP {
    */
   async #audit(input: { tool_name: string; outcome: 'ran' | 'denied'; description: string }) {
     const { services, tenant_id, created_by, conversation_id } = this.#options.sentinel;
-    await services.audit?.record({
-      tenant_id,
-      created_by,
-      conversation_id,
-      tier: 3,
-      tool_name: input.tool_name,
-      description: input.description,
-      outcome: input.outcome,
-      auto_deny_reason: null,
-    });
+    // A log row that cannot be written must not turn an event Google saved into a reported failure, which a retry
+    // would answer with a second event.
+    try {
+      await services.audit?.record({
+        tenant_id,
+        created_by,
+        conversation_id,
+        tier: 3,
+        tool_name: input.tool_name,
+        description: input.description,
+        outcome: input.outcome,
+        auto_deny_reason: null,
+      });
+    } catch (error) {
+      this.#options.logger.error('Calendar write audit row could not be written', {
+        tool_name: input.tool_name,
+        outcome: input.outcome,
+        ...extractErrorLogFields(error),
+      });
+    }
   }
 
   /** Runs one approved write, only if what it would send now still hashes to what the card showed. */
@@ -352,22 +366,9 @@ export class CalendarToolSet extends LocalToolMCP {
       return await refuse(DEMO_SEND_REFUSAL);
     }
     const what = `"${review.title}" on ${review.when} (${review.time_zone})${review.guests_emailed ? `, guests emailed: ${review.attendees.join(', ')}` : ''}`;
+    let saved: { id: string };
     try {
-      const saved = await input.send(resolved.request);
-      await this.#audit({
-        tool_name: input.tool_name,
-        outcome: 'ran',
-        description: `${input.status === 'created' ? 'Added to' : 'Changed in'} Google Calendar after the owner approved it: ${what}`,
-      });
-      return jsonResult({
-        account: this.#options.account,
-        event_id: saved.id,
-        status: input.status,
-        title: review.title,
-        when: review.when,
-        time_zone: review.time_zone,
-        guests_emailed: review.guests_emailed,
-      });
+      saved = await input.send(resolved.request);
     } catch (error) {
       await this.#audit({
         tool_name: input.tool_name,
@@ -376,6 +377,20 @@ export class CalendarToolSet extends LocalToolMCP {
       });
       return failureResult(error);
     }
+    await this.#audit({
+      tool_name: input.tool_name,
+      outcome: 'ran',
+      description: `${input.status === 'created' ? 'Added to' : 'Changed in'} Google Calendar after the owner approved it: ${what}`,
+    });
+    return jsonResult({
+      account: this.#options.account,
+      event_id: saved.id,
+      status: input.status,
+      title: review.title,
+      when: review.when,
+      time_zone: review.time_zone,
+      guests_emailed: review.guests_emailed,
+    });
   }
 
   async #createEvent({ input, context }: { input: CreateEventInput; context: ToolInvocationContext | undefined }) {

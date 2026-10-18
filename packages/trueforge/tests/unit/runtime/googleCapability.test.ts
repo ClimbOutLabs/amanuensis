@@ -2,6 +2,7 @@ import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
 import { defaultSentinelServices, forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { googleCapability } from '../../../src/runtime/googleCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
@@ -49,6 +50,7 @@ describe('googleCapability for mail', () => {
           : defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
       }),
       attachmentStager: undefined,
+      logger: createLogger({ silent: true }),
       timeZone: undefined,
       fetchImpl: () => Promise.reject(new Error('no network in this test')),
     });
@@ -124,6 +126,7 @@ describe('googleCapability for calendar', () => {
       tracing: NOOP_AGENT_TRACING,
       timeZone: 'America/Sao_Paulo',
       attachmentStager: undefined,
+      logger: createLogger({ silent: true }),
       sentinel: createSentinelHostContext({
         ...owner,
         conversation_id: 'c1',

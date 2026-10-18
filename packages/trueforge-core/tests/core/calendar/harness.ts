@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from 'winston';
 import { CalendarApi } from '../../../src/core/calendar/CalendarApi';
 import { CalendarToolSet } from '../../../src/core/calendar/CalendarToolSet';
 import { GoogleAccessTokens } from '../../../src/core/google/GoogleAccessTokens';
@@ -40,6 +41,7 @@ export async function build(input: {
   services?: SentinelServices;
   /** Shared across builds so a later turn sees what an earlier one wrote. */
   google?: ReturnType<typeof scriptedGoogle>;
+  logger?: Logger;
 }) {
   const connections = new FakeConnections();
   await connections.save(
@@ -71,6 +73,7 @@ export async function build(input: {
     features: input.features ?? ['gmail_read', 'calendar_read'],
     timeZone: 'timeZone' in input ? input.timeZone : 'America/Sao_Paulo',
     sentinel,
+    logger: input.logger ?? createLogger({ silent: true }),
   });
   return { tools, google, sentinel, connections };
 }
