@@ -63,7 +63,8 @@ const rootElement = document.getElementById('root');
 if (rootElement == null) throw new Error('Missing fixture root');
 
 createRoot(rootElement).render(
-  <SlotsProvider>
+  // As in the app: the shell CSP keeps stylesheets and fonts on the app origin.
+  <SlotsProvider theme={{ webFonts: false }}>
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem' }}>
       <ChatImageScope port={port} sessionId="session-1" turnId="turn-1" settled>
         <Markdown content={REPLY} />

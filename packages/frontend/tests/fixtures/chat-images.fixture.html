@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chat images fixture</title>
-    <!-- The same image policy as index.html; the browser test checks the two stay equal. -->
+    <!-- The same policy as index.html; the browser test checks the two stay equal. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:"
+      content="img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data:; connect-src 'self'"
     />
     <meta name="referrer" content="no-referrer" />
     <style>
