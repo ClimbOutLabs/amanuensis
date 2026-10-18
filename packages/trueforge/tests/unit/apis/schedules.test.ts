@@ -79,7 +79,7 @@ function stubTurnExecutionDeps(
 ) {
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog: McpCatalog.loadShipped(),
     scheduleStore,
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,

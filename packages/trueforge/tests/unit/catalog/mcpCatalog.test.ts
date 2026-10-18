@@ -4,11 +4,11 @@ import { McpCatalogFileSchema } from '../../../src/schemas/mcpCatalog';
 
 describe('shipped MCP catalog', () => {
   it('loads and validates every shipped preset', () => {
-    expect(McpCatalog.load().list().length).toBeGreaterThan(0);
+    expect(McpCatalog.loadShipped().list().length).toBeGreaterThan(0);
   });
 
   it('ships a hindsight preset whose placeholder URL is a shape memory can actually use', () => {
-    const hindsight = McpCatalog.load()
+    const hindsight = McpCatalog.loadShipped()
       .list()
       .find(server => server.name === 'hindsight');
     if (hindsight === undefined) {
@@ -30,7 +30,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('offers Parallel’s keyless hosted MCP as the one preset that becomes the web search provider', () => {
-    const presets = McpCatalog.load().list();
+    const presets = McpCatalog.loadShipped().list();
     expect(presets.filter(server => server.search_provider === true).map(server => server.name)).toEqual([
       'parallel-web',
     ]);
@@ -44,7 +44,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('keeps Tavily as a preset a user can pick as the search provider, without making it the default', () => {
-    const tavily = McpCatalog.load()
+    const tavily = McpCatalog.loadShipped()
       .list()
       .find(server => server.name === 'tavily');
     expect(tavily?.url).toBe('https://mcp.tavily.com/mcp');
@@ -52,7 +52,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('lists the real search tools of Parallel, Tavily and Exa, and none for a server that cannot search', () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     const searchTools = (name: string) => catalog.list().find(server => server.name === name)?.search_tools;
     expect(searchTools('parallel-web')).toEqual(['web_search', 'web_fetch']);
     // Tavily's crawl, map, research and feedback tools are left out: they walk sites or write back.
@@ -63,7 +63,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('looks up the search tools by endpoint, ignoring a key in the query string or a trailing slash', () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp')).toEqual(['tavily_search', 'tavily_extract']);
     expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic')).toEqual([
       'tavily_search',
@@ -73,7 +73,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('gives no search tools to another host, another path, another scheme, or something that is not a URL', () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     for (const url of [
       'https://mcp.tavily.com.evil.test/mcp',
       'https://evil.test/https://mcp.tavily.com/mcp',
@@ -87,7 +87,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('declares the session id and model name as Parallel’s plumbing arguments, and none for other presets', () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     expect(catalog.presetForUrl('https://search.parallel.ai/mcp')?.search_plumbing_fields).toEqual([
       'session_id',
       'model_name',
@@ -96,7 +96,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('keeps the plumbing arguments out of the public catalog list', () => {
-    const parallel = McpCatalog.load()
+    const parallel = McpCatalog.loadShipped()
       .list()
       .find(entry => entry.name === 'parallel-web');
     expect(parallel).toBeDefined();
@@ -104,7 +104,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('grants the stored search tools as they are, with the preset’s plumbing arguments', () => {
-    const grant = McpCatalog.load().searchProviderGrant({
+    const grant = McpCatalog.loadShipped().searchProviderGrant({
       url: 'https://search.parallel.ai/mcp',
       storedTools: ['stored_tool'],
     });
@@ -112,7 +112,7 @@ describe('shipped MCP catalog', () => {
   });
 
   it('falls back to the preset’s search tools for a designated connector saved without any', () => {
-    const catalog = McpCatalog.load();
+    const catalog = McpCatalog.loadShipped();
     for (const url of ['https://search.parallel.ai/mcp', 'https://search.parallel.ai/mcp/?key=invented']) {
       expect(catalog.searchProviderGrant({ url, storedTools: [] })).toEqual({
         tools: ['web_search', 'web_fetch'],
@@ -123,7 +123,7 @@ describe('shipped MCP catalog', () => {
 
   it('grants nothing from the catalog to a designated connector that is no known preset', () => {
     expect(
-      McpCatalog.load().searchProviderGrant({ url: 'https://search.invented.example/mcp', storedTools: [] }),
+      McpCatalog.loadShipped().searchProviderGrant({ url: 'https://search.invented.example/mcp', storedTools: [] }),
     ).toEqual({
       tools: [],
       plumbing_fields: [],

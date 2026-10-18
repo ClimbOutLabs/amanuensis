@@ -30,7 +30,7 @@ async function createFixture() {
     clientName: 'test-client',
   });
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
-  const catalog = McpCatalog.load();
+  const catalog = McpCatalog.loadShipped();
   return {
     mcpServerStore,
     globalSettingsStore,

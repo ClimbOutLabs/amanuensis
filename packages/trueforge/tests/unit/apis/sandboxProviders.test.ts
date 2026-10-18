@@ -126,7 +126,7 @@ describe('sandboxProviders router', () => {
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       skillCatalog: SkillCatalog.load(),
       sandboxCatalog: SandboxCatalog.load(),
     });

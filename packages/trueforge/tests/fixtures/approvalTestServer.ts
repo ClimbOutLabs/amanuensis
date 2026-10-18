@@ -135,7 +135,7 @@ function buildApp(input: {
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     withTransaction: callback => db.transaction().execute(callback),

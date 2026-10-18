@@ -87,7 +87,7 @@ const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
 const app = createServerApp({
   modelCatalog: ModelCatalog.load(),
-  mcpCatalog: McpCatalog.load(),
+  mcpCatalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
   skillCatalog: SkillCatalog.load(),
   sandboxCatalog: SandboxCatalog.load(),
   sandboxProviderStore,
