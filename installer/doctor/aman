@@ -719,7 +719,7 @@ fix_checkout() {
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
-  local name=$1 file mode dir
+  local name=$1 file mode dir extra
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
@@ -736,32 +736,13 @@ check_instance_config() {
       return
     fi
   done
-  summarize_users "$dir"
-  if [ "$USERS_SHORT" = 1 ]; then
-    record "$name" config warn "The settings files are private to you.${USERS_SUMMARY} Fewer emails are allowed to sign in than there are users." \
-      "Run install.sh instance list-users, then instance add-user again for each member; it repairs the allowed emails."
+  extra=$(extra_sign_in_users "${AMAN_HOME}/state/instances/${name}.conf" "$dir")
+  if [ -n "$extra" ]; then
+    record "$name" config warn "More than the owner can sign in: ${extra}." \
+      "$INSTANCE_FIX"
     return
   fi
-  record "$name" config ok "The settings files exist and are private to you.${USERS_SUMMARY}" ""
-}
-
-# Sets USERS_SUMMARY (" N sign-in user(s): the owner and M member(s).") from the hash variables in dex.env, and
-# USERS_SHORT=1 when fewer emails are allowed than there are users. Hashes are counted, never printed.
-summarize_users() { # instance dir
-  local users members allowed
-  USERS_SUMMARY=""
-  USERS_SHORT=0
-  [ -f "${1}/dex.env" ] || return 0
-  users=$(awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
-  users=${users:-0}
-  members=0
-  if [ "$users" -gt 0 ]; then members=$((users - 1)); fi
-  USERS_SUMMARY=" ${users} sign-in user(s): the owner and ${members} member(s)."
-  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null | awk 'END { print }')
-  case "$allowed" in
-    '' | *'*'*) return 0 ;;
-  esac
-  if [ "$(printf '%s' "$allowed" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')" -lt "$users" ]; then USERS_SHORT=1; fi
+  record "$name" config ok "The settings files exist and are private to you." ""
 }
 
 # What a container is, in words for a person: "the main app" for the app of instance main.
@@ -1477,6 +1458,7 @@ doctor_repair() { # kind
         continue
       fi
     else
+      check_instance_config "$name"
       check_instance_containers "$name"
     fi
     text_checks "$name"

@@ -33,6 +33,7 @@ const OIDC_CONFIG = {
   OIDC_ADMIN_ROLE_VALUE: 'owner@example.com',
   OIDC_SCOPES: ['openid', 'profile', 'email'],
   OIDC_ALLOWED_EMAILS: NO_EMAILS,
+  OIDC_REQUIRE_VERIFIED_EMAIL: false,
 };
 const CLIENT_ID = 'network-client';
 const STATE_COOKIE = 'oauth_state';

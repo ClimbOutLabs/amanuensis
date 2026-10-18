@@ -322,7 +322,7 @@ report_blockers_and_exit() {
 
 # Read-only look at what exists, turned into plan lines and download entries. Runs after plan_preflight.
 plan_build() {
-  local name have_release=0 expected_app expected_stt
+  local name extra have_release=0 expected_app expected_stt
   if [ -f "$RELEASE_DIR/release.json" ]; then
     have_release=1
   fi
@@ -366,6 +366,8 @@ plan_build() {
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
+      extra=$(extra_sign_in_users "$(reg_file "$name")" "$(instance_dir "$name")")
+      if [ -n "$extra" ]; then plan_add todo "Remove $extra from instance $name"; fi
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
@@ -391,11 +393,11 @@ plan_build() {
   if [ "$OPT_DEMO" = 1 ]; then
     name=$(demo_target)
     if need_new_instance; then
-      plan_add todo "$(demo_plan_text "$name" "${OPT_DEMO_USER:-$I_EMAIL}")"
+      plan_add todo "$(demo_plan_text "$name" "$I_EMAIL")"
     elif demo_env_on "$name"; then
       plan_add have "Demo mode is on for instance $name"
     else
-      plan_add todo "$(demo_plan_text "$name" "$(demo_user "$name")")"
+      plan_add todo "$(demo_plan_text "$name" "$(reg_get "$name" owner_email)")"
     fi
   fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
@@ -608,6 +610,7 @@ install_execute() {
     for name in $(reg_names); do
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
+      if instance_enforce_single_owner "$name"; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi

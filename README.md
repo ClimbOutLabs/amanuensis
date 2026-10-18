@@ -102,7 +102,7 @@ Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
 >
 > A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs a local Dex identity provider in Docker, or point it at any OIDC provider. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -124,7 +124,7 @@ The server runs without a file watcher (on some Windows machines the watcher sta
 
 When you're ready to run Aman as a shared service instead of a personal install. This is the production topology — the server containerized, Postgres replacing SQLite as durable storage, and Redis so streams and cancellations follow the client across server replicas — with no Node.js or pnpm needed on the host. Choose it when the app needs to serve more than just you, or when you want to evaluate a deployment.
 
-The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and needs no external identity provider; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
+The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and uses Aman's own sign-in service; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -142,7 +142,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: 
 docker compose --profile login up --build
 ```
 
-Open `http://localhost:8791` and click **Let's Get Started**. The identity provider runs at `https://localhost:5556` with a certificate the stack minted on first start, so the browser warns once: choose **Advanced**, proceed to localhost, and sign in with the email and password you chose.
+Open `http://localhost:8791` and click **Let's Get Started**. The sign-in service runs at `https://localhost:5556` with a certificate the stack minted on first start, so the browser warns once: choose **Advanced**, proceed to localhost, and sign in with the email and password you chose.
 
 <p align="center">
   <img src="./packages/frontend/public/compose-get-started.png" alt="The first screen of a Compose stack with login on: the Amanuensis logo, the heading Welcome to Amanuensis, and a Let's Get Started button" width="420">
@@ -177,8 +177,8 @@ The untracked `packages/trueforge/.env` file created during setup is required by
 
 ## Security boundaries and limitations
 
-- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host.
-- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile, or your own identity provider) and appropriate network controls before any shared or internet-facing deployment.
+- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and it refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host. It also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email.
+- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile) and appropriate network controls before any shared or internet-facing deployment.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
 - Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.

@@ -22,9 +22,9 @@ volume_tar() {
   D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data -cf - .
 }
 
-# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses.
+# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses. Compose reads the last match.
 env_get() {
-  sed -n "s/^$2=//p" "$1" | head -n 1
+  sed -n "s/^$2=//p" "$1" | tail -n 1
 }
 
 BACKUP_SCRATCH_LABEL=com.amanuensis.scratch=backup

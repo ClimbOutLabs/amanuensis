@@ -128,19 +128,21 @@ test_token_factory_settings_match_the_server() {
 }
 
 test_sign_in_settings_match_the_server() {
-  t_begin "the installer writes the sign-in settings the server reads, and the doctor counts what add-user wrote"
-  local repo=$INSTALLER_DIR/.. config key out
+  t_begin "the installer writes the sign-in settings the server reads, and the owner as its one allowed email"
+  local repo=$INSTALLER_DIR/.. config key out allowed
   config=$(cat "$repo/packages/trueforge/src/config.ts")
   for key in OIDC_ALLOWED_EMAILS OIDC_ADMIN_ROLE_VALUE OIDC_USER_ROLE_CLAIM OIDC_USER_REFERENCE_CLAIM; do
     assert_contains "$config" "getEnv('$key'" "the server reads $key"
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
   done
+  assert_contains "$config" "assertSingleOwnerSignIn({ standalone: configuration.STANDALONE" "the server enforces one allowed email in standalone"
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "STANDALONE=true" "the installer runs the standalone server"
   sandbox_new
   install_machine
-  run_install instance add-user judge1 --email judge1@demo.invalid
-  assert_rc 0
+  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "$AMAN_HOME/instances/main/.env")
+  assert_eq "$allowed" "owner@example.invalid" "exactly the owner, no list and no pattern"
   out=$(real_doctor --json --instance main) || true
-  assert_contains "$out" '"id":"config","state":"ok","detail":"The settings files exist and are private to you. 2 sign-in user(s): the owner and 1 member(s)."'
+  assert_contains "$out" '"id":"config","state":"ok","detail":"The settings files exist and are private to you."'
   assert_not_contains "$out" "\$2a"
   sandbox_drop
 }
