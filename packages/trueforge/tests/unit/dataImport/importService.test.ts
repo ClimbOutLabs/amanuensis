@@ -3429,6 +3429,29 @@ describe('runDataImport keeps what people see strict', () => {
       await target.close();
     }
   });
+
+  it('imports a chat whose approval card no longer fits, leaving the card out', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-broken-card');
+    try {
+      const broken = await repack(archive, entries => {
+        withEvent(entries, {
+          type: 'tool.approval_required',
+          id: 'evt-broken-card',
+          created_at: '2026-09-01T10:00:00.000Z',
+          thread_id: MAIN_THREAD_ID,
+          tool_calls: [
+            { id: 'call-broken-card', source_event_id: 'evt-model', tier3_card: { ...HONEST_CARD, plain_what: 7 } },
+          ],
+        });
+      });
+      const result = await runDataImport(importDeps(target), importRequest(broken));
+      expect(result.summary).toContain("Chat 'First chat': 1 tool detail from an older version was left out.");
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
 });
 
 describe('runDataImport tells the person everything it left out', () => {
@@ -3621,6 +3644,28 @@ describe('runDataImport review: subagents, tool kinds and dry runs', () => {
         order: 'asc',
       });
       expect(events.data.some(event => event.type === 'aman.skill.used')).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('leaves out subagent fields that no longer fit, never filling them with blanks', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-broken-thread');
+    try {
+      const broken = await editScheduledTurn(archive, ({ thread }) => {
+        thread['parent'] = { thread_id: 'main', tool_call_id: 7 };
+        thread['agent_info'] = { type: 'dynamic', name: 7, input: 'go' };
+        thread['completion'] = { type: 'done', output: 'Done.', send_to_parent: { role: 'tool' } };
+      });
+      const result = await runDataImport(importDeps(target), importRequest(broken));
+      expect(result.summary).toMatch(/: 3 assistant details from an older version were left out\./);
+      const { turn } = await importedScheduledChat(target);
+      const main = turn?.snapshot.threads['main'];
+      expect(main?.parent ?? null).toBeNull();
+      expect(main?.agent_info ?? null).toBeNull();
+      expect(main?.completion ?? null).toBeNull();
     } finally {
       await source.close();
       await target.close();

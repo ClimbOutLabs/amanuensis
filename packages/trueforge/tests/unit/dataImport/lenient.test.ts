@@ -157,6 +157,27 @@ describe('readVisible', () => {
     expect(total(leftOut)).toBe(1);
   });
 
+  it('leaves out an approval card that no longer fits, inside enrichment or not, never filling it with blanks', () => {
+    const CardSchema = z.object({ plain_what: z.string(), plain_why: z.string().nullable() });
+    const WithCards = z.object({
+      text: z.string(),
+      tier3_card: CardSchema.optional(),
+      tool_info: z.object({ name: z.string(), tier3_card: CardSchema.optional() }).optional(),
+    });
+    const broken = { plain_what: 7, plain_why: null };
+    const visibleCard = countingLeftOut(() => readVisible(WithCards, { text: 'Hello', tier3_card: broken }, { label }));
+    expect(visibleCard.result.success && visibleCard.result.data).toEqual({ text: 'Hello' });
+    expect(total(visibleCard.leftOut)).toBe(1);
+    const enrichedCard = countingLeftOut(() =>
+      readVisible(WithCards, { text: 'Hello', tool_info: { name: 'search', tier3_card: broken } }, { label }),
+    );
+    expect(enrichedCard.result.success && enrichedCard.result.data).toEqual({
+      text: 'Hello',
+      tool_info: { name: 'search' },
+    });
+    expect(total(enrichedCard.leftOut)).toBe(1);
+  });
+
   it('refuses a change to what people see', () => {
     expect(readVisible(MessageSchema, { text: 42, tool_info: { name: 'search', hint: 'x' } }, { label }).success).toBe(
       false,

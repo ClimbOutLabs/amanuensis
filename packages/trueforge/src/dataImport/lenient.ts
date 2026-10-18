@@ -44,13 +44,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 const NEUTRAL_CANDIDATES: readonly unknown[] = [undefined, null, '', 0, false, [], {}];
 
 /** Keys that hold Aman's own enrichment wherever they appear, even inside what people see. */
-const INTERNAL_KEYS: ReadonlySet<string> = new Set(['tool_info', 'tier3_card', 'maps_hosts']);
+const INTERNAL_KEYS: ReadonlySet<string> = new Set(['tool_info', 'maps_hosts']);
+
+/** An approval card people read, wherever it appears: one that no longer fits is left out, never shown with blanks. */
+const CARD_KEYS: ReadonlySet<string> = new Set(['tier3_card']);
 
 /** Telemetry inside what people see. Each is optional, so a value that no longer fits is dropped, never filled in. */
 const TELEMETRY_KEYS: ReadonlySet<string> = new Set(['usage', 'metrics', 'handoff']);
 
 interface RepairMode {
-  /** `all`: any part may be repaired. `internal-keys`: only values under INTERNAL_KEYS and TELEMETRY_KEYS may be. */
+  /** `all`: any part may be repaired. `internal-keys`: only values under INTERNAL_KEYS, CARD_KEYS and TELEMETRY_KEYS may be. */
   scope: 'all' | 'internal-keys';
   /** Whether a required field that no longer fits may take a neutral value; otherwise its record is left out. */
   fill: boolean;
@@ -105,8 +108,9 @@ function repaired(schema: z.ZodType, { value, mode }: { value: unknown; mode: Re
       if (!(field instanceof z.ZodType)) {
         continue;
       }
-      const fieldMode: RepairMode =
-        mode.scope === 'all'
+      const fieldMode: RepairMode = CARD_KEYS.has(key)
+        ? { scope: 'all', fill: false }
+        : mode.scope === 'all'
           ? mode
           : INTERNAL_KEYS.has(key)
             ? { scope: 'all', fill: true }
@@ -212,7 +216,7 @@ export function readInternal<T extends z.ZodType>(
 
 /**
  * `value` read against a schema for what people see: it must fit as is, except for internal
- * enrichment and telemetry under INTERNAL_KEYS and TELEMETRY_KEYS, which is repaired or dropped.
+ * enrichment, cards and telemetry under INTERNAL_KEYS, CARD_KEYS and TELEMETRY_KEYS, which is repaired or dropped.
  * Otherwise the strict result says where it fails.
  */
 export function readVisible<T extends z.ZodType>(

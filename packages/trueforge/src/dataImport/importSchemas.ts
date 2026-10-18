@@ -301,9 +301,21 @@ const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
 const ImportThreadFieldsSchema = z.object({
   thread_id: z.string().min(1),
   current_context_usage: internal(CurrentContextUsageSchema, { label: LEFT_OUT.threadDetail }),
-  parent: internal(AgentParentSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
-  agent_info: internal(ImportAgentInfoSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
-  completion: internal(ImportCompletionMarkerSchema.nullable(), { label: LEFT_OUT.threadDetail }).optional(),
+  parent: internal(AgentParentSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
+  agent_info: internal(ImportAgentInfoSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
+  completion: internal(ImportCompletionMarkerSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
   task_state: internal(TaskStateSchema.optional(), { label: LEFT_OUT.threadDetail }).optional(),
 });
 
