@@ -5,6 +5,8 @@ const CONTENT = {
   assistant_name: 'Aman',
   assistant_identity: 'A local personal assistant.',
   voice_guidance: 'Be direct and kind.',
+  user_name: null,
+  address_as: null,
   user_profile: 'Prefers concise answers.',
   pinned_preferences: ['Use plain English.', 'Avoid em dashes.'],
   learned_profile: null,
@@ -27,6 +29,8 @@ export function runPersonalizationStoreContractSuite(getStore: () => IPersonaliz
     expect(created.updated_by).toBe('user-a');
     expect(created.created_at).toMatch(/Z$/);
     expect(created.pinned_preferences).toEqual(CONTENT.pinned_preferences);
+    expect(created.user_name).toBeNull();
+    expect(created.address_as).toBeNull();
     expect(Array.isArray(created.pinned_preferences)).toBe(true);
     expect((await store.getProfile({ tenant_id: 'default', created_by: 'user-a' }))?.pinned_preferences).toEqual(
       CONTENT.pinned_preferences,
@@ -53,6 +57,8 @@ export function runPersonalizationStoreContractSuite(getStore: () => IPersonaliz
       updated_by: 'user-a',
       ...CONTENT,
       voice_guidance: 'Be concise and warm.',
+      user_name: null,
+      address_as: null,
     });
     expect(updated.revision).toBe(2);
     expect(updated.digest).not.toBe(personalizationDigest(CONTENT));
@@ -178,6 +184,8 @@ export function runPersonalizationStoreContractSuite(getStore: () => IPersonaliz
       updated_by: 'user-a',
       ...CONTENT,
       voice_guidance: 'Be blunt.',
+      user_name: null,
+      address_as: null,
     });
 
     await expect(

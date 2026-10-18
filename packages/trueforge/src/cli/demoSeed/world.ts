@@ -64,6 +64,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     assistant_name: null,
     assistant_identity: null,
     voice_guidance: 'Warm, plain and brief.',
+    user_name: 'Maya',
+    address_as: 'Maya',
     user_profile: `Maya, a fictional demo user (${DEMO_MARKER}). A 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.`,
     pinned_preferences: [
       'Keep answers short and warm.',

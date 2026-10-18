@@ -537,6 +537,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     assistant_name: 'Aman',
     assistant_identity: 'A helpful local assistant.',
     voice_guidance: 'Warm and brief.',
+    user_name: null,
+    address_as: null,
     user_profile: 'Lives in two time zones.',
     pinned_preferences: ['Answer concisely.'],
     learned_profile: null,

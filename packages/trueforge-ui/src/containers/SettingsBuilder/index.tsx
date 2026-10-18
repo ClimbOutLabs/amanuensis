@@ -7,6 +7,8 @@ import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { AmanFirstRunGuide } from '@/components/AmanFirstRunGuide.js';
+import { useOptionalAmanSetup } from '@/components/AmanSetupContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import { Icon } from '@/icons/Icon.js';
@@ -51,6 +53,8 @@ const TruefoundrySettingsBuilder = () => {
   const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
+  // A new owner lands on Models first, so the first-run checklist shows there until put away.
+  const showFirstRunGuide = useOptionalAmanSetup() !== null && section === 'models';
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -179,6 +183,7 @@ const TruefoundrySettingsBuilder = () => {
 
         <section className="flex flex-col h-full flex-1 overflow-y-hidden px-6 py-4">
           <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto">
+            {showFirstRunGuide ? <AmanFirstRunGuide placement="settings" className="mb-4 max-w-none shrink-0" /> : null}
             <Suspense fallback={<SettingsSectionFallback />}>
               {section === 'models' ? <ModelSettings /> : null}
               {section === 'model-roles' ? <ModelRoleSettings /> : null}

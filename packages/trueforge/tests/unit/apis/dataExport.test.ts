@@ -323,6 +323,8 @@ describe('Data export route', () => {
       assistant_name: 'Helper',
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: 'Alice likes concise answers.',
       pinned_preferences: ['concise'],
       learned_profile: null,

@@ -135,10 +135,12 @@ export class PersonalizationClient {
      * @example
      *     await client.personalization.createOrUpdateProfile({
      *         profile: {
+     *             addressAs: "Sam",
      *             assistantIdentity: "A thoughtful local-first personal assistant.",
      *             assistantName: "Aman",
      *             learningEnabled: false,
      *             pinnedPreferences: ["Use short bullet points."],
+     *             userName: "Sam Rivera",
      *             userProfile: "Prefers local-first tools and plain English.",
      *             voiceGuidance: "Warm, direct, and concise."
      *         }
