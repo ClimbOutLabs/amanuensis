@@ -107,6 +107,19 @@ run_root() {
   fi
 }
 
+# Asks for the password once, before the first root change, so a refused password stops the run with nothing half
+# done and later sudo calls of this run do not ask again. $1 says what was left as it was.
+root_ready() {
+  [ "$(id -u)" != 0 ] || return 0
+  command -v sudo >/dev/null 2>&1 || die "This needs administrator rights, and this computer has no way to ask for them, so $1. Run the same command again from an administrator account."
+  sudo -n true 2>/dev/null && return 0
+  # sudo reads the password from the terminal, so a run without one cannot be asked.
+  (: </dev/tty) 2>/dev/null ||
+    die "This needs your computer password, which can only be typed in a terminal window, so $1. Run the same command again in a terminal window."
+  sudo -v -p 'Your computer password (it stays hidden as you type): ' ||
+    die "The password was not accepted, so $1. Type the password you use to log in to this computer, then run the same command again."
+}
+
 # Shell function the root steps run on the downloaded key. The file must hold exactly one primary key
 # and its fingerprint must be the pinned one; subkey fingerprints belong to that primary key, so only
 # the fingerprint that follows each pub record is compared.

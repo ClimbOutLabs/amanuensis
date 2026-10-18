@@ -325,6 +325,33 @@ test_root_steps_with_the_flag() {
   sandbox_drop
 }
 
+test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
+  t_begin "a refused password for the sandbox root steps stops before the setup runs and before the instance exists"
+  sandbox_new
+  printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
+  STUB_SUDO_REFUSE=1
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --sandbox-root --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so instance main was not started. Run the same command again in a terminal window."
+  assert_log_lacks "sudo -v"
+  run_install_tty "Instance name=>
+Your email=>owner@example.invalid
+Back up automatically=>y
+Go ahead?=>y
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
+Repeat the password=>$SENTINEL_PASSWORD" --sandbox-root
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
+  assert_log_has "sudo -v"
+  assert_log_lacks "--fix --yes"
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
 test_root_steps_answered_yes_on_a_terminal() {
   t_begin "on a terminal the root steps are shown and run after a yes"
   sandbox_new
@@ -480,6 +507,81 @@ test_remove_stops_the_slots() {
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
   assert_log_has "aman-sandbox.mjs --down --purge --instance main"
+  sandbox_drop
+}
+
+test_remove_asks_for_the_password_before_any_change() {
+  t_begin "remove --purge-data asks for the password before it changes anything, and a refused one changes nothing"
+  sandbox_new
+  install_machine
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  : >"$STUB_LOG"
+  STUB_SUDO_REFUSE=1
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 1
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so nothing was changed. Run the same command again in a terminal window."
+  run_install_tty "" instance remove main --purge-data --confirm-name main
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so nothing was changed. Type the password you use to log in to this computer, then run the same command again."
+  assert_log_has "sudo -v"
+  assert_log_lacks "--down"
+  assert_log_lacks "/instances/main/.env down"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  assert_file "$AMAN_HOME/instances/main/compose.yaml"
+  assert_file "$SB_STATE/up/main-slots"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data"
+  if [ -d "$SB/aman-slots/main" ]; then t_pass; else t_fail "the slot disks are kept"; fi
+  sandbox_drop
+}
+
+test_remove_that_stops_at_the_slot_disks_can_run_again() {
+  t_begin "a remove that cannot delete the slot disks does not report the instance removed, and the same command finishes it"
+  sandbox_new
+  install_machine
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  STUB_SLOT_DISK_FAIL=1
+  run_install instance remove main --purge-data --confirm-name main
+  unset STUB_SLOT_DISK_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "so the removal was not finished. Run the same command again: install.sh instance remove main --purge-data"
+  assert_log_has "/instances/main/.env down"
+  assert_not_contains "$OUT$ERR" "Removed instance"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Removed instance main and deleted its data:"
+  assert_no_path "$SB/aman-slots/main"
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_remove_deletes_slots_left_by_a_removed_instance() {
+  t_begin "remove --purge-data deletes the slot disks an earlier removal left behind"
+  sandbox_new
+  install_machine
+  # What an interrupted removal left: no instance, no volumes, no slot containers, only the slot disks.
+  rm -rf "$AMAN_HOME/instances/main" "$AMAN_HOME/state/instances/main.conf" "$SB_STATE/up/main-slots"
+  grep -Ev '^(aman_main_|main_slot_)' "$SB_STATE/volumes" >"$SB_STATE/volumes.new" || true
+  mv "$SB_STATE/volumes.new" "$SB_STATE/volumes"
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  run_install instance remove main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main is already removed, but its sandboxes are still on this computer."
+  assert_flat_contains "$OUT" "To delete them: install.sh instance remove main --purge-data"
+  if [ -d "$SB/aman-slots/main" ]; then t_pass; else t_fail "without --purge-data the slot disks are kept"; fi
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_log_has "aman-sandbox.mjs --down --purge --instance main"
+  assert_log_has "sudo -n true"
+  assert_flat_contains "$OUT" "Deleted the sandboxes that instance main left behind."
+  assert_no_path "$SB/aman-slots/main"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main does not exist; nothing to do."
   sandbox_drop
 }
 
@@ -673,6 +775,7 @@ test_rendered_compose_wires_the_app_to_the_slots
 test_install_without_sandbox
 test_root_steps_need_consent_yes_is_not_enough
 test_root_steps_with_the_flag
+test_root_steps_stop_before_the_setup_when_the_password_is_refused
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
 test_healthy_slots_need_no_root
@@ -683,6 +786,9 @@ test_failed_verification_fails_the_install_with_the_repair
 test_second_instance_gets_its_own_slots
 test_instance_add_without_the_sandbox
 test_remove_stops_the_slots
+test_remove_asks_for_the_password_before_any_change
+test_remove_that_stops_at_the_slot_disks_can_run_again
+test_remove_deletes_slots_left_by_a_removed_instance
 test_existing_instance_without_wiring_gets_it
 test_rerun_turns_the_sandbox_on_and_keeps_the_data
 test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how
