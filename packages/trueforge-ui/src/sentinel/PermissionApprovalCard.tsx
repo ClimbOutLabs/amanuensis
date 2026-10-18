@@ -93,6 +93,12 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      {email.reply_in_thread !== null && (
+        <dl className="mb-1">
+          <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
+          <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
+        </dl>
+      )}
       <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
       {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
       {email.bcc.length > 0 && (

@@ -55,6 +55,7 @@ export async function build(input: {
   features?: ('gmail_read' | 'gmail_compose')[];
   stager?: AttachmentStager | undefined;
   unattended?: boolean;
+  demoSendAllowlist?: string[] | null;
   listDeadlineMs?: number;
 }) {
   const connections = new FakeConnections();
@@ -69,7 +70,10 @@ export async function build(input: {
       return Promise.resolve();
     },
   });
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    demoSendAllowlist: input.demoSendAllowlist ?? null,
+  };
   const sentinel = createSentinelHostContext({
     ...OWNER,
     conversation_id: 'c1',
@@ -99,6 +103,12 @@ export const route =
   (path: string, body: unknown, status = 200): Route =>
   url =>
     url.pathname === `/gmail/v1/users/me${path}` ? json(body, status) : undefined;
+
+/** Gmail's answer for one thread, filtered by the headers a request names, as the real API does. */
+export const threadRoute =
+  (thread: GmailThread): Route =>
+  url =>
+    url.pathname === `/gmail/v1/users/me/threads/${thread.id}` ? json(gmailThreadResponse({ thread, url })) : undefined;
 
 const escapeSnippet = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

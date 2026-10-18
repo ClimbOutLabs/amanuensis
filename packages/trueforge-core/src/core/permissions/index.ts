@@ -31,11 +31,18 @@ export { verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
 export { extractCardFields, genericExtractor } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';
-export { MAPS_TOOL_NAMES, RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, isMapsToolName } from './mapsToolNames';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_PLACES_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  isMapsToolName,
+} from './mapsToolNames';
 export { provenanceForToolType, requiresNetwork } from './networkRequirements';
 export type { ToolProvenance } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { RunnerWorkflow } from './runner';
+export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

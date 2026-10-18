@@ -29,6 +29,8 @@ const action: SentinelAction = {
 /** The server's Sentinel composition over one SQLite file, as main.ts builds it. */
 function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
   return createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
     audit: new SentinelAuditStore(db),
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -62,6 +64,8 @@ describe('createSentinelServices', () => {
     const toolGrants = new SqliteMcpToolGrantStore(db);
     try {
       const services = createSentinelServices({
+        demoMode: true,
+        demoSendAllowlist: ['maya@demo.example'],
         audit: new SentinelAuditStore(db),
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
@@ -70,6 +74,7 @@ describe('createSentinelServices', () => {
       });
       expect(services.token_store).toBe(approvalTokens);
       expect(services.tool_grants).toBe(toolGrants);
+      expect(services.demoSendAllowlist).toEqual(['maya@demo.example']);
     } finally {
       await db.destroy();
     }
@@ -120,5 +125,32 @@ describe('createSentinelServices', () => {
     } finally {
       await restarted.destroy();
     }
+  });
+
+  describe('demo send list', () => {
+    async function allowlistFor(input: { demoMode: boolean; demoSendAllowlist: string[] }) {
+      const db = createSqliteDb(databaseFile);
+      try {
+        return createSentinelServices({
+          ...input,
+          audit: new SentinelAuditStore(db),
+          settings: new SqliteSentinelSettingsStore(db),
+          approvalTokens: new SqliteApprovalTokenStore(db),
+          toolGrants: new SqliteMcpToolGrantStore(db),
+          outboundSecrets: () => Promise.resolve([]),
+        }).demoSendAllowlist;
+      } finally {
+        await db.destroy();
+      }
+    }
+
+    it('is the configured list on a demo instance, and an empty list stays empty rather than off', async () => {
+      expect(await allowlistFor({ demoMode: true, demoSendAllowlist: ['a@demo.example'] })).toEqual(['a@demo.example']);
+      expect(await allowlistFor({ demoMode: true, demoSendAllowlist: [] })).toEqual([]);
+    });
+
+    it('is off outside demo mode, whatever the list says', async () => {
+      expect(await allowlistFor({ demoMode: false, demoSendAllowlist: ['a@demo.example'] })).toBeNull();
+    });
   });
 });

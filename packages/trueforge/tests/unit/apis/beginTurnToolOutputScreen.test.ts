@@ -302,9 +302,9 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       expect(given).toBe(googleStore);
     });
 
-    it('never gives a demo instance a real mailbox, even with a stored Google login', async () => {
-      const { given } = await googleConnectionsOf({ demoMode: true });
-      expect(given).toBeUndefined();
+    it('keeps Google on a demo instance, where the sentinel holds sends to the demo list', async () => {
+      const { given, googleStore } = await googleConnectionsOf({ demoMode: true });
+      expect(given).toBe(googleStore);
     });
   });
 });
