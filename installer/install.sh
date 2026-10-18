@@ -158,6 +158,7 @@ Options
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
   --verbose             show technical details and the full list of downloads
   --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
+                        (an instance that has never started is started once first, so the file can be checked)
   --name NAME           name of the first instance (default main)
   --email ADDRESS       the email you sign in with
   --instance NAME       which instance demo-seed and password apply to (default: the only one)

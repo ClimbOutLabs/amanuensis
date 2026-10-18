@@ -87,6 +87,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman password [--instance NAME] [--password-stdin]
          sets a new owner password; run it on the computer where Aman is installed
        aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
+         --dry-run checks the file and imports nothing; an instance that has never started is started once first
        aman migrate --from-compose FOLDER [--user ID]
 USAGE
 }

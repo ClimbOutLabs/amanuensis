@@ -46,57 +46,94 @@ const NEUTRAL_CANDIDATES: readonly unknown[] = [undefined, null, '', 0, false, [
 /** Keys that hold Aman's own enrichment wherever they appear, even inside what people see. */
 const INTERNAL_KEYS: ReadonlySet<string> = new Set(['tool_info', 'tier3_card', 'maps_hosts']);
 
-/** `all`: any part may be repaired. `internal-keys`: only values under INTERNAL_KEYS may be. */
-type RepairScope = 'all' | 'internal-keys';
+/** Telemetry inside what people see. Each is optional, so a value that no longer fits is dropped, never filled in. */
+const TELEMETRY_KEYS: ReadonlySet<string> = new Set(['usage', 'metrics', 'handoff']);
+
+interface RepairMode {
+  /** `all`: any part may be repaired. `internal-keys`: only values under INTERNAL_KEYS and TELEMETRY_KEYS may be. */
+  scope: 'all' | 'internal-keys';
+  /** Whether a required field that no longer fits may take a neutral value; otherwise its record is left out. */
+  fill: boolean;
+}
 
 interface Repair {
   value: unknown;
-  /** Internal details replaced or left out on the way. */
-  changes: number;
+  /** Something in the value was replaced or dropped. */
+  fixed: boolean;
+  /** List items left out, each its own detail. */
+  droppedItems: number;
+}
+
+/** One for a garbled value, plus one for each list item it lost. */
+function repairCount(repair: Repair): number {
+  return repair.droppedItems + (repair.fixed ? 1 : 0);
 }
 
 function neutral(schema: z.ZodType): Repair | undefined {
   for (const candidate of NEUTRAL_CANDIDATES) {
     const parsed = schema.safeParse(candidate);
     if (parsed.success) {
-      return { value: parsed.data, changes: 1 };
+      return { value: parsed.data, fixed: true, droppedItems: 0 };
     }
   }
-  return schema instanceof z.ZodObject ? repaired(schema, { value: {}, scope: 'all' }) : undefined;
+  if (!(schema instanceof z.ZodObject)) {
+    return undefined;
+  }
+  const built = repaired(schema, { value: {}, mode: { scope: 'all', fill: true } });
+  return built === undefined ? undefined : { ...built, fixed: true };
+}
+
+function acceptsUndefined(schema: z.ZodType): boolean {
+  return schema.safeParse(undefined).success;
 }
 
 /** A parsed value for `schema` built from `value`, keeping every part that still fits. */
-function repaired(schema: z.ZodType, { value, scope }: { value: unknown; scope: RepairScope }): Repair | undefined {
+function repaired(schema: z.ZodType, { value, mode }: { value: unknown; mode: RepairMode }): Repair | undefined {
   const direct = schema.safeParse(value);
   if (direct.success) {
-    return { value: direct.data, changes: 0 };
+    return { value: direct.data, fixed: false, droppedItems: 0 };
   }
   if ((schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) && value !== undefined && value !== null) {
     const inner = schema.unwrap();
-    return inner instanceof z.ZodType ? repaired(inner, { value, scope }) : undefined;
+    return inner instanceof z.ZodType ? repaired(inner, { value, mode }) : undefined;
   }
   if (schema instanceof z.ZodObject && isRecord(value)) {
     const fields: Record<string, unknown> = {};
-    let changes = 0;
+    let anyFixed = false;
+    let droppedItems = 0;
     for (const [key, field] of Object.entries(schema.shape)) {
       if (!(field instanceof z.ZodType)) {
         continue;
       }
-      const fieldScope = scope === 'all' || INTERNAL_KEYS.has(key) ? 'all' : 'internal-keys';
-      const fixed =
-        repaired(field, { value: value[key], scope: fieldScope }) ??
-        (fieldScope === 'all' ? neutral(field) : undefined);
+      const fieldMode: RepairMode =
+        mode.scope === 'all'
+          ? mode
+          : INTERNAL_KEYS.has(key)
+            ? { scope: 'all', fill: true }
+            : TELEMETRY_KEYS.has(key)
+              ? { scope: 'all', fill: false }
+              : mode;
+      let fixed = repaired(field, { value: value[key], mode: fieldMode });
+      if (fixed === undefined && fieldMode.scope === 'all') {
+        fixed = acceptsUndefined(field)
+          ? { value: undefined, fixed: true, droppedItems: 0 }
+          : fieldMode.fill
+            ? neutral(field)
+            : undefined;
+      }
       // A field nothing can stand in for means the record cannot be rebuilt.
       if (fixed === undefined) {
         return undefined;
       }
-      changes += fixed.changes;
+      anyFixed ||= fixed.fixed;
+      droppedItems += fixed.droppedItems;
       if (fixed.value !== undefined) {
         fields[key] = fixed.value;
       }
     }
     const again = schema.safeParse(fields);
-    return again.success ? { value: again.data, changes: Math.max(changes, 1) } : undefined;
+    // A record that failed only on keys this version does not know still counts as repaired.
+    return again.success ? { value: again.data, fixed: anyFixed || droppedItems === 0, droppedItems } : undefined;
   }
   if (schema instanceof z.ZodArray && Array.isArray(value)) {
     const element = schema.element;
@@ -104,27 +141,29 @@ function repaired(schema: z.ZodType, { value, scope }: { value: unknown; scope: 
       return undefined;
     }
     const items: unknown[] = [];
-    let changes = 0;
+    let anyFixed = false;
+    let droppedItems = 0;
     for (const item of value) {
-      const fixed = repaired(element, { value: item, scope });
+      const fixed = repaired(element, { value: item, mode });
       if (fixed === undefined) {
-        if (scope !== 'all') {
+        if (mode.scope !== 'all') {
           return undefined;
         }
         // One record that no longer fits leaves the list without it.
-        changes += 1;
+        droppedItems += 1;
         continue;
       }
-      changes += fixed.changes;
+      anyFixed ||= fixed.fixed;
+      droppedItems += fixed.droppedItems;
       items.push(fixed.value);
     }
     const again = schema.safeParse(items);
-    return again.success ? { value: again.data, changes: Math.max(changes, 1) } : undefined;
+    return again.success ? { value: again.data, fixed: anyFixed || droppedItems === 0, droppedItems } : undefined;
   }
   if (schema instanceof z.ZodUnion) {
     for (const option of schema.options) {
       if (option instanceof z.ZodType) {
-        const fixed = repaired(option, { value, scope });
+        const fixed = repaired(option, { value, mode });
         if (fixed !== undefined) {
           return fixed;
         }
@@ -135,7 +174,7 @@ function repaired(schema: z.ZodType, { value, scope }: { value: unknown; scope: 
 }
 
 function counted(repair: Repair, label: string): unknown {
-  noteLeftOut({ label, count: repair.changes });
+  noteLeftOut({ label, count: repairCount(repair) });
   return repair.value;
 }
 
@@ -143,6 +182,8 @@ interface ReadOptions<T extends z.ZodType> {
   /** What the person is told was left out, such as "tool detail". */
   label: string;
   fallback?: z.input<T>;
+  /** False leaves a record out rather than give a required field a neutral value; default true. */
+  fill?: boolean;
 }
 
 /**
@@ -152,15 +193,15 @@ interface ReadOptions<T extends z.ZodType> {
 export function readInternal<T extends z.ZodType>(
   schema: T,
   value: unknown,
-  { label, fallback }: ReadOptions<T>,
+  { label, fallback, fill = true }: ReadOptions<T>,
 ): z.output<T> | undefined {
   const direct = schema.safeParse(value);
   if (direct.success) {
     return direct.data;
   }
   const fixed =
-    repaired(schema, { value, scope: 'all' }) ??
-    (fallback === undefined ? neutral(schema) : { value: fallback, changes: 1 });
+    repaired(schema, { value, mode: { scope: 'all', fill } }) ??
+    (fallback !== undefined ? { value: fallback, fixed: true, droppedItems: 0 } : fill ? neutral(schema) : undefined);
   if (fixed === undefined) {
     noteLeftOut({ label });
     return undefined;
@@ -171,7 +212,8 @@ export function readInternal<T extends z.ZodType>(
 
 /**
  * `value` read against a schema for what people see: it must fit as is, except for internal
- * enrichment under INTERNAL_KEYS, which is repaired. Otherwise the strict result says where it fails.
+ * enrichment and telemetry under INTERNAL_KEYS and TELEMETRY_KEYS, which is repaired or dropped.
+ * Otherwise the strict result says where it fails.
  */
 export function readVisible<T extends z.ZodType>(
   schema: T,
@@ -182,7 +224,7 @@ export function readVisible<T extends z.ZodType>(
   if (direct.success) {
     return direct;
   }
-  const fixed = repaired(schema, { value, scope: 'internal-keys' });
+  const fixed = repaired(schema, { value, mode: { scope: 'internal-keys', fill: true } });
   if (fixed === undefined) {
     return direct;
   }
@@ -259,7 +301,8 @@ export function mixedList<T extends z.ZodType>({
         kept.push(parsed.data);
         continue;
       }
-      const read = readInternal(schema, item, { label });
+      // A record people may still see is never given made-up values: it is read as it is, or left out.
+      const read = readInternal(schema, item, { label, fill: false });
       if (read !== undefined) {
         kept.push(read);
       }

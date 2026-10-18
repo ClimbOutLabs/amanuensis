@@ -118,6 +118,8 @@ const VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
   EventType.TOOL_RESPONSE_REQUIRED,
   EventType.MCP_AUTH_REQUIRED,
   EventType.TURN_DONE,
+  EventType.THREAD_CREATED,
+  EventType.THREAD_DONE,
 ]);
 
 /** A tool call's own name and server, and the tool info it carries; see forEachToolCall. */
@@ -325,9 +327,9 @@ const ImportTurnFieldsSchema = z.object({
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
   state: z.unknown().transform((value, ctx) => {
-    // A finished turn's output is what people read, so it stays strict.
+    // A finished or failed turn's output is what people read, so it stays strict.
     const parsed =
-      isRecord(value) && value['status'] === 'done'
+      isRecord(value) && (value['status'] === 'done' || value['status'] === 'error')
         ? readVisible(TurnStateSchema, value, { label: LEFT_OUT.toolDetail })
         : // Any other state this version cannot read lands like a turn left running: cancelled, with nothing lost.
           TurnStateSchema.safeParse(

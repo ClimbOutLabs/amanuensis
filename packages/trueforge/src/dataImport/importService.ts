@@ -295,18 +295,33 @@ function rejectSection({
   error: z.ZodError;
   logger: DataImportDeps<never>['logger'];
 }): never {
+  logRejectedSection({ name, json, error, logger });
+  const [first] = error.issues;
+  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
+  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
+    cause: error,
+  });
+}
+
+/** Where a section failed, by path and issue kind only: the archive's own values never reach the log. */
+function logRejectedSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): void {
   const [first] = error.issues;
   const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
   logger.warn('Data import rejected an export section', {
     section: name,
     issue_count: error.issues.length,
-    // Paths and issue kinds only: the archive's own values never reach the log.
     issues: error.issues.slice(0, MAX_LOGGED_ISSUES).map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
     ...ids,
-  });
-  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
-  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
-    cause: error,
   });
 }
 
@@ -338,7 +353,6 @@ function parseSection<TSchema extends z.ZodType>({
   return result.data;
 }
 
-/** A sessions file read one record at a time, so each detail left out is told against its own chat. */
 /** The chat a raw sessions record belongs to, and its title as far as it is known yet. */
 function rawChat(item: unknown, titles: ReadonlyMap<string, string | null>): { id: string; title: string | null } {
   const session = isRecord(item) ? item['session'] : undefined;
@@ -350,6 +364,7 @@ function rawChat(item: unknown, titles: ReadonlyMap<string, string | null>): { i
   return { id, title: titles.get(id) ?? rawTitle };
 }
 
+/** A sessions file read one record at a time, so each detail left out is told against its own chat. */
 function parseChatRecords<TSchema extends z.ZodType>({
   files,
   name,
@@ -384,7 +399,7 @@ function parseChatRecords<TSchema extends z.ZodType>({
       }
       const chat = rawChat(item, chats.titles);
       throw new DataImportError(
-        `Chat '${chat.title ?? 'Untitled chat'}' uses the tool ${cause.toolName}, and this Aman cannot tell what kind of tool it was, so nothing was imported. Update Aman to its newest version, then import again.`,
+        `Chat '${chat.title ?? 'Untitled chat'}' uses the tool ${cause.toolName}, and this Aman cannot tell what kind of tool it was, so nothing was imported. If the file came from a newer Aman, update this one. Otherwise delete that chat in the Aman it came from, export again and import the new file.`,
         400,
         { cause },
       );
@@ -392,7 +407,13 @@ function parseChatRecords<TSchema extends z.ZodType>({
     const { result, leftOut: counts } = parsed;
     if (!result.success) {
       const issues = result.error.issues.map(issue => ({ ...issue, path: [index, ...issue.path] }));
-      rejectSection({ name, json, error: new z.ZodError(issues), logger });
+      logRejectedSection({ name, json, error: new z.ZodError(issues), logger });
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        400,
+        { cause: result.error },
+      );
     }
     const chat = chatOf(result.data);
     if (chat.title !== undefined) {
@@ -464,7 +485,8 @@ interface ChatReading {
 /**
  * Tells the kind of a tool call recorded with a kind this version does not know, from facts and
  * never by guessing: a call to a connector in the export or in this Aman's connector catalog is a
- * connector tool; otherwise every other call to the same tool in the export must agree on one kind.
+ * connector tool; otherwise every other call to the same tool on the same server in the export must
+ * agree on one kind.
  */
 function toolTypeResolver({
   files,
@@ -490,11 +512,12 @@ function toolTypeResolver({
         // A damaged file is reported by the parse that needs it.
         continue;
       }
-      forEachToolCall(json, ({ toolName, toolInfo }) => {
+      forEachToolCall(json, ({ toolName, serverName, toolInfo }) => {
         const type = toolInfo['type'];
         if (isToolType(type)) {
-          const before = found.get(toolName);
-          found.set(toolName, before === undefined || before === type ? type : 'conflicting');
+          const key = toolKey({ serverName, toolName });
+          const before = found.get(key);
+          found.set(key, before === undefined || before === type ? type : 'conflicting');
         }
       });
     }
@@ -505,9 +528,18 @@ function toolTypeResolver({
     if (serverName !== '' && connectorNames.has(serverName)) {
       return 'mcp';
     }
-    const type = recordedTypes().get(toolName);
-    return type === undefined || type === 'conflicting' ? undefined : type;
+    const type = recordedTypes().get(toolKey({ serverName, toolName }));
+    // A connector tool always names its server, so a call without one is never taken for one.
+    if (type === undefined || type === 'conflicting' || (type === 'mcp' && serverName === '')) {
+      return undefined;
+    }
+    return type;
   };
+}
+
+/** The same tool name on two servers is two tools. */
+function toolKey({ serverName, toolName }: { serverName: string; toolName: string }): string {
+  return `${serverName}\u0000${toolName}`;
 }
 
 function readSessionEntries(input: {
@@ -1167,6 +1199,19 @@ export async function runDataImport<TTransaction>(
   }
   importsInFlight.add(tenantId);
   try {
+    if (request.dryRun === true) {
+      // A dry run never takes the lock, since taking it cleans up after an interrupted import.
+      const existing = await readMarkerForRecovery(deps);
+      if (existing !== undefined) {
+        throw new DataImportError(
+          isLiveImportMarker(existing.marker, Date.now())
+            ? IMPORT_BUSY_MESSAGE
+            : 'An earlier import did not finish, so this file was not checked. Run the import without --dry-run to finish cleaning up, then check again.',
+          409,
+        );
+      }
+      return await importArchive(deps, { request, lock: undefined });
+    }
     const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
     const lock = await acquireImportLock(deps, { tenantId, subjectId, scope });
     try {
@@ -1181,7 +1226,8 @@ export async function runDataImport<TTransaction>(
 
 async function importArchive<TTransaction>(
   deps: DataImportDeps<TTransaction>,
-  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> },
+  /** No lock for a dry run, which writes nothing and returns before the first write. */
+  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> | undefined },
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   const contents = loadArchive({
@@ -1328,7 +1374,7 @@ async function importArchive<TTransaction>(
     deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
-  if (request.dryRun === true) {
+  if (lock === undefined) {
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,

@@ -468,7 +468,7 @@ export async function replaySessions(
         throw cause;
       }
       throw new DataImportError(
-        `Chat ${session.session_id} in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        `Chat '${session.title ?? 'Untitled chat'}' in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
         400,
         { cause },
       );

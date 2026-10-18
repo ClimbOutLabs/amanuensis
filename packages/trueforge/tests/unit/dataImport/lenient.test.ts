@@ -32,7 +32,8 @@ describe('readInternal', () => {
     const LaterSchema = z.object({ ...StatsSchema.shape, added_later: z.string(), retries: z.number() });
     const { result, leftOut } = countingLeftOut(() => readInternal(LaterSchema, { items: 2 }, { label }));
     expect(result).toEqual({ items: 2, added_later: '', retries: 0 });
-    expect(leftOut).toEqual(new Map([[label, 2]]));
+    // One garbled value, however many of its fields were filled in.
+    expect(leftOut).toEqual(new Map([[label, 1]]));
   });
 
   it('never invents an enum value: a record that needs one is left out, and reported', () => {
@@ -101,14 +102,14 @@ describe('every repair is reported', () => {
       },
       2,
     ],
+    ['list items repaired inside, once for the value', { count: 1, items: [{ state: 'open' }, { state: 'done' }] }, 1],
+    ['an optional enum that no longer fits, left out', { count: 1, items: [], choice: 'z' }, 1],
+    ['a value that is not a record at all, rebuilt once', 'not a record', 1],
     [
-      'each list item repaired inside, counted per field',
-      { count: 1, items: [{ state: 'open' }, { state: 'done' }] },
+      'several repairs in one record: once for the value, plus each list item left out',
+      { note: 3, items: [{ id: 'i', state: 'gone' }], choice: 'z' },
       2,
     ],
-    ['an optional enum that no longer fits, left out', { count: 1, items: [], choice: 'z' }, 1],
-    ['a value that is not a record at all, rebuilt with each required field neutral', 'not a record', 2],
-    ['several repairs in one record, each one', { note: 3, items: [{ id: 'i', state: 'gone' }], choice: 'z' }, 4],
   ])('%s', (_case, value, expected) => {
     const { result, leftOut } = countingLeftOut(() => readInternal(RecordSchema, value, { label }));
     expect(RecordSchema.safeParse(result).success).toBe(true);
@@ -144,6 +145,18 @@ describe('readVisible', () => {
     expect(total(leftOut)).toBe(1);
   });
 
+  it('drops telemetry that no longer fits instead of making up its values', () => {
+    const WithUsage = z.object({
+      text: z.string(),
+      usage: z.object({ input_tokens: z.number(), output_tokens: z.number() }).optional(),
+    });
+    const { result, leftOut } = countingLeftOut(() =>
+      readVisible(WithUsage, { text: 'Hello', usage: { input_tokens: 'many' } }, { label }),
+    );
+    expect(result.success && result.data).toEqual({ text: 'Hello' });
+    expect(total(leftOut)).toBe(1);
+  });
+
   it('refuses a change to what people see', () => {
     expect(readVisible(MessageSchema, { text: 42, tool_info: { name: 'search', hint: 'x' } }, { label }).success).toBe(
       false,
@@ -167,10 +180,8 @@ describe('mixedList', () => {
     const { result, leftOut } = countingLeftOut(() =>
       Events.parse([{ type: 'message', text: 'Hi' }, { type: 'usage' }, { type: 'from-a-later-version', tokens: 2 }]),
     );
-    expect(result).toEqual([
-      { type: 'message', text: 'Hi' },
-      { type: 'usage', tokens: 0 },
-    ]);
+    // A record people may see is never filled in: the usage record without its count is left out too.
+    expect(result).toEqual([{ type: 'message', text: 'Hi' }]);
     expect(leftOut).toEqual(new Map([['note', 2]]));
   });
 

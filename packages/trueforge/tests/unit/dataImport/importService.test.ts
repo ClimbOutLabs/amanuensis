@@ -1209,13 +1209,14 @@ describe('runDataImport reports damage by location only', () => {
       const error = await importError(target, broken);
       expect(error).toMatchObject({ status: 400 });
       const message = error instanceof Error ? error.message : '';
-      expect(message).toContain('sessions.json');
-      expect(message).toContain('[0].session.created_at');
-      expect(message).not.toContain('private-value-123');
+      expect(message).toBe(
+        `Chat 'First chat' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+      );
       expect(warn).toHaveBeenCalledTimes(1);
       const fields: unknown = warn.mock.calls[0]?.[1];
       expect(JSON.stringify(fields)).not.toContain('private-value-123');
       expect(fields).toMatchObject({ section: 'sessions.json', session_id: 'session-1' });
+      expect(JSON.stringify(fields)).toContain('[0].session.created_at');
     } finally {
       await source.close();
       await target.close();
@@ -2910,15 +2911,17 @@ describe('runDataImport with chats larger than one file may be', () => {
       });
       const error = await importError(target, broken);
       const message = error instanceof Error ? error.message : '';
-      expect(message).toMatch(
-        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.turn\.created_at/,
+      expect(message).toBe(
+        `Chat 'First chat' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
       );
-      expect(message).not.toContain('private-value-456');
-      expect(target.logger.warn.mock.calls[0]?.[1]).toMatchObject({
+      const logged: unknown = target.logger.warn.mock.calls[0]?.[1];
+      expect(logged).toMatchObject({
         section: 'sessions/0001.json',
         session_id: SEED_IDS.sessionMain,
         turn_id: 'session-1-turn-1',
       });
+      expect(JSON.stringify(logged)).toMatch(/\[\d+\]\.turn\.created_at/);
+      expect(JSON.stringify(logged)).not.toContain('private-value-456');
     } finally {
       await source.close();
       await target.close();
@@ -3147,7 +3150,7 @@ describe('runDataImport with an export from an older version', () => {
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(4);
       expect(result.summary).toContain("Chat 'First chat': 1 background note from an older version was left out.");
-      expect(result.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
+      expect(result.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
       expect(result.summary).not.toContain('Your chats are complete');
       expect(result.summary).toContain(
         'The older history of 1 space was trimmed before the export, so its versions now start at 1.',
@@ -3229,7 +3232,7 @@ describe('runDataImport with an export from an older version', () => {
         .mockRejectedValueOnce(new Error('The store refused this turn'));
       const error = await importError(target, archive);
       expect(error instanceof Error && error.message).toBe(
-        `Chat ${SEED_IDS.sessionMain} in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        `Chat 'First chat' in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
       );
       expect(target.logger.warn).toHaveBeenCalledWith(
         'Data import could not read a chat back',
@@ -3306,9 +3309,11 @@ describe('runDataImport when Aman internals have changed', () => {
       const result = await runDataImport(importDeps(target), importRequest(changed));
       expect(result.chats).toBe(4);
       for (const chat of ['First chat', 'Morning digest', 'Unfinished chat', 'Untitled chat']) {
-        expect(result.summary).toMatch(new RegExp(`Chat '${chat}': [^.]* from an older version were left out\\.`));
+        expect(result.summary).toMatch(
+          new RegExp(`Chat '${chat}': [^.]* from an older version (was|were) left out\\.`),
+        );
       }
-      expect(result.summary).toContain('Your settings: 3 permission settings from an older version were left out.');
+      expect(result.summary).toContain('Your settings: 1 permission setting from an older version was left out.');
       const messages = async (instance: Instance, sessionId: string, turnId: string) =>
         (
           (await instance.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId }))?.snapshot.threads[
@@ -3342,8 +3347,11 @@ describe('runDataImport when Aman internals have changed', () => {
         entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
       });
       const error = await importError(target, broken);
-      expect(error instanceof Error && error.message).toMatch(
-        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.turn\.snapshot\.threads\.main\.context\[0\]/,
+      expect(error instanceof Error && error.message).toBe(
+        `Chat 'First chat' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+      );
+      expect(JSON.stringify(target.logger.warn.mock.calls[0]?.[1])).toMatch(
+        /\[\d+\]\.turn\.snapshot\.threads\.main\.context\[0\]/,
       );
     } finally {
       await source.close();
@@ -3375,9 +3383,10 @@ describe('runDataImport keeps what people see strict', () => {
       });
       const error = await importError(target, changed);
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toMatch(
-        /^The sessions\/0001\.json section of this export is damaged at \[\d+\]\.events\[\d+\]/,
+      expect(error instanceof Error && error.message).toBe(
+        `Chat 'First chat' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
       );
+      expect(JSON.stringify(target.logger.warn.mock.calls[0]?.[1])).toMatch(/\[\d+\]\.events\[\d+\]/);
     } finally {
       await source.close();
       await target.close();
@@ -3414,7 +3423,7 @@ describe('runDataImport keeps what people see strict', () => {
       });
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(3);
-      expect(result.summary).toContain("Chat 'First chat': 3 tool details from an older version were left out.");
+      expect(result.summary).toContain("Chat 'First chat': 1 tool detail from an older version was left out.");
     } finally {
       await source.close();
       await target.close();
@@ -3440,7 +3449,7 @@ describe('runDataImport tells the person everything it left out', () => {
 
       const dry = await runDataImport(importDeps(target), { ...importRequest(older), dryRun: true });
       expect(dry.summary).toMatch(/^This was a dry run, so nothing was imported\. The import would bring 4 chats/);
-      expect(dry.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
+      expect(dry.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
       const sessions = await target.stores.sessionStore.listSessions({
         tenant_id: TENANT,
         limit: 10,
@@ -3457,7 +3466,7 @@ describe('runDataImport tells the person everything it left out', () => {
       expect(sessions.data).toEqual([]);
 
       const real = await runDataImport(importDeps(target), importRequest(older));
-      expect(real.summary).toContain("Chat 'Untitled chat': 6 tool details from an older version were left out.");
+      expect(real.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
     } finally {
       await source.close();
       await target.close();
@@ -3536,7 +3545,7 @@ describe('runDataImport with a tool call of a kind this version does not know', 
       const archive = await repack(await olderArchive(source), withUnknownToolKind('plain-connector'));
       const result = await runDataImport(importDeps(target), importRequest(archive));
       expect(result.chats).toBe(4);
-      expect(result.summary).toContain("Chat 'Untitled chat': 7 tool details from an older version were left out.");
+      expect(result.summary).toContain("Chat 'Untitled chat': 2 tool details from an older version were left out.");
       const turn = await target.stores.sessionStore.getTurn({ session_id: 'edited-chat', turn_id: 'edited-turn-3' });
       const call = turn?.snapshot.threads[MAIN_THREAD_ID]?.context.find(message => 'tool_calls' in message);
       expect(call).toMatchObject({ tool_calls: [{ id: 'call-older-route', tool_info: { type: 'mcp' } }] });
@@ -3554,8 +3563,177 @@ describe('runDataImport with a tool call of a kind this version does not know', 
       const error = await importError(target, archive);
       expect(error).toBeInstanceOf(DataImportError);
       expect(error instanceof Error && error.message).toBe(
-        "Chat 'Untitled chat' uses the tool render_route, and this Aman cannot tell what kind of tool it was, so nothing was imported. Update Aman to its newest version, then import again.",
+        "Chat 'Untitled chat' uses the tool render_route, and this Aman cannot tell what kind of tool it was, so nothing was imported. If the file came from a newer Aman, update this one. Otherwise delete that chat in the Aman it came from, export again and import the new file.",
       );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport review: subagents, tool kinds and dry runs', () => {
+  it('refuses a subagent start whose title changed shape, naming the chat', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-thread-created');
+    try {
+      const changed = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        listAt(turnRecordOf(records, 'session-1-turn-1')['events'], 'events').push({
+          type: 'thread.created',
+          id: 'evt-thread-created',
+          created_at: '2026-09-01T10:00:00.000Z',
+          thread_id: 'sub-1',
+          title: { text: 'Research helper' },
+        });
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const error = await importError(target, changed);
+      expect(error instanceof Error && error.message).toBe(
+        "Chat 'First chat' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.",
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('leaves out a skill note that lost a required field, never filling it in', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-skill-note');
+    try {
+      const changed = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        listAt(turnRecordOf(records, 'session-1-turn-1')['events'], 'events').push({
+          type: 'aman.skill.used',
+          id: 'evt-skill-used',
+          created_at: '2026-09-01T10:00:00.000Z',
+        });
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const result = await runDataImport(importDeps(target), importRequest(changed));
+      expect(result.summary).toContain("Chat 'First chat': 1 background note from an older version was left out.");
+      const events = await target.stores.sessionStore.listTurnEvents({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+        limit: 100,
+        page_token: undefined,
+        order: 'asc',
+      });
+      expect(events.data.some(event => event.type === 'aman.skill.used')).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  /** First chat with a call to a tool named search for each tool info, and their results. */
+  const withSearches = async ({
+    archive,
+    toolInfos,
+  }: {
+    archive: Buffer;
+    toolInfos: readonly Record<string, unknown>[];
+  }): Promise<Buffer> =>
+    repack(archive, entries => {
+      const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+      const thread = recordAt(
+        recordAt(
+          recordAt(recordAt(turnRecordOf(records, 'session-1-turn-1')['turn'], 'turn')['snapshot'], 'snapshot')[
+            'threads'
+          ],
+          'threads',
+        )['main'],
+        'main thread',
+      );
+      const call = (id: string, toolInfo: Record<string, unknown>) => ({
+        id,
+        type: 'function',
+        function: { name: 'search', arguments: '{"q":"tide"}' },
+        tool_info: { mcp_server_id: '', original_tool_name: 'search', ...toolInfo },
+      });
+      const ids = toolInfos.map((_, index) => `call-search-${index}`);
+      listAt(thread['context'], 'context').push(
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: toolInfos.map((info, index) => call(`call-search-${index}`, info)),
+        },
+        ...ids.map(id => ({ role: 'tool', tool_call_id: id, content: 'found' })),
+      );
+      entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+    });
+
+  it('never takes a call without a server for a connector tool of the same name', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-tool-key');
+    try {
+      // The call recorded as a connector tool without a server is no proof the other one is.
+      const changed = await withSearches({
+        archive,
+        toolInfos: [
+          { type: 'mcp', mcp_server_name: 'notes' },
+          { type: 'mcp', mcp_server_name: '' },
+          { type: 'kind-from-a-later-version', mcp_server_name: '' },
+        ],
+      });
+      const error = await importError(target, changed);
+      expect(error instanceof Error && error.message).toMatch(
+        /^Chat 'First chat' uses the tool search, and this Aman cannot tell what kind of tool it was/,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('never takes a tool on one server for the tool of the same name on another', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-tool-server');
+    try {
+      const changed = await withSearches({
+        archive,
+        toolInfos: [
+          { type: 'mcp', mcp_server_name: 'notes' },
+          { type: 'kind-from-a-later-version', mcp_server_name: 'files' },
+        ],
+      });
+      const error = await importError(target, changed);
+      expect(error instanceof Error && error.message).toMatch(
+        /^Chat 'First chat' uses the tool search, and this Aman cannot tell what kind of tool it was/,
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('a dry run after an interrupted import changes nothing and says what to do', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-dry-run-leftovers');
+    try {
+      await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
+        target.db,
+      );
+      const stuckStore = new Proxy(target.stores.sessionStore, {
+        get: (store, property, receiver) =>
+          property === 'deleteSession'
+            ? () => Promise.reject(new Error('stuck'))
+            : Reflect.get(store, property, receiver),
+      });
+      await importError(target, archive, { ...importDeps(target), sessionStore: stuckStore });
+      await sql`DROP TRIGGER import_fail_space_update`.execute(target.db);
+      const markerBefore = await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY });
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+
+      const error = await runDataImport(importDeps(target), { ...importRequest(archive), dryRun: true }).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error instanceof Error && error.message).toBe(
+        'An earlier import did not finish, so this file was not checked. Run the import without --dry-run to finish cleaning up, then check again.',
+      );
+      expect(await chatsOf(target, 'bob')).toHaveLength(3);
+      expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toEqual(markerBefore);
     } finally {
       await source.close();
       await target.close();
