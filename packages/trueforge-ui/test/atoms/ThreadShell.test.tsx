@@ -90,8 +90,24 @@ describe('ThreadComposerAreaShell', () => {
         Populated composer
       </ThreadComposerAreaShell>,
     );
-    expect(composer).toHaveClass('rounded-t-(--composer-radius)');
+    // Phones keep the rounded tab; desktop drops it so messages do not look like they sit in a box.
+    expect(composer).toHaveClass('rounded-t-(--composer-radius)', 'md:rounded-t-none');
     expect(composer).toHaveTextContent('Populated composer');
+  });
+
+  it('sits lower on desktop and fades messages out above the composer, leaving phones unchanged', () => {
+    render(<ThreadComposerAreaShell data-testid="composer">Composer</ThreadComposerAreaShell>);
+
+    const composer = screen.getByTestId('composer');
+    expect(composer).toHaveClass(
+      'pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
+      'md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
+      'md:before:absolute',
+      'md:before:bottom-full',
+      'md:before:h-6',
+      'md:before:bg-linear-to-t',
+    );
+    expect(composer.className).not.toMatch(/md:pb-\[max\(1\.5rem/);
   });
 });
 
