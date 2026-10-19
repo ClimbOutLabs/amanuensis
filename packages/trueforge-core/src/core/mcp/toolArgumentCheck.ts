@@ -33,6 +33,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readSchema(value: unknown): ToolParameterSchema | undefined {
+  if (value === true) {
+    // A schema of true allows any value: it reads as an empty schema, which checks nothing.
+    return {};
+  }
+  if (value === false) {
+    // A schema of false allows no value: an empty list of choices matches nothing, so any
+    // value sent for it is a problem.
+    return { enum: [] };
+  }
   if (!isRecord(value)) {
     return undefined;
   }
@@ -85,6 +94,9 @@ function describeSchema(schema: ToolParameterSchema): string {
   const union = schema.anyOf ?? schema.oneOf;
   if (union !== undefined && union.length > 0) {
     return union.map(member => describeSchema(member)).join(' or ');
+  }
+  if (schema.enum !== undefined && schema.enum.length === 0) {
+    return 'left out (this tool does not take a value here)';
   }
   if (schema.enum !== undefined && schema.enum.length > 0) {
     const shown = schema.enum.slice(0, 5).map(entry => (typeof entry === 'string' ? entry : JSON.stringify(entry)));
@@ -168,7 +180,7 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
     return repaired ?? { value, problems: [{ path, expected: describeSchema(schema) }] };
   }
 
-  if (schema.enum !== undefined && schema.enum.length > 0) {
+  if (schema.enum !== undefined) {
     const hit = schema.enum.some(entry => JSON.stringify(entry) === JSON.stringify(value));
     return hit ? { value, problems: [] } : { value, problems: [{ path, expected: describeSchema(schema) }] };
   }

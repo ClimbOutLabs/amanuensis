@@ -52,6 +52,51 @@ describe('ToolMarkupGuard streaming filter', () => {
     expect(shown).toBe('Checking now. ');
     expect(guard.finish()).toEqual({ status: 'broken' });
   });
+
+  it('keeps markup shown as an example inside a fenced code block as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text =
+      'Here is what the markup looks like:\n```\n<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}}</tool_call>\n```\nThat is the whole shape.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps a fenced example as text when it streams in pieces, split inside the fence and the markup', () => {
+    const guard = new ToolMarkupGuard();
+    const text =
+      'Example:\n```\n<｜DSML｜invoke name="create_event"></｜DSML｜invoke>\n```\nEnd of example.';
+    let shown = '';
+    for (const piece of ['Example:\n`', '``\n<｜DS', 'ML｜invoke name="create_event"></｜DSML｜invoke>\n`', '``\nEnd of example.']) {
+      shown += guard.push(piece);
+      expect(guard.inMarkup).toBe(false);
+    }
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('still captures markup that comes after a fenced example closes', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(
+      'Example:\n```\n<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}}</tool_call>\n```\nNow for real: ' +
+        '<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-2"}}</tool_call>',
+    );
+    expect(shown).toContain('evt-1');
+    expect(shown).not.toContain('evt-2');
+    expect(guard.finish()).toEqual({
+      status: 'recovered',
+      calls: [{ name: 'get_event', arguments: { event_id: 'evt-2' } }],
+    });
+  });
+
+  it('keeps a tilde-fenced example as text too', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Shape:\n~~~\n<tool_call>{"name": "get_event", "arguments": {}}</tool_call>\n~~~\nDone.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
 });
 
 describe('parseToolMarkup', () => {

@@ -9,6 +9,8 @@
  * captured markup is either rebuilt into real tool calls, which then go through the same checks and
  * approval cards as any other call, or reported as broken, which stops the answer. A function_results
  * block is a result the model invented for a call that never ran, so it can never be rebuilt.
+ * Markup shown inside a fenced code block is an example the person asked to see, not a call:
+ * the filter treats fenced text as ordinary text and never captures it.
  */
 
 /** Shown to the person when a reply's tool-call markup could not be rebuilt and the answer stops. */
@@ -46,16 +48,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** The longest opener, so a stream tail shorter than this can always be held back safely. */
 const MAX_OPENER_LENGTH = Math.max(...MARKUP_OPENERS.map(opener => opener.length));
 
+/** The markers that open and close a fenced code block in the answer text. */
+const FENCE_MARKERS: readonly string[] = ['```', '~~~'];
+
 /**
  * Holds streamed answer text back until it is known not to be markup. Text before any markup is
  * released as it arrives, minus a short tail that could still grow into an opener. Once an opener
  * matches, everything from it on is captured as markup and nothing more is released: whatever the
  * model writes after its markup (usually the claim that the thing is done) is not shown either.
+ * Inside a fenced code block nothing is markup: the fence's text is released as it arrives, and
+ * only an opener after the closing fence can start a capture.
  */
 export class ToolMarkupGuard {
   #pending = '';
   #markup = '';
   #inMarkup = false;
+  /** The marker that opened the fence the scan is inside, or undefined when outside one. */
+  #fence: string | undefined;
 
   /** Feed one streamed text piece; returns the text that is safe to show now. */
   push(text: string): string {
@@ -64,18 +73,42 @@ export class ToolMarkupGuard {
       return '';
     }
     this.#pending += text;
-    const openerAt = this.#openerIndex(this.#pending);
-    if (openerAt !== -1) {
-      const emit = this.#pending.slice(0, openerAt);
-      this.#markup = this.#pending.slice(openerAt);
-      this.#pending = '';
-      this.#inMarkup = true;
+    let emit = '';
+    for (;;) {
+      if (this.#fence !== undefined) {
+        const closeAt = this.#pending.indexOf(this.#fence);
+        if (closeAt === -1) {
+          // All of this is fence text; only a tail that could grow into the closing fence waits.
+          const hold = this.#markerTailLength(this.#pending, this.#fence.charAt(0));
+          emit += this.#pending.slice(0, this.#pending.length - hold);
+          this.#pending = this.#pending.slice(this.#pending.length - hold);
+          return emit;
+        }
+        emit += this.#pending.slice(0, closeAt + this.#fence.length);
+        this.#pending = this.#pending.slice(closeAt + this.#fence.length);
+        this.#fence = undefined;
+        continue;
+      }
+      const fence = this.#fenceIndex(this.#pending);
+      const openerAt = this.#openerIndex(this.#pending);
+      if (fence !== undefined && (openerAt === -1 || fence.at < openerAt)) {
+        emit += this.#pending.slice(0, fence.at + fence.marker.length);
+        this.#pending = this.#pending.slice(fence.at + fence.marker.length);
+        this.#fence = fence.marker;
+        continue;
+      }
+      if (openerAt !== -1) {
+        emit += this.#pending.slice(0, openerAt);
+        this.#markup = this.#pending.slice(openerAt);
+        this.#pending = '';
+        this.#inMarkup = true;
+        return emit;
+      }
+      const hold = Math.max(this.#heldTailLength(this.#pending), this.#anyMarkerTailLength(this.#pending));
+      emit += this.#pending.slice(0, this.#pending.length - hold);
+      this.#pending = this.#pending.slice(this.#pending.length - hold);
       return emit;
     }
-    const hold = this.#heldTailLength(this.#pending);
-    const emit = this.#pending.slice(0, this.#pending.length - hold);
-    this.#pending = this.#pending.slice(this.#pending.length - hold);
-    return emit;
   }
 
   /** The held-back tail, released only by finish when no markup ever came. */
@@ -104,6 +137,33 @@ export class ToolMarkupGuard {
       }
     }
     return earliest;
+  }
+
+  /** The earliest fence marker in the text, with the marker itself, or undefined when there is none. */
+  #fenceIndex(text: string): { at: number; marker: string } | undefined {
+    let found: { at: number; marker: string } | undefined;
+    for (const marker of FENCE_MARKERS) {
+      const at = text.indexOf(marker);
+      if (at !== -1 && (found === undefined || at < found.at)) {
+        found = { at, marker };
+      }
+    }
+    return found;
+  }
+
+  /** How much of the tail is a run of one fence character that could still grow into a marker. */
+  #markerTailLength(text: string, char: string): number {
+    let run = 0;
+    for (let index = text.length - 1; index >= 0 && text.charAt(index) === char; index--) {
+      run++;
+    }
+    return Math.min(run, 2);
+  }
+
+  /** The fence-character tail for either marker, when the text ends mid-run. */
+  #anyMarkerTailLength(text: string): number {
+    const last = text.charAt(text.length - 1);
+    return last === '`' || last === '~' ? this.#markerTailLength(text, last) : 0;
   }
 
   /** How much of the tail could still be the beginning of an opener and must wait for more text. */

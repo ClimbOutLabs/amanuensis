@@ -55,9 +55,9 @@ function call(id: string, name: string, args: Record<string, unknown> | string):
   };
 }
 
-function guard(calls: RawToolCall[], knownEventIds: ReadonlySet<string> = new Set(), unattended = false) {
+function guard(calls: RawToolCall[], knownEventIds: ReadonlySet<string> = new Set()) {
   const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: calls };
-  return guardModelReply({ message, tools: TOOLS, knownEventIds, unattended });
+  return guardModelReply({ message, tools: TOOLS, knownEventIds });
 }
 
 describe('guardModelReply', () => {
@@ -114,15 +114,13 @@ describe('guardModelReply', () => {
     expect(atCap.tooManyCalls).toBe(false);
   });
 
-  it('does not stop an unattended run for a big batch: its calls are held for the owner instead', () => {
+  it('counts every call toward the cap, held ones included: exempting held calls in an unattended run is the runtime recount, not the guard', () => {
     const batch = guard(
       Array.from({ length: 22 }, (_, index) =>
         call(`g${String(index)}`, 'get_event', { event_id: `evt-${String(index)}` }),
       ),
-      new Set(),
-      true,
     );
-    expect(batch.tooManyCalls).toBe(false);
+    expect(batch.tooManyCalls).toBe(true);
     expect(batch.message.tool_calls).toHaveLength(22);
   });
 

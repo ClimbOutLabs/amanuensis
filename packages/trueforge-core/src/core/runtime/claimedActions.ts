@@ -131,30 +131,75 @@ const CLAIM_VERBS = [
 /** A negation anywhere before the claim verb turns the match into a non-claim: "I haven't sent". */
 const NEGATION = /(n't|\bnot\b|\bnever\b|unable to|could not|failed to)/i;
 
-/** Whether the text leading into a match, up to its claim verb, negates it. */
-function isNegated(input: { text: string; matchIndex: number; matched: string }): boolean {
-  const before = input.text.slice(Math.max(0, input.matchIndex - 30), input.matchIndex);
-  const lower = input.matched.toLowerCase();
-  let verbAt = input.matched.length;
+/** Where the claim verb sits inside one match, or the match length when none is found. */
+function claimVerbOffset(matched: string): number {
+  const lower = matched.toLowerCase();
+  let verbAt = matched.length;
   for (const verb of CLAIM_VERBS) {
     const at = lower.indexOf(verb);
     if (at !== -1 && at < verbAt) {
       verbAt = at;
     }
   }
-  return NEGATION.test(before) || NEGATION.test(input.matched.slice(0, verbAt));
+  return verbAt;
+}
+
+/** Whether the text leading into a match, up to its claim verb, negates it. */
+function isNegated(input: { text: string; matchIndex: number; matched: string }): boolean {
+  const before = input.text.slice(Math.max(0, input.matchIndex - 30), input.matchIndex);
+  return NEGATION.test(before) || NEGATION.test(input.matched.slice(0, claimVerbOffset(input.matched)));
+}
+
+/**
+ * The spans of a text inside double quotes: a draft the person asked for, or words quoted
+ * back, are somebody's text being shown, not the answer claiming anything itself.
+ */
+function quotedSpans(text: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  let openAt: number | undefined;
+  let curly = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (openAt === undefined) {
+      if (char === '"' || char === '“') {
+        openAt = index;
+        curly = char === '“';
+      }
+    } else if (curly ? char === '”' : char === '"') {
+      spans.push({ start: openAt, end: index });
+      openAt = undefined;
+    }
+  }
+  if (openAt !== undefined) {
+    spans.push({ start: openAt, end: text.length });
+  }
+  return spans;
+}
+
+/** Whether a match's claim verb falls inside a quoted span: quoted words are not a claim. */
+function isQuotedClaim(input: {
+  spans: { start: number; end: number }[];
+  matchIndex: number;
+  matched: string;
+}): boolean {
+  const verbAt = input.matchIndex + claimVerbOffset(input.matched);
+  return input.spans.some(span => verbAt > span.start && verbAt < span.end);
 }
 
 /** The action families a finished answer claims to have done, with negated mentions left out. */
 export function detectActionClaims(text: string): ActionClaimFamily[] {
   const families: ActionClaimFamily[] = [];
+  const spans = quotedSpans(text);
   for (const { family, pattern } of CLAIM_PATTERNS) {
     if (families.includes(family)) {
       continue;
     }
     const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
     for (const match of text.matchAll(global)) {
-      if (!isNegated({ text, matchIndex: match.index, matched: match[0] })) {
+      if (
+        !isNegated({ text, matchIndex: match.index, matched: match[0] }) &&
+        !isQuotedClaim({ spans, matchIndex: match.index, matched: match[0] })
+      ) {
         families.push(family);
         break;
       }
@@ -193,25 +238,38 @@ export function claimHasMatchingSuccess(input: {
   }
 }
 
-/** Whether a tool result's text plainly carries an error, in the host's own error envelope. */
-function toolResultCarriesError(content: string): boolean {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a tool result shows the call did not do the thing, so it cannot back a claim. Three
+ * shapes say so: an error of any shape (the host's own envelope, or a provider's error body
+ * passed through unchanged), the JSON-RPC error shape (a numeric code beside a text message),
+ * and a held result: the call is only waiting for the owner's approval, so nothing has run.
+ * Anything else a tool returned counts as it having worked, so the note stays rare.
+ */
+function toolResultDidNotRun(content: string): boolean {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
     return false;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || !('error' in parsed)) {
+  if (!isRecord(parsed)) {
     return false;
   }
-  return typeof parsed.error === 'string';
+  if ('error' in parsed || 'held' in parsed) {
+    return true;
+  }
+  return typeof parsed['code'] === 'number' && typeof parsed['message'] === 'string';
 }
 
 /**
  * The action calls that succeeded in the current turn: calls made after the person's latest
  * message whose tool result came back without an error, and that are actions rather than reads.
- * A result counts as failed only when it plainly carries an error; anything else a tool returned
- * counts as it having worked, so the note stays rare.
+ * A result counts as not run only when it plainly shows it (an error, or a hold for approval);
+ * anything else a tool returned counts as it having worked, so the note stays rare.
  */
 export function successfulActionCallsThisTurn(context: readonly ContextMessage[]): SuccessfulActionCall[] {
   let boundary = -1;
@@ -243,7 +301,7 @@ export function successfulActionCallsThisTurn(context: readonly ContextMessage[]
         });
       }
     } else if (message.role === 'tool') {
-      if (toolResultCarriesError(message.content)) {
+      if (toolResultDidNotRun(message.content)) {
         failedIds.add(message.tool_call_id);
       }
     }

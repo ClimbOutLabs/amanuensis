@@ -142,4 +142,48 @@ describe('checkToolArguments', () => {
       { path: 'send_updates', expected: 'one of: all, none' },
     ]);
   });
+
+  it('coerces boolean text with any casing and padding', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { a: { type: 'boolean' }, b: { type: 'boolean' } },
+    });
+    const outcome = checkToolArguments({ schema, args: { a: ' TRUE ', b: 'False' } });
+    expect(outcome.problems).toEqual([]);
+    expect(outcome.args).toEqual({ a: true, b: false });
+  });
+
+  it('flags an extra argument that breaks the additionalProperties schema', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      additionalProperties: { type: 'string' },
+    });
+    const outcome = checkToolArguments({ schema, args: { name: 'x', extra: 5 } });
+    expect(outcome.problems).toEqual([{ path: 'extra', expected: 'text' }]);
+  });
+
+  it('keeps an argument whose property schema is the boolean true (any value allowed)', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { options: true, name: { type: 'string' } },
+      required: ['options', 'name'],
+    });
+    const outcome = checkToolArguments({ schema, args: { options: { a: 1 }, name: 'x' } });
+    expect(outcome.problems).toEqual([]);
+    expect(outcome.args).toEqual({ options: { a: 1 }, name: 'x' });
+  });
+
+  it('flags an argument whose property schema is the boolean false (no value allowed)', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { options: false, name: { type: 'string' } },
+    });
+    const outcome = checkToolArguments({ schema, args: { options: { a: 1 }, name: 'x' } });
+    expect(outcome.problems).toEqual([
+      { path: 'options', expected: 'left out (this tool does not take a value here)' },
+    ]);
+    // Leaving the forbidden argument out is fine.
+    expect(checkToolArguments({ schema, args: { name: 'x' } }).problems).toEqual([]);
+  });
 });
