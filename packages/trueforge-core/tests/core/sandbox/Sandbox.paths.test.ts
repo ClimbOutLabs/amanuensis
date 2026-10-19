@@ -4119,6 +4119,30 @@ describe('Sandbox skills without a network', () => {
     expect(prompt).not.toContain('The skill is present');
   });
 
+  it('starts a no-network sandbox for an assistant with no skills and sends no skill env', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    // Sessions always build a mounter, even with no skills; its init must not reach a no-network sandbox.
+    const provider = makeProvider({
+      network: 'none',
+      exec: (params): Promise<ExecResult> => {
+        execCalls.push(params);
+        const envNames = Object.keys(params.env ?? {});
+        if (envNames.length > 0) {
+          return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
+        }
+        return readyExec();
+      },
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+    expect(execCalls.some(call => call.command === 'true')).toBe(true);
+    expect(execCalls.some(call => call.env?.['TFY_SKILLS_DIR'] !== undefined)).toBe(false);
+    expect(execCalls.some(call => call.command.includes('skill_downloader.py'))).toBe(false);
+  });
+
   it('shows the person a plain sentence when the sandbox will not start, not the provider error', async () => {
     const provider = makeProvider({
       exec: (params): Promise<ExecResult> =>
