@@ -5,7 +5,7 @@ import { isRecord } from './lenient';
 export interface PersonaNameRepair {
   /** The personas section with every name and alias made to fit today's rules. */
   json: unknown;
-  /** One plain sentence per change, for the import summary. */
+  /** One plain sentence per visible change, for the import summary. */
   lines: string[];
 }
 
@@ -13,10 +13,19 @@ const CHARACTERS_REASON = "names can only use letters, numbers, spaces, _ - and 
 const LENGTH_REASON = `names can be at most ${String(PERSONA_NAME_MAX_LENGTH)} characters`;
 const START_REASON = 'names must start with a letter or number';
 const EMPTY_REASON = 'it has no letters or numbers';
-const RESERVED_REASON = 'it is a reserved word';
+const RESERVED_REASON = '"my", "the", "a" and "an" can\'t be names on their own';
+const MARK_REASON = 'it uses characters that names cannot hold now';
 const CLASH_REASON = 'another persona already uses that name';
 const OWN_NAME_REASON = "it is the same as the persona's own name";
 const OWN_ALIAS_REASON = "it is already one of the persona's aliases";
+
+interface CleanedName {
+  text: string;
+  /** A visible change, for the person to be told. Undefined for a silent change such as Unicode form or spacing. */
+  reason: string | undefined;
+  /** Set when the name cannot be kept at all, so a name gets a number and an alias is dropped. */
+  unusable: string | undefined;
+}
 
 interface PersonaCandidate {
   entry: Record<string, unknown>;
@@ -27,7 +36,7 @@ interface PersonaCandidate {
 
 /**
  * Makes persona names and aliases from an older version fit today's rules before the strict read.
- * A name that already fits is kept as it is. Anything else is cleaned up, and each change is reported.
+ * A name that already fits is kept as it is. Anything else is cleaned up, and each visible change is reported.
  */
 export function repairPersonaNames(json: unknown): PersonaNameRepair {
   if (!Array.isArray(json)) {
@@ -38,6 +47,8 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
   const lines: string[] = [];
   // The index of the persona that uses each match key.
   const taken = new Map<string, number>();
+  // Aliases that already fit and claimed their key, as `index:slot`.
+  const keptAliases = new Set<string>();
 
   // Names that already fit claim their keys first, so a repaired name never displaces one.
   candidates.forEach((candidate, index) => {
@@ -50,6 +61,26 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
     }
   });
 
+  // Aliases that already fit come next, so a name generated for a clash never displaces one. An alias
+  // that is its own persona's name is left to the alias pass, which reports it as the persona's own name.
+  candidates.forEach((candidate, index) => {
+    if (candidate === undefined) {
+      return;
+    }
+    const ownKey = wantedKey(candidate.displayName);
+    candidate.aliases.forEach((alias, slot) => {
+      if (typeof alias !== 'string' || !fitsPersonaName(alias)) {
+        return;
+      }
+      const key = personaMatchKey(alias);
+      if (key === ownKey || taken.has(key)) {
+        return;
+      }
+      taken.set(key, index);
+      keptAliases.add(`${String(index)}:${String(slot)}`);
+    });
+  });
+
   const finalNames = candidates.map((candidate, index) => {
     if (candidate === undefined) {
       return undefined;
@@ -60,21 +91,16 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
     const cleaned = cleanName(candidate.displayName);
     let finalName = cleaned.text;
     let reason = cleaned.reason;
-    if (finalName === '') {
+    if (cleaned.unusable !== undefined) {
       finalName = freeNumberedName('Persona', taken);
-      reason = EMPTY_REASON;
-    } else if (isPersonaDeterminer(personaMatchKey(finalName))) {
-      finalName = freeNumberedName('Persona', taken);
-      reason = RESERVED_REASON;
+      reason = cleaned.unusable;
     } else if (taken.has(personaMatchKey(finalName))) {
       finalName = freeClashName(finalName, taken);
       reason = reason === undefined ? CLASH_REASON : `${CLASH_REASON}, and ${reason}`;
     }
     taken.set(personaMatchKey(finalName), index);
-    if (finalName !== candidate.displayName) {
-      lines.push(
-        `Renamed the persona "${candidate.displayName}" to "${finalName}", because ${reason ?? CLASH_REASON}.`,
-      );
+    if (reason !== undefined) {
+      lines.push(`Renamed the persona "${candidate.displayName}" to "${finalName}", because ${reason}.`);
     }
     return finalName;
   });
@@ -86,23 +112,33 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
       return entry;
     }
     const finalKey = personaMatchKey(finalName);
-    const aliases = candidate.aliases.flatMap(alias => {
+    // Blank aliases from one persona are reported once, since they all say the same thing.
+    let blankReported = false;
+    const aliases = candidate.aliases.flatMap((alias, slot) => {
       if (typeof alias !== 'string') {
         // Left as it is, so the strict read refuses the section.
         return [alias];
       }
-      const cleaned = fitsPersonaName(alias) ? { text: alias, reason: undefined } : cleanName(alias);
-      const key = personaMatchKey(cleaned.text);
+      if (keptAliases.has(`${String(index)}:${String(slot)}`)) {
+        return [alias];
+      }
       const drop = (because: string) => {
         lines.push(`Dropped the persona alias "${alias}" of the persona "${finalName}", because ${because}.`);
         return [];
       };
-      if (cleaned.text === '') {
-        return drop(EMPTY_REASON);
+      const cleaned = fitsPersonaName(alias)
+        ? { text: alias, reason: undefined, unusable: undefined }
+        : cleanName(alias);
+      if (cleaned.unusable !== undefined) {
+        if (alias.trim() === '') {
+          if (blankReported) {
+            return [];
+          }
+          blankReported = true;
+        }
+        return drop(cleaned.unusable);
       }
-      if (isPersonaDeterminer(key)) {
-        return drop(RESERVED_REASON);
-      }
+      const key = personaMatchKey(cleaned.text);
       const owner = taken.get(key);
       if (owner !== undefined) {
         if (owner !== index) {
@@ -111,7 +147,7 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
         return drop(key === finalKey ? OWN_NAME_REASON : OWN_ALIAS_REASON);
       }
       taken.set(key, index);
-      if (cleaned.text !== alias && cleaned.reason !== undefined) {
+      if (cleaned.reason !== undefined) {
         lines.push(
           `Renamed the persona alias "${alias}" of the persona "${finalName}" to "${cleaned.text}", because ${cleaned.reason}.`,
         );
@@ -140,29 +176,47 @@ function fitsPersonaName(value: string): boolean {
   return PersonaNameSchema.safeParse(value).success && !isPersonaDeterminer(personaMatchKey(value));
 }
 
+/** The match key a name is wanted under: its own text when it fits, or its cleaned text when it can be kept. */
+function wantedKey(name: string): string | undefined {
+  if (fitsPersonaName(name)) {
+    return personaMatchKey(name);
+  }
+  const cleaned = cleanName(name);
+  return cleaned.unusable === undefined ? personaMatchKey(cleaned.text) : undefined;
+}
+
 /**
- * Cleans a name in the order the rules apply: other characters become spaces, spaces collapse,
- * the ends are trimmed, the name is cut to length, and leading characters that are not a letter or
- * number are dropped. The reason is for the first change that applies; none when nothing changed.
+ * Cleans a name in the order the rules apply: the Unicode form is made composed, other characters
+ * become spaces, spaces collapse, the ends are trimmed, the name is cut to length, and leading
+ * characters that are not a letter or number are dropped. Only a visible change gives a reason.
  */
-function cleanName(raw: string): { text: string; reason: string | undefined } {
-  const normalized = raw.normalize('NFC');
-  const spaced = normalized
+function cleanName(raw: string): CleanedName {
+  const composed = raw.normalize('NFC');
+  // In some scripts a combining mark is part of its letter, so removing it would change the word.
+  if (/\p{M}/u.test(composed)) {
+    return { text: '', reason: MARK_REASON, unusable: MARK_REASON };
+  }
+  const spaced = composed
     .replace(/[^\p{L}\p{N} _'-]/gu, ' ')
     .replace(/ +/g, ' ')
     .trim();
   const cut = truncate(spaced, PERSONA_NAME_MAX_LENGTH);
   const text = cut.replace(/^[^\p{L}\p{N}]+/u, '');
-  if (text === raw) {
-    return { text, reason: undefined };
+  let reason: string | undefined;
+  if (/[^\p{L}\p{N} _'-]/u.test(composed)) {
+    reason = CHARACTERS_REASON;
+  } else if (characterCount(spaced) > PERSONA_NAME_MAX_LENGTH) {
+    reason = LENGTH_REASON;
+  } else if (text !== cut) {
+    reason = START_REASON;
   }
-  if (/[^\p{L}\p{N} _'-]/u.test(normalized)) {
-    return { text, reason: CHARACTERS_REASON };
+  if (text === '') {
+    return { text, reason, unusable: EMPTY_REASON };
   }
-  if (characterCount(raw.trim()) > PERSONA_NAME_MAX_LENGTH) {
-    return { text, reason: LENGTH_REASON };
+  if (isPersonaDeterminer(personaMatchKey(text))) {
+    return { text, reason, unusable: RESERVED_REASON };
   }
-  return { text, reason: cut === text ? LENGTH_REASON : START_REASON };
+  return { text, reason, unusable: undefined };
 }
 
 /** Counted in code points, as the name schema's length check counts them. */

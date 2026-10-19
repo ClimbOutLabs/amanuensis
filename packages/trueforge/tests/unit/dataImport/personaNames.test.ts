@@ -94,10 +94,12 @@ describe('repairPersonaNames', () => {
     expect(lines).toEqual([]);
   });
 
-  it('gives a name that is only the word "The" a number, because it is a reserved word', () => {
+  it('gives a name that is only the word "The" a number, because "my", "the", "a" and "an" can\'t be names on their own', () => {
     const { json, lines } = repairPersonaNames([entry('The')]);
     expect(namesOf(json)[0]?.display_name).toBe('Persona 1');
-    expect(lines).toEqual(['Renamed the persona "The" to "Persona 1", because it is a reserved word.']);
+    expect(lines).toEqual([
+      'Renamed the persona "The" to "Persona 1", because "my", "the", "a" and "an" can\'t be names on their own.',
+    ]);
     expectAcceptedByAppRules(json);
   });
 
@@ -134,7 +136,7 @@ describe('repairPersonaNames', () => {
     expect(namesOf(json)[0]?.aliases).toEqual(['Zara']);
     expect(lines).toEqual([
       'Dropped the persona alias "!!" of the persona "Zara Quinn", because it has no letters or numbers.',
-      'Dropped the persona alias "the" of the persona "Zara Quinn", because it is a reserved word.',
+      'Dropped the persona alias "the" of the persona "Zara Quinn", because "my", "the", "a" and "an" can\'t be names on their own.',
       `Dropped the persona alias "Zara. Quinn" of the persona "Zara Quinn", because it is the same as the persona's own name.`,
     ]);
     expectAcceptedByAppRules(json);
@@ -169,5 +171,58 @@ describe('repairPersonaNames', () => {
     const { json, lines } = repairPersonaNames(input);
     expect(json).toEqual(input);
     expect(lines).toEqual([]);
+  });
+
+  it('keeps a name whose only change is its Unicode form, and reports nothing', () => {
+    // The decomposed é has a combining mark, so it does not fit as typed, but composing it is not a visible change.
+    const { json, lines } = repairPersonaNames([entry('e\u0301tienne')]);
+    expect(namesOf(json)[0]?.display_name).toBe('\u00e9tienne');
+    expect(lines).toEqual([]);
+    expectAcceptedByAppRules(json);
+  });
+
+  it('drops an alias that is only the word "the" with spaces around it, reporting the reason and no length', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara', [' the '])]);
+    expect(namesOf(json)[0]?.aliases).toEqual([]);
+    expect(lines).toEqual([
+      `Dropped the persona alias " the " of the persona "Zara", because "my", "the", "a" and "an" can't be names on their own.`,
+    ]);
+  });
+
+  it('gives a name in an Indic script a number and says why, without deleting any of its marks', () => {
+    const { json, lines } = repairPersonaNames([entry('हिन्दी', ['हिन्दी'])]);
+    expect(namesOf(json)[0]).toEqual({ display_name: 'Persona 1', aliases: [] });
+    expect(lines).toEqual([
+      'Renamed the persona "हिन्दी" to "Persona 1", because it uses characters that names cannot hold now.',
+      'Dropped the persona alias "हिन्दी" of the persona "Persona 1", because it uses characters that names cannot hold now.',
+    ]);
+  });
+
+  it('keeps a valid alias rather than give its key to a name that has to be generated', () => {
+    const { json, lines } = repairPersonaNames([entry('Dr. Kim'), entry('Zara', ['Dr Kim'])]);
+    expect(namesOf(json)).toEqual([
+      { display_name: 'Dr Kim 2', aliases: [] },
+      { display_name: 'Zara', aliases: ['Dr Kim'] },
+    ]);
+    expect(lines).toEqual([
+      `Renamed the persona "Dr. Kim" to "Dr Kim 2", because another persona already uses that name, and names can only use letters, numbers, spaces, _ - and '.`,
+    ]);
+  });
+
+  it('drops an alias that is the persona’s own name even when the name was repaired from it', () => {
+    const { json, lines } = repairPersonaNames([entry('Dr. Kim', ['Dr Kim'])]);
+    expect(namesOf(json)).toEqual([{ display_name: 'Dr Kim', aliases: [] }]);
+    expect(lines).toEqual([
+      `Renamed the persona "Dr. Kim" to "Dr Kim", because names can only use letters, numbers, spaces, _ - and '.`,
+      `Dropped the persona alias "Dr Kim" of the persona "Dr Kim", because it is the same as the persona's own name.`,
+    ]);
+  });
+
+  it('reports a repeated blank alias once', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara', ['  ', ' '])]);
+    expect(namesOf(json)[0]?.aliases).toEqual([]);
+    expect(lines).toEqual([
+      'Dropped the persona alias "  " of the persona "Zara", because it has no letters or numbers.',
+    ]);
   });
 });

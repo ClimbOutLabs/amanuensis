@@ -2491,7 +2491,7 @@ describe('runDataImport repairs persona names an older version wrote', () => {
       'exactly "The"',
       [{ display_name: 'The' }],
       ['Persona 1', 'Researcher'],
-      'Renamed the persona "The" to "Persona 1", because it is a reserved word.',
+      'Renamed the persona "The" to "Persona 1", because "my", "the", "a" and "an" can\'t be names on their own.',
     ],
   ])('imports a persona name with %s, repairs it, and says so', async (_label, names, expectedNames, line) => {
     const { source, archive } = await seededArchive();
@@ -2541,7 +2541,7 @@ describe('runDataImport repairs persona names an older version wrote', () => {
         `Dropped the persona alias "Zara. Quinn" of the persona "Zara Quinn", because it is the same as the persona's own name.`,
       );
       expect(result.summary).toContain(
-        'Dropped the persona alias "the" of the persona "Zara Quinn", because it is a reserved word.',
+        'Dropped the persona alias "the" of the persona "Zara Quinn", because "my", "the", "a" and "an" can\'t be names on their own.',
       );
       expect(await storedPersonaNames(target)).toContainEqual({ display_name: 'Zara Quinn', aliases: [] });
     } finally {
