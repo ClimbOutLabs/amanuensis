@@ -72,6 +72,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
@@ -127,7 +128,7 @@ import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { agentIfAccessible, canReadAgentBoundResource } from './agentAccess';
+import { canReadAgentBoundResource } from './agentAccess';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -1711,6 +1712,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       referencedAgent = agent;
     }
 
+    const chatRunner: ChatRunner | undefined =
+      referencedAgent !== undefined
+        ? { kind: 'saved', agent: referencedAgent }
+        : session.record.agent.type === 'inline'
+          ? { kind: 'plain', spec: session.record.agent.spec }
+          : undefined;
+    const scheduleOwner = createdBySubjectFromRequestContext(requestContext);
     const modelProviderStore = deps.resolveModelProviderStore(c, referencedAgent);
     const mcpServerStore = deps.resolveMcpServerStore(c, referencedAgent);
     const skillStore = deps.resolveSkillStore(c);
@@ -1996,23 +2004,27 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
       schedules:
-        deps.schedules === undefined
+        deps.schedules === undefined || chatRunner === undefined
           ? undefined
           : {
               ...deps.schedules,
               tenant_id: requestContext.tenant_id,
-              owner: createdBySubjectFromRequestContext(requestContext),
-              // The same check the Schedules page makes: the person must be allowed to use the agent.
-              resolveAgent: async name =>
-                name === undefined
-                  ? referencedAgent
-                  : agentIfAccessible({
-                      authorizer: deps.authorizer,
-                      context: requestContext,
-                      action: 'use',
-                      agent: await agentStore.getAgent({ tenant_id: requestContext.tenant_id, name }),
-                    }),
-              assistantName: profile?.assistant_name ?? null,
+              owner: scheduleOwner,
+              // A schedule made here runs as whatever runs this turn: the chat's agent or setup, and its persona.
+              chatAssistant: resolveChatAssistant({
+                tenant_id: requestContext.tenant_id,
+                owner: scheduleOwner,
+                runner: chatRunner,
+                persona: persona?.kind === 'persona' ? persona.persona : undefined,
+                assistantName: profile?.assistant_name ?? null,
+                agentStore,
+              }),
+              runsAs: scheduleRunsAs({
+                tenant_id: requestContext.tenant_id,
+                agentStore,
+                personaStore: deps.personaStore,
+                personalizationStore: deps.personalizationStore,
+              }),
               logger: deps.logger,
             },
     });

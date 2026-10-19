@@ -200,6 +200,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
   const agentSpec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' });
 
   const agent = await stores.agentStore.createAgent({
+    host_managed: false,
     tenant_id: tenantId,
     created_by_subject: subject(userId),
     name: SEED_IDS.agentName,
@@ -219,6 +220,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     tenant_id: tenantId,
     agent_id: agent.id,
     agent_name: SEED_IDS.agentName,
+    persona_id: null,
     name: 'Daily digest',
     manifest: dailyManifest,
     created_by_subject: subject(userId),
@@ -229,6 +231,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     tenant_id: tenantId,
     agent_id: agent.id,
     agent_name: SEED_IDS.agentName,
+    persona_id: null,
     name: 'Weekly review',
     manifest: ScheduleManifestSchema.parse({
       task: 'Write the weekly review',

@@ -91,6 +91,7 @@ async function buildSession<TTransaction>({
       const page = await stores.agentStore.listAgents({
         tenant_id: TENANT_ID,
         agent_name: undefined,
+        include_host_managed: true,
         limit: OWNER_PAGE_LIMIT,
         page_token: pageToken,
       });

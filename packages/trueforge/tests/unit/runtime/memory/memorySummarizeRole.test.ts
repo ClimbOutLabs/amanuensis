@@ -49,6 +49,7 @@ function agentRecord(summarizationModelName?: string): AgentRecord {
     description: 'Test agent',
     manifest,
     external_id: null,
+    host_managed: false,
     created_by_subject: {
       subject_id: 'user-1',
       subject_type: 'user',

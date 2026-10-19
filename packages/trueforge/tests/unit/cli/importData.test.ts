@@ -31,7 +31,7 @@ const RESULT: ImportDataResult = {
 interface Calls {
   opened: number;
   closed: number;
-  imports: { bytes: string; userId: string; displayName: string }[];
+  imports: { bytes: string; userId: string; displayName: string; dryRun: boolean }[];
   audits: { userId: string; description: string }[];
 }
 
@@ -39,8 +39,8 @@ function fakeDeps(options: { importError?: Error; auditError?: Error; modelReady
   const calls: Calls = { opened: 0, closed: 0, imports: [], audits: [] };
   const session: ImportDataSession = {
     owner: OWNER,
-    importArchive: ({ archive, userId, displayName }) => {
-      calls.imports.push({ bytes: archive.toString('utf8'), userId, displayName });
+    importArchive: ({ archive, userId, displayName, dryRun }) => {
+      calls.imports.push({ bytes: archive.toString('utf8'), userId, displayName, dryRun });
       return options.importError === undefined ? Promise.resolve(RESULT) : Promise.reject(options.importError);
     },
     recordAudit: input => {
@@ -81,13 +81,24 @@ describe('aman import-data', () => {
     const io = fakeIo();
     const code = await createImportData(deps)({ args: ['--in', archivePath], io });
     expect(code).toBe(0);
-    expect(calls.imports).toEqual([{ bytes: 'archive-bytes', userId: OWNER, displayName: OWNER }]);
+    expect(calls.imports).toEqual([{ bytes: 'archive-bytes', userId: OWNER, displayName: OWNER, dryRun: false }]);
     expect(JSON.parse(io.out.join(''))).toEqual({ user_id: OWNER, ...RESULT });
     expect(io.err.join('')).toBe(`${RESULT.summary}\n`);
     expect(calls.audits).toHaveLength(1);
     expect(calls.audits[0]).toMatchObject({ userId: OWNER });
     expect(calls.audits[0]?.description).toContain('from the command line');
     expect(calls.closed).toBe(1);
+  });
+
+  it('with --dry-run, prints what an import would bring and records nothing', async () => {
+    const { deps, calls } = fakeDeps();
+    const io = fakeIo();
+    const code = await createImportData(deps)({ args: ['--in', archivePath, '--dry-run'], io });
+    expect(code).toBe(0);
+    expect(calls.imports).toEqual([{ bytes: 'archive-bytes', userId: OWNER, displayName: OWNER, dryRun: true }]);
+    expect(JSON.parse(io.out.join(''))).toEqual({ user_id: OWNER, dry_run: true, ...RESULT });
+    expect(io.err.join('')).toBe(`${RESULT.summary}\n`);
+    expect(calls.audits).toEqual([]);
   });
 
   it('accepts the owner given explicitly, with a display name', async () => {

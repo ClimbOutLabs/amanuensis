@@ -5,10 +5,21 @@
  * written. The schemas cover the fields import consumes; store records carry
  * their owner and tenant fields along, which import checks for shape and
  * then replaces with the importing user's identity.
+ *
+ * What people see and own is read strictly: chats and their dates, message
+ * roles and text, tool call ids, names, arguments and results, the turn
+ * events a chat is drawn from (VISIBLE_EVENT_TYPES) and a finished turn's
+ * output, the agent a chat runs, uploaded files and their digests, memories,
+ * spaces, personas, schedules, connectors, audit rows, and the ids that tie
+ * them together. Aman's own bookkeeping is read through lenient.ts, so a
+ * change to it in any version never stops an import: tool call enrichment
+ * (even inside visible events), telemetry and lifecycle events, other turn
+ * states, metrics, thread runtime state, and settings import never applies.
  */
 import {
   AgentSpecSchema,
   CreatedBySubjectSchema,
+  EventType,
   SessionAgentSchema,
   SessionMetadataSchema,
   SessionMetricsSchema,
@@ -27,6 +38,7 @@ import { InternalToolCallInfoSchema, LLMToolMessageSchema } from '@truefoundry/t
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
+import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
@@ -37,6 +49,16 @@ import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedul
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
+import {
+  forwardIssues,
+  internal,
+  isRecord,
+  mixedList,
+  noteLeftOut,
+  readInternal,
+  readVisible,
+  visible,
+} from './lenient';
 
 export const ImportManifestSchema = z.object({
   format: z.string(),
@@ -52,6 +74,142 @@ export type ImportManifest = z.infer<typeof ImportManifestSchema>;
 /** Every durable event shape this build can persist: built-in events plus the host's passthrough events. */
 export const ImportEventSchema = SessionEventWithPassthroughSchema;
 export type ImportEvent = z.infer<typeof ImportEventSchema>;
+
+/** What the person is told was left out, in the singular; LEFT_OUT_PLURALS has each plural. */
+export const LEFT_OUT = {
+  toolDetail: 'tool detail',
+  turnEvent: 'background note',
+  turnState: 'reply status',
+  turnDetail: 'reply detail',
+  threadDetail: 'assistant detail',
+  chatDetail: 'chat detail',
+  checklistDetail: 'checklist detail',
+  permissionSetting: 'permission setting',
+} as const;
+
+export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
+  [LEFT_OUT.toolDetail]: 'tool details',
+  [LEFT_OUT.turnEvent]: 'background notes',
+  [LEFT_OUT.turnState]: 'reply statuses',
+  [LEFT_OUT.turnDetail]: 'reply details',
+  [LEFT_OUT.threadDetail]: 'assistant details',
+  [LEFT_OUT.chatDetail]: 'chat details',
+  [LEFT_OUT.checklistDetail]: 'checklist details',
+  [LEFT_OUT.permissionSetting]: 'permission settings',
+};
+
+/** Host-owned turn data; one this version does not store is left out. */
+function readTurnCustom(value: unknown): ReturnType<typeof parseTurnCustom> {
+  try {
+    return parseTurnCustom(value ?? null);
+  } catch {
+    noteLeftOut({ label: LEFT_OUT.turnDetail });
+    return null;
+  }
+}
+
+/** The events the chat on screen is drawn from; every other event is Aman's own record of the turn. */
+const VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  EventType.TURN_CREATED,
+  EventType.MODEL_MESSAGE,
+  EventType.TOOL_RESPONSE,
+  EventType.TOOL_RESPONSE_V2,
+  EventType.TOOL_APPROVAL_REQUIRED,
+  EventType.TOOL_RESPONSE_REQUIRED,
+  EventType.MCP_AUTH_REQUIRED,
+  EventType.TURN_DONE,
+  EventType.THREAD_CREATED,
+  EventType.THREAD_DONE,
+]);
+
+/** A tool call's own name and server, and the tool info it carries; see forEachToolCall. */
+export interface ArchivedToolCall {
+  toolName: string;
+  serverName: string;
+  toolInfo: Record<string, unknown>;
+}
+
+/** Visits every tool call (an object with a function name and tool info) anywhere inside `value`. */
+export function forEachToolCall(value: unknown, visit: (call: ArchivedToolCall) => void): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      forEachToolCall(item, visit);
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  const toolInfo = value['tool_info'];
+  const fn = value['function'];
+  if (isRecord(toolInfo) && isRecord(fn) && typeof fn['name'] === 'string') {
+    const serverName = toolInfo['mcp_server_name'];
+    visit({ toolName: fn['name'], serverName: typeof serverName === 'string' ? serverName : '', toolInfo });
+  }
+  for (const entry of Object.values(value)) {
+    forEachToolCall(entry, visit);
+  }
+}
+
+const TOOL_TYPES = InternalToolCallInfoSchema.shape.type.options;
+export type ToolType = (typeof TOOL_TYPES)[number];
+
+export function isToolType(value: unknown): value is ToolType {
+  return TOOL_TYPES.some(type => type === value);
+}
+
+/** Says which kind of tool a call used, from what this Aman knows; undefined when it cannot tell. */
+export type ToolTypeResolver = (call: Pick<ArchivedToolCall, 'toolName' | 'serverName'>) => ToolType | undefined;
+
+/** A tool call whose kind neither its archive nor this Aman can tell. */
+export class UnknownToolTypeError extends Error {
+  readonly toolName: string;
+  constructor(toolName: string) {
+    super(`The kind of the tool ${toolName} is not one this version knows.`);
+    this.name = 'UnknownToolTypeError';
+    this.toolName = toolName;
+  }
+}
+
+let toolTypeResolver: ToolTypeResolver | undefined;
+
+/** Runs a synchronous parse with `resolver` telling the kind of tool calls recorded with one this version does not know. */
+export function withToolTypeResolver<T>(resolver: ToolTypeResolver, run: () => T): T {
+  const outer = toolTypeResolver;
+  toolTypeResolver = resolver;
+  try {
+    return run();
+  } finally {
+    toolTypeResolver = outer;
+  }
+}
+
+/** Fills in the kind of each tool call recorded with one this version does not know, or throws. */
+function withKnownToolTypes(value: unknown): unknown {
+  forEachToolCall(value, ({ toolName, serverName, toolInfo }) => {
+    if (isToolType(toolInfo['type'])) {
+      return;
+    }
+    const resolved = toolTypeResolver?.({ toolName, serverName });
+    if (resolved === undefined) {
+      throw new UnknownToolTypeError(toolName);
+    }
+    // The archive is parsed from a fresh JSON copy, so filling the value in place changes nothing else.
+    toolInfo['type'] = resolved;
+    noteLeftOut({ label: LEFT_OUT.toolDetail });
+  });
+  return value;
+}
+
+const ImportEventListSchema = z.preprocess(
+  withKnownToolTypes,
+  mixedList({
+    schema: ImportEventSchema,
+    label: LEFT_OUT.turnEvent,
+    visibleLabel: LEFT_OUT.toolDetail,
+    isVisible: event => isRecord(event) && typeof event['type'] === 'string' && VISIBLE_EVENT_TYPES.has(event['type']),
+  }),
+);
 
 /** A stored instant; session and turn dates are written back to the store, so a bad one fails before any write. */
 const ArchivedInstantSchema = z.iso.datetime({ offset: true });
@@ -82,21 +240,24 @@ const ImportToolCallInfoSchema = InternalToolCallInfoSchema.pick({
   effect: true,
 });
 
-const ImportContextMessageSchema = ContextMessageSchema.transform((message, ctx) => {
-  if (!('tool_calls' in message) || message.tool_calls === undefined) {
-    return message;
-  }
-  const toolCalls: typeof message.tool_calls = [];
-  for (const call of message.tool_calls) {
-    const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
-    if (!toolInfo.success) {
-      ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
-      return z.NEVER;
+/** A message is what people see; only each tool call's host-owned info is read leniently. */
+const ImportContextMessageSchema = z
+  .preprocess(withKnownToolTypes, visible(ContextMessageSchema, { label: LEFT_OUT.toolDetail }))
+  .transform((message, ctx) => {
+    if (!('tool_calls' in message) || message.tool_calls === undefined) {
+      return message;
     }
-    toolCalls.push({ ...call, tool_info: toolInfo.data });
-  }
-  return { ...message, tool_calls: toolCalls };
-});
+    const toolCalls: typeof message.tool_calls = [];
+    for (const call of message.tool_calls) {
+      const toolInfo = ImportToolCallInfoSchema.safeParse(call.tool_info);
+      if (!toolInfo.success) {
+        ctx.addIssue({ code: 'custom', message: 'A tool call carries malformed tool info.' });
+        return z.NEVER;
+      }
+      toolCalls.push({ ...call, tool_info: toolInfo.data });
+    }
+    return { ...message, tool_calls: toolCalls };
+  });
 
 /** Result a call that was still open when the archive was made gets; it never ran here. */
 export const EXPIRED_CALL_RESULT = 'This request expired when the chat was imported. It was not run.';
@@ -139,11 +300,23 @@ const ImportAgentInfoSchema = AgentInfoSchema.omit({ workspace_cwd: true });
  */
 const ImportThreadFieldsSchema = z.object({
   thread_id: z.string().min(1),
-  current_context_usage: CurrentContextUsageSchema,
-  parent: AgentParentSchema.nullable().optional(),
-  agent_info: ImportAgentInfoSchema.nullable().optional(),
-  completion: ImportCompletionMarkerSchema.nullable().optional(),
-  task_state: TaskStateSchema.optional(),
+  current_context_usage: internal(CurrentContextUsageSchema, { label: LEFT_OUT.threadDetail }),
+  parent: internal(AgentParentSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
+  agent_info: internal(ImportAgentInfoSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
+  completion: internal(ImportCompletionMarkerSchema.nullable(), {
+    label: LEFT_OUT.threadDetail,
+    fallback: null,
+    fill: false,
+  }).optional(),
+  task_state: internal(TaskStateSchema.optional(), { label: LEFT_OUT.threadDetail }).optional(),
 });
 
 const ImportThreadSnapshotSchema = z.object({
@@ -165,9 +338,23 @@ const ImportTurnFieldsSchema = z.object({
   first_turn_id: z.string(),
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
-  state: TurnStateSchema,
+  state: z.unknown().transform((value, ctx) => {
+    // A finished or failed turn's output is what people read, so it stays strict.
+    const parsed =
+      isRecord(value) && (value['status'] === 'done' || value['status'] === 'error')
+        ? readVisible(TurnStateSchema, value, { label: LEFT_OUT.toolDetail })
+        : // Any other state this version cannot read lands like a turn left running: cancelled, with nothing lost.
+          TurnStateSchema.safeParse(
+            readInternal(TurnStateSchema, value, { label: LEFT_OUT.turnState, fallback: { status: 'running' } }),
+          );
+    if (!parsed.success) {
+      forwardIssues(ctx, { issues: parsed.error.issues, path: [] });
+      return z.NEVER;
+    }
+    return parsed.data;
+  }),
   input: z.array(TurnInputItemSchema),
-  custom: z.unknown(),
+  custom: z.unknown().transform(readTurnCustom),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
 });
@@ -187,17 +374,23 @@ export const ImportSessionRecordSchema = z.object({
   title: z.string().nullable(),
   folder_id: z.string().nullable(),
   external_id: z.string().nullable(),
-  source: SessionSourceSchema.nullable(),
-  metadata: SessionMetadataSchema,
-  custom: z.unknown(),
-  task_checklist: TaskChecklistSchema,
-  metrics: SessionMetricsSchema,
-  repository_id: z.string().nullable(),
-  workspace_cwd: z.string().nullable(),
+  source: internal(SessionSourceSchema.nullable(), { label: LEFT_OUT.chatDetail }),
+  metadata: internal(SessionMetadataSchema, { label: LEFT_OUT.chatDetail }),
+  // Never stored on import, so data in it is left out.
+  custom: z.unknown().transform(value => {
+    if (isRecord(value) ? Object.keys(value).length > 0 : value !== null && value !== undefined) {
+      noteLeftOut({ label: LEFT_OUT.chatDetail });
+    }
+    return null;
+  }),
+  task_checklist: internal(TaskChecklistSchema, { label: LEFT_OUT.checklistDetail }),
+  metrics: internal(SessionMetricsSchema, { label: LEFT_OUT.chatDetail }),
+  repository_id: internal(z.string().nullable(), { label: LEFT_OUT.chatDetail }),
+  workspace_cwd: internal(z.string().nullable(), { label: LEFT_OUT.chatDetail }),
   last_turn_id: z.string().nullable(),
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
-  last_activity_timestamp_ms: z.number(),
+  last_activity_timestamp_ms: internal(z.number(), { label: LEFT_OUT.chatDetail }),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
@@ -225,17 +418,15 @@ const ImportPersonaActivationSchema = z.object(
 
 export const ImportSessionEntrySchema = z.object({
   session: ImportSessionRecordSchema,
-  turns: z.array(z.object({ turn: ImportTurnRecordSchema, events: z.array(ImportEventSchema) })),
+  turns: z.array(z.object({ turn: ImportTurnRecordSchema, events: ImportEventListSchema })),
   artifacts: z.array(ImportArtifactRecordSchema),
   /** Absent from exports made before persona choices travelled. */
   persona_activations: z.array(ImportPersonaActivationSchema).default([]),
 });
 export type ImportSessionEntry = z.infer<typeof ImportSessionEntrySchema>;
-/** The single sessions.json of format version 1. */
-export const ImportSessionsFileSchema = z.array(ImportSessionEntrySchema);
 
 /** A record of a sessions/ file: a chat, then each of its turns in order. */
-const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
+export const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('session'),
     session: ImportSessionRecordSchema,
@@ -247,12 +438,11 @@ const ImportSessionPartRecordSchema = z.discriminatedUnion('kind', [
       ...ImportTurnFieldsSchema.shape,
       snapshot: z.object({ threads: z.record(z.string(), ImportThreadDeltaSchema) }),
     }),
-    events: z.array(ImportEventSchema),
+    events: ImportEventListSchema,
     artifacts: z.array(ImportArtifactRecordSchema),
   }),
 ]);
 export type ImportSessionPartRecord = z.infer<typeof ImportSessionPartRecordSchema>;
-export const ImportSessionPartFileSchema = z.array(ImportSessionPartRecordSchema);
 
 export const ImportFolderRecordSchema = z.object({
   tenant_id: z.string(),
@@ -271,6 +461,8 @@ export const ImportAgentRecordSchema = z.object({
   description: z.string(),
   manifest: AgentSpecSchema,
   external_id: z.string().nullable(),
+  /** Absent from exports made before host-made schedule agents were marked. */
+  host_managed: z.boolean().default(false),
   created_by_subject: CreatedBySubjectSchema,
   created_at: z.string(),
   updated_at: z.string(),
@@ -326,6 +518,8 @@ export const ImportScheduleRecordSchema = z.object({
   agent_id: z.string().min(1),
   agent_name: z.string().nullable(),
   name: z.string().min(1),
+  /** Absent from exports made before schedules kept a persona. */
+  persona_id: z.string().min(1).nullable().default(null),
   manifest: ScheduleManifestSchema,
   status: ScheduleStatusSchema,
   created_by_subject: CreatedBySubjectSchema,
@@ -349,7 +543,8 @@ export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 export const ImportSettingsFileSchema = z.object({
   /** Instance-wide toggles; only present for an administrator's export. */
   instance: z.array(z.object({ key: z.string().min(1), value: z.string() })),
-  permission_settings: SentinelUserSettingsSchema,
+  // Never applied on import.
+  permission_settings: internal(SentinelUserSettingsSchema, { label: LEFT_OUT.permissionSetting }),
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;
 

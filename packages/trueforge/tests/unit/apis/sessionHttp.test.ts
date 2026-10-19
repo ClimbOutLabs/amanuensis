@@ -180,6 +180,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('creates a named session and filters list by agent_id', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -213,6 +214,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('returns caller-scoped metrics for a named agent', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -277,6 +279,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('lets an agent manager read named sessions, events, and metrics but not mutate them', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: { subject_id: 'owner', subject_type: 'user', subject_display_name: 'Owner' },
       name: 'managed-agent',
@@ -574,6 +577,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('rejects PATCH agent on a named session', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -860,6 +864,7 @@ describe('sessions HTTP agent binding', () => {
   it('returns 404 when creating a session for a named agent the caller cannot use', async () => {
     deniedCanAccessAgent.mockClear();
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,

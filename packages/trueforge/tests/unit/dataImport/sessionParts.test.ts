@@ -1,6 +1,8 @@
+import { z } from 'zod';
+
 import { DataImportError } from '../../../src/dataImport/importError';
 import type { ImportSessionPartRecord } from '../../../src/dataImport/importSchemas';
-import { ImportSessionPartFileSchema } from '../../../src/dataImport/importSchemas';
+import { ImportSessionPartRecordSchema } from '../../../src/dataImport/importSchemas';
 import { assembleSessionParts } from '../../../src/dataImport/sessionParts';
 
 const NOW = '2026-10-16T10:00:00.000Z';
@@ -63,7 +65,7 @@ function turnRecord(input: { sessionId: string; turnId: string; base: number; ad
 }
 
 function records(raw: unknown[]): ImportSessionPartRecord[] {
-  return ImportSessionPartFileSchema.parse(raw);
+  return z.array(ImportSessionPartRecordSchema).parse(raw);
 }
 
 describe('assembleSessionParts', () => {

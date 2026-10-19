@@ -1691,6 +1691,15 @@ describe('aman import and aman migrate', () => {
     );
   });
 
+  it('import passes --dry-run on to the installer', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--dry-run']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --dry-run`),
+    );
+  });
+
   it('import needs --instance when this computer has more than one, and a file always', () => {
     make({ instances: ['main', 'second'] });
     world.installerStub(world.sandbox());

@@ -1,3 +1,4 @@
+import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import { createAgentsRouter } from '../../../src/apis/agents';
 import { TrueForgeAuthorizer, type AgentListAccess, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
@@ -9,6 +10,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { CHAT_ASSISTANT_DESCRIPTION } from '../../../src/runtime/chatAssistant';
 import { ListAgentsResponseSchema } from '../../../src/schemas/agent';
 
 const modelProvider = {
@@ -88,13 +90,14 @@ const denyAllAuthorizer: Authorizer = {
 describe('agents router', () => {
   let router: ReturnType<typeof createAgentsRouter>;
   let deniedRouter: ReturnType<typeof createAgentsRouter>;
+  let agentStore: SqliteAgentStore;
 
   beforeAll(async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const modelProviderStore = new SqliteModelProviderStore(db);
     await modelProviderStore.upsertProvider({ tenant_id: 'default', name: 'anthropic', manifest: modelProvider });
-    const agentStore = new SqliteAgentStore(db);
+    agentStore = new SqliteAgentStore(db);
     router = createAgentsRouter({
       resolveAgentStore: () => agentStore,
       resolveModelProviderStore: () => modelProviderStore,
@@ -324,6 +327,38 @@ describe('agents router', () => {
 
     const badToken = await router.request('/?page_token=not-a-token');
     expect(badToken.status).toBe(400);
+  });
+
+  it('leaves the agents the host made for chat schedules out of the list, by their stored mark', async () => {
+    await agentStore.createAgent({
+      tenant_id: 'default',
+      name: 'zzz-host-made-assistant',
+      description: CHAT_ASSISTANT_DESCRIPTION,
+      manifest: AgentSpecSchema.parse(manifest),
+      external_id: null,
+      host_managed: true,
+      created_by_subject: { subject_id: 'local-user', subject_type: 'user', subject_display_name: 'local-user' },
+    });
+    const lookalike = await router.request(
+      '/',
+      jsonInit('POST', { ...writeBody, name: 'assistant-0123456789abcdef', description: CHAT_ASSISTANT_DESCRIPTION }),
+    );
+    expect(lookalike.status).toBe(201);
+
+    const listed = ListAgentsResponseSchema.parse(await (await router.request('/?agent_name=assistant')).json());
+    const names = listed.data.map(agent => agent.name);
+    // A person's own agent is listed even when its name and description look host-made.
+    expect(names).toContain('assistant-0123456789abcdef');
+    expect(names).not.toContain('zzz-host-made-assistant');
+  });
+
+  it('never lets the public API mark an agent as host-made', async () => {
+    const created = await router.request(
+      '/',
+      jsonInit('POST', { ...writeBody, name: 'zzz-sent-mark', host_managed: true }),
+    );
+    expect(created.status).toBe(400);
+    expect(await agentStore.getAgent({ tenant_id: 'default', name: 'zzz-sent-mark' })).toBeUndefined();
   });
 
   it('lists agents filtered by agent_name substring case-insensitively', async () => {

@@ -19,6 +19,8 @@ export interface AgentRecord {
   description: string;
   manifest: AgentSpec;
   external_id: string | null;
+  /** The host made it to run a chat's schedules. People never pick it, so agent lists leave it out. */
+  host_managed: boolean;
   created_by_subject: CreatedBySubject;
   /** ISO-8601 UTC instant. */
   created_at: string;
@@ -43,6 +45,8 @@ export interface ListAgentsInput {
   external_ids?: readonly string[];
   /** Case-insensitive substring match on `name`. */
   agent_name: string | undefined;
+  /** False for lists a person sees; true where every agent counts (export, access scoping). */
+  include_host_managed: boolean;
   /** When undefined, return the full matching set (no SQL LIMIT). */
   limit: number | undefined;
   page_token: string | undefined;
@@ -72,6 +76,8 @@ export interface CreateAgentInput {
   description: string;
   manifest: AgentSpec;
   external_id: string | null;
+  /** Set only when the host makes a chat's schedule assistant; never from the public API. */
+  host_managed: boolean;
   created_by_subject: CreatedBySubject;
   custom?: Record<string, unknown>;
 }
