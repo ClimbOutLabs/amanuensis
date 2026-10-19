@@ -117,6 +117,7 @@ import {
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
+import { repairPersonaNames } from './personaNames';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -337,14 +338,17 @@ function parseSection<TSchema extends z.ZodType>({
   schema,
   logger,
   leftOut,
+  prepare,
 }: {
   files: ReadonlyMap<string, Buffer>;
   name: string;
   schema: TSchema;
   logger: DataImportDeps<never>['logger'];
   leftOut: LeftOutReport;
+  /** Brings an older version's values up to today's rules before the strict read. */
+  prepare: (json: unknown) => unknown;
 }): z.infer<TSchema> {
-  const json = readSectionJson({ files, name });
+  const json = prepare(readSectionJson({ files, name }));
   const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(json));
   if (!result.success) {
     rejectSection({ name, json, error: result.error, logger });
@@ -459,6 +463,8 @@ interface ArchiveContents {
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
   leftOutReport: LeftOutReport;
+  /** Persona names and aliases an older version wrote that today's rules changed or dropped. */
+  personaRepairLines: string[];
 }
 
 /** The sessions/ file names in order; a gap in the numbering is a missing file. */
@@ -627,8 +633,12 @@ function loadArchive(input: {
     }
   }
   const leftOut: LeftOutReport = new Map();
-  const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
-    parseSection({ files, name, schema, logger, leftOut });
+  const section = <TSchema extends z.ZodType>(
+    name: string,
+    schema: TSchema,
+    prepare: (json: unknown) => unknown = json => json,
+  ): z.infer<TSchema> => parseSection({ files, name, schema, logger, leftOut, prepare });
+  const personaRepairLines: string[] = [];
 
   const manifest = section('manifest.json', ImportManifestSchema);
   if (manifest.format !== 'aman-export') {
@@ -666,7 +676,11 @@ function loadArchive(input: {
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
     folders,
     agents: section('agents.json', ImportAgentsFileSchema),
-    personas: section('personas.json', ImportPersonasFileSchema),
+    personas: section('personas.json', ImportPersonasFileSchema, json => {
+      const repaired = repairPersonaNames(json);
+      personaRepairLines.push(...repaired.lines);
+      return repaired.json;
+    }),
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
@@ -677,6 +691,7 @@ function loadArchive(input: {
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
+    personaRepairLines,
   };
   validateCrossReferences(contents);
   return contents;
@@ -1369,9 +1384,12 @@ async function importArchive<TTransaction>(
     throw error;
   }
 
-  const leftOut = leftOutLines({ report: contents.leftOutReport, titles: sessions.titles });
+  const leftOut = [
+    ...contents.personaRepairLines,
+    ...leftOutLines({ report: contents.leftOutReport, titles: sessions.titles }),
+  ];
   if (leftOut.length > 0) {
-    deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
+    deps.logger.info('Data import left out or repaired details from an older version', { left_out: leftOut });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
   if (lock === undefined) {

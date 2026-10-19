@@ -21,13 +21,14 @@ export const PersonaIdParamsSchema = z
  * The `u` flag is what makes `\p{L}` a Unicode property escape rather than a
  * literal `p`, so it cannot be dropped from the runtime check.
  */
-const PERSONA_NAME_REGEX = /^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u;
+export const PERSONA_NAME_REGEX = /^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u;
+export const PERSONA_NAME_MAX_LENGTH = 48;
 
-const PersonaNameSchema = z
+export const PersonaNameSchema = z
   .string()
   .trim()
   .min(1)
-  .max(48)
+  .max(PERSONA_NAME_MAX_LENGTH)
   // Keep Unicode-aware validation in host code. OpenAPI patterns use an
   // ECMAScript-compatible subset and cannot portably represent `\p{L}` with
   // the required `u` flag, so publishing this regex would break SDK clients.
