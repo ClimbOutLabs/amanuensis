@@ -19,6 +19,7 @@ export interface ToolParameterSchema {
   enum?: unknown[] | undefined;
   anyOf?: ToolParameterSchema[] | undefined;
   oneOf?: ToolParameterSchema[] | undefined;
+  allOf?: ToolParameterSchema[] | undefined;
   additionalProperties?: boolean | ToolParameterSchema | undefined;
 }
 
@@ -70,6 +71,9 @@ function readSchema(value: unknown): ToolParameterSchema | undefined {
   const oneOf = Array.isArray(value['oneOf'])
     ? value['oneOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
     : undefined;
+  const allOf = Array.isArray(value['allOf'])
+    ? value['allOf'].map(entry => readSchema(entry)).filter((entry): entry is ToolParameterSchema => entry !== undefined)
+    : undefined;
   const additional = value['additionalProperties'];
   const additionalProperties =
     typeof additional === 'boolean' ? additional : isRecord(additional) ? readSchema(additional) : undefined;
@@ -81,6 +85,7 @@ function readSchema(value: unknown): ToolParameterSchema | undefined {
     ...(enumValues !== undefined ? { enum: enumValues } : {}),
     ...(anyOf !== undefined && anyOf.length > 0 ? { anyOf } : {}),
     ...(oneOf !== undefined && oneOf.length > 0 ? { oneOf } : {}),
+    ...(allOf !== undefined && allOf.length > 0 ? { allOf } : {}),
     ...(additionalProperties !== undefined ? { additionalProperties } : {}),
   };
 }
@@ -149,8 +154,37 @@ interface CheckOutcome {
   problems: ArgumentProblem[];
 }
 
-function joinPath(base: string, key: string): string {
-  return base === '' ? key : `${base}.${key}`;
+function joinPath(input: { base: string; key: string }): string {
+  return input.base === '' ? input.key : `${input.base}.${input.key}`;
+}
+
+/**
+ * A schema read together with its allOf parts: every part must hold, so for checking, the
+ * parts read as one schema whose named fields and required fields are the union of all of
+ * them (recursively). Without this, a field declared only under allOf is treated as an
+ * argument the tool does not have and silently dropped.
+ */
+function flattenAllOf(schema: ToolParameterSchema): ToolParameterSchema {
+  if (schema.allOf === undefined || schema.allOf.length === 0) {
+    return schema;
+  }
+  let properties = schema.properties;
+  let required = schema.required;
+  for (const member of schema.allOf) {
+    const flat = flattenAllOf(member);
+    if (flat.properties !== undefined) {
+      properties = { ...flat.properties, ...(properties ?? {}) };
+    }
+    if (flat.required !== undefined) {
+      required = [...new Set([...(required ?? []), ...flat.required])];
+    }
+  }
+  return {
+    ...schema,
+    allOf: undefined,
+    ...(properties !== undefined ? { properties } : {}),
+    ...(required !== undefined ? { required } : {}),
+  };
 }
 
 /**
@@ -224,7 +258,8 @@ function checkValue(input: { schema: ToolParameterSchema; value: unknown; path: 
 }
 
 function checkObject(input: { schema: ToolParameterSchema; value: Record<string, unknown>; path: string }): CheckOutcome {
-  const { schema, value, path } = input;
+  const { value, path } = input;
+  const schema = flattenAllOf(input.schema);
   const properties = schema.properties ?? {};
   const propertyNames = Object.keys(properties);
   const required = new Set(schema.required ?? []);
@@ -243,7 +278,11 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
       if (schema.additionalProperties === true) {
         cleaned[key] = entry;
       } else if (isRecord(schema.additionalProperties)) {
-        const outcome = checkValue({ schema: schema.additionalProperties, value: entry, path: joinPath(path, key) });
+        const outcome = checkValue({
+          schema: schema.additionalProperties,
+          value: entry,
+          path: joinPath({ base: path, key }),
+        });
         problems.push(...outcome.problems);
         if (outcome.problems.length === 0) {
           cleaned[key] = outcome.value;
@@ -256,13 +295,16 @@ function checkObject(input: { schema: ToolParameterSchema; value: Record<string,
       // An explicit null for an optional argument means "not given": drop it, do not send it.
       continue;
     }
-    const outcome = checkValue({ schema: propertySchema, value: entry, path: joinPath(path, key) });
+    const outcome = checkValue({ schema: propertySchema, value: entry, path: joinPath({ base: path, key }) });
     problems.push(...outcome.problems);
     cleaned[key] = outcome.value;
   }
   for (const name of required) {
     if (!(name in cleaned) && !(name in value)) {
-      problems.push({ path: joinPath(path, name), expected: `${describeSchema(properties[name] ?? {})} (this one is required)` });
+      problems.push({
+        path: joinPath({ base: path, key: name }),
+        expected: `${describeSchema(properties[name] ?? {})} (this one is required)`,
+      });
     }
   }
   return { value: cleaned, problems };

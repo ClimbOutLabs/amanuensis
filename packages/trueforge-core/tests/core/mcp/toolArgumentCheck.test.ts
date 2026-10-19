@@ -174,6 +174,21 @@ describe('checkToolArguments', () => {
     expect(outcome.args).toEqual({ options: { a: 1 }, name: 'x' });
   });
 
+  it('keeps arguments declared under allOf instead of dropping them', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      allOf: [{ properties: { room: { type: 'string' } }, required: ['room'] }],
+    });
+    const outcome = checkToolArguments({ schema, args: { title: 'Dentist', room: '2B' } });
+    expect(outcome.problems).toEqual([]);
+    expect(outcome.args).toEqual({ title: 'Dentist', room: '2B' });
+    // A field required only under allOf is still reported when it is missing.
+    expect(checkToolArguments({ schema, args: { title: 'Dentist' } }).problems).toEqual([
+      { path: 'room', expected: 'text (this one is required)' },
+    ]);
+  });
+
   it('flags an argument whose property schema is the boolean false (no value allowed)', () => {
     const schema = toParameterSchema({
       type: 'object',
