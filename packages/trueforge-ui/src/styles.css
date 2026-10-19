@@ -1345,6 +1345,12 @@
   text-underline-offset: 0.125rem;
 }
 
+.maps-card-replaced {
+  margin: 0.25rem 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
 .maps-card-blocked {
   padding: 1.5rem 1rem;
   text-align: center;

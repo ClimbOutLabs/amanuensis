@@ -20,6 +20,7 @@ import {
   SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
+import { recordFetchedPages, type FetchedPageStore } from '../search/fetchedPages';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -157,6 +158,7 @@ export class ToolSet implements IToolSet {
   private readonly searchProvider: boolean;
   private readonly searchTools: ReadonlySet<string>;
   private readonly searchPlumbingFields: readonly string[];
+  private readonly pages: FetchedPageStore | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -183,6 +185,12 @@ export class ToolSet implements IToolSet {
      * declares it read-only or this list names it. Has no effect without `sentinel`.
      */
     searchProvider?: SearchProviderGrant | undefined;
+    /**
+     * The shared memory of pages read this session, written after every successful call so a
+     * place found on a page can be checked against it whatever tool read the page. Set by the
+     * host only.
+     */
+    pages?: FetchedPageStore | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -197,6 +205,7 @@ export class ToolSet implements IToolSet {
     this.searchProvider = params.searchProvider !== undefined;
     this.searchTools = new Set(params.searchProvider?.tools);
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
+    this.pages = params.pages;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -290,6 +299,15 @@ export class ToolSet implements IToolSet {
       params,
       response: await this.source.callTool(params, decision, context),
     });
+    if (this.pages !== undefined && isCallToolResponseResult(response) && response.result.isError !== true) {
+      // Every page reading tool records what it read, not only one provider: a place claim is
+      // checked against this memory, so a page read any other way must count too.
+      recordFetchedPages({
+        pages: this.pages,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
+    }
     if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
       // What a search returned is what a later fetch in this turn may name. A call that itself
       // names a URL is a fetch: its page's links are not search results, so they stay unreturned.

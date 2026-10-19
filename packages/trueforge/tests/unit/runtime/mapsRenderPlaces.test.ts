@@ -130,6 +130,72 @@ describe('render_places', () => {
     expect(asked).toEqual([]);
   });
 
+  it('names every refused place and its reason when nothing could be checked', async () => {
+    const { service, pages } = setup(query => hit('38.7', '-9.1', query));
+    const { body, isError } = bodyOf(
+      await renderPlaces({
+        service,
+        pages,
+        input: { places: [{ ...harbour, name: 'Invented Clinic' }], calendar_locations: [] },
+      }),
+    );
+    expect(isError).toBe(true);
+    expect(body['refused']).toEqual([{ name: 'Invented Clinic', reason: 'The name is not on that page.' }]);
+  });
+
+  it('pins a place read from a page whose address uses abbreviations', async () => {
+    const { service, pages } = setup(query => hit('29.9', '-90.1', '916 St Andrew Street, New Orleans'));
+    pages.remember({
+      url: 'https://hope-house.example/',
+      text: 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.',
+    });
+    const { body, isError } = bodyOf(
+      await renderPlaces({
+        service,
+        pages,
+        input: {
+          places: [
+            {
+              name: 'Hope House',
+              address: '916 St Andrew St, New Orleans',
+              source_url: 'http://hope-house.example',
+            },
+          ],
+          calendar_locations: [],
+        },
+      }),
+    );
+    expect(isError).toBe(false);
+    expect(body['places']).toEqual([expect.objectContaining({ name: 'Hope House', lat: 29.9, lng: -90.1 })]);
+  });
+
+  it('refuses a geocoder result in a different city than the address', async () => {
+    const { service, pages } = setup(() => hit('40.6', '-73.9', 'Harbour Family Clinic, Brooklyn, New York'));
+    const { body, isError } = bodyOf(
+      await renderPlaces({ service, pages, input: { places: [harbour], calendar_locations: [] } }),
+    );
+    expect(isError).toBe(true);
+    expect(body).toMatchObject({ status: 'error', code: 'not_grounded' });
+    expect(body['refused']).toEqual([
+      { name: 'Harbour Family Clinic', reason: 'The place the map found is in a different area.' },
+    ]);
+  });
+
+  it('keeps the good places and refuses only the one the map put in a different city', async () => {
+    const { service, pages } = setup(query =>
+      query.includes('Sample')
+        ? hit('38.7', '-9.1', query)
+        : hit('40.6', '-73.9', 'Harbour Family Clinic, Brooklyn, New York'),
+    );
+    const { body } = bodyOf(
+      await renderPlaces({ service, pages, input: { places: [harbour, garden], calendar_locations: [] } }),
+    );
+    expect(body['places']).toEqual([expect.objectContaining({ name: 'Garden Health Centre' })]);
+    expect(body['refused']).toEqual([
+      { name: 'Harbour Family Clinic', reason: 'The place the map found is in a different area.' },
+    ]);
+  });
+
   it('marks a place already in the calendar and keeps it', async () => {
     const { service, pages } = setup(query => hit('38.7', '-9.1', query));
     const { body } = bodyOf(

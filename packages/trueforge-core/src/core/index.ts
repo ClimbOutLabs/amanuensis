@@ -481,6 +481,12 @@ export {
   remoteImageAskReason,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export { FetchedPageStore, fetchedPages } from './search/fetchedPages';
-export { groundPlace, isInCalendar } from './search/groundPlace';
+export {
+  FETCHED_PAGE_TEXT_MAX_CHARS,
+  FetchedPageStore,
+  fetchedPages,
+  pageUrlKey,
+  recordFetchedPages,
+} from './search/fetchedPages';
+export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';

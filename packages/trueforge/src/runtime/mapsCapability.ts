@@ -21,6 +21,7 @@ import {
   LocalToolMCP,
   mapsDestinationHosts,
   MapsTravelModeSchema,
+  normalizedWords,
   RENDER_MAP_TOOL_NAME,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -474,12 +475,17 @@ function mapsErrorResult({
   error,
   field,
   mode,
+  refused,
 }: {
   error: MapsUpstreamError;
   field?: string;
   mode?: MapsTravelMode;
+  refused?: { name: string; reason: string }[];
 }): ReturnType<typeof toolResultResponse> {
   const body: MapsErrorBody = { status: 'error', code: error.code };
+  if (refused !== undefined) {
+    body.refused = refused;
+  }
   if (field !== undefined) {
     body.field = field;
   }
@@ -500,6 +506,38 @@ const REFUSAL_REASONS = {
   name_not_found: 'The name is not on that page.',
   address_not_found: 'The address is not on that page.',
 } as const;
+
+const OUT_OF_AREA_REASON = 'The place the map found is in a different area.';
+
+/**
+ * Whether a geocoder result sits in the area the query itself names. The area is the part after
+ * the first comma: its words must appear in the result name, or every long number after the comma
+ * (a postcode) must. A query that names no area passes, and so does a result that names the area
+ * in its own words beside the same postcode.
+ */
+export function isInRequestedArea({ query, displayName }: { query: string; displayName: string }): boolean {
+  const segments = query.split(',');
+  if (segments.length < 2) {
+    return true;
+  }
+  const cityTokens = normalizedWords(segments[1] ?? '')
+    .trim()
+    .split(' ')
+    .filter(token => /^\p{L}+$/u.test(token));
+  const numbers =
+    segments
+      .slice(1)
+      .join(',')
+      .match(/\d{3,}/g) ?? [];
+  if (cityTokens.length === 0 && numbers.length === 0) {
+    return true;
+  }
+  if (cityTokens.length > 0 && normalizedWords(displayName).includes(` ${cityTokens.join(' ')} `)) {
+    return true;
+  }
+  const displayNumbers = displayName.match(/\d{3,}/g) ?? [];
+  return numbers.length > 0 && numbers.every(number => displayNumbers.includes(number));
+}
 
 /**
  * Pins places the model found on pages this server fetched. A place is kept only when its name and
@@ -537,18 +575,25 @@ export async function renderPlaces({
     }
   }
   if (grounded.length === 0) {
-    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded') });
+    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
   }
   try {
     const places = [];
     for (const place of grounded) {
       const found = await service.geocode(place.address);
+      if (found !== null && !isInRequestedArea({ query: place.address, displayName: found.resolved_name })) {
+        refused.push({ name: place.name, reason: OUT_OF_AREA_REASON });
+        continue;
+      }
       places.push({
         ...place,
         lat: found?.lat ?? null,
         lng: found?.lng ?? null,
         already_in_calendar: isInCalendar({ place, locations: input.calendar_locations }),
       });
+    }
+    if (places.length === 0) {
+      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
     }
     return toolResultResponse({
       text: JSON.stringify({ status: 'ok', places, refused, attribution: MAPS_ATTRIBUTION }),
@@ -606,7 +651,7 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
       description:
-        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
+        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use only for a place or address the user typed themselves. A place that came from a web page goes through render_places instead, never this tool. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
       schema: RENDER_MAP_INPUT_SCHEMA,
       handler: async input => this.renderMap(input),
     }),
@@ -620,7 +665,7 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
       description:
-        "Pin places on one map card, each with the details found on the page it came from. Use only after tavily_extract has read the pages. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Pass the page's own link as source_url. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
+        "Pin places on one map card, each with the details found on the page it came from. Use after a page reading tool has read the pages, whichever one it was: tavily_extract, web_fetch, or another provider's fetch tool all count. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Short forms such as St for Street are fine. Pass the page's own link as source_url. Every refused place comes back with its name and the reason, so fix that one detail and call again for it. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
       handler: async input => renderPlaces({ service: this.service, pages: fetchedPages, input }),
     }),
@@ -633,7 +678,7 @@ class MapsTool extends LocalToolMCP {
   private async renderMap(input: RenderMapInput): Promise<ReturnType<typeof toolResultResponse>> {
     try {
       const place = await this.service.geocode(input.place_name);
-      if (place === null) {
+      if (place === null || !isInRequestedArea({ query: input.place_name, displayName: place.resolved_name })) {
         return mapsErrorResult({ error: new MapsUpstreamError('not_found') });
       }
       const pins = input.poi === undefined ? [] : await this.service.searchPoi(place, input.poi);

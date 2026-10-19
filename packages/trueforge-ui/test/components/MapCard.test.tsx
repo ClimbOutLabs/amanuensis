@@ -585,6 +585,20 @@ describe('MapCard with several found places', () => {
     expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything());
   });
 
+  it('adds one line saying how many places were left out and why', () => {
+    renderCard({
+      data: {
+        ...placesData,
+        refused: [
+          { name: 'Canal Practice', reason: 'The address is not on that page.' },
+          { name: 'River Clinic', reason: 'The address is not on that page.' },
+        ],
+      },
+      state: 'ready',
+    });
+    expect(screen.getByText('2 places left out: The address is not on that page.')).toBeInTheDocument();
+  });
+
   it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {
     const hostile = '<img src=x onerror=alert(1)>';
     const [first, second] = placesData.places ?? [];

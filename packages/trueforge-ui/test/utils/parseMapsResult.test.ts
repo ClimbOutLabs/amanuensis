@@ -230,5 +230,35 @@ describe('parseMapsResult', () => {
       expect(parsed.state).toBe('unavailable');
       expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
     });
+
+    it('carries the refused places of a part-way result to the card', () => {
+      const parsed = parseMapsResult(
+        JSON.stringify({
+          ...okBody,
+          refused: [{ name: 'Canal Practice', reason: 'The address is not on that page.' }],
+        }),
+        'render_places',
+      );
+      expect(parsed.state).toBe('ready');
+      expect(parsed.data?.refused).toEqual([{ name: 'Canal Practice', reason: 'The address is not on that page.' }]);
+    });
+
+    it('names up to three refused places and one next step when nothing was pinned', () => {
+      const refused = ['Alpha House', 'Beta House', 'Gamma House', 'Delta House'].map(name => ({
+        name,
+        reason: 'The name is not on that page.',
+      }));
+      const parsed = parseMapsResult(
+        JSON.stringify({ status: 'error', code: 'not_grounded', refused }),
+        'render_places',
+      );
+      expect(parsed.state).toBe('unavailable');
+      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
+      expect(parsed.blockedMessage).toContain('Alpha House');
+      expect(parsed.blockedMessage).toContain('Beta House');
+      expect(parsed.blockedMessage).toContain('Gamma House');
+      expect(parsed.blockedMessage).not.toContain('Delta House');
+      expect(parsed.blockedMessage).toContain('then try again');
+    });
   });
 });

@@ -23,19 +23,51 @@ export type GroundResult =
 const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
 const MIN_PHONE_SUFFIX_DIGITS = 7;
 
-/** Lower case, accents removed, every run of other characters one space, padded so words match whole. */
-function words(text: string): string {
+/**
+ * Short and long spellings of one address word, folded to the short one. Folding both sides to the
+ * same word means "St" matches "Street" and "Saint", in either direction, while every other word
+ * still has to match in full.
+ */
+const ADDRESS_WORD_FORMS: Readonly<Record<string, string>> = {
+  street: 'st',
+  saint: 'st',
+  avenue: 'ave',
+  road: 'rd',
+  boulevard: 'blvd',
+  drive: 'dr',
+  lane: 'ln',
+  court: 'ct',
+  place: 'pl',
+  square: 'sq',
+  highway: 'hwy',
+  parkway: 'pkwy',
+  suite: 'ste',
+  apartment: 'apt',
+  north: 'n',
+  south: 's',
+  east: 'e',
+  west: 'w',
+  mount: 'mt',
+  fort: 'ft',
+};
+
+/**
+ * Lower case, accents removed, every run of other characters one space, address words folded to
+ * one spelling, padded so words match whole.
+ */
+export function normalizedWords(text: string): string {
   const folded = text
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
-  return ` ${folded} `;
+  const tokens = folded === '' ? [] : folded.split(' ').map(token => ADDRESS_WORD_FORMS[token] ?? token);
+  return ` ${tokens.join(' ')} `;
 }
 
 function pageHas({ pageWords, value }: { pageWords: string; value: string }): boolean {
-  const needle = words(value);
+  const needle = normalizedWords(value);
   return needle.trim() !== '' && pageWords.includes(needle);
 }
 
@@ -68,7 +100,7 @@ export function groundPlace({ claim, pages }: { claim: PlaceClaim; pages: Fetche
   if (page === undefined) {
     return { ok: false, reason: 'source_not_fetched' };
   }
-  const pageWords = words(page.text);
+  const pageWords = normalizedWords(page.text);
   if (!pageHas({ pageWords, value: claim.name })) {
     return { ok: false, reason: 'name_not_found' };
   }
@@ -108,9 +140,9 @@ export function isInCalendar({
   place: { name: string; address: string };
   locations: readonly string[];
 }): boolean {
-  const candidates = [words(place.name), words(place.address)];
+  const candidates = [normalizedWords(place.name), normalizedWords(place.address)];
   return locations.some(location => {
-    const where = words(location);
+    const where = normalizedWords(location);
     if (where.trim() === '') {
       return false;
     }

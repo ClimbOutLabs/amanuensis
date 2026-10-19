@@ -413,6 +413,7 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          pages: fetchedPages,
         });
       }),
     );

@@ -949,6 +949,74 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.getByTestId('mock-map-card')).toHaveTextContent('1 place found');
   });
 
+  it('shrinks a failed pin call to one quiet line when a later map in the same answer replaces it', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-failed',
+            result: JSON.stringify({
+              status: 'error',
+              code: 'not_grounded',
+              refused: [{ name: 'Harbour Family Clinic', reason: 'The name is not on that page.' }],
+            }),
+          }),
+          placesCallPart({
+            toolCallId: 'tool-places-good',
+            result: JSON.stringify({
+              status: 'ok',
+              places: [
+                {
+                  name: 'Harbour Family Clinic',
+                  address: '12 Example Street, Lisbon 1100-000',
+                  languages: null,
+                  hours: null,
+                  price: null,
+                  phone: null,
+                  source_url: 'https://harbour-clinic.example/en',
+                  source_site: 'harbour-clinic.example',
+                  fetched_at: '2026-10-17T10:00:00.000Z',
+                  lat: 38.7,
+                  lng: -9.1,
+                  already_in_calendar: false,
+                },
+              ],
+              refused: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          }),
+          { type: 'text', text: 'Here is the place.' },
+        ],
+      },
+    ]);
+
+    expect(screen.getByTestId('map-card-replaced')).toHaveTextContent(/replaces it/);
+    expect(screen.getAllByTestId('mock-map-card')).toHaveLength(1);
+  });
+
+  it('keeps the full message of a failed pin call when no later map replaces it', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-failed-only',
+            result: JSON.stringify({
+              status: 'error',
+              code: 'not_grounded',
+              refused: [{ name: 'Harbour Family Clinic', reason: 'The name is not on that page.' }],
+            }),
+          }),
+          { type: 'text', text: 'No luck.' },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByTestId('map-card-replaced')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-map-card')).toBeInTheDocument();
+  });
+
   it('asks first for the pin call and shows no map until it is approved', () => {
     renderAssistantMessage([
       {

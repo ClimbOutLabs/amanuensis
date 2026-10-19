@@ -17,6 +17,21 @@ describe('FetchedPageStore', () => {
     expect(store.recall('https://a.example/x')).toBeUndefined();
   });
 
+  it('finds a page when the link differs only in scheme, case or a trailing slash', () => {
+    const store = new FetchedPageStore({ now: () => 0, ttlMs: 1000, maxPages: 3 });
+    store.remember({ url: 'https://a.example/x/', text: 'hello' });
+    expect(store.recall('http://a.example/x')?.text).toBe('hello');
+    expect(store.recall('https://A.EXAMPLE/x/')?.text).toBe('hello');
+    expect(store.recall('https://a.example/x')?.text).toBe('hello');
+  });
+
+  it('does not treat a different path or query as the same page', () => {
+    const store = new FetchedPageStore({ now: () => 0, ttlMs: 1000, maxPages: 3 });
+    store.remember({ url: 'https://a.example/x', text: 'hello' });
+    expect(store.recall('https://a.example/other')).toBeUndefined();
+    expect(store.recall('https://a.example/x?y=1')).toBeUndefined();
+  });
+
   it('drops the oldest page once it holds too many', () => {
     const store = new FetchedPageStore({ now: () => 0, ttlMs: 1000, maxPages: 2 });
     store.remember({ url: 'https://a.example/1', text: '1' });

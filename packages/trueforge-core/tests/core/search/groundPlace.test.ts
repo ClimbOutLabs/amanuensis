@@ -82,6 +82,71 @@ describe('groundPlace', () => {
       reason: 'name_not_found',
     });
   });
+
+  it('matches a short address written with abbreviations against the full page text', () => {
+    const pages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    pages.remember({
+      url: 'https://hope-house.example/',
+      text: 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.',
+    });
+    const claim: PlaceClaim = {
+      name: 'Hope House',
+      address: '916 St Andrew St',
+      languages: null,
+      hours: null,
+      price: null,
+      phone: null,
+      source_url: 'https://hope-house.example/',
+    };
+    expect(groundPlace({ claim, pages })).toMatchObject({ ok: true, place: { name: 'Hope House' } });
+  });
+
+  it('matches Street against St and Avenue against Ave in both directions', () => {
+    const pages = storeWithPages();
+    expect(groundPlace({ claim: { ...harbour, address: '12 Example St, Lisbon 1100-000' }, pages })).toMatchObject({
+      ok: true,
+    });
+    expect(
+      groundPlace({
+        claim: {
+          name: 'Garden Health Centre',
+          address: '4 Sample Ave, Lisbon 1200-000',
+          languages: null,
+          hours: null,
+          price: null,
+          phone: null,
+          source_url: GARDEN_URL,
+        },
+        pages,
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('still refuses a near miss with the wrong house number', () => {
+    const pages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    pages.remember({
+      url: 'https://hope-house.example/',
+      text: 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.',
+    });
+    const claim: PlaceClaim = {
+      name: 'Hope House',
+      address: '917 St Andrew St',
+      languages: null,
+      hours: null,
+      price: null,
+      phone: null,
+      source_url: 'https://hope-house.example/',
+    };
+    expect(groundPlace({ claim, pages })).toEqual({ ok: false, reason: 'address_not_found' });
+  });
 });
 
 describe('isInCalendar', () => {
