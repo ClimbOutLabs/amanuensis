@@ -50,6 +50,28 @@ describe('Space tool classification', () => {
     expect(decision.reason_detail).toBe('Updated a space.');
   });
 
+  it('shows a name with newlines and tabs as one line', async () => {
+    const decision = await classifyTier(spaceAction('create_space', { name: 'Home\nrenovation\tplans' }), makeCtx());
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
+    expect(decision.reason_detail).toBe('Created space: Home renovation plans');
+  });
+
+  it('trims the padding around the name it shows', async () => {
+    const decision = await classifyTier(spaceAction('create_space', { name: '  Home renovation  ' }), makeCtx());
+    expect(decision.reason_detail).toBe('Created space: Home renovation');
+  });
+
+  it('caps a long name in the line it shows', async () => {
+    const decision = await classifyTier(spaceAction('create_space', { name: 'a'.repeat(500) }), makeCtx());
+    expect(decision.reason_detail).toBe(`Created space: ${'a'.repeat(79)}…`);
+  });
+
+  it('shows the nameless line when the name is only whitespace', async () => {
+    const decision = await classifyTier(spaceAction('update_space', { space_id: 'sp1', name: ' \n\t ' }), makeCtx());
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
+    expect(decision.reason_detail).toBe('Updated a space.');
+  });
+
   it('runs revert_space without asking', async () => {
     const decision = await classifyTier(spaceAction('revert_space', { space_id: 'sp1', revision: 2 }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });

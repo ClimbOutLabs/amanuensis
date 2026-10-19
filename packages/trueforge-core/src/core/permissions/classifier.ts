@@ -1938,14 +1938,33 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
 
+/** Most characters of a space's name the line in the chat shows. */
+const SPACE_NAME_MAX_CHARS = 80;
+
+/**
+ * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, and
+ * capped the way the Gmail card caps a subject. Null when the call carries no name, or the name
+ * is only whitespace, so the line falls back to naming no space.
+ */
+function spaceDisplayName(name: string | null): string | null {
+  if (name === null) {
+    return null;
+  }
+  const oneLine = name.replace(/\s+/g, ' ').trim();
+  if (oneLine === '') {
+    return null;
+  }
+  const chars = Array.from(oneLine);
+  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : oneLine;
+}
+
 /**
  * The plain line a space write shows instead of a card, parallel to the line a silent search shows.
  * Create and update calls carry the space's name; a revert call names only the space's id, so its
  * line cannot.
  */
 function spaceWriteLine(action: SentinelAction): string {
-  const name = stringParam(action.canonical_params, 'name');
-  const shown = name === null || name.trim() === '' ? null : name;
+  const shown = spaceDisplayName(stringParam(action.canonical_params, 'name'));
   if (action.tool_name === CREATE_SPACE_TOOL_NAME) {
     return shown === null ? 'Created a space.' : `Created space: ${shown}`;
   }
