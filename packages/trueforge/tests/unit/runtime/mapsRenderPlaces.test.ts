@@ -31,7 +31,7 @@ const garden = {
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 const OTHER_SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-b' };
 const AREA_REASON =
-  'The place the map found is in a different area.';
+  'The place the map found is in a different area. Try again with a fuller address, adding the town or postcode.';
 
 function setup(geocode: (query: string) => unknown[]) {
   const asked: string[] = [];
@@ -170,7 +170,7 @@ describe('render_places', () => {
     expect(body['refused']).toEqual([
       {
         name: 'Invented Clinic',
-        reason: 'The name is not on that page.',
+        reason: 'The name is not on that page. Copy it word for word from the page and try again.',
       },
     ]);
   });

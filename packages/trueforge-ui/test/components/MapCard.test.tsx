@@ -590,13 +590,23 @@ describe('MapCard with several found places', () => {
       data: {
         ...placesData,
         refused: [
-          { name: 'Canal Practice', reason: 'The address is not on that page.' },
-          { name: 'River Clinic', reason: 'The address is not on that page.' },
+          {
+            name: 'Canal Practice',
+            reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+          },
+          {
+            name: 'River Clinic',
+            reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+          },
         ],
       },
       state: 'ready',
     });
-    expect(screen.getByText('2 places left out: The address is not on that page.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '2 places left out: The address is not on that page. Copy it word for word from the page and try again.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {

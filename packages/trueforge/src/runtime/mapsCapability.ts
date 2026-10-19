@@ -504,12 +504,12 @@ function mapsErrorResult({
 
 const REFUSAL_REASONS = {
   source_not_fetched: 'Aman has not read that page, so the details cannot be checked.',
-  name_not_found: 'The name is not on that page.',
-  address_not_found: 'The address is not on that page.',
+  name_not_found: 'The name is not on that page. Copy it word for word from the page and try again.',
+  address_not_found: 'The address is not on that page. Copy it word for word from the page and try again.',
 } as const;
 
 const OUT_OF_AREA_REASON =
-  'The place the map found is in a different area.';
+  'The place the map found is in a different area. Try again with a fuller address, adding the town or postcode.';
 
 /**
  * US states, under the spellings normalizedWords folds their names to, with the code a geocoder

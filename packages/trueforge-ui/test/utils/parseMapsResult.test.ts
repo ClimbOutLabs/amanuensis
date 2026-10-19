@@ -235,18 +235,28 @@ describe('parseMapsResult', () => {
       const parsed = parseMapsResult(
         JSON.stringify({
           ...okBody,
-          refused: [{ name: 'Canal Practice', reason: 'The address is not on that page.' }],
+          refused: [
+            {
+              name: 'Canal Practice',
+              reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+            },
+          ],
         }),
         'render_places',
       );
       expect(parsed.state).toBe('ready');
-      expect(parsed.data?.refused).toEqual([{ name: 'Canal Practice', reason: 'The address is not on that page.' }]);
+      expect(parsed.data?.refused).toEqual([
+        {
+          name: 'Canal Practice',
+          reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+        },
+      ]);
     });
 
     it('names up to three refused places and one next step when nothing was pinned', () => {
       const refused = ['Alpha House', 'Beta House', 'Gamma House', 'Delta House'].map(name => ({
         name,
-        reason: 'The name is not on that page.',
+        reason: 'The name is not on that page. Copy it word for word from the page and try again.',
       }));
       const parsed = parseMapsResult(
         JSON.stringify({ status: 'error', code: 'not_grounded', refused }),

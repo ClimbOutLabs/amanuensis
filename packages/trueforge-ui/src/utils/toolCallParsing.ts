@@ -687,7 +687,7 @@ function parsePlace(value: unknown): MapPlace | undefined {
 }
 
 /** The places a pin call refused, as written by the server: a name and a plain reason each. */
-export function parseRefusedPlaces(body: Record<string, unknown>): { name: string; reason: string }[] {
+function parseRefusedPlaces(body: Record<string, unknown>): { name: string; reason: string }[] {
   if (!Array.isArray(body.refused)) {
     return [];
   }

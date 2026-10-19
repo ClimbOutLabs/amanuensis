@@ -959,7 +959,12 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
             result: JSON.stringify({
               status: 'error',
               code: 'not_grounded',
-              refused: [{ name: 'Harbour Family Clinic', reason: 'The name is not on that page.' }],
+              refused: [
+                {
+                  name: 'Harbour Family Clinic',
+                  reason: 'The name is not on that page. Copy it word for word from the page and try again.',
+                },
+              ],
             }),
           }),
           placesCallPart({
@@ -1005,7 +1010,12 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
             result: JSON.stringify({
               status: 'error',
               code: 'not_grounded',
-              refused: [{ name: 'Harbour Family Clinic', reason: 'The name is not on that page.' }],
+              refused: [
+                {
+                  name: 'Harbour Family Clinic',
+                  reason: 'The name is not on that page. Copy it word for word from the page and try again.',
+                },
+              ],
             }),
           }),
           { type: 'text', text: 'No luck.' },
