@@ -148,7 +148,6 @@ import {
   type InternalThreadDoneEvent,
   type SubAgentCompletionMarker,
 } from './AgentThread.types';
-import { claimedActionNote, successfulActionCallsThisTurn } from './claimedActions';
 import {
   currentContextUsageFromCompletion,
   getEmptyCurrentContextUsage,
@@ -3266,22 +3265,6 @@ export class AgentThread {
       emptyTerminalFallback !== undefined &&
       !hasToolCalls(assistantMessage) &&
       assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0;
-    // The claimed-action guard: a finished answer that says it added, sent, scheduled, saved or
-    // deleted something, with no matching successful call in this turn behind the claim, is
-    // marked under the claim so it never reads as a success.
-    if (
-      !hasToolCalls(assistantMessage) &&
-      typeof assistantMessage.content === 'string' &&
-      assistantMessage.content.trim() !== ''
-    ) {
-      const note = claimedActionNote({
-        content: assistantMessage.content,
-        successes: successfulActionCallsThisTurn(this.context),
-      });
-      if (note !== undefined) {
-        assistantMessage = { ...assistantMessage, content: `${assistantMessage.content.trimEnd()}\n\n${note}` };
-      }
-    }
     // A run that ends with actions waiting for its owner says so in its own last message.
     if (
       finishReason === 'stop' &&

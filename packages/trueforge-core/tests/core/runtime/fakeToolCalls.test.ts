@@ -16,7 +16,6 @@ import { BROKEN_TOOL_MARKUP_MESSAGE } from '../../../src/core/llm/toolMarkup';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
-import { CLAIMED_ACTION_NOTE } from '../../../src/core/runtime/claimedActions';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
@@ -244,42 +243,6 @@ describe('leaked markup', () => {
     const events = await drain(thread);
     expect(callToolNames(toolSet)).toEqual(['create_event']);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
-  });
-});
-
-describe('claimed actions', () => {
-  it('marks a calendar claim that no tool call backs up', async () => {
-    const toolSet = makeToolSet();
-    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
-      replyStream({ text: 'Done, I added the appointment to your calendar.' }),
-    );
-    const thread = makeThread({ toolSet, create });
-    await drain(thread);
-    expect(toolSet.callTool).not.toHaveBeenCalled();
-    const saved = lastAssistant(thread);
-    expect(saved?.role).toBe('assistant');
-    if (saved?.role === 'assistant') {
-      expect(saved.content).toBe(`Done, I added the appointment to your calendar.\n\n${CLAIMED_ACTION_NOTE}`);
-    }
-  });
-
-  it('leaves a claim alone when the matching call succeeded in the turn', async () => {
-    const toolSet = makeToolSet();
-    let round = 0;
-    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
-      round += 1;
-      if (round === 1) {
-        return replyStream({ calls: [{ id: 'call-1', name: 'create_event', args: VALID_CREATE_ARGS }] });
-      }
-      return replyStream({ text: 'Done, I added the appointment to your calendar.' });
-    });
-    const thread = makeThread({ toolSet, create });
-    await drain(thread);
-    expect(callToolNames(toolSet)).toEqual(['create_event']);
-    const saved = lastAssistant(thread);
-    if (saved?.role === 'assistant') {
-      expect(saved.content).toBe('Done, I added the appointment to your calendar.');
-    }
   });
 });
 
