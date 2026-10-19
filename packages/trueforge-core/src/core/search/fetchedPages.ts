@@ -214,7 +214,7 @@ function urlSpellings(raw: string): string[] {
  * toward a check; the words of the link that was asked for are not page text, so a result that
  * prints its own link back adds nothing a claim could be checked against.
  */
-function withoutUrlText({ text, url }: { text: string; url: string }): string {
+export function withoutUrlText({ text, url }: { text: string; url: string }): string {
   let kept = text;
   for (const spelling of urlSpellings(url)) {
     const wanted = spelling.toLowerCase();
