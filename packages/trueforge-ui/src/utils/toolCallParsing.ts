@@ -471,6 +471,7 @@ export function parseSandboxResult(result: string | undefined): {
   exitCode?: number | null;
   resultText?: string;
   resultJson?: string;
+  notices?: string[];
 } {
   if (result === undefined) return {};
   const parsed = parseJsonIncrementally(result);
@@ -482,10 +483,14 @@ export function parseSandboxResult(result: string | undefined): {
   const response = isUnknownRecord(visibleResult.response) ? visibleResult.response : undefined;
   const exitCode = typeof response?.exitCode === 'number' ? response.exitCode : null;
   const resultText = typeof response?.result === 'string' ? response.result : undefined;
+  const notices = Array.isArray(visibleResult.notices)
+    ? visibleResult.notices.filter((notice): notice is string => typeof notice === 'string')
+    : [];
   return {
     exitCode,
     resultText,
     resultJson: parsed.isPartial ? result : JSON.stringify(visibleResult, null, 2),
+    ...(notices.length > 0 ? { notices } : {}),
   };
 }
 

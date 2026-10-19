@@ -1,23 +1,25 @@
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { join, posix, sep } from 'node:path';
 import type { SandboxInitUpload } from '../provider/Provider';
 import { shellEscape } from '../provider/Provider';
 import { execFileRunner, type HostCommandRunner } from '../slots/git/hostCommand';
 import type { GitSkill, Skill } from './SkillMounter';
 
 // A sandbox with no network cannot fetch skills, so the host fetches them and copies the files in.
-// Registry tarballs are uploaded and unpacked inside the sandbox; git skills are sparse-cloned here
-// and their files uploaded one by one.
+// Registry tarballs are checked here, uploaded, and unpacked inside the sandbox; git skills are
+// sparse-cloned here and their files uploaded one by one.
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const GIT_TIMEOUT_MS = 300_000;
+const ARCHIVE_LIST_TIMEOUT_MS = 60_000;
 // Same caps the in-sandbox downloader applies, so a skill cannot be bigger here than there.
 const MAX_SKILL_BYTES = 100 * 1024 * 1024;
 const MAX_SKILL_FILES = 2_000;
-const MAX_GIT_OUTPUT_BYTES = 8 * 1024 * 1024;
-const HOST_GIT_LIMITS = { addressSpaceBytes: 8 * 1024 * 1024 * 1024, cpuSeconds: 300, fileBytes: 1024 * 1024 * 1024 };
+const MAX_TOOL_OUTPUT_BYTES = 8 * 1024 * 1024;
+const HOST_TOOL_LIMITS = { addressSpaceBytes: 8 * 1024 * 1024 * 1024, cpuSeconds: 300, fileBytes: 1024 * 1024 * 1024 };
 const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
+const TAR_BINARY = '/usr/bin/tar';
 const OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u;
 const REF_PATTERN = /^[A-Za-z0-9._/-]+$/u;
 
@@ -30,10 +32,10 @@ export function skillCopyFailedNotice(name: string): string {
 }
 
 export interface SkillCopyDeps {
-  /** Downloads a registry skill's tarball. Defaults to an HTTPS fetch with a timeout. */
+  /** Downloads a registry skill's tarball. Defaults to an HTTPS fetch with a timeout and size cap. */
   fetchArchive?: ((url: string, signal: AbortSignal) => Promise<Buffer>) | undefined;
-  /** Runs git on the host for git skills. */
-  git?: HostCommandRunner | undefined;
+  /** Runs git and tar on the host. */
+  host?: HostCommandRunner | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -53,16 +55,47 @@ export interface SkillCopyResult {
   failed: ReadonlyMap<string, string>;
 }
 
-async function fetchArchiveBytes(url: string, signal: AbortSignal): Promise<Buffer> {
-  const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]) });
+/**
+ * Downloads a registry tarball. Redirects are refused, so the bytes come only from the presigned
+ * URL's own host, and the body is read with the size cap enforced while it streams in.
+ */
+export async function fetchRegistryArchive(input: {
+  url: string;
+  signal: AbortSignal;
+  maxBytes?: number | undefined;
+}): Promise<Buffer> {
+  const maxBytes = input.maxBytes ?? MAX_SKILL_BYTES;
+  const response = await fetch(input.url, {
+    redirect: 'error',
+    signal: AbortSignal.any([input.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]),
+  });
   if (!response.ok) {
     throw new Error(`download answered ${String(response.status)}`);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_SKILL_BYTES) {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel();
     throw new Error('skill archive is too large');
   }
-  return bytes;
+  const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response.body?.getReader();
+  if (reader === undefined) {
+    throw new Error('download had no body');
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error('skill archive is too large');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 // The subdirectory must stay inside the repository: no absolute paths, no `..`, no empty segments.
@@ -83,33 +116,96 @@ function isSafeRef(ref: string): boolean {
   return REF_PATTERN.test(ref) && !ref.startsWith('-');
 }
 
+function isInside(input: { path: string; root: string }): boolean {
+  return input.path === input.root || input.path.startsWith(`${input.root}${sep}`);
+}
+
+/**
+ * Rejects an archive that is not a tar, holds a link or special file, or has a path that leaves the
+ * skill folder. The archive is listed, never extracted, on the host.
+ */
+async function assertSafeArchive(input: {
+  archive: Buffer;
+  host: HostCommandRunner;
+  signal: AbortSignal;
+}): Promise<void> {
+  const work = await mkdtemp(join(tmpdir(), 'tfy-archive-'));
+  try {
+    const file = join(work, 'skill.tar');
+    await writeFile(file, input.archive);
+    const list = async (flag: string): Promise<string[]> => {
+      const result = await input.host.run({
+        argv: [TAR_BINARY, flag, file],
+        env: HOST_PATH_ENV,
+        cwd: work,
+        timeoutMs: ARCHIVE_LIST_TIMEOUT_MS,
+        signal: input.signal,
+        maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
+        limits: HOST_TOOL_LIMITS,
+      });
+      if (result.exitCode !== 0) {
+        throw new Error('archive could not be read as a tar');
+      }
+      return result.stdout
+        .toString('utf-8')
+        .split('\n')
+        .filter(line => line !== '');
+    };
+    for (const line of await list('-tvf')) {
+      const kind = line.charAt(0);
+      if ((kind !== '-' && kind !== 'd') || line.includes(' link to ')) {
+        throw new Error('archive holds a link or a special file');
+      }
+    }
+    for (const name of await list('-tf')) {
+      if (name.startsWith('/') || name.split('/').includes('..')) {
+        throw new Error('archive path leaves the skill folder');
+      }
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
 interface SkillFile {
   relPath: string;
   content: Buffer;
 }
 
-/** Every regular file under `root`. Symlinks and `.git` are left out, so nothing reads outside the skill. */
-async function readSkillFiles(root: string): Promise<SkillFile[]> {
-  const rootStat = await lstat(root);
-  if (!rootStat.isDirectory()) {
-    throw new Error('skill path is not a directory');
+/**
+ * Every regular file under the skill folder. The folder and each file must resolve to a real path
+ * inside the checkout. Any link inside the skill fails the whole skill, so none is followed.
+ */
+async function readSkillFiles(input: { skillDir: string; repo: string; expectedDir: string }): Promise<SkillFile[]> {
+  const repoReal = await realpath(input.repo);
+  const dirReal = await realpath(input.skillDir);
+  if (dirReal !== input.expectedDir || !isInside({ path: dirReal, root: repoReal })) {
+    throw new Error('skill folder is a link or leaves the repository');
   }
   const files: SkillFile[] = [];
   let bytes = 0;
   const walk = async (dir: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (entry.name === '.git' || entry.isSymbolicLink()) {
+      if (entry.name === '.git') {
         continue;
       }
+      if (entry.isSymbolicLink()) {
+        throw new Error('skill contains a link');
+      }
       const relPath = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        await walk(join(dir, entry.name), relPath);
+        await walk(path, relPath);
         continue;
       }
       if (!entry.isFile()) {
         continue;
       }
-      const content = await readFile(join(dir, entry.name));
+      const real = await realpath(path);
+      if (!isInside({ path: real, root: repoReal })) {
+        throw new Error('skill file leaves the repository');
+      }
+      const content = await readFile(real);
       bytes += content.byteLength;
       if (bytes > MAX_SKILL_BYTES || files.length >= MAX_SKILL_FILES) {
         throw new Error('skill is too large');
@@ -117,7 +213,7 @@ async function readSkillFiles(root: string): Promise<SkillFile[]> {
       files.push({ relPath, content });
     }
   };
-  await walk(root, '');
+  await walk(dirReal, '');
   return files;
 }
 
@@ -136,10 +232,10 @@ function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string 
 
 async function fetchGitSkill(input: {
   skill: GitSkill;
-  git: HostCommandRunner;
+  host: HostCommandRunner;
   signal: AbortSignal;
 }): Promise<{ objectId: string; files: SkillFile[] }> {
-  const { skill, git, signal } = input;
+  const { skill, host, signal } = input;
   if (!isSafeSubdir(skill.path) || !isSafeRef(skill.ref) || skill.url.startsWith('-')) {
     throw new Error('git skill has an unsafe url, ref or path');
   }
@@ -155,14 +251,14 @@ async function fetchGitSkill(input: {
       GIT_ALLOW_PROTOCOL: 'https',
     };
     const run = async (args: readonly string[], cwd: string): Promise<string> => {
-      const result = await git.run({
+      const result = await host.run({
         argv: ['git', '-c', 'core.hooksPath=/dev/null', ...args],
         env,
         cwd,
         timeoutMs: GIT_TIMEOUT_MS,
         signal,
-        maxStdoutBytes: MAX_GIT_OUTPUT_BYTES,
-        limits: HOST_GIT_LIMITS,
+        maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
+        limits: HOST_TOOL_LIMITS,
       });
       if (result.exitCode !== 0) {
         throw new Error(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
@@ -180,7 +276,9 @@ async function fetchGitSkill(input: {
       await run(['-C', repo, 'sparse-checkout', 'set', '--cone', '--', skill.path], work);
     }
     await run(['-C', repo, 'checkout', '-q', 'FETCH_HEAD'], work);
-    const files = await readSkillFiles(skill.path === '' ? repo : join(repo, skill.path));
+    const repoReal = await realpath(repo);
+    const expectedDir = skill.path === '' ? repoReal : join(repoReal, skill.path);
+    const files = await readSkillFiles({ skillDir: join(repo, skill.path), repo, expectedDir });
     return { objectId, files };
   } finally {
     await rm(work, { recursive: true, force: true });
@@ -198,8 +296,9 @@ export async function copySkillsIntoSandbox(input: {
 }): Promise<SkillCopyResult> {
   const { skillsDir, deps } = input;
   const signal = deps.signal ?? new AbortController().signal;
-  const fetchArchive = deps.fetchArchive ?? fetchArchiveBytes;
-  const git = deps.git ?? execFileRunner;
+  const fetchArchive =
+    deps.fetchArchive ?? ((url: string, abort: AbortSignal) => fetchRegistryArchive({ url, signal: abort }));
+  const host = deps.host ?? execFileRunner;
   const copied: CopiedSkill[] = [];
   const uploads: SandboxInitUpload[] = [];
   const unpackCommands: string[] = [];
@@ -212,13 +311,14 @@ export async function copySkillsIntoSandbox(input: {
       }
       if (skill.type === 'registry') {
         const archive = await fetchArchive(skill.presignedUrl, signal);
+        await assertSafeArchive({ archive, host, signal });
         const archivePath = posix.join(skillsDir, `.tfy-archive-${skill.name}.tar`);
         uploads.push({ remotePath: archivePath, content: archive });
         unpackCommands.push(unpackRegistrySkillCommand({ dir: posix.join(skillsDir, skill.name), archivePath }));
         copied.push({ skill, objectId: null });
         continue;
       }
-      const fetched = await fetchGitSkill({ skill, git, signal });
+      const fetched = await fetchGitSkill({ skill, host, signal });
       for (const file of fetched.files) {
         uploads.push({ remotePath: posix.join(skillsDir, skill.name, file.relPath), content: file.content });
       }

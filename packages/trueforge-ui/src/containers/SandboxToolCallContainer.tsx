@@ -10,7 +10,9 @@ export function SandboxToolCallContainer(
 ) {
   const SandboxToolCallCard = useSlot('SandboxToolCallCard');
   const [viewMode, setViewMode] = useState<'terminal' | 'code'>('terminal');
-  const terminalAvailable = Boolean(props.command || props.summary || props.resultText || props.resultJson);
+  const terminalAvailable = Boolean(
+    props.command || props.summary || props.resultText || props.resultJson || props.notices?.length,
+  );
   const codeAvailable = Boolean(props.argsJson || props.resultJson);
   const effectiveViewMode = !terminalAvailable && codeAvailable ? 'code' : viewMode;
   const hasContent = useMemo(() => {

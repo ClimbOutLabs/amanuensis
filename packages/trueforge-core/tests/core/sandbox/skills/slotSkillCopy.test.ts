@@ -1,17 +1,20 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Skill } from '../../../../src/core/sandbox/skills/SkillMounter';
 import {
   copySkillsIntoSandbox,
+  fetchRegistryArchive,
   SKILL_COPY_FAILED_REASON,
   type SkillCopyDeps,
 } from '../../../../src/core/sandbox/skills/slotSkillCopy';
 import { execFileRunner, type HostCommandRunner } from '../../../../src/core/sandbox/slots/git/hostCommand';
 
 const SKILLS_DIR = '/workspace/.aman/skills';
+const TAR = '/usr/bin/tar';
 
 function registry(input: { name: string; presignedUrl: string }): Skill {
   const { name, presignedUrl } = input;
@@ -25,6 +28,23 @@ function registry(input: { name: string; presignedUrl: string }): Skill {
     presignedUrl,
   };
 }
+
+/** A tarball built by the host's tar from whatever `build` puts in its folder. */
+function archiveOf(build: (folder: string) => void): Buffer {
+  const work = mkdtempSync(join(tmpdir(), 'skill-archive-test-'));
+  try {
+    const folder = join(work, 'src');
+    mkdirSync(folder);
+    build(folder);
+    const archive = join(work, 'out.tar');
+    execFileSync(TAR, ['-cf', archive, '-C', folder, '.']);
+    return readFileSync(archive);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+const SKILL_TAR = archiveOf(folder => writeFileSync(join(folder, 'SKILL.md'), '# alpha\n'));
 
 // The real host git, pointed at local file:// repositories. Only the test widens the protocol list.
 const fileGit: HostCommandRunner = {
@@ -48,12 +68,10 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     const result = await copySkillsIntoSandbox({
       skills: [registry({ name: 'alpha', presignedUrl: 'https://dl.example/alpha.tar' })],
       skillsDir: SKILLS_DIR,
-      deps: { fetchArchive: () => Promise.resolve(Buffer.from('tar-bytes')) },
+      deps: { fetchArchive: () => Promise.resolve(SKILL_TAR) },
     });
 
-    expect(result.uploads).toEqual([
-      { remotePath: `${SKILLS_DIR}/.tfy-archive-alpha.tar`, content: Buffer.from('tar-bytes') },
-    ]);
+    expect(result.uploads).toEqual([{ remotePath: `${SKILLS_DIR}/.tfy-archive-alpha.tar`, content: SKILL_TAR }]);
     expect(result.unpackCommands).toHaveLength(1);
     expect(result.unpackCommands[0]).toContain('tar --no-same-owner --no-same-permissions -xf');
     expect(result.copied).toEqual([
@@ -71,7 +89,7 @@ describe('copySkillsIntoSandbox for registry skills', () => {
       skillsDir: SKILLS_DIR,
       deps: {
         fetchArchive: url =>
-          url.endsWith('beta.tar') ? Promise.reject(new Error('answered 403')) : Promise.resolve(Buffer.from('a')),
+          url.endsWith('beta.tar') ? Promise.reject(new Error('answered 403')) : Promise.resolve(SKILL_TAR),
       },
     });
 
@@ -80,8 +98,53 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     expect(result.uploads.map(upload => upload.remotePath)).toEqual([`${SKILLS_DIR}/.tfy-archive-alpha.tar`]);
   });
 
+  test('leaves out a body that is not a tar, and still copies the others', async () => {
+    const result = await copySkillsIntoSandbox({
+      skills: [
+        registry({ name: 'broken', presignedUrl: 'https://dl.example/broken.tar' }),
+        registry({ name: 'alpha', presignedUrl: 'https://dl.example/alpha.tar' }),
+      ],
+      skillsDir: SKILLS_DIR,
+      deps: {
+        fetchArchive: url =>
+          Promise.resolve(url.endsWith('broken.tar') ? Buffer.from('<html>not a tar</html>') : SKILL_TAR),
+      },
+    });
+
+    expect(result.copied.map(({ skill }) => skill.name)).toEqual(['alpha']);
+    expect(result.failed.get('broken')).toBe(SKILL_COPY_FAILED_REASON);
+  });
+
+  test('leaves out a tarball that holds a symlink', async () => {
+    const linked = archiveOf(folder => symlinkSync('/etc/passwd', join(folder, 'SKILL.md')));
+    const result = await copySkillsIntoSandbox({
+      skills: [registry({ name: 'linked', presignedUrl: 'https://dl.example/linked.tar' })],
+      skillsDir: SKILLS_DIR,
+      deps: { fetchArchive: () => Promise.resolve(linked) },
+    });
+
+    expect(result.copied).toEqual([]);
+    expect(result.uploads).toEqual([]);
+    expect(result.failed.get('linked')).toBe(SKILL_COPY_FAILED_REASON);
+  });
+
+  test('leaves out a tarball that holds a hard link', async () => {
+    const hardlinked = archiveOf(folder => {
+      writeFileSync(join(folder, 'SKILL.md'), '# alpha\n');
+      linkSync(join(folder, 'SKILL.md'), join(folder, 'copy.md'));
+    });
+    const result = await copySkillsIntoSandbox({
+      skills: [registry({ name: 'hardlinked', presignedUrl: 'https://dl.example/hardlinked.tar' })],
+      skillsDir: SKILLS_DIR,
+      deps: { fetchArchive: () => Promise.resolve(hardlinked) },
+    });
+
+    expect(result.copied).toEqual([]);
+    expect(result.failed.get('hardlinked')).toBe(SKILL_COPY_FAILED_REASON);
+  });
+
   test('refuses a skill name that could reach the downloader state files', async () => {
-    const fetchArchive = jest.fn(() => Promise.resolve(Buffer.from('a')));
+    const fetchArchive = jest.fn(() => Promise.resolve(SKILL_TAR));
     const result = await copySkillsIntoSandbox({
       skills: [registry({ name: '.tfy-requested-skills.json', presignedUrl: 'https://dl.example/x.tar' })],
       skillsDir: SKILLS_DIR,
@@ -109,26 +172,70 @@ describe('copySkillsIntoSandbox for registry skills', () => {
   });
 });
 
+describe('fetchRegistryArchive', () => {
+  let server: Server;
+  let origin: string;
+
+  beforeEach(async () => {
+    server = createServer((request, response) => {
+      if (request.url === '/redirect') {
+        response.writeHead(302, { location: `${origin}/body` }).end();
+        return;
+      }
+      response.writeHead(200).end(SKILL_TAR);
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    origin = `http://127.0.0.1:${String(port)}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+
+  test('returns the bytes of a plain download', async () => {
+    const bytes = await fetchRegistryArchive({ url: `${origin}/body`, signal: new AbortController().signal });
+    expect(bytes.equals(SKILL_TAR)).toBe(true);
+  });
+
+  test('refuses a redirect, so the bytes come only from the presigned host', async () => {
+    await expect(
+      fetchRegistryArchive({ url: `${origin}/redirect`, signal: new AbortController().signal }),
+    ).rejects.toThrow();
+  });
+
+  test('stops reading once the body passes the size cap', async () => {
+    await expect(
+      fetchRegistryArchive({ url: `${origin}/body`, signal: new AbortController().signal, maxBytes: 16 }),
+    ).rejects.toThrow('too large');
+  });
+});
+
 describe('copySkillsIntoSandbox for git skills', () => {
   let root: string;
   let repo: string;
   let commit: string;
 
+  /** Commits whatever is in the repository now and records its commit id. */
+  function commitAll(message: string): void {
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '--allow-empty', '-m', message]);
+    commit = git(repo, ['rev-parse', 'HEAD']);
+  }
+
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'skill-copy-test-'));
     repo = join(root, 'source');
     mkdirSync(join(repo, 'skills', 'echo'), { recursive: true });
-    mkdirSync(join(repo, 'other'), { recursive: true });
+    mkdirSync(join(repo, 'other', 'echo'), { recursive: true });
     writeFileSync(join(repo, 'skills', 'echo', 'SKILL.md'), '# echo\n');
+    writeFileSync(join(repo, 'other', 'echo', 'SKILL.md'), '# other echo\n');
     writeFileSync(join(repo, 'other', 'NOTES.md'), 'not part of the skill\n');
-    // A link inside the skill must not be copied: it could point at a host file.
-    symlinkSync('/etc/passwd', join(repo, 'skills', 'echo', 'escape'));
     git(root, ['init', '-q', '-b', 'main', repo]);
     git(repo, ['config', 'uploadpack.allowFilter', 'true']);
     git(repo, ['config', 'uploadpack.allowAnySHA1InWant', 'true']);
-    git(repo, ['add', '.']);
-    git(repo, ['commit', '-q', '-m', 'skill']);
-    commit = git(repo, ['rev-parse', 'HEAD']);
+    commitAll('skill');
   });
 
   afterEach(() => {
@@ -150,14 +257,13 @@ describe('copySkillsIntoSandbox for git skills', () => {
     const result = await copySkillsIntoSandbox({
       skills: [gitSkill({ ref: 'main', path: 'skills/echo' })],
       skillsDir: SKILLS_DIR,
-      deps: { git: fileGit },
+      deps: { host: fileGit },
     });
 
     expect(result.failed.size).toBe(0);
     expect(result.copied).toEqual([{ skill: gitSkill({ ref: 'main', path: 'skills/echo' }), objectId: commit }]);
     const skillMd = result.uploads.find(upload => upload.remotePath === `${SKILLS_DIR}/echo/SKILL.md`);
     expect(skillMd?.content.toString('utf-8')).toBe('# echo\n');
-    expect(result.uploads.map(upload => upload.remotePath)).not.toContain(`${SKILLS_DIR}/echo/escape`);
     expect(result.uploads.some(upload => upload.remotePath.includes('/other/'))).toBe(false);
     expect(await readFile(join(repo, 'skills', 'echo', 'SKILL.md'), 'utf-8')).toBe('# echo\n');
   });
@@ -166,7 +272,7 @@ describe('copySkillsIntoSandbox for git skills', () => {
     const result = await copySkillsIntoSandbox({
       skills: [gitSkill({ ref: commit, path: 'skills/echo' })],
       skillsDir: SKILLS_DIR,
-      deps: { git: fileGit },
+      deps: { host: fileGit },
     });
 
     expect(result.copied).toEqual([{ skill: gitSkill({ ref: commit, path: 'skills/echo' }), objectId: commit }]);
@@ -176,10 +282,39 @@ describe('copySkillsIntoSandbox for git skills', () => {
     const result = await copySkillsIntoSandbox({
       skills: [gitSkill({ ref: 'main', path: '../other' })],
       skillsDir: SKILLS_DIR,
-      deps: { git: fileGit },
+      deps: { host: fileGit },
     });
 
     expect(result.copied).toEqual([]);
+    expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
+  });
+
+  test('leaves out a skill with a symlinked directory in its path, and uploads nothing from the link target', async () => {
+    // The link sends `linked/echo` to the other folder, which holds a different skill.
+    symlinkSync(join(repo, 'other'), join(repo, 'linked'));
+    commitAll('link a folder');
+    const result = await copySkillsIntoSandbox({
+      skills: [gitSkill({ ref: 'main', path: 'linked/echo' })],
+      skillsDir: SKILLS_DIR,
+      deps: { host: fileGit },
+    });
+
+    expect(result.copied).toEqual([]);
+    expect(result.uploads).toEqual([]);
+    expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
+  });
+
+  test('leaves out a skill that holds a symlinked file, and uploads nothing from the link target', async () => {
+    symlinkSync(join(repo, 'other', 'NOTES.md'), join(repo, 'skills', 'echo', 'notes.md'));
+    commitAll('link a file');
+    const result = await copySkillsIntoSandbox({
+      skills: [gitSkill({ ref: 'main', path: 'skills/echo' })],
+      skillsDir: SKILLS_DIR,
+      deps: { host: fileGit },
+    });
+
+    expect(result.copied).toEqual([]);
+    expect(result.uploads).toEqual([]);
     expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
   });
 });

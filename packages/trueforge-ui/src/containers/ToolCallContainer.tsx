@@ -402,7 +402,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
 
   if (isSandbox) {
     const { command, intent, summary, argsJson } = parseSandboxArgs(part.argsText, part.toolName);
-    const { exitCode, resultText, resultJson } = parseSandboxResult(resultString);
+    const { exitCode, resultText, resultJson, notices } = parseSandboxResult(resultString);
     return (
       <SandboxToolCallContainer
         name={part.toolName}
@@ -418,6 +418,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
+        notices={notices}
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
