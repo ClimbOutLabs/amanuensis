@@ -6,7 +6,7 @@
  */
 
 /** How long a create is remembered for the already-created check: the last few minutes. */
-export const RECENT_CREATE_WINDOW_MS = 10 * 60_000;
+const RECENT_CREATE_WINDOW_MS = 10 * 60_000;
 
 interface RecentCreate {
   titleKey: string;
