@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
@@ -68,6 +68,8 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     const seed = join(base, 'seed');
     git(base, 'init', '-b', 'main', seed);
     await writeFile(join(seed, 'README.md'), 'hello\n');
+    await writeFile(join(seed, 'run.sh'), '#!/bin/sh\necho ran\n');
+    await chmod(join(seed, 'run.sh'), 0o755);
     git(seed, 'add', '.');
     git(seed, 'commit', '-m', 'first');
     git(seed, 'push', remote, 'main');
@@ -115,6 +117,7 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     };
   }
 
+  // As root, the old unpack restores the foreign owner without error, so only this ownership check catches it.
   test("a clone's tar unpacks in the guest as the sandbox user, not as the server's owner", async () => {
     // The guest records who owns the unpacked repository before the bridge removes it.
     const owners: number[] = [];
@@ -142,6 +145,15 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     expect(await readFile(guest.path('widgets/README.md'), 'utf8')).toBe('hello\n');
     expect(owners).toEqual([(await stat(guest.root)).uid]);
     expect(owners).not.toContain(SERVER_OWNER);
+  });
+
+  test('a file that was executable in the repository is still executable after the clone', async () => {
+    const bridge = bridgeWith();
+
+    const result = await bridge.run(input(bridge, `git clone ${URL} widgets`));
+
+    expect(result).toMatchObject({ success: true, response: { exitCode: 0 } });
+    expect((await stat(guest.path('widgets/run.sh'))).mode & 0o111).not.toBe(0);
   });
 
   test('the clone lands in the workspace, which stays writable afterwards', async () => {
@@ -173,17 +185,17 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
       [
         'the disk is full',
         'tar: repo.tar: Cannot open: No space left on device\n',
-        'fatal: the sandbox ran out of space for this repository. Try a shallow clone: git clone --depth 1 <url>.',
+        'fatal: the sandbox is out of space for this repository. Start a new chat and clone it there.',
       ],
       [
         'the files cannot take the owner',
         'tar: repo.git/HEAD: Cannot change ownership to uid 1234, gid 1234: Invalid argument\n',
-        'fatal: the sandbox could not save the repository files. Restart Aman, then run git clone again.',
+        'fatal: the sandbox could not save the repository files. Restart Aman and try again.',
       ],
       [
         'anything else',
         'tar: This does not look like a tar archive\n',
-        'fatal: the sandbox could not unpack the repository. Restart Aman, then run git clone again.',
+        'fatal: the sandbox could not unpack the repository. Restart Aman and try again.',
       ],
     ])('%s', async (_case, stderr, message) => {
       const logger = makeSilentLogger();
@@ -221,8 +233,7 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
         success: true,
         response: {
           exitCode: 1,
-          result:
-            'fatal: the sandbox ran out of space for this repository. Free some space in the sandbox or start a new chat, then run git pull again.',
+          result: 'fatal: the sandbox is out of space. Start a new chat and clone the repository there.',
         },
       });
     });
