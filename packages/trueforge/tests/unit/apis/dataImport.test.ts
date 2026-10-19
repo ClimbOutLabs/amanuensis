@@ -185,12 +185,9 @@ describe('Data import route', () => {
     expect(body.data.spaces).toBe(1);
     expect(body.data.schedules).toBe(2);
     expect(body.data.schedules_off).toBe(true);
-    expect(body.data.summary).toContain(
-      'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
-    );
-    expect(body.data.summary).toContain(
-      'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
-    );
+    expect(body.data.summary).toContain('Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 space\n  1 agent');
+    expect(body.data.summary).toContain('2 schedules (they will be off)');
+    expect(body.data.summary).toContain('Permissions start fresh, so each tool will ask again.');
 
     // Everything landed owned by bob with ids kept, schedules off, and the
     // dcr connector reading "needs credentials".

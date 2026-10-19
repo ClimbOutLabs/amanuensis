@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { DataImportError } from '../../dataImport/importError';
+import type { ImportDataResult } from '../../schemas/dataImport';
 import type { Command } from '../command';
 import { errorCode } from '../errorCode';
 import { UsageError } from '../io';
@@ -23,7 +24,8 @@ machine that runs it; there is no button in the app.
   --dry-run               Check the file and say what an import would bring, including anything it would leave out, and change nothing
   --check-ready           Print whether the search model the import needs is on disk yet, and change nothing
 
-Prints the result as JSON on stdout and a summary on stderr. Exit codes: 0 ok, 1 failure, 2 usage.
+Prints the summary on stdout, in plain words, and the result as JSON on stderr, where the
+installer keeps it in the import log. Exit codes: 0 ok, 1 failure, 2 usage.
 `;
 
 export interface ImportDataDeps {
@@ -63,6 +65,24 @@ function parseOptions(args: readonly string[]) {
   } catch (error) {
     throw new UsageError(argumentErrorMessage(error), { cause: error });
   }
+}
+
+function counted(count: number, singular: string, plural: string): string {
+  return `${String(count)} ${count === 1 ? singular : plural}`;
+}
+
+/** What an import brought, in one line, for the audit row; the printed summary is the full layout. */
+function broughtLine(result: ImportDataResult): string {
+  return [
+    counted(result.chats, 'chat', 'chats'),
+    counted(result.memories, 'memory', 'memories'),
+    counted(result.personas, 'persona', 'personas'),
+    counted(result.spaces, 'space', 'spaces'),
+    counted(result.agents, 'agent', 'agents'),
+    result.schedules === 0
+      ? counted(0, 'schedule', 'schedules')
+      : `${counted(result.schedules, 'schedule', 'schedules')} (off)`,
+  ].join(', ');
 }
 
 /** A failure is reported as one plain line. */
@@ -142,17 +162,20 @@ export function createImportData(deps: ImportDataDeps): Command {
         throw describeFailure(error);
       });
       if (dryRun) {
-        await io.stderr(`${result.summary}\n`);
-        await io.stdout(`${JSON.stringify({ user_id: userId, dry_run: true, ...result })}\n`);
+        await io.stderr(`${JSON.stringify({ user_id: userId, dry_run: true, ...result })}\n`);
+        await io.stdout(`${result.summary}\n`);
         return 0;
       }
       await session
-        .recordAudit({ userId, description: `Imported data for ${userId} from the command line. ${result.summary}` })
+        .recordAudit({
+          userId,
+          description: `Imported data for ${userId} from the command line. Imported ${broughtLine(result)}.`,
+        })
         .catch(async (error: unknown) => {
           await io.stderr(`The import finished, but its audit row was not written: ${oneLine(error)}\n`);
         });
-      await io.stderr(`${result.summary}\n`);
-      await io.stdout(`${JSON.stringify({ user_id: userId, ...result })}\n`);
+      await io.stderr(`${JSON.stringify({ user_id: userId, ...result })}\n`);
+      await io.stdout(`${result.summary}\n`);
       return 0;
     } finally {
       await session.close().catch(() => undefined);
