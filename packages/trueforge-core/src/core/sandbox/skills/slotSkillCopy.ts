@@ -26,9 +26,22 @@ const REF_PATTERN = /^[A-Za-z0-9._/-]+$/u;
 /** What the model sees for a skill that could not be copied. The full error is not shown. */
 export const SKILL_COPY_FAILED_REASON = "couldn't be copied into the sandbox";
 
+/** A fetch from the network failed. Any other failure means the skill's own files are the problem. */
+export class SkillDownloadError extends Error {}
+
+/** Why a skill was left out: the download failed, or its files are bad. */
+export type SkillCopyCause = 'download' | 'damaged';
+
+export interface SkillCopyFailure {
+  cause: SkillCopyCause;
+}
+
 /** The one plain line a person sees when a skill is left out. */
-export function skillCopyFailedNotice(name: string): string {
-  return `The skill ${name} couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+export function skillCopyFailedNotice(input: { name: string; cause: SkillCopyCause }): string {
+  if (input.cause === 'download') {
+    return `The skill ${input.name} couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+  }
+  return `The skill ${input.name} couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.`;
 }
 
 export interface SkillCopyDeps {
@@ -51,8 +64,8 @@ export interface SkillCopyResult {
   uploads: readonly SandboxInitUpload[];
   /** Shell steps that unpack registry tarballs inside the sandbox. */
   unpackCommands: readonly string[];
-  /** Skill name to the plain reason it was left out. */
-  failed: ReadonlyMap<string, string>;
+  /** Skill name to why it was left out. */
+  failed: ReadonlyMap<string, SkillCopyFailure>;
 }
 
 /**
@@ -65,12 +78,17 @@ export async function fetchRegistryArchive(input: {
   maxBytes?: number | undefined;
 }): Promise<Buffer> {
   const maxBytes = input.maxBytes ?? MAX_SKILL_BYTES;
-  const response = await fetch(input.url, {
-    redirect: 'error',
-    signal: AbortSignal.any([input.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]),
-  });
+  let response: Response;
+  try {
+    response = await fetch(input.url, {
+      redirect: 'error',
+      signal: AbortSignal.any([input.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]),
+    });
+  } catch (error) {
+    throw new SkillDownloadError('download could not start', { cause: error });
+  }
   if (!response.ok) {
-    throw new Error(`download answered ${String(response.status)}`);
+    throw new SkillDownloadError(`download answered ${String(response.status)}`);
   }
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -79,21 +97,26 @@ export async function fetchRegistryArchive(input: {
   }
   const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response.body?.getReader();
   if (reader === undefined) {
-    throw new Error('download had no body');
+    throw new SkillDownloadError('download had no body');
   }
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
+    let next: Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>;
+    try {
+      next = await reader.read();
+    } catch (error) {
+      throw new SkillDownloadError('download was interrupted', { cause: error });
+    }
+    if (next.done) {
       break;
     }
-    total += value.byteLength;
+    total += next.value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
       throw new Error('skill archive is too large');
     }
-    chunks.push(value);
+    chunks.push(next.value);
   }
   return Buffer.concat(chunks);
 }
@@ -151,15 +174,40 @@ async function assertSafeArchive(input: {
         .split('\n')
         .filter(line => line !== '');
     };
-    for (const line of await list('-tvf')) {
+    const details = await list('-tvf');
+    const names = await list('-tf');
+    if (details.length !== names.length) {
+      throw new Error('archive listing does not match');
+    }
+    for (const line of details) {
       const kind = line.charAt(0);
       if ((kind !== '-' && kind !== 'd') || line.includes(' link to ')) {
         throw new Error('archive holds a link or a special file');
       }
     }
-    for (const name of await list('-tf')) {
-      if (name.startsWith('/') || name.split('/').includes('..')) {
+    // Tar unpacks in order, so a path under a file, or a path listed twice, cannot be unpacked.
+    const seen = new Set<string>();
+    const files = new Set<string>();
+    for (const [index, raw] of names.entries()) {
+      const name = raw.replace(/^\.\//u, '').replace(/\/+$/u, '');
+      if (name === '' || name === '.') {
+        continue;
+      }
+      const parts = name.split('/');
+      if (name.startsWith('/') || parts.includes('..')) {
         throw new Error('archive path leaves the skill folder');
+      }
+      if (seen.has(name)) {
+        throw new Error('archive repeats a path');
+      }
+      for (let depth = 1; depth < parts.length; depth++) {
+        if (files.has(parts.slice(0, depth).join('/'))) {
+          throw new Error('archive puts a path under a file');
+        }
+      }
+      seen.add(name);
+      if (details[index]?.charAt(0) === '-') {
+        files.add(name);
       }
     }
   } finally {
@@ -261,7 +309,7 @@ async function fetchGitSkill(input: {
         limits: HOST_TOOL_LIMITS,
       });
       if (result.exitCode !== 0) {
-        throw new Error(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
+        throw new SkillDownloadError(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
       }
       return result.stdout.toString('utf-8');
     };
@@ -302,7 +350,7 @@ export async function copySkillsIntoSandbox(input: {
   const copied: CopiedSkill[] = [];
   const uploads: SandboxInitUpload[] = [];
   const unpackCommands: string[] = [];
-  const failed = new Map<string, string>();
+  const failed = new Map<string, SkillCopyFailure>();
 
   for (const skill of input.skills) {
     try {
@@ -327,7 +375,7 @@ export async function copySkillsIntoSandbox(input: {
       if (signal.aborted) {
         throw error;
       }
-      failed.set(skill.name, SKILL_COPY_FAILED_REASON);
+      failed.set(skill.name, { cause: error instanceof SkillDownloadError ? 'download' : 'damaged' });
     }
   }
   return { copied, uploads, unpackCommands, failed };

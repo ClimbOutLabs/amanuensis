@@ -8,7 +8,8 @@ import type { Skill } from '../../../../src/core/sandbox/skills/SkillMounter';
 import {
   copySkillsIntoSandbox,
   fetchRegistryArchive,
-  SKILL_COPY_FAILED_REASON,
+  skillCopyFailedNotice,
+  SkillDownloadError,
   type SkillCopyDeps,
 } from '../../../../src/core/sandbox/skills/slotSkillCopy';
 import { execFileRunner, type HostCommandRunner } from '../../../../src/core/sandbox/slots/git/hostCommand';
@@ -89,12 +90,14 @@ describe('copySkillsIntoSandbox for registry skills', () => {
       skillsDir: SKILLS_DIR,
       deps: {
         fetchArchive: url =>
-          url.endsWith('beta.tar') ? Promise.reject(new Error('answered 403')) : Promise.resolve(SKILL_TAR),
+          url.endsWith('beta.tar')
+            ? Promise.reject(new SkillDownloadError('answered 403'))
+            : Promise.resolve(SKILL_TAR),
       },
     });
 
     expect(result.copied.map(({ skill }) => skill.name)).toEqual(['alpha']);
-    expect(result.failed.get('beta')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('beta')).toEqual({ cause: 'download' });
     expect(result.uploads.map(upload => upload.remotePath)).toEqual([`${SKILLS_DIR}/.tfy-archive-alpha.tar`]);
   });
 
@@ -112,7 +115,7 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     });
 
     expect(result.copied.map(({ skill }) => skill.name)).toEqual(['alpha']);
-    expect(result.failed.get('broken')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('broken')).toEqual({ cause: 'damaged' });
   });
 
   test('leaves out a tarball that holds a symlink', async () => {
@@ -125,7 +128,7 @@ describe('copySkillsIntoSandbox for registry skills', () => {
 
     expect(result.copied).toEqual([]);
     expect(result.uploads).toEqual([]);
-    expect(result.failed.get('linked')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('linked')).toEqual({ cause: 'damaged' });
   });
 
   test('leaves out a tarball that holds a hard link', async () => {
@@ -140,7 +143,58 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     });
 
     expect(result.copied).toEqual([]);
-    expect(result.failed.get('hardlinked')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('hardlinked')).toEqual({ cause: 'damaged' });
+  });
+
+  test('leaves out a tarball that puts a path under a file, and still copies the others', async () => {
+    // Listed in this order, `x` is a file and `x/y` needs `x` to be a folder. Unpacking fails on it.
+    const parts = mkdtempSync(join(tmpdir(), 'skill-archive-parts-'));
+    try {
+      mkdirSync(join(parts, 'a'));
+      mkdirSync(join(parts, 'b'));
+      writeFileSync(join(parts, 'a', 'x'), 'a file\n');
+      mkdirSync(join(parts, 'b', 'x'));
+      writeFileSync(join(parts, 'b', 'x', 'y'), 'under the file\n');
+      const conflicting = join(parts, 'conflict.tar');
+      execFileSync(TAR, ['-cf', conflicting, '-C', join(parts, 'a'), 'x', '-C', join(parts, 'b'), 'x/y']);
+      const result = await copySkillsIntoSandbox({
+        skills: [
+          registry({ name: 'conflict', presignedUrl: 'https://dl.example/conflict.tar' }),
+          registry({ name: 'alpha', presignedUrl: 'https://dl.example/alpha.tar' }),
+        ],
+        skillsDir: SKILLS_DIR,
+        deps: {
+          fetchArchive: url => Promise.resolve(url.endsWith('conflict.tar') ? readFileSync(conflicting) : SKILL_TAR),
+        },
+      });
+
+      expect(result.copied.map(({ skill }) => skill.name)).toEqual(['alpha']);
+      expect(result.failed.get('conflict')).toEqual({ cause: 'damaged' });
+    } finally {
+      rmSync(parts, { recursive: true, force: true });
+    }
+  });
+
+  test('leaves out a tarball that repeats a path', async () => {
+    const parts = mkdtempSync(join(tmpdir(), 'skill-archive-parts-'));
+    try {
+      mkdirSync(join(parts, 'a'));
+      mkdirSync(join(parts, 'b'));
+      writeFileSync(join(parts, 'a', 'SKILL.md'), '# first\n');
+      writeFileSync(join(parts, 'b', 'SKILL.md'), '# second\n');
+      const repeated = join(parts, 'repeat.tar');
+      execFileSync(TAR, ['-cf', repeated, '-C', join(parts, 'a'), 'SKILL.md', '-C', join(parts, 'b'), 'SKILL.md']);
+      const result = await copySkillsIntoSandbox({
+        skills: [registry({ name: 'repeat', presignedUrl: 'https://dl.example/repeat.tar' })],
+        skillsDir: SKILLS_DIR,
+        deps: { fetchArchive: () => Promise.resolve(readFileSync(repeated)) },
+      });
+
+      expect(result.copied).toEqual([]);
+      expect(result.failed.get('repeat')).toEqual({ cause: 'damaged' });
+    } finally {
+      rmSync(parts, { recursive: true, force: true });
+    }
   });
 
   test('refuses a skill name that could reach the downloader state files', async () => {
@@ -152,7 +206,7 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     });
 
     expect(fetchArchive).not.toHaveBeenCalled();
-    expect(result.failed.get('.tfy-requested-skills.json')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('.tfy-requested-skills.json')).toEqual({ cause: 'damaged' });
   });
 
   test('rethrows an abort instead of recording the skill as left out', async () => {
@@ -169,6 +223,20 @@ describe('copySkillsIntoSandbox for registry skills', () => {
         deps,
       }),
     ).rejects.toThrow('aborted');
+  });
+});
+
+describe('skillCopyFailedNotice', () => {
+  test('blames the connection only for a download failure', () => {
+    expect(skillCopyFailedNotice({ name: 'echo', cause: 'download' })).toBe(
+      "The skill echo couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.",
+    );
+  });
+
+  test('names damaged files, not the connection, when the archive itself is bad', () => {
+    expect(skillCopyFailedNotice({ name: 'echo', cause: 'damaged' })).toBe(
+      "The skill echo couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.",
+    );
   });
 });
 
@@ -286,7 +354,7 @@ describe('copySkillsIntoSandbox for git skills', () => {
     });
 
     expect(result.copied).toEqual([]);
-    expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('echo')).toEqual({ cause: 'damaged' });
   });
 
   test('leaves out a skill with a symlinked directory in its path, and uploads nothing from the link target', async () => {
@@ -301,7 +369,7 @@ describe('copySkillsIntoSandbox for git skills', () => {
 
     expect(result.copied).toEqual([]);
     expect(result.uploads).toEqual([]);
-    expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('echo')).toEqual({ cause: 'damaged' });
   });
 
   test('leaves out a skill that holds a symlinked file, and uploads nothing from the link target', async () => {
@@ -315,6 +383,6 @@ describe('copySkillsIntoSandbox for git skills', () => {
 
     expect(result.copied).toEqual([]);
     expect(result.uploads).toEqual([]);
-    expect(result.failed.get('echo')).toBe(SKILL_COPY_FAILED_REASON);
+    expect(result.failed.get('echo')).toEqual({ cause: 'damaged' });
   });
 });

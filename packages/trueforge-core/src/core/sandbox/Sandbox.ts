@@ -111,7 +111,7 @@ import {
 } from './provider/Provider';
 import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
-import { skillCopyFailedNotice } from './skills/slotSkillCopy';
+import { SKILL_COPY_FAILED_REASON, skillCopyFailedNotice, type SkillCopyFailure } from './skills/slotSkillCopy';
 import { pushCardFields } from './slots/git/pushCard';
 import {
   GIT_INDEX_ENTRIES_COMMAND,
@@ -1972,7 +1972,7 @@ export class Sandbox extends LocalToolMCP {
   /** Cached prerequisite check results: skill name -> reason unavailable. Empty map = all available. */
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   // Kept apart from the prerequisite cache, which the prerequisite check clears.
-  private skillCopyFailures: ReadonlyMap<string, string> = new Map<string, string>();
+  private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
   // Plain lines for the person, shown once on the next exec result.
   private pendingSkillNotices: string[] = [];
   /** Flag to track if we've already checked prerequisites. */
@@ -2902,7 +2902,10 @@ export class Sandbox extends LocalToolMCP {
 
   /** Skills left out when they were copied into the sandbox, plus any missing prerequisites. */
   private unavailableSkillsForPrompt(): Map<string, string> | undefined {
-    const merged = new Map([...this.skillCopyFailures, ...this.unavailableSkillsCache]);
+    const merged = new Map(this.unavailableSkillsCache);
+    for (const name of this.skillCopyFailures.keys()) {
+      merged.set(name, SKILL_COPY_FAILED_REASON);
+    }
     return merged.size > 0 ? merged : undefined;
   }
 
@@ -6301,9 +6304,11 @@ export class Sandbox extends LocalToolMCP {
     } else {
       const offline = await this.skillMounter?.getOfflineSandboxInit(skillPaths, { signal });
       skillInit = offline?.init;
-      const failed = offline?.failed ?? new Map<string, string>();
+      const failed = offline?.failed ?? new Map<string, SkillCopyFailure>();
       this.skillCopyFailures = failed;
-      this.pendingSkillNotices = [...failed.keys()].map(name => skillCopyFailedNotice(name));
+      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
+        skillCopyFailedNotice({ name, cause: failure.cause }),
+      );
       this.cachedSkillsSection = undefined;
     }
     if (skillInit) {

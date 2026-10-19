@@ -4,7 +4,7 @@ import { SKILL_DOWNLOAD_TIMEOUT_SECONDS, buildWriteAndRunScriptCommand } from '.
 import { sandboxScripts } from '../sandboxScripts.gen';
 import { SKILLS_PREAMBLE, getSkillPath, renderSkillPromptBody, type SkillPromptMode } from './constants';
 import type { ISkillMounter } from './ISkillMounter';
-import { copySkillsIntoSandbox, type SkillCopyDeps } from './slotSkillCopy';
+import { copySkillsIntoSandbox, type SkillCopyDeps, type SkillCopyFailure } from './slotSkillCopy';
 
 // A git-sourced skill materialized by a sparse clone in the sandbox (git_downloader.py). By
 // default only name/description/path are advertised in the prompt and their SKILL.md is read
@@ -53,8 +53,8 @@ const DOWNLOADER_STATE_FILE_NAME = '.tfy-skill-downloader-state.json';
 export interface OfflineSkillInit {
   /** Undefined when no skill could be copied, so nothing skills-related is sent. */
   init: SandboxInit | undefined;
-  /** Skill name to the plain reason it was left out. */
-  failed: ReadonlyMap<string, string>;
+  /** Skill name to why it was left out. */
+  failed: ReadonlyMap<string, SkillCopyFailure>;
 }
 
 type RequestedGitSkill = Pick<GitSkill, 'type' | 'name' | 'url' | 'path' | 'ref'>;
