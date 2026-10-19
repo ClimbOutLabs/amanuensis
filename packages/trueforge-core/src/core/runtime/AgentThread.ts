@@ -195,7 +195,12 @@ import {
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
-import { collectKnownEventIds, guardModelReply, TOO_MANY_TOOL_CALLS_MESSAGE } from './modelReplyGuard';
+import {
+  collectKnownEventIds,
+  guardModelReply,
+  MAX_TOOL_CALLS_PER_REPLY,
+  TOO_MANY_TOOL_CALLS_MESSAGE,
+} from './modelReplyGuard';
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
@@ -3145,7 +3150,11 @@ export class AgentThread {
 
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
-    // per-reply call cap stops the turn before anything in it is classified or run.
+    // per-reply call cap stops the turn before anything in it is classified or run. An
+    // unattended run is recounted after classification instead (below): the guard counts
+    // every call, but calls that will be held for the owner's approval do not count toward
+    // the cap there, and which ones those are is only known once each call is classified.
+    const unattended = this.sentinel?.services.unattended === true;
     const replyGuard = guardModelReply({
       message: {
         ...result.value.output,
@@ -3157,9 +3166,8 @@ export class AgentThread {
       },
       tools,
       knownEventIds: collectKnownEventIds(this.context),
-      unattended: this.sentinel?.services.unattended === true,
     });
-    if (replyGuard.tooManyCalls) {
+    if (replyGuard.tooManyCalls && !unattended) {
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -3205,8 +3213,21 @@ export class AgentThread {
         }),
       };
     }
+    // The unattended recount, now that classification has stamped every call: calls that
+    // will be held for the owner's approval do not count toward the per-reply cap (the hold
+    // machinery has its own per-chat limit), but calls that run at once still do. The turn
+    // stops here, before anything is held or run, when those alone are over the cap.
+    if (unattended && replyGuard.tooManyCalls) {
+      const immediateCalls = (assistantMessage.tool_calls ?? []).filter(
+        call => call.tool_info.is_approval_required !== true,
+      ).length;
+      if (immediateCalls > MAX_TOOL_CALLS_PER_REPLY) {
+        yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      }
+    }
     // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
-    if (this.sentinel?.services.unattended === true) {
+    if (unattended) {
       const held = holdApprovalCalls({
         message: assistantMessage,
         alreadyHeld: findHeldToolCalls(this.context).length,

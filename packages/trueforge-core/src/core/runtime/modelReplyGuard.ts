@@ -89,15 +89,8 @@ export function guardModelReply(input: {
   message: RawAssistantMessage;
   tools: ChatCompletionTool[];
   knownEventIds: ReadonlySet<string>;
-  /**
-   * True for an unattended run (a schedule or background brief). The per-reply cap does not stop
-   * those: nothing there runs without the owner, because approval-required calls are held, and
-   * the hold machinery has its own per-chat limit that tells the model about the overflow. The
-   * cap is for attended chats, where a flooded reply would otherwise run its calls at once.
-   */
-  unattended: boolean;
 }): ModelReplyGuardOutcome {
-  const { message, tools, knownEventIds, unattended } = input;
+  const { message, tools, knownEventIds } = input;
   const schemas = new Map<string, ToolParameterSchema>();
   for (const tool of tools) {
     if (tool.type === 'function') {
@@ -170,6 +163,9 @@ export function guardModelReply(input: {
       ...(message.tool_calls === undefined ? {} : { tool_calls: deduped }),
     },
     invalidCalls,
-    tooManyCalls: !unattended && deduped.length > MAX_TOOL_CALLS_PER_REPLY,
+    // Every call counts here: which calls an unattended run will hold for approval is only
+    // known after classification, so the runtime recounts there and exempts the held ones.
+    // Counted at this stage, the cap is the plain per-reply limit for any run.
+    tooManyCalls: deduped.length > MAX_TOOL_CALLS_PER_REPLY,
   };
 }

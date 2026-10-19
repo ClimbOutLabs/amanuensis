@@ -65,10 +65,14 @@ describe('ToolMarkupGuard streaming filter', () => {
 
   it('keeps a fenced example as text when it streams in pieces, split inside the fence and the markup', () => {
     const guard = new ToolMarkupGuard();
-    const text =
-      'Example:\n```\n<｜DSML｜invoke name="create_event"></｜DSML｜invoke>\n```\nEnd of example.';
+    const text = 'Example:\n```\n<｜DSML｜invoke name="create_event"></｜DSML｜invoke>\n```\nEnd of example.';
     let shown = '';
-    for (const piece of ['Example:\n`', '``\n<｜DS', 'ML｜invoke name="create_event"></｜DSML｜invoke>\n`', '``\nEnd of example.']) {
+    for (const piece of [
+      'Example:\n`',
+      '``\n<｜DS',
+      'ML｜invoke name="create_event"></｜DSML｜invoke>\n`',
+      '``\nEnd of example.',
+    ]) {
       shown += guard.push(piece);
       expect(guard.inMarkup).toBe(false);
     }
