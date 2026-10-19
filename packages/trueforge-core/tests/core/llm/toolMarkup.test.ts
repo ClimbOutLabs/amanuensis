@@ -103,6 +103,95 @@ describe('ToolMarkupGuard streaming filter', () => {
   });
 });
 
+describe('ToolMarkupGuard prose that only talks about markup', () => {
+  it('keeps an answer that names a tag inside inline code, whole and clean', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Wrap the value in the `<parameter>` tag and save the file.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps that answer whole when the inline code streams in split pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Wrap the value in the `<par', 'ameter>` tag', ' and save the file.']) {
+      shown += guard.push(piece);
+      expect(guard.inMarkup).toBe(false);
+    }
+    expect(shown + guard.heldText).toBe('Wrap the value in the `<parameter>` tag and save the file.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps a bare parameter mention with no backticks as text too', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Set it with <parameter name="title"> as the first tag inside the call.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps prose that names the invoke and tool_call elements as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The <invoke> element carries one call, and each call sits in a <tool_call> element.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps a [TOOL_CALLS] mention that no list follows as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The reply opens with a [TOOL_CALLS] marker, written out in full, then explains itself.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('still recovers a real call that follows an inline-code mention of the wrapper', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(
+      'Aside: `<tool_call>` is the wrapper. For real now: ' +
+        '<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-2"}}</tool_call>',
+    );
+    expect(shown).toContain('Aside:');
+    expect(shown).not.toContain('evt-2');
+    expect(guard.finish()).toEqual({
+      status: 'recovered',
+      calls: [{ name: 'get_event', arguments: { event_id: 'evt-2' } }],
+    });
+  });
+
+  it('still stops a plain XML call attempt, which is broken markup', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('<tool_calls><invoke name="create_event"></invoke></tool_calls>');
+    expect(shown).toBe('');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+
+  it('still recovers a Mistral list streamed through the guard', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Doing it now. [TOOL_CALLS] [{"name": "get_event", "arguments": {"event_id": "evt-1"}}]');
+    expect(shown).toBe('Doing it now. ');
+    expect(guard.finish()).toEqual({
+      status: 'recovered',
+      calls: [{ name: 'get_event', arguments: { event_id: 'evt-1' } }],
+    });
+  });
+
+  it('does not let an unclosed backtick on one line hide a real leak on the next', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(
+      'A stray ` backtick sits on this line.\n<｜DSML｜invoke name="create_event"></｜DSML｜invoke>',
+    );
+    expect(shown).toBe('A stray ` backtick sits on this line.\n');
+    expect(guard.finish()).toEqual({ status: 'recovered', calls: [{ name: 'create_event', arguments: {} }] });
+  });
+});
+
 describe('parseToolMarkup', () => {
   it('rebuilds a DSML call, with JSON parameters parsed and string parameters kept as text', () => {
     const outcome = parseToolMarkup(DSML_CREATE);
