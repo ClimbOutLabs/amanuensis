@@ -40,16 +40,13 @@ function closeServer(server: Server): Promise<void> {
 
 function call(port: number, input: { method?: string; path: string; token?: string }): Promise<Reply> {
   return new Promise((resolve, reject) => {
-    const req = httpRequest(
-      { host: '127.0.0.1', port, path: input.path, method: input.method ?? 'GET' },
-      res => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8'), headers: res.headers });
-        });
-      },
-    );
+    const req = httpRequest({ host: '127.0.0.1', port, path: input.path, method: input.method ?? 'GET' }, res => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8'), headers: res.headers });
+      });
+    });
     req.once('error', reject);
     if (input.token !== undefined) {
       req.setHeader('x-aman-mirror-token', input.token);
@@ -102,9 +99,7 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
     }
     if (url === '/simple/requests/') {
       res.writeHead(200, { 'content-type': 'text/html' });
-      res.end(
-        `<a href="${origin}/packages/aa/requests-2.0-py3-none-any.whl#sha256=abc">requests</a>`,
-      );
+      res.end(`<a href="${origin}/packages/aa/requests-2.0-py3-none-any.whl#sha256=abc">requests</a>`);
       return;
     }
     if (url === '/packages/aa/requests-2.0-py3-none-any.whl') {
@@ -150,7 +145,12 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
     registry,
     cacheDir,
     logger: silentLogger,
-    upstreamBases: { pypi: [upstreamBase, upstreamBase], npm: [upstreamBase], go: [upstreamBase], cargo: [upstreamBase, upstreamBase] },
+    upstreamBases: {
+      pypi: [upstreamBase, upstreamBase],
+      npm: [upstreamBase],
+      go: [upstreamBase],
+      cargo: [upstreamBase, upstreamBase],
+    },
     ...(options?.maxDownloadBytes === undefined ? {} : { maxDownloadBytes: options.maxDownloadBytes }),
     ...(options?.maxCacheBytes === undefined ? {} : { maxCacheBytes: options.maxCacheBytes }),
   });

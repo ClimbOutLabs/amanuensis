@@ -77,13 +77,6 @@ import {
   type SandboxCommandEffect,
   type SandboxInvocationPurpose,
 } from './commandClassification';
-import {
-  PACKAGE_GIT_DEPENDENCY_MESSAGE,
-  PACKAGE_MANIFEST_FILES,
-  commandDownloadsPackages,
-  findGitDependency,
-  packageDownloadCardWhat,
-} from './packageMirrors';
 import { classifyExecCommand, interpreterInvocationRefusal, type ExecGuardHost } from './driver/ExecGuard';
 import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
@@ -107,6 +100,13 @@ import {
   isGitNetworkCommand,
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
+import {
+  commandDownloadsPackages,
+  findGitDependency,
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  PACKAGE_MANIFEST_FILES,
+  packageDownloadCardWhat,
+} from './packageMirrors';
 import {
   ensureExecSuccess,
   shellEscape,
@@ -3752,7 +3752,11 @@ export class Sandbox extends LocalToolMCP {
       if (dir === undefined || dir === '') {
         return;
       }
-      dirs.add(dir.startsWith('/') ? dir : `${workspaceDir}/${dir}`);
+      if (dir.startsWith('/')) {
+        dirs.add(dir);
+      } else if (workspaceDir !== undefined) {
+        dirs.add(`${workspaceDir}/${dir}`);
+      }
     };
     addDir(input.cwd);
     addDir(this.boundRepository?.workspace_cwd);

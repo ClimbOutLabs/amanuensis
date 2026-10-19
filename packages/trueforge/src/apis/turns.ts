@@ -610,14 +610,15 @@ function createTurnResolver(deps: {
                     created_by: userRef,
                     repository_id: boundRepository.repository_id,
                   });
-                  if (repository === undefined || !repository.package_downloads_allowed) {
-                    if (repository !== undefined) {
-                      packageMirrorTokens.revokeRepository({
-                        tenant_id,
-                        created_by: userRef,
-                        repository_id: repository.id,
-                      });
-                    }
+                  if (repository === undefined) {
+                    return undefined;
+                  }
+                  if (!repository.package_downloads_allowed) {
+                    packageMirrorTokens.revokeRepository({
+                      tenant_id,
+                      created_by: userRef,
+                      repository_id: repository.id,
+                    });
                     return undefined;
                   }
                   return packageMirrorTokens.issue({

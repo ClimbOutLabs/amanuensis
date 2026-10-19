@@ -16,7 +16,10 @@ describe('splitShellCommands', () => {
   });
 
   it('keeps a pipe inside quotes inside its segment', () => {
-    expect(splitShellCommands('echo "a|b" | wc -c')).toEqual([['echo', 'a|b'], ['wc', '-c']]);
+    expect(splitShellCommands('echo "a|b" | wc -c')).toEqual([
+      ['echo', 'a|b'],
+      ['wc', '-c'],
+    ]);
   });
 });
 

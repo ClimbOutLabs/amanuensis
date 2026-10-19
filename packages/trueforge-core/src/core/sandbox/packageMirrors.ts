@@ -171,7 +171,10 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
   if (base === 'go' && sub === 'mod' && (argv[2] === 'download' || argv[2] === 'tidy' || argv[2] === 'vendor')) {
     return 'go';
   }
-  if ((base === 'uv' && sub === 'pip' && argv[2] === 'install') || (base === 'uv' && (sub === 'sync' || sub === 'add'))) {
+  if (
+    (base === 'uv' && sub === 'pip' && argv[2] === 'install') ||
+    (base === 'uv' && (sub === 'sync' || sub === 'add'))
+  ) {
     return 'pypi';
   }
   if (base === 'poetry' && (sub === 'install' || sub === 'add' || sub === 'update')) {
@@ -186,9 +189,7 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
  * they would try to fetch the dependency.
  */
 export function commandDownloadsPackages(command: string): boolean {
-  return splitShellCommands(command).some(
-    words => segmentDownloadEcosystem(programWords(words)) !== undefined,
-  );
+  return splitShellCommands(command).some(words => segmentDownloadEcosystem(programWords(words)) !== undefined);
 }
 
 /**

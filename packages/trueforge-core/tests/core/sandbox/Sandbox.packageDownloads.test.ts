@@ -14,8 +14,7 @@ const BOUND_REPOSITORY: BoundRepository = {
   commands: [],
 };
 
-const PACKAGE_CARD_WHAT =
-  "Aman wants to download this project's packages from the public package sites (PyPI).";
+const PACKAGE_CARD_WHAT = "Aman wants to download this project's packages from the public package sites (PyPI).";
 
 const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
@@ -70,8 +69,7 @@ function makeSandbox(input: {
   return new Sandbox({
     provider: makeProvider(input.execCalls),
     boundRepository: input.boundRepository,
-    loadBoundRepository:
-      input.boundRepository === undefined ? undefined : async () => input.boundRepository,
+    loadBoundRepository: input.boundRepository === undefined ? undefined : async () => input.boundRepository,
     workspaceVerificationCoordinator:
       input.boundRepository === undefined ? undefined : new TestDurableWorkspaceCoordinator(),
     workspaceLeaseOwnerId: input.boundRepository === undefined ? undefined : 'test-replica',
