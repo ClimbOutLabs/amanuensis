@@ -67,21 +67,21 @@ function parseOptions(args: readonly string[]) {
   }
 }
 
-function counted(count: number, singular: string, plural: string): string {
+function counted({ count, singular, plural }: { count: number; singular: string; plural: string }): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
 
 /** What an import brought, in one line, for the audit row; the printed summary is the full layout. */
 function broughtLine(result: ImportDataResult): string {
   return [
-    counted(result.chats, 'chat', 'chats'),
-    counted(result.memories, 'memory', 'memories'),
-    counted(result.personas, 'persona', 'personas'),
-    counted(result.spaces, 'space', 'spaces'),
-    counted(result.agents, 'agent', 'agents'),
+    counted({ count: result.chats, singular: 'chat', plural: 'chats' }),
+    counted({ count: result.memories, singular: 'memory', plural: 'memories' }),
+    counted({ count: result.personas, singular: 'persona', plural: 'personas' }),
+    counted({ count: result.spaces, singular: 'space', plural: 'spaces' }),
+    counted({ count: result.agents, singular: 'agent', plural: 'agents' }),
     result.schedules === 0
-      ? counted(0, 'schedule', 'schedules')
-      : `${counted(result.schedules, 'schedule', 'schedules')} (off)`,
+      ? counted({ count: 0, singular: 'schedule', plural: 'schedules' })
+      : `${counted({ count: result.schedules, singular: 'schedule', plural: 'schedules' })} (off)`,
   ].join(', ');
 }
 
