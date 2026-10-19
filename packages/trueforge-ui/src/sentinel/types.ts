@@ -13,12 +13,12 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
-import { mailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
 import {
   heldBecause,
   savedSearchHoldReason,
   SERVER_SECRET_REASON,
 } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -51,10 +51,7 @@ const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 
 /** One recipient of a mail card: the name it is shown with, empty when it has none, and the address mail goes to. */
-export type SentinelApprovalMailbox = {
-  name: string;
-  address: string;
-};
+export type SentinelApprovalMailbox = Tier3Mailbox;
 
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
@@ -348,20 +345,11 @@ function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefin
   return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
 }
 
-/** A recipient as stored: the name-and-address form, or a bare address string from before names were kept. */
-function parseMailbox(value: unknown): SentinelApprovalMailbox | undefined {
-  if (typeof value === 'string') return mailboxOf(value);
-  if (!isRecord(value)) return undefined;
-  const name = optionalString(value, 'name');
-  const address = optionalString(value, 'address');
-  return name === undefined || address === undefined ? undefined : { name, address };
-}
-
 function mailboxList(value: unknown): SentinelApprovalMailbox[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const mailboxes: SentinelApprovalMailbox[] = [];
   for (const item of value) {
-    const mailbox = parseMailbox(item);
+    const mailbox = readStoredMailbox(item);
     if (mailbox === undefined) return undefined;
     mailboxes.push(mailbox);
   }

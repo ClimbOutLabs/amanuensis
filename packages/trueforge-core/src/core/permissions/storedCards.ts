@@ -7,15 +7,12 @@ import { z } from 'zod';
 
 import type { SessionEventItem } from '../../agent-session/schemas/events';
 import type { TurnState } from '../../agent-session/schemas/turn';
-import { mailboxOf } from '../email/gmail/mailbox';
 import { ApprovalToolCallRefSchema, EventType } from '../events/schema';
 import { Tier3EmailSchema } from './tier';
-import { Tier3MailboxSchema, type Tier3Mailbox } from './tierMailbox';
+import { readStoredMailbox, StoredMailboxSchema, type Tier3Mailbox } from './tierMailbox';
 
 type ApprovalToolCallRef = z.infer<typeof ApprovalToolCallRefSchema>;
 type Tier3Email = z.infer<typeof Tier3EmailSchema>;
-
-const StoredMailboxSchema = z.union([Tier3MailboxSchema, z.string().transform(address => mailboxOf(address))]);
 
 function storedMailboxes(recipients: readonly unknown[]): Tier3Mailbox[] {
   return recipients.map(recipient => StoredMailboxSchema.parse(recipient));
@@ -76,10 +73,7 @@ function archivedRecipients(value: unknown): unknown {
     return value;
   }
   const recipients: unknown[] = value;
-  return recipients.map(recipient => {
-    const parsed = StoredMailboxSchema.safeParse(recipient);
-    return parsed.success ? parsed.data : recipient;
-  });
+  return recipients.map(recipient => readStoredMailbox(recipient) ?? recipient);
 }
 
 function archivedCard(email: Record<string, unknown>): Record<string, unknown> {

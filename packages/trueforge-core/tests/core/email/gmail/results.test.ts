@@ -1,5 +1,6 @@
 import { readMessage } from '../../../../src/core/email/gmail/message';
 import {
+  addressListIsPlain,
   getDraftResult,
   listThreadsResult,
   mailboxesOf,
@@ -166,5 +167,21 @@ describe('result shapes', () => {
       in_reply_to: '<abc@mail.example.com>',
       attachments: [],
     });
+  });
+});
+
+describe('mailbox headers that could read two ways', () => {
+  it('refuses a quoted display name that looks like an address, as it refuses one unquoted', () => {
+    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(false);
+    expect(addressListIsPlain('"Reviewer (ops)" <ops@example.org>')).toBe(false);
+    expect(addressListIsPlain('boss@example.com <other@example.org>')).toBe(false);
+    expect(addressListIsPlain('"Grace Lee" <grace@example.com>')).toBe(true);
+  });
+
+  it('shows a part with more than one angle bracket whole, as the address, and never splits it', () => {
+    expect(mailboxesOf('"Ada" <ada@example.com> <grace@example.org>')).toEqual([
+      { name: '', address: '"Ada" <ada@example.com> <grace@example.org>' },
+    ]);
+    expect(mailboxesOf('Ada <ada@example.com>')).toEqual([{ name: 'Ada', address: 'ada@example.com' }]);
   });
 });

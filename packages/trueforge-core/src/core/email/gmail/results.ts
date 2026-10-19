@@ -189,7 +189,7 @@ function isPlainMailbox(part: string): boolean {
   }
   const name = value.slice(0, open).trim();
   const quoted = name.length >= 2 && name.startsWith('"') && name.endsWith('"');
-  return quoted ? !/["\\\r\n]/.test(name.slice(1, -1)) : PLAIN_NAME.test(name);
+  return quoted ? !/["\\\r\n@()[\]]/.test(name.slice(1, -1)) : PLAIN_NAME.test(name);
 }
 
 /**

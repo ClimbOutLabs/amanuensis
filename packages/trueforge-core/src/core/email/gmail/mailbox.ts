@@ -9,6 +9,10 @@ export const MAX_ANGLE_ADDRESS_CHARS = 320;
  * and the address. A part with no usable `<address>` is taken whole as the address.
  */
 export function mailboxOf(part: string): Tier3Mailbox {
+  // Two brackets could be read two ways, so such a part is shown whole and never split.
+  if (part.split('<').length > 2 || part.split('>').length > 2) {
+    return { name: '', address: part.trim() };
+  }
   const close = part.indexOf('>');
   const open = close === -1 ? -1 : part.lastIndexOf('<', close);
   const inner = open === -1 ? '' : part.slice(open + 1, close).trim();
