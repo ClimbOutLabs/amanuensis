@@ -1,4 +1,10 @@
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
@@ -49,7 +55,12 @@ import {
   type WorkspaceVerificationCoordinator,
 } from '../../../src/core/sandbox/Sandbox';
 import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
-import { REQUESTED_SKILLS_FILE_NAME, SkillMounter, type GitSkill } from '../../../src/core/sandbox/skills/SkillMounter';
+import {
+  REQUESTED_SKILLS_FILE_NAME,
+  SkillMounter,
+  type GitSkill,
+  type Skill,
+} from '../../../src/core/sandbox/skills/SkillMounter';
 import { structuredEditObservationForTargets } from '../../../src/core/sandbox/structuredEditPrecondition';
 import { GIT_INDEX_ENTRIES_COMMAND, TRACKED_WORKTREE_COMMAND } from '../../../src/core/sandbox/workspaceStateCapture';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -4076,6 +4087,93 @@ describe('Sandbox provider-owned paths', () => {
   });
 });
 
+/** Runs a guest command for real, in `cwd`, with only the env the test allows. */
+function runGuestCommand(input: { command: string; cwd: string; env: Record<string, string> }): Promise<ExecResult> {
+  return new Promise(resolve => {
+    execFile(
+      '/bin/sh',
+      ['-c', input.command],
+      { cwd: input.cwd, env: { PATH: '/usr/bin:/bin', ...input.env }, timeout: 60_000 },
+      (error, stdout, stderr) => {
+        const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
+        resolve({ success: true, response: { exitCode, result: `${stdout}${stderr}` } });
+      },
+    );
+  });
+}
+
+/**
+ * A slot-like provider: its commands and files are real, under `root`. Like the slot agent, it refuses
+ * every env name except TFY_SKILLS_DIR at the skills directory.
+ */
+function slotLikeProvider(input: { root: string; skillsDir: string; execCalls: SandboxExecParams[] }): SandboxProvider {
+  const { root, skillsDir, execCalls } = input;
+  return makeProvider({
+    network: 'none',
+    exec: (params): Promise<ExecResult> => {
+      execCalls.push(params);
+      const env = params.env ?? {};
+      const refused = Object.keys(env).filter(name => name !== 'TFY_SKILLS_DIR' || env[name] !== skillsDir);
+      if (refused.length > 0) {
+        return Promise.resolve({ success: false, error: `env names are not allowed: ${refused.join(', ')}` });
+      }
+      return runGuestCommand({ command: params.command, cwd: root, env });
+    },
+    getToolResultDumpDir: () => join(root, 'tool-results'),
+    getFileUploadsDir: () => join(root, 'uploads'),
+    getGitCredentialsPath: () => join(root, '.git-credentials'),
+    getSkillsDir: () => skillsDir,
+    getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
+    uploadFile: async ({ remotePath, content }) => {
+      await mkdir(dirname(remotePath), { recursive: true });
+      await writeFile(remotePath, content);
+    },
+  });
+}
+
+/** A registry skill tarball holding one SKILL.md, built with the host's tar. */
+function skillArchive(input: { root: string; name: string }): Buffer {
+  const { root, name } = input;
+  const source = mkdtempSync(join(root, `${name}-src-`));
+  writeFileSync(join(source, 'SKILL.md'), `# ${name}\n`);
+  const archive = join(root, `${name}.tar`);
+  execFileSync('/usr/bin/tar', ['-cf', archive, '-C', source, '.']);
+  return readFileSync(archive);
+}
+
+async function serveArchives(
+  archives: ReadonlyMap<string, Buffer>,
+): Promise<{ urlFor: (path: string) => string; close: () => Promise<void> }> {
+  const server: Server = createServer((request, response) => {
+    const bytes = archives.get(request.url ?? '');
+    if (bytes === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'application/x-tar' }).end(bytes);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 0;
+  return {
+    urlFor: path => `http://127.0.0.1:${String(port)}${path}`,
+    close: () => new Promise<void>(resolve => server.close(() => resolve())),
+  };
+}
+
+function registrySkill(input: { name: string; presignedUrl: string }): Skill {
+  const { name, presignedUrl } = input;
+  return {
+    type: 'registry',
+    name,
+    description: name,
+    fqn: `agent-skill:acme/team/${name}:1`,
+    preload: false,
+    skillMdContent: null,
+    presignedUrl,
+  };
+}
+
 describe('Sandbox skills without a network', () => {
   const gitSkill = {
     type: 'git',
@@ -4091,32 +4189,66 @@ describe('Sandbox skills without a network', () => {
     arguments: { intent: 'Run command', purpose: 'execute', command: 'true' },
   };
 
-  it('starts a no-network sandbox with skills without the skill env or downloader, and tells the model they are unavailable', async () => {
-    const execCalls: SandboxExecParams[] = [];
-    // Like a slot agent, this provider refuses any env name the sandbox sends.
-    const provider = makeProvider({
-      network: 'none',
-      exec: (params): Promise<ExecResult> => {
-        execCalls.push(params);
-        const envNames = Object.keys(params.env ?? {});
-        if (envNames.length > 0) {
-          return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
-        }
-        return readyExec();
-      },
-    });
-    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gitSkill] }) });
+  it('copies the skills into a no-network sandbox and the downloader confirms them offline', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([
+        ['/alpha.tar', skillArchive({ root, name: 'alpha' })],
+        ['/beta.tar', skillArchive({ root, name: 'beta' })],
+      ]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({ root, skillsDir, execCalls });
+      const alpha = registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') });
+      const beta = registrySkill({ name: 'beta', presignedUrl: archives.urlFor('/beta.tar') });
+      const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [alpha, beta] }) });
 
-    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
 
-    expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
-    expect(execCalls.some(call => call.command === 'true')).toBe(true);
-    expect(execCalls.some(call => call.command.includes('skill_downloader.py'))).toBe(false);
-    const builder = new InstructionBuilder('prompt');
-    sandbox.buildInstruction(builder);
-    const prompt = builder.build();
-    expect(prompt).toContain('echo: unavailable (this sandbox has no internet access)');
-    expect(prompt).not.toContain('The skill is present');
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
+      expect(readFileSync(join(skillsDir, 'beta', 'SKILL.md'), 'utf-8')).toBe('# beta\n');
+      const skillInit = execCalls.filter(call => call.env?.['TFY_SKILLS_DIR'] !== undefined);
+      expect(skillInit).toHaveLength(1);
+      expect(skillInit[0]?.env).toEqual({ TFY_SKILLS_DIR: skillsDir });
+      expect(execCalls.some(call => call.command === 'true')).toBe(true);
+      const builder = new InstructionBuilder('prompt');
+      sandbox.buildInstruction(builder);
+      expect(builder.build()).not.toContain('unavailable');
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves out a skill that cannot be downloaded, names it as unavailable, and still copies the rest', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(new Map([['/alpha.tar', skillArchive({ root, name: 'alpha' })]]));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const broken = registrySkill({ name: 'gamma', presignedUrl: archives.urlFor('/missing.tar') });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') }), broken],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
+      const builder = new InstructionBuilder('prompt');
+      sandbox.buildInstruction(builder);
+      const prompt = builder.build();
+      expect(prompt).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
+      expect(prompt).not.toContain('alpha: unavailable');
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('starts a no-network sandbox for an assistant with no skills and sends no skill env', async () => {

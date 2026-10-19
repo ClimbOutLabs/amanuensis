@@ -106,6 +106,7 @@ import {
   withTrustedPath,
   type ExecResult,
   type SandboxExecParams,
+  type SandboxInit,
   type SandboxProvider,
 } from './provider/Provider';
 import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
@@ -123,7 +124,6 @@ import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
-import { SKILLS_NO_NETWORK_REASON } from './skills/constants';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
@@ -1970,6 +1970,8 @@ export class Sandbox extends LocalToolMCP {
   private mcpClientInstall: CodeModeClientInstall | undefined;
   /** Cached prerequisite check results: skill name -> reason unavailable. Empty map = all available. */
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
+  // Kept apart from the prerequisite cache, which the prerequisite check clears.
+  private skillCopyFailures: ReadonlyMap<string, string> = new Map<string, string>();
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -2888,12 +2890,10 @@ export class Sandbox extends LocalToolMCP {
     return this.cachedSkillsSection;
   }
 
-  /** Skills download over the network, so a sandbox without one reports every skill unavailable. */
+  /** Skills left out when they were copied into the sandbox, plus any missing prerequisites. */
   private unavailableSkillsForPrompt(): Map<string, string> | undefined {
-    if (!this.hasNetwork()) {
-      return new Map((this.skillMounter?.skillNames() ?? []).map(name => [name, SKILLS_NO_NETWORK_REASON]));
-    }
-    return this.unavailableSkillsCache.size > 0 ? this.unavailableSkillsCache : undefined;
+    const merged = new Map([...this.skillCopyFailures, ...this.unavailableSkillsCache]);
+    return merged.size > 0 ? merged : undefined;
   }
 
   buildInstruction(builder: InstructionBuilder): void {
@@ -4309,8 +4309,8 @@ export class Sandbox extends LocalToolMCP {
       return;
     }
 
-    // Only check if there are skills; the sandbox is guaranteed live here. Without a network none can load.
-    if (!this.skillMounter || !this.hasNetwork()) {
+    // Only check if there are skills; the sandbox is guaranteed live here.
+    if (!this.skillMounter) {
       this.prerequisitesChecked = true;
       return;
     }
@@ -6282,14 +6282,18 @@ export class Sandbox extends LocalToolMCP {
     }
 
     // Fold skill installation into this single init exec. The mounter returns a declarative
-    // command + env + timeout; runs even when empty so existing skills are cleaned up. A sandbox
-    // with no network skips it: the downloader can't fetch, and the provider refuses its env.
-    const skillInit = this.hasNetwork()
-      ? this.skillMounter?.getSandboxInit({
-          skillsDir,
-          skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId),
-        })
-      : undefined;
+    // command + env + timeout. With network it runs even when empty so existing skills are cleaned
+    // up; without it the host copies the skills in and nothing is sent when there are none.
+    const skillPaths = { skillsDir, skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId) };
+    let skillInit: SandboxInit | undefined;
+    if (this.hasNetwork()) {
+      skillInit = this.skillMounter?.getSandboxInit(skillPaths);
+    } else {
+      const offline = await this.skillMounter?.getOfflineSandboxInit(skillPaths, { signal });
+      skillInit = offline?.init;
+      this.skillCopyFailures = offline?.failed ?? new Map<string, string>();
+      this.cachedSkillsSection = undefined;
+    }
     if (skillInit) {
       for (const upload of skillInit.uploads) {
         await this.provider.uploadFile({

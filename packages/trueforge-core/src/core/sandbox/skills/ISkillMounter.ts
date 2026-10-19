@@ -1,5 +1,7 @@
 import type { InstructionBuilder } from '../../InstructionBuilder';
 import type { SandboxInit } from '../provider/Provider';
+import type { OfflineSkillInit } from './SkillMounter';
+import type { SkillCopyDeps } from './slotSkillCopy';
 
 // A set of skills that describes itself in the prompt and installs itself into a sandbox. The sandbox
 // holds one mounter and inspects individual skills only through this interface (prompt rendering,
@@ -10,6 +12,11 @@ export interface ISkillMounter {
   instruction(builder: InstructionBuilder, paths: { skillsDir: string }, unavailableSkills?: Map<string, string>): void;
   // The command (+ env, timeout) that installs these skills; Sandbox folds it into its init exec.
   getSandboxInit(paths: { skillsDir: string; skillDownloaderPath: string }): SandboxInit;
+  // The sandbox-without-network counterpart: the host fetches the skills and returns the init that only confirms them.
+  getOfflineSandboxInit(
+    paths: { skillsDir: string; skillDownloaderPath: string },
+    deps?: SkillCopyDeps,
+  ): Promise<OfflineSkillInit>;
   // The subset of mounted skills that declare prerequisites, for Sandbox's prerequisite check.
   skillPrerequisites(): readonly { name: string; requires: readonly string[] }[];
   // Names of all mounted skills, for host-side skill-use telemetry.
