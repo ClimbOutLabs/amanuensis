@@ -1,3 +1,7 @@
+/** What a person sees when the sandbox will not start. The full error goes to the log. */
+export const SANDBOX_START_FAILED_MESSAGE =
+  "Aman's sandbox couldn't start. Try again in a minute. If it keeps failing, restart Aman.";
+
 export abstract class SandboxError extends Error {
   /**
    * Every sandbox failure is caused by the request itself — a bad path, a missing
