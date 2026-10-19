@@ -14,6 +14,10 @@ export const SEARCH_HELD_REASON = 'it needed approval';
 
 const SEARCH_WHAT_PREFIX = 'Search the web through ';
 
+/** The held web search card names the search in plain words, never the connector's id. */
+const WEB_SEARCH_NAME = 'Web search';
+const WEB_SEARCH_WHAT_PREFIX = `${WEB_SEARCH_NAME}: `;
+
 /** Opening of the Tavily search card sentence, which also names what the call costs. */
 export const TAVILY_SEARCH_WHAT_PREFIX = 'Search the web with Tavily for: ';
 
@@ -29,9 +33,10 @@ export function heldBecause(why: string): string {
   return why === '' ? '' : `. Held because ${why}.`;
 }
 
-/** Card sentence for a held search; the query is already masked where it must be. */
-export function searchHoldCardText({ server, query, why }: { server: string; query: string; why: string }): string {
-  return `${SEARCH_WHAT_PREFIX}${server} for: ${query}${heldBecause(why)}`;
+/** Card sentence for a held search; the summary is already masked where it must be. */
+export function searchHoldCardText({ summary, why }: { summary: string; why: string }): string {
+  const subject = summary === '' ? WEB_SEARCH_NAME : `${WEB_SEARCH_WHAT_PREFIX}${summary}`;
+  return `${subject}${heldBecause(why)}`;
 }
 
 /** Audit row text for a held search: the rule that fired, never the query. */
@@ -41,8 +46,8 @@ export function searchHoldAuditText({ server, why }: { server: string; why: stri
 
 /** Whether a card sentence describes a held search, generic or Tavily. */
 export function isSearchHoldCardText(text: string): boolean {
-  return [SEARCH_WHAT_PREFIX, TAVILY_SEARCH_WHAT_PREFIX, TAVILY_EXTRACT_WHAT_PREFIX].some(prefix =>
-    text.startsWith(prefix),
+  return [WEB_SEARCH_WHAT_PREFIX, SEARCH_WHAT_PREFIX, TAVILY_SEARCH_WHAT_PREFIX, TAVILY_EXTRACT_WHAT_PREFIX].some(
+    prefix => text.startsWith(prefix),
   );
 }
 

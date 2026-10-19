@@ -455,7 +455,7 @@ describe('turns', () => {
               workspace_cwd: 'C:\\work\\bound-demo',
               agent: { type: 'inline', spec: agentSpec },
             },
-            answersOnlyHeldActions: () => Promise.resolve(false),
+            answersOnlyDeniedHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-non-stream',
@@ -724,7 +724,7 @@ describe('turns', () => {
               workspace_cwd: null,
               agent: { type: 'inline', spec: agentSpec },
             },
-            answersOnlyHeldActions: () => Promise.resolve(false),
+            answersOnlyDeniedHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-gone',

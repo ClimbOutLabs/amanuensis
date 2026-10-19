@@ -1368,6 +1368,14 @@ function searchQueryText(strings: OutboundStrings): string {
 }
 
 /**
+ * The one line a held search card names: the first text the search carries, such as its objective or
+ * first query. Provider plumbing and the other fields stay out; the exact text is in the card's details.
+ */
+function searchSummaryText(strings: OutboundStrings): string {
+  return strings.values.map(value => value.trim()).find(value => value !== '') ?? '';
+}
+
+/**
  * A designated-provider call that stops for approval. The card shows the exact text the call would
  * send. An unattended run holds it for the owner like any other call that asks.
  */
@@ -1376,16 +1384,15 @@ async function holdSearchCall(input: {
   ctx: ClassifyContext;
   reason: SearchAskReason;
   why: string;
-  queryText: string;
+  /** The card's one line, with any held key masked. */
+  summary: string;
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
   params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
   const shown =
-    input.queryText.length > SEARCH_CARD_TEXT_MAX
-      ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
-      : input.queryText;
+    input.summary.length > SEARCH_CARD_TEXT_MAX ? `${input.summary.slice(0, SEARCH_CARD_TEXT_MAX)}...` : input.summary;
   const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
   const tavilyText =
     input.params === undefined
@@ -1402,8 +1409,7 @@ async function holdSearchCall(input: {
       plain_what:
         tavily === null
           ? searchHoldCardText({
-              server: escapeDisplayText(server),
-              query: escapeDisplayText(shown),
+              summary: escapeDisplayText(shown),
               why: input.why,
             })
           : input.why === ''
@@ -1463,8 +1469,9 @@ async function classifySearchProviderTool(input: {
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, queryText, params: action.canonical_params, fields: extraction.fields });
+    holdSearchCall({ action, ctx, reason, why, summary, params: action.canonical_params, fields: extraction.fields });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1481,7 +1488,7 @@ async function classifySearchProviderTool(input: {
       ctx,
       reason: 'mcp_search_guard',
       why: SERVER_SECRET_REASON,
-      queryText: maskedStrings === undefined ? HIDDEN_QUERY : searchQueryText(maskedStrings),
+      summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
       params: masked,
       fields: {
         ...extraction.fields,

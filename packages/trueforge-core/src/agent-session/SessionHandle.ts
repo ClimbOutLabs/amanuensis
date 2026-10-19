@@ -644,16 +644,20 @@ export class SessionHandle<
   }
 
   /**
-   * True when every item of the input answers an action an unattended run held and nobody has
-   * answered yet. Such a turn runs only those actions, so the caller ends it without a model call.
+   * True when every item of the input turns down an action an unattended run held and nobody has
+   * answered yet. Such a turn has nothing to run, so the caller ends it without a model call.
+   * An approved held action is not one of these: its result goes back to the model, which continues.
    */
-  async answersOnlyHeldActions(input: {
+  async answersOnlyDeniedHeldActions(input: {
     previous_turn_id: string | undefined;
     input: readonly TurnInputItem[] | undefined;
   }): Promise<boolean> {
     const items = input.input ?? [];
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
+      return false;
+    }
+    if (!items.every(item => item.approval.status === 'deny')) {
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });

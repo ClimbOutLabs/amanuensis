@@ -454,13 +454,22 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
       .mockRejectedValue(new PreviousTurnRunningError(TIP_TURN_ID));
   }
 
-  it('ends the turn after the tool step, so approving runs just that call and asks the model nothing', async () => {
+  it('ends the turn with no model call when the owner turns the held action down', async () => {
+    const app = await buildApp(undefined, { heldAction: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+  });
+
+  it('lets the model continue after the owner approves, so its answer uses the result', async () => {
     const app = await buildApp(undefined, { heldAction: true });
     const createTurn = captureCreateTurnOptions();
 
     await postTurn(app, approvalInput({ status: 'allow' }));
 
-    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: false }));
   });
 
   it('does not end the turn early for an approval that is not about a held action', async () => {
