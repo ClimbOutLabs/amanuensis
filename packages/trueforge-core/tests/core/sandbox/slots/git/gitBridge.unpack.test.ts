@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
 import { gitLocalImportHardeningConfigEntries } from '../../../../../src/core/permissions/gitHardening';
+import type { GitRemotePrecondition } from '../../../../../src/core/sandbox/gitRemoteObservation';
 import type { HostAuthenticatedGitPlan } from '../../../../../src/core/sandbox/hostAuthenticatedGit';
 import type { ExecResult } from '../../../../../src/core/sandbox/provider/Provider';
 import { GitBridge, type BridgeGuest } from '../../../../../src/core/sandbox/slots/git/gitBridge';
@@ -12,6 +13,11 @@ import { makeSilentLogger } from '../../../harnessMocks';
 import { LocalGuest } from './localGuest';
 
 const URL = 'https://github.com/acme/widgets';
+const TOKEN = 'fake-host-token-1234567890';
+const APPROVED_ORIGIN: GitRemotePrecondition = {
+  remotes: [{ name: 'origin', url: `${URL}.git` }],
+  summary: `This uses origin, which is ${URL}.git. Your GitHub sign-in is only offered to this repository.`,
+};
 const TAR_BINARY = '/usr/bin/tar';
 const IDENTITY = {
   GIT_AUTHOR_NAME: 'Test',
@@ -87,7 +93,11 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     });
   }
 
-  function input(bridge: GitBridge, command: string, sandbox: BridgeGuest = guest) {
+  function input(
+    bridge: GitBridge,
+    command: string,
+    options: { sandbox?: BridgeGuest; cwd?: string; approved?: boolean } = {},
+  ) {
     const plan: HostAuthenticatedGitPlan | undefined = bridge.plan(command);
     if (plan === undefined) {
       throw new Error(`not a bridged command: ${command}`);
@@ -95,11 +105,11 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     return {
       command,
       plan,
-      token: null,
-      approvedRemotes: undefined,
-      guest: sandbox,
+      token: options.approved === true ? TOKEN : null,
+      approvedRemotes: options.approved === true ? APPROVED_ORIGIN : undefined,
+      guest: options.sandbox ?? guest,
       sandboxId: 's1-test',
-      cwd: '/workspace',
+      cwd: options.cwd ?? '/workspace',
       timeoutSeconds: 60,
       signal: undefined,
     };
@@ -126,7 +136,7 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
     };
     const bridge = bridgeWith();
 
-    const result = await bridge.run(input(bridge, `git clone ${URL} widgets`, recording));
+    const result = await bridge.run(input(bridge, `git clone ${URL} widgets`, { sandbox: recording }));
 
     expect(result).toMatchObject({ success: true, response: { exitCode: 0 } });
     expect(await readFile(guest.path('widgets/README.md'), 'utf8')).toBe('hello\n');
@@ -168,12 +178,12 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
       [
         'the files cannot take the owner',
         'tar: repo.git/HEAD: Cannot change ownership to uid 1234, gid 1234: Invalid argument\n',
-        'fatal: the sandbox could not save the repository files. Run the clone again.',
+        'fatal: the sandbox could not save the repository files. Restart Aman, then run git clone again.',
       ],
       [
         'anything else',
         'tar: This does not look like a tar archive\n',
-        'fatal: the sandbox could not unpack the repository. Run the clone again.',
+        'fatal: the sandbox could not unpack the repository. Restart Aman, then run git clone again.',
       ],
     ])('%s', async (_case, stderr, message) => {
       const logger = makeSilentLogger();
@@ -181,11 +191,40 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
       const bridge = bridgeWith({ logger });
       const outcome: ExecResult = { success: true, response: { exitCode: 2, result: stderr } };
 
-      const result = await bridge.run(input(bridge, `git clone ${URL} widgets`, failingUnpack(outcome)));
+      const result = await bridge.run(input(bridge, `git clone ${URL} widgets`, { sandbox: failingUnpack(outcome) }));
 
       expect(result).toEqual({ success: true, response: { exitCode: 1, result: message } });
       // The raw text from tar is kept for the logs, not shown to the person.
       expect(warn).toHaveBeenCalledWith('git bridge could not unpack a repository in the sandbox', { stderr });
+    });
+
+    test('a pull that cannot unpack names the pull, not the clone', async () => {
+      const bridge = bridgeWith();
+      expect(await bridge.run(input(bridge, `git clone ${URL} widgets`))).toMatchObject({
+        success: true,
+        response: { exitCode: 0 },
+      });
+      const outcome: ExecResult = {
+        success: true,
+        response: { exitCode: 2, result: 'tar: repo.tar: Cannot open: No space left on device\n' },
+      };
+
+      const result = await bridge.run(
+        input(bridge, 'git pull --ff-only', {
+          sandbox: failingUnpack(outcome),
+          cwd: '/workspace/widgets',
+          approved: true,
+        }),
+      );
+
+      expect(result).toEqual({
+        success: true,
+        response: {
+          exitCode: 1,
+          result:
+            'fatal: the sandbox ran out of space for this repository. Free some space in the sandbox or start a new chat, then run git pull again.',
+        },
+      });
     });
   });
 });

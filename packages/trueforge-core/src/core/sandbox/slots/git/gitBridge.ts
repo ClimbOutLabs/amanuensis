@@ -114,14 +114,19 @@ function failed(output: string): ExecResult {
 }
 
 /** One plain sentence for why the sandbox could not unpack; tar's own words are logged, never shown. */
-function unpackFailure(stderr: string): string {
-  if (/No space left on device|File too large|Disk quota exceeded/u.test(stderr)) {
-    return 'fatal: the sandbox ran out of space for this repository. Try a shallow clone: git clone --depth 1 <url>.';
+function unpackFailure(input: { stderr: string; subcommand: string }): string {
+  const again = `run git ${input.subcommand} again`;
+  if (/No space left on device|File too large|Disk quota exceeded/u.test(input.stderr)) {
+    return input.subcommand === 'clone'
+      ? 'fatal: the sandbox ran out of space for this repository. Try a shallow clone: git clone --depth 1 <url>.'
+      : `fatal: the sandbox ran out of space for this repository. Free some space in the sandbox or start a new chat, then ${again}.`;
   }
-  if (/Operation not permitted|Permission denied|Invalid argument|Cannot change (?:ownership|mode)/u.test(stderr)) {
-    return 'fatal: the sandbox could not save the repository files. Run the clone again.';
+  if (
+    /Operation not permitted|Permission denied|Invalid argument|Cannot change (?:ownership|mode)/u.test(input.stderr)
+  ) {
+    return `fatal: the sandbox could not save the repository files. Restart Aman, then ${again}.`;
   }
-  return 'fatal: the sandbox could not unpack the repository. Run the clone again.';
+  return `fatal: the sandbox could not unpack the repository. Restart Aman, then ${again}.`;
 }
 
 function hostFailure(stderr: string): string {
@@ -388,7 +393,7 @@ export class GitBridge {
       if (!unpacked.success || unpacked.response.exitCode !== 0) {
         const stderr = unpacked.success ? unpacked.response.result : unpacked.error;
         this.options.logger.warn('git bridge could not unpack a repository in the sandbox', { stderr });
-        throw new Refusal(unpackFailure(stderr));
+        throw new Refusal(unpackFailure({ stderr, subcommand: input.input.plan.subcommand }));
       }
       // Every spelling of the repository's address is mapped, so the remote resolves however its URL is written.
       const address = `https://github.com/${input.slug}`;
