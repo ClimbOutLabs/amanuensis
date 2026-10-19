@@ -95,7 +95,7 @@ function describeSchema(schema: ToolParameterSchema): string {
   if (union !== undefined && union.length > 0) {
     return union.map(member => describeSchema(member)).join(' or ');
   }
-  if (schema.enum !== undefined && schema.enum.length === 0) {
+  if (schema.enum?.length === 0) {
     return 'left out (this tool does not take a value here)';
   }
   if (schema.enum !== undefined && schema.enum.length > 0) {
