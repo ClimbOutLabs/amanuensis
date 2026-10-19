@@ -954,8 +954,7 @@ describe('ToolCallContainer: held search request', () => {
   function renderHeldSearch(call: Record<string, unknown>, status?: ThreadMessageLike['status']) {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
-        server: 'finder',
-        query: 'how do I rotate ws••••••3x safely',
+        summary: 'how do I rotate ws••••••3x safely',
         why: "it contains one of this computer's keys",
       }),
       plain_why: null,

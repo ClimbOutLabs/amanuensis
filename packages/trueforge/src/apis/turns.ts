@@ -2033,8 +2033,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
-    // Answering actions a scheduled run held runs just those calls; the chat is not asked anything new.
-    const stopAfterToolResponse = await session.answersOnlyHeldActions({
+    // Turning down held actions ends the turn with no model call. Approving one runs the call,
+    // and the model continues with its result.
+    const stopAfterToolResponse = await session.answersOnlyDeniedHeldActions({
       previous_turn_id: body.previous_turn_id,
       input: body.input,
     });

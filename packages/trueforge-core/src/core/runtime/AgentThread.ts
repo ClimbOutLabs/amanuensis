@@ -119,6 +119,7 @@ import {
   HELD_DENIED_NOTE,
   HELD_REASON_CODE,
   HeldActionRefusedError,
+  heldActionsNote,
   holdApprovalCalls,
   type NotSavedReason,
 } from '../permissions/heldActions';
@@ -1425,6 +1426,8 @@ export class AgentThread {
   private heldReplayOutput: ModelMessageEvent | undefined;
   // Calls an unattended turn could not save for the owner, so the app can say so. Lives for one turn.
   private readonly notSavedCalls = new Map<string, NotSavedReason>();
+  // Card sentences of the actions an unattended turn held, named in its last message. Lives for one turn.
+  private readonly heldSentences: string[] = [];
   // Set when send() ran init() early to re-check held actions; execute() reports it with its own init.
   private earlyInit: { initializationInfo: MCPServerInitInfo[]; authRequirementInfo: MCPAuthRequired[] } | undefined;
   // Staged documents awaiting extraction in the turn loop. Set by send() when processAgentUserInput
@@ -3170,6 +3173,7 @@ export class AgentThread {
       }
       for (const call of assistantMessage.tool_calls ?? []) {
         if (call.tool_info.held_for_owner !== undefined && call.tool_info.held_for_owner.duplicate !== true) {
+          this.heldSentences.push(call.tool_info.tier3_card?.plain_what ?? 'an action');
           await this.auditHeld({ info: call.tool_info, outcome: 'logged', note: 'Held for the owner' });
         }
       }
@@ -3193,6 +3197,17 @@ export class AgentThread {
       emptyTerminalFallback !== undefined &&
       !hasToolCalls(assistantMessage) &&
       assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0;
+    // A run that ends with actions waiting for its owner says so in its own last message.
+    if (
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !emptyTerminalFailure &&
+      !shouldNudgeForEmptyReasoning &&
+      this.heldSentences.length > 0
+    ) {
+      const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
+      assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
+    }
     const agentAssistantMessage = buildModelMessageEvent({
       // The terminal model event is authoritative. By this point the complete tool
       // arguments are available, so publish the same resolved, server-classified
