@@ -45,6 +45,16 @@ const TOOLS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_events',
+      parameters: {
+        type: 'object',
+        properties: { limit: { type: 'integer' } },
+      },
+    },
+  },
 ];
 
 function call(id: string, name: string, args: Record<string, unknown> | string): RawToolCall {
@@ -74,6 +84,23 @@ describe('guardModelReply', () => {
   it('flags a call whose arguments cannot be repaired, keyed by its id', () => {
     const outcome = guard([call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '[' })]);
     expect(outcome.invalidCalls.get('a')).toContain('full_content should be true or false');
+  });
+
+  it('treats arguments streamed as empty text as an empty object when the tool allows one', () => {
+    // A provider that streams no argument text sends the call with '' for its arguments; the
+    // executor reads that as {}, so the guard must not refuse it as incomplete.
+    const outcome = guard([call('a', 'list_events', '')]);
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(outcome.message.tool_calls).toHaveLength(1);
+    expect(outcome.tooManyCalls).toBe(false);
+  });
+
+  it('sends an empty-arguments call with a required field through the plain argument message instead', () => {
+    const outcome = guard([call('a', 'create_event', '')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('title should be text');
+    expect(message).toContain('was not sent');
+    expect(message).not.toContain('not complete');
   });
 
   it('leaves calls to tools with no offered schema untouched', () => {

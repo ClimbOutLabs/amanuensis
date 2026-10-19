@@ -28,7 +28,7 @@ export const MAX_TOOL_CALLS_PER_REPLY = 8;
 export const TOO_MANY_TOOL_CALLS_MESSAGE =
   'The model asked for too many tool calls at once, so Aman stopped. Try again.';
 
-export interface ModelReplyGuardOutcome {
+interface ModelReplyGuardOutcome {
   /** The reply with arguments repaired and exact duplicate calls removed. */
   message: RawAssistantMessage;
   /** Calls that must not run, by call id, each with the plain message the model gets instead. */
@@ -42,8 +42,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseArguments(call: RawToolCall): Record<string, unknown> | undefined {
+  // A provider that streams no argument text sends the call with empty text for its
+  // arguments, which the executor reads as an empty object; read it the same way here, so
+  // the schema check, not an "incomplete" refusal, decides what happens to such a call.
+  const text = call.function.arguments === '' ? '{}' : call.function.arguments;
   try {
-    const parsed: unknown = JSON.parse(call.function.arguments);
+    const parsed: unknown = JSON.parse(text);
     return isRecord(parsed) ? parsed : undefined;
   } catch {
     return undefined;

@@ -70,6 +70,12 @@ function makeToolSet(approvalRequired = false) {
         },
         preload: true,
       },
+      {
+        name: 'list_events',
+        description: 'List events',
+        inputSchema: { type: 'object', properties: {} },
+        preload: true,
+      },
     ],
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
@@ -312,6 +318,41 @@ describe('argument checking', () => {
     // Nothing the person sees carries a provider's raw validation text.
     expect(JSON.stringify(events)).not.toContain('invalid_type');
     expect(JSON.stringify(events)).not.toContain('anyOf');
+  });
+
+  it('runs a call whose arguments streamed as empty text when the tool needs none', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'list-1', name: 'list_events', args: '' }] });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(callToolNames(toolSet)).toEqual(['list_events']);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('refuses empty-text arguments with the plain argument message when a field is required', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'fetch-1', name: 'web_fetch', args: '' }] });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    const results = toolResults(thread);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.content).toContain('urls should be a list (this one is required)');
+    expect(results[0]?.content).not.toContain('not complete');
   });
 
   it('never runs a call whose arguments are half-formed JSON', async () => {
