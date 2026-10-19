@@ -50,6 +50,7 @@ const CONTENT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  nameLeftOff: false,
 };
 
 describe('Gmail write classification', () => {
@@ -179,16 +180,28 @@ describe('Gmail write classification', () => {
     ]);
   });
 
-  it('shows the real address when a name looks like another address', async () => {
-    // The display name is quoted in the header, so the address is the one in the angle brackets.
+  it('leaves off a name that looks like an address, shows the real address, and says so on the card', async () => {
+    // The display name is quoted in the header and looks like an address, so only the address in brackets is kept.
     const spoofed = mailboxOf('"boss@example.com" <other@evil.example>');
-    expect(spoofed).toEqual({ name: 'boss@example.com', address: 'other@evil.example' });
+    expect(spoofed).toEqual({ name: '', address: 'other@evil.example' });
     const decision = await classifyTier(
-      gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, to: [spoofed], cc: [], bcc: [] } }),
+      gmail(
+        'send_draft',
+        { draft_id: 'd1' },
+        { mail_draft: { ...CONTENT, to: [spoofed], cc: [], bcc: [], nameLeftOff: true } },
+      ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toContain('to boss@example.com (other@evil.example)');
-    expect(decision.card?.email?.to).toEqual([{ name: 'boss@example.com', address: 'other@evil.example' }]);
+    expect(decision.card?.plain_what).toContain('to other@evil.example.');
+    expect(decision.card?.plain_what).toContain(
+      'The name was left off this address because it looked like an address.',
+    );
+    expect(decision.card?.email?.to).toEqual([{ name: '', address: 'other@evil.example' }]);
+  });
+
+  it('shows no name-left-off line when every name was kept', async () => {
+    const decision = await classifyTier(gmail('send_draft', { draft_id: 'd1' }, { mail_draft: CONTENT }), makeCtx());
+    expect(decision.card?.plain_what).not.toContain('The name was left off');
   });
 
   it('escapes a recipient name the same way as the rest of the card', async () => {

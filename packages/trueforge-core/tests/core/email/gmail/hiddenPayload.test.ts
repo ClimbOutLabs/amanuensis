@@ -493,7 +493,7 @@ describe('every recipient is a bare address or Name <address>, with no comments'
     ['a bare address', 'grace@example.com'],
     ['a list of bare addresses', 'grace@example.com, lin@example.com'],
     ['a named address', 'Grace Lima <grace@example.com>'],
-    ['a quoted name with a comma', '"Costa, Rui" <rui@example.com>'],
+    ['a quoted name with a comma and parentheses', '"Costa, Rui (Lisbon)" <rui@example.com>'],
     ['a mixed list', 'Grace <grace@example.com>, lin@example.com, "Sam, Jr." <sam@example.com>'],
     ['a non-ASCII name', 'José Müller <jose@example.com>'],
   ])('allows %s', (_name, to) => {

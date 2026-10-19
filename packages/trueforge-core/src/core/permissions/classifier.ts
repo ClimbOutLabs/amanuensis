@@ -1550,6 +1550,9 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Said on a card when a recipient's name was left off because it looked like an address. */
+const NAME_LEFT_OFF_LINE = ' The name was left off this address because it looked like an address.';
+
 /** Most characters of subject the card shows inside its sentence. */
 const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
 
@@ -1631,7 +1634,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       ? `Send ${subject} from your Gmail ${recipientsLine}.`
       : kind === 'change'
         ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) + threadLine;
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) +
+    threadLine +
+    (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),

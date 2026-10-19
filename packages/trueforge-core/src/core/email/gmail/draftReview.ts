@@ -19,6 +19,8 @@ export interface ReviewableDraft {
   references: string;
   /** The display name the message is sent under, which recipients see; empty when there is none. */
   fromName: string;
+  /** Whether a recipient's name was left off because it looked like an address, so the card says so. */
+  nameLeftOff: boolean;
 }
 
 /** Hash of everything a send delivers. */

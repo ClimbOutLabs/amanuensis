@@ -46,7 +46,7 @@ describe('message reading', () => {
       mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@evil.example>'),
     ).toEqual([
       { name: 'Maya López', address: 'maya@example.com' },
-      { name: 'boss@example.com', address: 'other@evil.example' },
+      { name: '', address: 'other@evil.example' },
     ]);
   });
 });
@@ -171,11 +171,18 @@ describe('result shapes', () => {
 });
 
 describe('mailbox headers that could read two ways', () => {
-  it('refuses a quoted display name that looks like an address, as it refuses one unquoted', () => {
-    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(false);
-    expect(addressListIsPlain('"Reviewer (ops)" <ops@example.org>')).toBe(false);
+  it('keeps the header and leaves off a quoted display name that looks like an address', () => {
+    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(true);
+    expect(mailboxesOf('"boss@example.com" <other@example.org>')).toEqual([{ name: '', address: 'other@example.org' }]);
+    expect(addressListIsPlain('"Jane Doe (Acme)" <jane@example.com>')).toBe(true);
+    expect(mailboxesOf('"Jane Doe (Acme)" <jane@example.com>')).toEqual([{ name: '', address: 'jane@example.com' }]);
+    expect(mailboxesOf('"Grace Lee" <grace@example.com>')).toEqual([
+      { name: 'Grace Lee', address: 'grace@example.com' },
+    ]);
+  });
+
+  it('refuses an unquoted display name that looks like an address', () => {
     expect(addressListIsPlain('boss@example.com <other@example.org>')).toBe(false);
-    expect(addressListIsPlain('"Grace Lee" <grace@example.com>')).toBe(true);
   });
 
   it('shows a part with more than one angle bracket whole, as the address, and never splits it', () => {

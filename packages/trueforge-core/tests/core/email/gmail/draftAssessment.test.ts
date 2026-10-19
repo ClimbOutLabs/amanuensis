@@ -45,6 +45,7 @@ describe('assessDraft', () => {
         inReplyTo: '<a@mail.example.com>',
         references: '<a@mail.example.com>',
         fromName: 'Ada Lovelace',
+        nameLeftOff: false,
       },
     });
   });

@@ -3,7 +3,7 @@ import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
 import type { Tier3Mailbox } from '../../permissions/tierMailbox';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
-import { mailboxOf, MAX_ANGLE_ADDRESS_CHARS } from './mailbox';
+import { mailboxOf, MAX_ANGLE_ADDRESS_CHARS, nameLeftOff } from './mailbox';
 import {
   headerOf,
   labelIdsOf,
@@ -189,7 +189,7 @@ function isPlainMailbox(part: string): boolean {
   }
   const name = value.slice(0, open).trim();
   const quoted = name.length >= 2 && name.startsWith('"') && name.endsWith('"');
-  return quoted ? !/["\\\r\n@()[\]]/.test(name.slice(1, -1)) : PLAIN_NAME.test(name);
+  return quoted ? !/["\\\r\n]/.test(name.slice(1, -1)) : PLAIN_NAME.test(name);
 }
 
 /**
@@ -206,6 +206,14 @@ export function mailboxesIn(input: { message: GmailMessage; name: string }): Tie
   return input.message.payload === undefined
     ? []
     : mailboxesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+}
+
+/** Whether a header left a display name off any recipient, because the name looked like an address. */
+export function nameLeftOffIn(input: { message: GmailMessage; name: string }): boolean {
+  return (
+    input.message.payload !== undefined &&
+    addressParts(rawHeaderOf({ part: input.message.payload, name: input.name })).parts.some(part => nameLeftOff(part))
+  );
 }
 
 /** Every address of a header, uncapped. */

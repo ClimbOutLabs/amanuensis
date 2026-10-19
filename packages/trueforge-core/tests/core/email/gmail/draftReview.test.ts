@@ -13,6 +13,7 @@ const DRAFT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  nameLeftOff: false,
 };
 
 describe('hashDraft', () => {

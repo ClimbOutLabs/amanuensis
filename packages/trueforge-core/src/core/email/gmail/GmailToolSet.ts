@@ -20,7 +20,7 @@ import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
 import { GmailApi, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
-import { mailboxOf } from './mailbox';
+import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
 import { answeredMessageOf, checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
@@ -439,6 +439,7 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
+      nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
     };
     if (answered === undefined && existing !== undefined) {
       // Headers kept from a saved draft are not the model's, but anyone may have edited that draft in Gmail.
