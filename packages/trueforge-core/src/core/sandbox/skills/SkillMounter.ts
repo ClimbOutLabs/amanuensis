@@ -143,11 +143,15 @@ export class SkillMounter implements ISkillMounter {
     if (this.skills.length === 0) {
       return;
     }
-    builder.addContent(SKILLS_PREAMBLE);
 
     // Separate available and unavailable skills
     const available = this.skills.filter(skill => !unavailableSkills?.has(skill.name));
     const unavailable = this.skills.filter(skill => unavailableSkills?.has(skill.name));
+
+    // The preamble describes mounted skills; with none mounted it would contradict the unavailable list.
+    if (available.length > 0) {
+      builder.addContent(SKILLS_PREAMBLE);
+    }
 
     // Render available skills first
     for (const skill of available) {
