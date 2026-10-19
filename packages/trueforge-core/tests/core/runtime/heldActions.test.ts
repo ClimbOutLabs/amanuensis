@@ -240,7 +240,12 @@ describe('an unattended run', () => {
     expect(h.callTool).not.toHaveBeenCalled();
     expect(brief.result.required_actions).toEqual([]);
     expect(brief.result.root_agent_error).toBeUndefined();
-    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+    // The run's last message names what it held, so the owner knows to look at the list.
+    expect(brief.result.output).toMatchObject({
+      content: expect.stringContaining(
+        "All done.\n\nI need your OK for one thing: Aman doesn't know this tool yet: send_note. Approve it on your Needs your OK list and I'll add it here.",
+      ),
+    });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
     expect(h.audit).toEqual([
       expect.objectContaining({ outcome: 'logged', description: expect.stringContaining('Held for the owner') }),
@@ -327,7 +332,7 @@ describe('an unattended run', () => {
     );
     expect(listed).toEqual(['call-send']);
     expect(brief.result.root_agent_error).toBeUndefined();
-    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+    expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
     expect(h.audit).toHaveLength(1);
     // The repeat is not something the owner can answer.
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -735,7 +740,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     expect(listed).toHaveLength(15);
     expect(h.callTool).not.toHaveBeenCalled();
     expect(brief.result.root_agent_error).toBeUndefined();
-    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+    expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
   });
 
   it('still stops the run when more than 8 calls would run at once', async () => {
