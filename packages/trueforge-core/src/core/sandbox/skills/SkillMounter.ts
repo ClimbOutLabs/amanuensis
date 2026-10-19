@@ -4,7 +4,7 @@ import { SKILL_DOWNLOAD_TIMEOUT_SECONDS, buildWriteAndRunScriptCommand } from '.
 import { sandboxScripts } from '../sandboxScripts.gen';
 import { SKILLS_PREAMBLE, getSkillPath, renderSkillPromptBody, type SkillPromptMode } from './constants';
 import type { ISkillMounter } from './ISkillMounter';
-import { copySkillsIntoSandbox, type SkillCopyDeps, type SkillCopyFailure } from './slotSkillCopy';
+import { copySkillsIntoSandbox, type SkillCopyDeps, type SkillCopyResult, type StagedSkill } from './slotSkillCopy';
 
 // A git-sourced skill materialized by a sparse clone in the sandbox (git_downloader.py). By
 // default only name/description/path are advertised in the prompt and their SKILL.md is read
@@ -49,13 +49,6 @@ export type Skill = GitSkill | RegistrySkill;
 export const REQUESTED_SKILLS_FILE_NAME = '.tfy-requested-skills.json';
 // Written by the host for an offline sandbox, so the in-sandbox downloader sees every skill as installed.
 const DOWNLOADER_STATE_FILE_NAME = '.tfy-skill-downloader-state.json';
-
-export interface OfflineSkillInit {
-  /** Undefined when no skill could be copied, so nothing skills-related is sent. */
-  init: SandboxInit | undefined;
-  /** Skill name to why it was left out. */
-  failed: ReadonlyMap<string, SkillCopyFailure>;
-}
 
 type RequestedGitSkill = Pick<GitSkill, 'type' | 'name' | 'url' | 'path' | 'ref'>;
 
@@ -207,57 +200,50 @@ export class SkillMounter implements ISkillMounter {
     };
   }
 
+  /** Fetches and checks each skill on the host, before anything is sent to a sandbox with no network. */
+  planOfflineSkills(paths: { skillsDir: string }, deps: SkillCopyDeps = {}): Promise<SkillCopyResult> {
+    return copySkillsIntoSandbox({ skills: this.skills, skillsDir: paths.skillsDir, deps });
+  }
+
   /**
-   * Copies the skills into a sandbox with no network. The host fetches each one and writes the
-   * downloader's requested and state files, so the in-sandbox run only confirms them and fetches nothing.
+   * The downloader's requested and state files for the skills that were staged in full. With them the
+   * in-sandbox run only confirms the skills and fetches nothing. Undefined when no skill is accepted.
    */
-  async getOfflineSandboxInit(
+  offlineSkillsInit(
     paths: { skillsDir: string; skillDownloaderPath: string },
-    deps: SkillCopyDeps = {},
-  ): Promise<OfflineSkillInit> {
-    if (this.skills.length === 0) {
-      return { init: undefined, failed: new Map() };
+    accepted: readonly StagedSkill[],
+  ): SandboxInit | undefined {
+    if (accepted.length === 0) {
+      return undefined;
     }
-    const copy = await copySkillsIntoSandbox({ skills: this.skills, skillsDir: paths.skillsDir, deps });
-    if (copy.copied.length === 0) {
-      return { init: undefined, failed: copy.failed };
-    }
-    const requested = copy.copied.map(({ skill, objectId }) =>
+    const requested = accepted.map(({ skill, objectId }) =>
       toRequestedSkill(skill.type === 'git' && objectId !== null ? { ...skill, ref: objectId } : skill),
     );
     const state = {
-      downloaded_git_skills: copy.copied.flatMap(({ skill, objectId }) =>
+      downloaded_git_skills: accepted.flatMap(({ skill, objectId }) =>
         skill.type === 'git' && objectId !== null ? [{ name: skill.name, ref: objectId, path: skill.path }] : [],
       ),
-      downloaded_registry_skills: copy.copied.flatMap(({ skill }) =>
+      downloaded_registry_skills: accepted.flatMap(({ skill }) =>
         skill.type === 'registry' ? [{ fqn: skill.fqn, name: skill.name }] : [],
       ),
     };
-    const command = [
-      ...copy.unpackCommands,
-      buildWriteAndRunScriptCommand({
+    return {
+      command: buildWriteAndRunScriptCommand({
         scriptPath: paths.skillDownloaderPath,
         scriptContent: sandboxScripts.skillDownloader,
       }),
-    ].join(' && ');
-    return {
-      init: {
-        command,
-        env: { TFY_SKILLS_DIR: paths.skillsDir },
-        timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
-        uploads: [
-          {
-            remotePath: `${paths.skillsDir}/${REQUESTED_SKILLS_FILE_NAME}`,
-            content: Buffer.from(JSON.stringify({ skills: requested }), 'utf-8'),
-          },
-          {
-            remotePath: `${paths.skillsDir}/${DOWNLOADER_STATE_FILE_NAME}`,
-            content: Buffer.from(JSON.stringify(state), 'utf-8'),
-          },
-          ...copy.uploads,
-        ],
-      },
-      failed: copy.failed,
+      env: { TFY_SKILLS_DIR: paths.skillsDir },
+      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      uploads: [
+        {
+          remotePath: `${paths.skillsDir}/${REQUESTED_SKILLS_FILE_NAME}`,
+          content: Buffer.from(JSON.stringify({ skills: requested }), 'utf-8'),
+        },
+        {
+          remotePath: `${paths.skillsDir}/${DOWNLOADER_STATE_FILE_NAME}`,
+          content: Buffer.from(JSON.stringify(state), 'utf-8'),
+        },
+      ],
     };
   }
 

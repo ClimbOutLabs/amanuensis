@@ -108,24 +108,23 @@ describe('SandboxToolCallCard', () => {
     expect(screen.queryByText('hidden command')).not.toBeInTheDocument();
     expect(screen.queryByText('hidden result')).not.toBeInTheDocument();
   });
-  it('shows skill notices as plain lines in the default view, without opening the code view', () => {
+  it('shows skill notices while the card is collapsed, outside the body', () => {
     render(
       <SandboxToolCallCard
         name="run_command"
         status="success"
-        expanded
+        expanded={false}
         onToggle={vi.fn()}
         hasContent
         command="ls"
         notices={["The skill echo couldn't be loaded, so Aman is working without it."]}
         resultText="ok"
-        viewMode="terminal"
       />,
     );
 
     expect(screen.getByTestId('sandbox-notices')).toHaveTextContent(
       "The skill echo couldn't be loaded, so Aman is working without it.",
     );
-    expect(screen.queryByTestId('sandbox-json')).not.toBeInTheDocument();
+    expect(screen.queryByText('ok')).not.toBeInTheDocument();
   });
 });

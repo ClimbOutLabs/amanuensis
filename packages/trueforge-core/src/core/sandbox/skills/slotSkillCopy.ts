@@ -6,9 +6,9 @@ import { shellEscape } from '../provider/Provider';
 import { execFileRunner, type HostCommandRunner } from '../slots/git/hostCommand';
 import type { GitSkill, Skill } from './SkillMounter';
 
-// A sandbox with no network cannot fetch skills, so the host fetches them and copies the files in.
-// Registry tarballs are checked here, uploaded, and unpacked inside the sandbox; git skills are
-// sparse-cloned here and their files uploaded one by one.
+// A sandbox with no network cannot fetch skills, so the host fetches and checks them, then copies
+// each one into the sandbox on its own. Each skill is staged in its own folder and moved into place
+// by its own step, so a skill that fails leaves only itself out.
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const GIT_TIMEOUT_MS = 300_000;
@@ -20,28 +20,44 @@ const MAX_TOOL_OUTPUT_BYTES = 8 * 1024 * 1024;
 const HOST_TOOL_LIMITS = { addressSpaceBytes: 8 * 1024 * 1024 * 1024, cpuSeconds: 300, fileBytes: 1024 * 1024 * 1024 };
 const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
 const TAR_BINARY = '/usr/bin/tar';
+const STAGING_DIR_NAME = '.tfy-staging';
 const OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u;
 const REF_PATTERN = /^[A-Za-z0-9._/-]+$/u;
 
 /** What the model sees for a skill that could not be copied. The full error is not shown. */
 export const SKILL_COPY_FAILED_REASON = "couldn't be copied into the sandbox";
 
-/** A fetch from the network failed. Any other failure means the skill's own files are the problem. */
+/** The network failed or answered with an error. */
 export class SkillDownloadError extends Error {}
 
-/** Why a skill was left out: the download failed, or its files are bad. */
-export type SkillCopyCause = 'download' | 'damaged';
+/** The git repository has no such branch, tag or commit. */
+export class SkillMissingVersionError extends Error {}
+
+/** The skill is bigger than the size cap. */
+export class SkillTooLargeError extends Error {}
+
+export type SkillCopyCause = 'download' | 'missing_version' | 'too_large' | 'damaged';
 
 export interface SkillCopyFailure {
   cause: SkillCopyCause;
 }
 
-/** The one plain line a person sees when a skill is left out. */
+/** The one plain line a person sees when a skill is left out. Each cause gives one thing to do. */
 export function skillCopyFailedNotice(input: { name: string; cause: SkillCopyCause }): string {
-  if (input.cause === 'download') {
-    return `The skill ${input.name} couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+  switch (input.cause) {
+    case 'download':
+      return `The skill ${input.name} couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+    case 'missing_version':
+      return `The skill ${input.name} couldn't be loaded because the version you picked wasn't found, so Aman is working without it. Pick another version of the skill, then start a new chat.`;
+    case 'too_large':
+      return `The skill ${input.name} is larger than 100 MB, so Aman is working without it. Remove some files from it, then start a new chat.`;
+    case 'damaged':
+      return `The skill ${input.name} couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.`;
+    default: {
+      const unreachable: never = input.cause;
+      throw new Error(`unexpected skill copy cause: ${String(unreachable)}`);
+    }
   }
-  return `The skill ${input.name} couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.`;
 }
 
 export interface SkillCopyDeps {
@@ -52,18 +68,19 @@ export interface SkillCopyDeps {
   signal?: AbortSignal | undefined;
 }
 
-export interface CopiedSkill {
+export interface StagedSkill {
+  name: string;
   skill: Skill;
   /** The commit a git skill was fetched at; null for registry skills. */
   objectId: string | null;
+  /** Files to upload into the skill's staging folder before its command runs. */
+  uploads: readonly SandboxInitUpload[];
+  /** The one step that moves the staged skill into place. Its failure removes only this skill's staging. */
+  command: string;
 }
 
 export interface SkillCopyResult {
-  copied: readonly CopiedSkill[];
-  /** Files to upload before the unpack commands run. */
-  uploads: readonly SandboxInitUpload[];
-  /** Shell steps that unpack registry tarballs inside the sandbox. */
-  unpackCommands: readonly string[];
+  staged: readonly StagedSkill[];
   /** Skill name to why it was left out. */
   failed: ReadonlyMap<string, SkillCopyFailure>;
 }
@@ -93,7 +110,7 @@ export async function fetchRegistryArchive(input: {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     await response.body?.cancel();
-    throw new Error('skill archive is too large');
+    throw new SkillTooLargeError('skill archive is too large');
   }
   const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response.body?.getReader();
   if (reader === undefined) {
@@ -114,7 +131,7 @@ export async function fetchRegistryArchive(input: {
     total += next.value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
-      throw new Error('skill archive is too large');
+      throw new SkillTooLargeError('skill archive is too large');
     }
     chunks.push(next.value);
   }
@@ -185,29 +202,9 @@ async function assertSafeArchive(input: {
         throw new Error('archive holds a link or a special file');
       }
     }
-    // Tar unpacks in order, so a path under a file, or a path listed twice, cannot be unpacked.
-    const seen = new Set<string>();
-    const files = new Set<string>();
-    for (const [index, raw] of names.entries()) {
-      const name = raw.replace(/^\.\//u, '').replace(/\/+$/u, '');
-      if (name === '' || name === '.') {
-        continue;
-      }
-      const parts = name.split('/');
-      if (name.startsWith('/') || parts.includes('..')) {
+    for (const name of names) {
+      if (name.startsWith('/') || name.split('/').includes('..')) {
         throw new Error('archive path leaves the skill folder');
-      }
-      if (seen.has(name)) {
-        throw new Error('archive repeats a path');
-      }
-      for (let depth = 1; depth < parts.length; depth++) {
-        if (files.has(parts.slice(0, depth).join('/'))) {
-          throw new Error('archive puts a path under a file');
-        }
-      }
-      seen.add(name);
-      if (details[index]?.charAt(0) === '-') {
-        files.add(name);
       }
     }
   } finally {
@@ -256,7 +253,7 @@ async function readSkillFiles(input: { skillDir: string; repo: string; expectedD
       const content = await readFile(real);
       bytes += content.byteLength;
       if (bytes > MAX_SKILL_BYTES || files.length >= MAX_SKILL_FILES) {
-        throw new Error('skill is too large');
+        throw new SkillTooLargeError('skill is too large');
       }
       files.push({ relPath, content });
     }
@@ -275,7 +272,7 @@ function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string 
       return sha;
     }
   }
-  throw new Error('ref not found in the repository');
+  throw new SkillMissingVersionError('ref not found in the repository');
 }
 
 async function fetchGitSkill(input: {
@@ -327,6 +324,10 @@ async function fetchGitSkill(input: {
     const repoReal = await realpath(repo);
     const expectedDir = skill.path === '' ? repoReal : join(repoReal, skill.path);
     const files = await readSkillFiles({ skillDir: join(repo, skill.path), repo, expectedDir });
+    if (files.length === 0) {
+      // A folder with only a submodule, or nothing tracked, has no skill in it to load.
+      throw new Error('skill has no files');
+    }
     return { objectId, files };
   } finally {
     await rm(work, { recursive: true, force: true });
@@ -334,8 +335,8 @@ async function fetchGitSkill(input: {
 }
 
 /**
- * Fetches each skill on the host and lists what to copy into the sandbox. A skill that fails is
- * left out and reported; the others still copy. Aborts are rethrown.
+ * Fetches and checks each skill on the host. A skill that fails is left out and reported; the others
+ * are staged. Aborts are rethrown.
  */
 export async function copySkillsIntoSandbox(input: {
   skills: readonly Skill[];
@@ -347,9 +348,7 @@ export async function copySkillsIntoSandbox(input: {
   const fetchArchive =
     deps.fetchArchive ?? ((url: string, abort: AbortSignal) => fetchRegistryArchive({ url, signal: abort }));
   const host = deps.host ?? execFileRunner;
-  const copied: CopiedSkill[] = [];
-  const uploads: SandboxInitUpload[] = [];
-  const unpackCommands: string[] = [];
+  const staged: StagedSkill[] = [];
   const failed = new Map<string, SkillCopyFailure>();
 
   for (const skill of input.skills) {
@@ -357,39 +356,93 @@ export async function copySkillsIntoSandbox(input: {
       if (!isSafeSkillName(skill.name)) {
         throw new Error('unsafe skill name');
       }
+      const paths = stagingPaths({ skillsDir, name: skill.name });
       if (skill.type === 'registry') {
         const archive = await fetchArchive(skill.presignedUrl, signal);
         await assertSafeArchive({ archive, host, signal });
-        const archivePath = posix.join(skillsDir, `.tfy-archive-${skill.name}.tar`);
-        uploads.push({ remotePath: archivePath, content: archive });
-        unpackCommands.push(unpackRegistrySkillCommand({ dir: posix.join(skillsDir, skill.name), archivePath }));
-        copied.push({ skill, objectId: null });
+        staged.push({
+          name: skill.name,
+          skill,
+          objectId: null,
+          uploads: [{ remotePath: paths.archive, content: archive }],
+          command: registryStageCommand(paths),
+        });
         continue;
       }
       const fetched = await fetchGitSkill({ skill, host, signal });
-      for (const file of fetched.files) {
-        uploads.push({ remotePath: posix.join(skillsDir, skill.name, file.relPath), content: file.content });
-      }
-      copied.push({ skill, objectId: fetched.objectId });
+      staged.push({
+        name: skill.name,
+        skill,
+        objectId: fetched.objectId,
+        uploads: fetched.files.map(file => ({
+          remotePath: posix.join(paths.stage, file.relPath),
+          content: file.content,
+        })),
+        command: gitStageCommand(paths),
+      });
     } catch (error) {
       if (signal.aborted) {
         throw error;
       }
-      failed.set(skill.name, { cause: error instanceof SkillDownloadError ? 'download' : 'damaged' });
+      failed.set(skill.name, { cause: causeOf(error) });
     }
   }
-  return { copied, uploads, unpackCommands, failed };
+  return { staged, failed };
 }
 
-// The tarball's own layout is the skill directory, as the downloader would extract it. Ownership
-// from the host's tar entries is dropped: the sandbox's root user cannot take a host file owner.
-function unpackRegistrySkillCommand(input: { dir: string; archivePath: string }): string {
-  const dir = shellEscape(input.dir);
-  const archive = shellEscape(input.archivePath);
+function causeOf(error: unknown): SkillCopyCause {
+  if (error instanceof SkillDownloadError) {
+    return 'download';
+  }
+  if (error instanceof SkillMissingVersionError) {
+    return 'missing_version';
+  }
+  if (error instanceof SkillTooLargeError) {
+    return 'too_large';
+  }
+  return 'damaged';
+}
+
+interface StagingPaths {
+  /** Where the skill lives once it is in place. */
+  dir: string;
+  /** Where the skill's files are staged until the move. */
+  stage: string;
+  /** Where a registry tarball is uploaded before it is unpacked into the staging folder. */
+  archive: string;
+}
+
+function stagingPaths(input: { skillsDir: string; name: string }): StagingPaths {
+  const staging = posix.join(input.skillsDir, STAGING_DIR_NAME);
+  return {
+    dir: posix.join(input.skillsDir, input.name),
+    stage: posix.join(staging, input.name),
+    archive: posix.join(staging, `${input.name}.tar`),
+  };
+}
+
+// Unpacks into the staging folder and moves it into place. Any failure removes this skill's staging
+// and returns non-zero, so the sandbox's init carries on without this skill.
+function registryStageCommand(paths: StagingPaths): string {
+  const dir = shellEscape(paths.dir);
+  const stage = shellEscape(paths.stage);
+  const archive = shellEscape(paths.archive);
   return [
-    `rm -rf -- ${dir}`,
-    `mkdir -p -- ${dir}`,
-    `tar --no-same-owner --no-same-permissions -xf ${archive} -C ${dir}`,
-    `rm -f -- ${archive}`,
-  ].join(' && ');
+    '(',
+    [
+      `rm -rf -- ${stage}`,
+      `mkdir -p -- ${stage}`,
+      `tar --no-same-owner --no-same-permissions -xf ${archive} -C ${stage}`,
+      `rm -f -- ${archive}`,
+      `rm -rf -- ${dir}`,
+      `mv -- ${stage} ${dir}`,
+    ].join(' && '),
+    `) || { rm -rf -- ${stage} ${archive}; false; }`,
+  ].join(' ');
+}
+
+function gitStageCommand(paths: StagingPaths): string {
+  const dir = shellEscape(paths.dir);
+  const stage = shellEscape(paths.stage);
+  return `( rm -rf -- ${dir} && mv -- ${stage} ${dir} ) || { rm -rf -- ${stage}; false; }`;
 }

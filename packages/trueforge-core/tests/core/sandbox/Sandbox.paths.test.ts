@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -4119,6 +4119,7 @@ function slotLikeProvider(input: { root: string; skillsDir: string; execCalls: S
       }
       return runGuestCommand({ command: params.command, cwd: root, env });
     },
+    getWorkspaceDir: () => join(root, 'workspace'),
     getToolResultDumpDir: () => join(root, 'tool-results'),
     getFileUploadsDir: () => join(root, 'uploads'),
     getGitCredentialsPath: () => join(root, '.git-credentials'),
@@ -4172,6 +4173,45 @@ function registrySkill(input: { name: string; presignedUrl: string }): Skill {
     skillMdContent: null,
     presignedUrl,
   };
+}
+
+type BrokenShape = 'file-then-folder' | 'file-then-subpath' | 'long-name' | 'dot-file' | 'dot-in-folder';
+
+const BROKEN_SHAPES: readonly BrokenShape[] = [
+  'file-then-folder',
+  'file-then-subpath',
+  'long-name',
+  'dot-file',
+  'dot-in-folder',
+];
+
+// Each shape lists fine on the host but cannot be unpacked in the sandbox.
+const BROKEN_ARCHIVE_SCRIPT = `
+import io, sys, tarfile
+out, shape = sys.argv[1], sys.argv[2]
+members = {
+    'file-then-folder': [('a/b', b'x'), ('a', b'y')],
+    'file-then-subpath': [('x', b'x'), ('x/y', b'y')],
+    'long-name': [('n' * 300 + '/SKILL.md', b'z')],
+    'dot-file': [('.', b'z')],
+    'dot-in-folder': [('a/.', b'z')],
+}[shape]
+with tarfile.open(out, 'w', format=tarfile.PAX_FORMAT) as tar:
+    for name, data in members:
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+`;
+
+function brokenArchive(shape: BrokenShape): Buffer {
+  const work = mkdtempSync(join(tmpdir(), 'broken-archive-'));
+  try {
+    const out = join(work, 'broken.tar');
+    execFileSync('python3', ['-I', '-c', BROKEN_ARCHIVE_SCRIPT, out, shape]);
+    return readFileSync(out);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 describe('Sandbox skills without a network', () => {
@@ -4250,11 +4290,85 @@ describe('Sandbox skills without a network', () => {
       }
       expect(JSON.parse(response.result.content[0].text)).toMatchObject({
         notices: [
-          "The skill gamma couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.",
+          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.",
         ],
       });
     } finally {
       await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(BROKEN_SHAPES)(
+    'an archive that is %s leaves only its own skill out; the other skill and an exec still work',
+    async shape => {
+      const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+      const archives = await serveArchives(
+        new Map([
+          ['/bad.tar', brokenArchive(shape)],
+          ['/good.tar', skillArchive({ root, name: 'good' })],
+        ]),
+      );
+      try {
+        const skillsDir = join(root, 'skills');
+        const execCalls: SandboxExecParams[] = [];
+        const provider = slotLikeProvider({ root, skillsDir, execCalls });
+        const sandbox = makeSandbox(provider, {
+          skillMounter: new SkillMounter({
+            skills: [
+              registrySkill({ name: 'bad', presignedUrl: archives.urlFor('/bad.tar') }),
+              registrySkill({ name: 'good', presignedUrl: archives.urlFor('/good.tar') }),
+            ],
+          }),
+        });
+
+        const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+        expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+        expect(execCalls.some(call => call.command === 'true')).toBe(true);
+        expect(readFileSync(join(skillsDir, 'good', 'SKILL.md'), 'utf-8')).toBe('# good\n');
+        expect(existsSync(join(skillsDir, 'bad'))).toBe(false);
+        if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+          throw new Error('Expected a text result');
+        }
+        expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+          notices: [
+            "The skill bad couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.",
+          ],
+        });
+      } finally {
+        await archives.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('delivers a skill notice on the next tool result of any kind, not only an exec', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'gamma', presignedUrl: 'http://127.0.0.1:9/gamma.tar' })],
+        }),
+      });
+
+      const response = await sandbox.callTool(
+        {
+          name: SANDBOX_WRITE_FILE_TOOL_NAME,
+          arguments: { intent: 'Write a note', path: 'note.txt', content: 'hi' },
+        },
+        { status: 'allow', scope: 'once' },
+      );
+
+      if (!isCallToolResponseResult(response)) {
+        throw new Error('Expected a result');
+      }
+      expect(response.result.content.map(part => (part.type === 'text' ? part.text : ''))).toContain(
+        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.",
+      );
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

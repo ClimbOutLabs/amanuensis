@@ -19,7 +19,7 @@ export type SandboxToolCallCardProps = {
   argsJson?: string;
   resultText?: string;
   resultJson?: string;
-  /** Plain lines for the person, such as a skill that could not be loaded. Shown in the default view. */
+  /** Plain lines for the person, such as a skill that could not be loaded. Shown even when collapsed. */
   notices?: readonly string[];
   viewMode?: 'terminal' | 'code';
   hasContent?: boolean;
@@ -63,7 +63,6 @@ function SandboxBody({
   argsJson,
   resultText,
   resultJson,
-  notices,
   viewMode = 'terminal',
   hasContent = false,
   onViewModeChange,
@@ -76,13 +75,12 @@ function SandboxBody({
   | 'argsJson'
   | 'resultText'
   | 'resultJson'
-  | 'notices'
   | 'viewMode'
   | 'hasContent'
   | 'onViewModeChange'
   | 'dataTestPrefix'
 >) {
-  const terminalAvailable = Boolean(command || summary || resultText || resultJson || notices?.length);
+  const terminalAvailable = Boolean(command || summary || resultText || resultJson);
   const codeAvailable = Boolean(argsJson || resultJson);
 
   return (
@@ -186,13 +184,6 @@ function SandboxBody({
                     </div>
                   </div>
                 )}
-                {notices !== undefined && notices.length > 0 && (
-                  <div className="my-1 font-sans text-xs leading-5 text-text-primary" data-testid="sandbox-notices">
-                    {notices.map(notice => (
-                      <div key={notice}>{notice}</div>
-                    ))}
-                  </div>
-                )}
                 {resultText ? (
                   <>
                     <div className="mx-3 my-1 border-t border-border" />
@@ -217,6 +208,16 @@ function SandboxBody({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SandboxNotices({ notices }: { notices: readonly string[] }) {
+  return (
+    <div className="px-3 pb-1 font-sans text-xs leading-5 text-text-primary" data-testid="sandbox-notices">
+      {notices.map(notice => (
+        <div key={notice}>{notice}</div>
+      ))}
     </div>
   );
 }
@@ -263,6 +264,7 @@ export function SandboxToolCallCard({
       approvalSlot={approvalSlot}
       approvalId={approvalId}
       dataTestPrefix={dataTestPrefix}
+      noticeSlot={notices !== undefined && notices.length > 0 ? <SandboxNotices notices={notices} /> : undefined}
       requestSlot={
         hasContent ? (
           <SandboxBody
@@ -272,7 +274,6 @@ export function SandboxToolCallCard({
             argsJson={argsJson}
             resultText={resultText}
             resultJson={resultJson}
-            notices={notices}
             viewMode={viewMode}
             hasContent={hasContent}
             onViewModeChange={onViewModeChange}
