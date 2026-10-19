@@ -433,11 +433,33 @@ describe('duplicates, floods and dependent reads', () => {
     }
   });
 
-  it('stops the turn when one reply asks for more than 8 tool calls', async () => {
+  it('runs a full reply of 20 different calls, one under the cap', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: Array.from({ length: 20 }, (_, index) => ({
+            id: `get-${String(index)}`,
+            name: 'get_event',
+            args: { event_id: `evt-${String(index)}` },
+          })),
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(callToolNames(toolSet)).toHaveLength(20);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('stops the turn when one reply asks for more than 20 tool calls', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({
-        calls: Array.from({ length: 9 }, (_, index) => ({
+        calls: Array.from({ length: 21 }, (_, index) => ({
           id: `get-${String(index)}`,
           name: 'get_event',
           args: { event_id: `evt-${String(index)}` },

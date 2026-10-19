@@ -743,8 +743,23 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
   });
 
-  it('still stops the run when more than 8 calls would run at once', async () => {
-    const calls = Array.from({ length: 9 }, (_, index) => ({
+  it('runs 20 distinct reads at once, one under the cap', async () => {
+    const calls = Array.from({ length: 20 }, (_, index) => ({
+      id: `call-read-${String(index)}`,
+      name: 'read_note',
+      args: JSON.stringify({ note: `n${String(index)}` }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    const { brief } = await runBrief(h);
+
+    expect(h.callTool).toHaveBeenCalledTimes(20);
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+  });
+
+  it('still stops the run when more than 20 calls would run at once', async () => {
+    const calls = Array.from({ length: 21 }, (_, index) => ({
       id: `call-read-${String(index)}`,
       name: 'read_note',
       args: JSON.stringify({ note: `n${String(index)}` }),

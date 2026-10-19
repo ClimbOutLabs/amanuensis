@@ -22,7 +22,7 @@ import { stableStringify } from '../permissions/approvalTokens';
 import type { ContextMessage } from './AgentThread.types';
 
 /** Most tool calls one reply may make; beyond this the turn stops (see TOO_MANY_TOOL_CALLS_MESSAGE). */
-export const MAX_TOOL_CALLS_PER_REPLY = 8;
+export const MAX_TOOL_CALLS_PER_REPLY = 20;
 
 /** Shown to the person when a reply asks for more tool calls than one reply may make. */
 export const TOO_MANY_TOOL_CALLS_MESSAGE =

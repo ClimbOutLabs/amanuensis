@@ -119,7 +119,7 @@ describe('guardModelReply', () => {
     expect(outcome.tooManyCalls).toBe(false);
   });
 
-  it('counts the cap after merging: 22 identical reads are one call, 9 different ones are too many', () => {
+  it('counts the cap after merging: 22 identical reads are one call, 21 different ones are too many', () => {
     const flood = guard(
       Array.from({ length: 22 }, (_, index) => call(`g${String(index)}`, 'get_event', { event_id: 'evt-1' })),
     );
