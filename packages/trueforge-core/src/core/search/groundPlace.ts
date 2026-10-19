@@ -71,6 +71,67 @@ function pageHas({ pageWords, value }: { pageWords: string; value: string }): bo
   return needle.trim() !== '' && pageWords.includes(needle);
 }
 
+function tokensOf(text: string): string[] {
+  const words = normalizedWords(text).trim();
+  return words === '' ? [] : words.split(' ');
+}
+
+/** Every run of the page's words that is exactly the given words, as start and end positions. */
+function occurrences(tokens: readonly string[], phrase: readonly string[]): { start: number; end: number }[] {
+  const found: { start: number; end: number }[] = [];
+  if (phrase.length === 0 || phrase.length > tokens.length) {
+    return found;
+  }
+  for (let at = 0; at + phrase.length <= tokens.length; at += 1) {
+    if (phrase.every((token, offset) => tokens[at + offset] === token)) {
+      found.push({ start: at, end: at + phrase.length });
+    }
+  }
+  return found;
+}
+
+/**
+ * How far apart a place's name and its address may sit on the page, in words between the two.
+ * A listing prints them together, a word or two apart at most ("is at"); a name from one listing
+ * and the address of the next sit a whole address apart, far beyond this.
+ */
+const MAX_WORDS_BETWEEN_NAME_AND_ADDRESS = 4;
+
+function closeTogether(
+  nameHits: readonly { start: number; end: number }[],
+  addressHits: readonly { start: number; end: number }[],
+): boolean {
+  return nameHits.some(name =>
+    addressHits.some(address => {
+      const between = Math.max(address.start - name.end, name.start - address.end, 0);
+      return between <= MAX_WORDS_BETWEEN_NAME_AND_ADDRESS;
+    }),
+  );
+}
+
+/** A name of two or more words is specific enough; a lone word must be at least this long. */
+const MIN_SINGLE_WORD_NAME_CHARS = 6;
+
+/**
+ * An address must run to at least this many words, one of them at least this long, before it can
+ * carry a match. Anything less ("9", "9 St") is a scrap that turns up anywhere on a page, in the
+ * opening hours as easily as in an address.
+ */
+const MIN_ADDRESS_WORDS = 3;
+const MIN_ADDRESS_WORD_CHARS = 3;
+
+function nameIsSpecific(tokens: readonly string[]): boolean {
+  if (tokens.length >= 2) {
+    return true;
+  }
+  const only = tokens[0];
+  return only !== undefined && only.length >= MIN_SINGLE_WORD_NAME_CHARS;
+}
+
+function addressIsSpecific(tokens: readonly string[]): boolean {
+  return tokens.length >= MIN_ADDRESS_WORDS && tokens.some(token => token.length >= MIN_ADDRESS_WORD_CHARS);
+}
+
 function pageHasPhone({ text, phone }: { text: string; phone: string }): boolean {
   const wanted = phone.replace(/\D/g, '');
   if (wanted.length < MIN_PHONE_SUFFIX_DIGITS) {
@@ -91,9 +152,10 @@ function siteOf(url: string): string {
 }
 
 /**
- * Keeps only what the fetched source page really says. The name and address must be on the page or
- * the place is refused; any other field it cannot find is dropped, never guessed. The source must
- * be a page this server fetched, and the fetch time is the server's.
+ * Keeps only what the fetched source page really says. The name and address must be on the page,
+ * close together the way a listing prints them, or the place is refused; any other field it
+ * cannot find is dropped, never guessed. The source must be a page this server fetched for this
+ * chat, and the fetch time is the server's.
  */
 export function groundPlace({
   claim,
@@ -109,10 +171,15 @@ export function groundPlace({
     return { ok: false, reason: 'source_not_fetched' };
   }
   const pageWords = normalizedWords(page.text);
-  if (!pageHas({ pageWords, value: claim.name })) {
+  const pageTokens = tokensOf(page.text);
+  const nameTokens = tokensOf(claim.name);
+  const nameHits = nameIsSpecific(nameTokens) ? occurrences(pageTokens, nameTokens) : [];
+  if (nameHits.length === 0) {
     return { ok: false, reason: 'name_not_found' };
   }
-  if (!pageHas({ pageWords, value: claim.address })) {
+  const addressTokens = tokensOf(claim.address);
+  const addressHits = addressIsSpecific(addressTokens) ? occurrences(pageTokens, addressTokens) : [];
+  if (addressHits.length === 0 || !closeTogether(nameHits, addressHits)) {
     return { ok: false, reason: 'address_not_found' };
   }
   const found = (value: string | null): string | null =>

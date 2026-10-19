@@ -182,6 +182,101 @@ describe('groundPlace', () => {
   });
 });
 
+describe('groundPlace checks the name and the address together', () => {
+  const LISTINGS_URL = 'https://listings.example/food';
+  const LISTINGS_TEXT = 'Hope House\n916 St. Andrew Street, New Orleans\nJoe Cafe\n12 Main St, New Orleans\n';
+
+  function listingsStore(): FetchedPageStore {
+    const pages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    pages.remember({ scope: SCOPE, url: LISTINGS_URL, text: LISTINGS_TEXT });
+    return pages;
+  }
+
+  const listingClaim = (name: string, address: string): PlaceClaim => ({
+    name,
+    address,
+    languages: null,
+    hours: null,
+    price: null,
+    phone: null,
+    source_url: LISTINGS_URL,
+  });
+
+  it('refuses a name paired with the address of the next listing on the page', () => {
+    const pages = listingsStore();
+    expect(groundPlace({ claim: listingClaim('Hope House', '12 Main St'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_not_found',
+    });
+  });
+
+  it('keeps each listing paired with its own address', () => {
+    const pages = listingsStore();
+    expect(groundPlace({ claim: listingClaim('Hope House', '916 St Andrew St'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+    expect(groundPlace({ claim: listingClaim('Joe Cafe', '12 Main St'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('keeps a name and an address written in one sentence', () => {
+    const pages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    pages.remember({
+      scope: SCOPE,
+      url: LISTINGS_URL,
+      text: 'Hope House is at 916 St. Andrew Street, New Orleans, and serves lunch daily.',
+    });
+    expect(groundPlace({ claim: listingClaim('Hope House', '916 St Andrew St'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('refuses a name that is only one short word, even when the page says it', () => {
+    const pages = listingsStore();
+    expect(groundPlace({ claim: listingClaim('House', '916 St Andrew St'), pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'name_not_found',
+    });
+  });
+
+  it('refuses an address given as a scrap too short to carry a match', () => {
+    const pages = storeWithPages();
+    expect(groundPlace({ claim: { ...harbour, address: '12' }, pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_not_found',
+    });
+    expect(groundPlace({ claim: { ...harbour, address: '12 Example' }, pages, scope: SCOPE })).toEqual({
+      ok: false,
+      reason: 'address_not_found',
+    });
+  });
+
+  it('keeps a full address whose street number is a single digit', () => {
+    const pages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    pages.remember({
+      scope: SCOPE,
+      url: LISTINGS_URL,
+      text: 'Hope House\n9 St. Andrew Street, New Orleans\nA food pantry open to everyone.',
+    });
+    expect(groundPlace({ claim: listingClaim('Hope House', '9 St Andrew St'), pages, scope: SCOPE })).toMatchObject({
+      ok: true,
+    });
+  });
+});
+
 describe('isInCalendar', () => {
   const place = { name: 'Harbour Family Clinic', address: '12 Example Street, Lisbon 1100-000' };
 
