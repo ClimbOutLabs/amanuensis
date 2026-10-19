@@ -48,7 +48,7 @@ import {
   type RepositoryCommandSourceObserver,
   type WorkspaceVerificationCoordinator,
 } from '../../../src/core/sandbox/Sandbox';
-import { SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
+import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
 import { REQUESTED_SKILLS_FILE_NAME, SkillMounter, type GitSkill } from '../../../src/core/sandbox/skills/SkillMounter';
 import { structuredEditObservationForTargets } from '../../../src/core/sandbox/structuredEditPrecondition';
 import { GIT_INDEX_ENTRIES_COMMAND, TRACKED_WORKTREE_COMMAND } from '../../../src/core/sandbox/workspaceStateCapture';
@@ -4073,6 +4073,94 @@ describe('Sandbox provider-owned paths', () => {
     expect(portableCommand).toContain("mv -f 'mcp-client/mcp_client.py.new' 'mcp-client/mcp_client.py'");
     expect(portableCommand).toContain("ln -sf '../mcp_client.py'");
     expect(portableCommand).toContain('mcp-client/bin/mcp-client');
+  });
+});
+
+describe('Sandbox skills without a network', () => {
+  const gitSkill = {
+    type: 'git',
+    name: 'echo',
+    description: 'Echo',
+    url: 'https://github.com/acme/skills.git',
+    path: '',
+    ref: 'a'.repeat(40),
+  } satisfies GitSkill;
+
+  const execTrue = {
+    name: SANDBOX_EXEC_TOOL_NAME,
+    arguments: { intent: 'Run command', purpose: 'execute', command: 'true' },
+  };
+
+  it('starts a no-network sandbox with skills without the skill env or downloader, and tells the model they are unavailable', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    // Like a slot agent, this provider refuses any env name the sandbox sends.
+    const provider = makeProvider({
+      network: 'none',
+      exec: (params): Promise<ExecResult> => {
+        execCalls.push(params);
+        const envNames = Object.keys(params.env ?? {});
+        if (envNames.length > 0) {
+          return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
+        }
+        return readyExec();
+      },
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gitSkill] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+    expect(execCalls.some(call => call.command === 'true')).toBe(true);
+    expect(execCalls.some(call => call.command.includes('skill_downloader.py'))).toBe(false);
+    const builder = new InstructionBuilder('prompt');
+    sandbox.buildInstruction(builder);
+    const prompt = builder.build();
+    expect(prompt).toContain('echo: unavailable (this sandbox has no internet access)');
+    expect(prompt).not.toContain('The skill is present');
+  });
+
+  it('starts a no-network sandbox for an assistant with no skills and sends no skill env', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    // Sessions always build a mounter, even with no skills; its init must not reach a no-network sandbox.
+    const provider = makeProvider({
+      network: 'none',
+      exec: (params): Promise<ExecResult> => {
+        execCalls.push(params);
+        const envNames = Object.keys(params.env ?? {});
+        if (envNames.length > 0) {
+          return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
+        }
+        return readyExec();
+      },
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+    expect(execCalls.some(call => call.command === 'true')).toBe(true);
+    expect(execCalls.some(call => call.env?.['TFY_SKILLS_DIR'] !== undefined)).toBe(false);
+    expect(execCalls.some(call => call.command.includes('skill_downloader.py'))).toBe(false);
+  });
+
+  it('shows the person a plain sentence when the sandbox will not start, not the provider error', async () => {
+    const provider = makeProvider({
+      exec: (params): Promise<ExecResult> =>
+        params.env?.['TFY_SKILLS_DIR'] === undefined
+          ? readyExec()
+          : Promise.resolve({ success: false, error: 'env names are not allowed: TFY_SKILLS_DIR' }),
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gitSkill] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+      expect(response).toBe('a text refusal');
+      return;
+    }
+    expect(response.result.isError).toBe(true);
+    expect(JSON.parse(response.result.content[0].text)).toMatchObject({ error: SANDBOX_START_FAILED_MESSAGE });
+    expect(response.result.content[0].text).not.toContain('env names');
   });
 });
 

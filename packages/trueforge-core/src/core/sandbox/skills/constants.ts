@@ -17,6 +17,9 @@ export function getSkillPath(params: { skillsDir: string; skillName: string }): 
   return `${params.skillsDir.replace(/\/+$/, '')}/${params.skillName}`;
 }
 
+// Skills are downloaded from the network, so a sandbox with no network reports them unavailable with this reason.
+export const SKILLS_NO_NETWORK_REASON = 'this sandbox has no internet access';
+
 export const SKILLS_PREAMBLE = [
   '1. The skill is present in the `path` directory.',
   '2. SKILL.md file within the directory is the primary file, there can be other files as well.',

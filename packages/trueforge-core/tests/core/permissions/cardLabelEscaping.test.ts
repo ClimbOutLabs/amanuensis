@@ -239,7 +239,7 @@ const LABEL_CASES: LabelCase[] = [
     shown: code => `lookup${code}_records`,
   },
   {
-    label: 'web search query and server name',
+    label: 'web search query',
     build: control => ({
       call: action(
         'web_lookup',
@@ -259,7 +259,7 @@ const LABEL_CASES: LabelCase[] = [
         },
       }),
     }),
-    shown: code => `through search${code} for: weather${code}`,
+    shown: code => `Web search: weather${code}`,
   },
 ];
 
