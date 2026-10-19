@@ -181,6 +181,43 @@ describe('render_places', () => {
     ]);
   });
 
+  it('refuses the place whose geocoder hit landed in a different state, and keeps the one in the state asked for', async () => {
+    const moUrl = 'https://springfield-clinic-mo.example/';
+    const ilUrl = 'https://springfield-clinic-il.example/';
+    const illinoisHit = 'Springfield Clinic, 102 Main St, Springfield, Illinois, United States';
+    const service = new MapsService({
+      geocoder_url: 'https://geocode.example',
+      road_providers: unusedRoadProviders(),
+      transit_provider: unusedTransitProvider(),
+      logger: createLogger({ silent: true }),
+      // The geocoder's best hit for both addresses is the Illinois clinic of the same name.
+      fetch_limited: () => Promise.resolve(new Response(JSON.stringify(hit('39.7', '-89.6', illinoisHit)))),
+    });
+    const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+    pages.remember({ url: moUrl, text: 'Springfield Clinic\n102 Main St, Springfield, Missouri' });
+    pages.remember({ url: ilUrl, text: 'Springfield Clinic\n102 Main St, Springfield, Illinois' });
+    const { body, isError } = bodyOf(
+      await renderPlaces({
+        service,
+        pages,
+        input: {
+          places: [
+            { name: 'Springfield Clinic', address: '102 Main St, Springfield, Missouri', source_url: moUrl },
+            { name: 'Springfield Clinic', address: '102 Main St, Springfield, Illinois', source_url: ilUrl },
+          ],
+          calendar_locations: [],
+        },
+      }),
+    );
+    expect(isError).toBe(false);
+    expect(body['places']).toEqual([
+      expect.objectContaining({ name: 'Springfield Clinic', address: '102 Main St, Springfield, Illinois' }),
+    ]);
+    expect(body['refused']).toEqual([
+      { name: 'Springfield Clinic', reason: 'The place the map found is in a different area.' },
+    ]);
+  });
+
   it('keeps the good places and refuses only the one the map put in a different city', async () => {
     const { service, pages } = setup(query =>
       query.includes('Sample')

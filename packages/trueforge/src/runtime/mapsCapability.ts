@@ -510,33 +510,158 @@ const REFUSAL_REASONS = {
 const OUT_OF_AREA_REASON = 'The place the map found is in a different area.';
 
 /**
- * Whether a geocoder result sits in the area the query itself names. The area is the part after
- * the first comma: its words must appear in the result name, or every long number after the comma
- * (a postcode) must. A query that names no area passes, and so does a result that names the area
- * in its own words beside the same postcode.
+ * US states, under the spellings normalizedWords folds their names to, with the code a geocoder
+ * shortens them to. A query and a result may spell the same state either way, so both forms count
+ * as the same area, and a different state in the result contradicts the one the query named.
+ */
+const US_STATE_CODES: Readonly<Record<string, string>> = {
+  alabama: 'al',
+  alaska: 'ak',
+  arizona: 'az',
+  arkansas: 'ar',
+  california: 'ca',
+  colorado: 'co',
+  connecticut: 'ct',
+  delaware: 'de',
+  'district of columbia': 'dc',
+  florida: 'fl',
+  georgia: 'ga',
+  hawaii: 'hi',
+  idaho: 'id',
+  illinois: 'il',
+  indiana: 'in',
+  iowa: 'ia',
+  kansas: 'ks',
+  kentucky: 'ky',
+  louisiana: 'la',
+  maine: 'me',
+  maryland: 'md',
+  massachusetts: 'ma',
+  michigan: 'mi',
+  minnesota: 'mn',
+  mississippi: 'ms',
+  missouri: 'mo',
+  montana: 'mt',
+  nebraska: 'ne',
+  nevada: 'nv',
+  'new hampshire': 'nh',
+  'new jersey': 'nj',
+  'new mexico': 'nm',
+  'new york': 'ny',
+  'n carolina': 'nc',
+  'n dakota': 'nd',
+  ohio: 'oh',
+  oklahoma: 'ok',
+  oregon: 'or',
+  pennsylvania: 'pa',
+  'rhode island': 'ri',
+  's carolina': 'sc',
+  's dakota': 'sd',
+  tennessee: 'tn',
+  texas: 'tx',
+  utah: 'ut',
+  vermont: 'vt',
+  virginia: 'va',
+  washington: 'wa',
+  'w virginia': 'wv',
+  wisconsin: 'wi',
+  wyoming: 'wy',
+};
+
+const US_STATE_NAMES_BY_CODE: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(US_STATE_CODES).map(([name, code]) => [code, name]),
+);
+const US_STATE_CODE_SET: ReadonlySet<string> = new Set(Object.values(US_STATE_CODES));
+
+/** The spellings one area part may appear under: itself, plus the other form of a US state. */
+function areaSpellings(tokens: readonly string[]): string[] {
+  const phrase = tokens.join(' ');
+  const code = US_STATE_CODES[phrase];
+  if (code !== undefined) {
+    return [phrase, code];
+  }
+  if (tokens.length === 1 && US_STATE_CODE_SET.has(phrase)) {
+    const name = US_STATE_NAMES_BY_CODE[phrase];
+    return name === undefined ? [phrase] : [phrase, name];
+  }
+  return [phrase];
+}
+
+/** Whether an area part appears in the result name under any of its spellings. */
+function areaPartAppears(tokens: readonly string[], displayWords: string): boolean {
+  return areaSpellings(tokens).some(spelling => displayWords.includes(` ${spelling} `));
+}
+
+/** The US state code an area part names, spelled out or as the code itself; undefined for any other part. */
+function stateCodeOf(tokens: readonly string[]): string | undefined {
+  const phrase = tokens.join(' ');
+  const code = US_STATE_CODES[phrase];
+  if (code !== undefined) {
+    return code;
+  }
+  return tokens.length === 1 && US_STATE_CODE_SET.has(phrase) ? phrase : undefined;
+}
+
+/** Whether the result name names a US state of its own, by name or by code, other than the given one. */
+function displayNamesOtherState(displayWords: string, ownCode: string): boolean {
+  for (const [name, code] of Object.entries(US_STATE_CODES)) {
+    if (code !== ownCode && displayWords.includes(` ${name} `)) {
+      return true;
+    }
+  }
+  return displayWords.split(' ').some(token => token !== '' && token !== ownCode && US_STATE_CODE_SET.has(token));
+}
+
+/**
+ * Whether a geocoder result sits in the area the query itself names. The area is what follows the
+ * first comma, in parts. It matches when every long number after the comma (a postcode) appears
+ * in the result name, or when the last part (the region) appears there, spelled out or, for a US
+ * state, as its code. The first part matching counts too, unless a later part names a US state
+ * the result contradicts with a different state of its own; parts between the two, such as a
+ * district, may be left out by the geocoder. A query that names no area passes.
  */
 export function isInRequestedArea({ query, displayName }: { query: string; displayName: string }): boolean {
   const segments = query.split(',');
   if (segments.length < 2) {
     return true;
   }
-  const cityTokens = normalizedWords(segments[1] ?? '')
-    .trim()
-    .split(' ')
-    .filter(token => /^\p{L}+$/u.test(token));
+  const areaParts = segments
+    .slice(1)
+    .map(segment =>
+      normalizedWords(segment)
+        .trim()
+        .split(' ')
+        .filter(token => /^\p{L}+$/u.test(token)),
+    )
+    .filter(part => part.length > 0);
   const numbers: string[] =
     segments
       .slice(1)
       .join(',')
       .match(/\d{3,}/g) ?? [];
-  if (cityTokens.length === 0 && numbers.length === 0) {
-    return true;
-  }
-  if (cityTokens.length > 0 && normalizedWords(displayName).includes(` ${cityTokens.join(' ')} `)) {
+  if (areaParts.length === 0 && numbers.length === 0) {
     return true;
   }
   const displayNumbers: string[] = displayName.match(/\d{3,}/g) ?? [];
-  return numbers.length > 0 && numbers.every(number => displayNumbers.includes(number));
+  if (numbers.length > 0 && numbers.every(number => displayNumbers.includes(number))) {
+    return true;
+  }
+  if (areaParts.length === 0) {
+    return false;
+  }
+  const displayWords = normalizedWords(displayName);
+  const lastPart = areaParts[areaParts.length - 1];
+  if (lastPart !== undefined && areaPartAppears(lastPart, displayWords)) {
+    return true;
+  }
+  const firstPart = areaParts[0];
+  if (firstPart === undefined || !areaPartAppears(firstPart, displayWords)) {
+    return false;
+  }
+  return !areaParts.slice(1).some(part => {
+    const code = stateCodeOf(part);
+    return code !== undefined && !areaPartAppears(part, displayWords) && displayNamesOtherState(displayWords, code);
+  });
 }
 
 /**

@@ -54,6 +54,15 @@ describe('recordFetchedPages', () => {
     expect(pages.recall(PAGE_URL)).toBeUndefined();
   });
 
+  it('records nothing when the search text is itself a link, so the snippet cannot pass as a read page', () => {
+    const pages = store();
+    const text = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
+    const count = recordFetchedPages({ pages, toolArguments: { query: PAGE_URL }, texts: [text] });
+    expect(count).toBe(0);
+    expect(pages.recall(PAGE_URL)).toBeUndefined();
+    expect(groundPlace({ claim, pages })).toEqual({ ok: false, reason: 'source_not_fetched' });
+  });
+
   it('does not let a fetched page plant a different page it only links to', () => {
     const pages = store();
     const other = 'https://elsewhere.example/planted';

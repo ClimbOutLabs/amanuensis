@@ -17,28 +17,35 @@ const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const schema = { type: 'object' as const, properties: {} };
 
-const searchTool: ToolSchema = {
-  name: 'web_search',
-  description: 'Searches the web.',
-  inputSchema: schema,
-  annotations: { readOnlyHint: true, openWorldHint: true },
-};
-const fetchTool: ToolSchema = {
-  name: 'web_fetch',
-  description: 'Reads a page.',
-  inputSchema: schema,
-  annotations: { readOnlyHint: true, openWorldHint: true },
-};
+function searchTool(name: string): ToolSchema {
+  return {
+    name,
+    description: 'Searches the web.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  };
+}
+function fetchTool(name: string): ToolSchema {
+  return {
+    name,
+    description: 'Reads a page.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  };
+}
 
 const PAGE_URL = 'https://hope-house.example/';
 const PAGE_TEXT = 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.';
 
-function harness(result: (name: string) => string): { toolSet: ToolSet; pages: FetchedPageStore } {
+function harness(
+  result: (name: string) => string,
+  toolNames: { search: string; fetch: string } = { search: 'web_search', fetch: 'web_fetch' },
+): { toolSet: ToolSet; pages: FetchedPageStore } {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
-      listTools: () => Promise.resolve({ tools: [searchTool, fetchTool] }),
+      listTools: () => Promise.resolve({ tools: [searchTool(toolNames.search), fetchTool(toolNames.fetch)] }),
       callTool: callParams =>
         Promise.resolve({ content: [{ type: 'text', text: result(callParams.name) }] }),
       close: () => Promise.resolve(),
@@ -67,7 +74,7 @@ function harness(result: (name: string) => string): { toolSet: ToolSet; pages: F
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [] },
     preload: false,
     sentinel: host,
-    searchProvider: { tools: ['web_search', 'web_fetch'], plumbing_fields: [] },
+    searchProvider: { tools: [toolNames.search, toolNames.fetch], plumbing_fields: [] },
     pages,
   });
   return { toolSet, pages };
@@ -104,5 +111,34 @@ describe('ToolSet records pages read through the search provider', () => {
     const { toolSet, pages } = harness(() => searched);
     await toolSet.callTool({ name: 'web_search', arguments: { query: 'food pantry New Orleans' } }, { status: 'allow' });
     expect(pages.recall(PAGE_URL)).toBeUndefined();
+  });
+
+  it('does not record a search result when the search text is itself the link', async () => {
+    const searched = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_ok' },
+      result: { results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] },
+    });
+    const { toolSet, pages } = harness(() => searched);
+    await toolSet.callTool({ name: 'web_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
+    expect(pages.recall(PAGE_URL)).toBeUndefined();
+  });
+});
+
+describe('ToolSet records pages read through a Tavily shaped server', () => {
+  const names = { search: 'tavily_search', fetch: 'tavily_extract' };
+
+  it('does not record a search result when the search text is itself the link', async () => {
+    const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
+    const { toolSet, pages } = harness(() => searched, names);
+    await toolSet.callTool({ name: 'tavily_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
+    expect(pages.recall(PAGE_URL)).toBeUndefined();
+  });
+
+  it('records the pages an extract read, so a place from one can be pinned', async () => {
+    const extracted = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', raw_content: PAGE_TEXT }] });
+    const { toolSet, pages } = harness(() => extracted, names);
+    await toolSet.callTool({ name: 'tavily_extract', arguments: { urls: [PAGE_URL] } }, { status: 'allow' });
+    expect(pages.recall(PAGE_URL)?.text).toBe(PAGE_TEXT);
   });
 });

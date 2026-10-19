@@ -92,27 +92,39 @@ function stringField(record: Record<string, unknown>, key: string): string | und
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 
-/** Every link a tool call named, at any depth of its arguments. A call that names no link read no page. */
-function namedUrls(value: unknown, into: Map<string, string>, depth: number): void {
+/**
+ * Argument names that hand a tool the page to read, so the link is the call's target. A link
+ * anywhere else in the arguments, above all in a search's text, names no page: the call did not
+ * read it, so its text must not be recorded as read.
+ */
+const PAGE_ARGUMENT_KEYS = new Set(['url', 'urls']);
+
+/**
+ * Every link a tool call named as a page to read, at any depth of its arguments. A call that
+ * names no link read no page.
+ */
+function namedUrls(value: unknown, into: Map<string, string>, depth: number, key: string | undefined): void {
   if (depth > 6) {
     return;
   }
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (/^https?:\/\/\S+$/i.test(trimmed)) {
-      into.set(pageUrlKey(trimmed), trimmed);
+    if (key !== undefined && PAGE_ARGUMENT_KEYS.has(key.toLowerCase())) {
+      const trimmed = value.trim();
+      if (/^https?:\/\/\S+$/i.test(trimmed)) {
+        into.set(pageUrlKey(trimmed), trimmed);
+      }
     }
     return;
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      namedUrls(item, into, depth + 1);
+      namedUrls(item, into, depth + 1, key);
     }
     return;
   }
   if (isRecord(value)) {
-    for (const item of Object.values(value)) {
-      namedUrls(item, into, depth + 1);
+    for (const [childKey, item] of Object.entries(value)) {
+      namedUrls(item, into, depth + 1, childKey);
     }
   }
 }
@@ -163,8 +175,9 @@ function collectPages(node: unknown, into: { url: string; text: string }[], dept
 
 /**
  * Records what a page reading tool actually read, so a later place claim can be checked against it
- * whatever provider read the page. Only a page the call itself named counts: a search names no
- * page, and a page a result only links to was never read. Returns how many pages were recorded.
+ * whatever provider read the page. Only a page the call itself named as the page to read counts:
+ * a search names no page, even when its text is itself a link, and a page a result only links to
+ * was never read. Returns how many pages were recorded.
  */
 export function recordFetchedPages(input: {
   pages: FetchedPageStore;
@@ -172,7 +185,7 @@ export function recordFetchedPages(input: {
   texts: readonly string[];
 }): number {
   const named = new Map<string, string>();
-  namedUrls(input.toolArguments, named, 0);
+  namedUrls(input.toolArguments, named, 0, undefined);
   if (named.size === 0) {
     return 0;
   }
