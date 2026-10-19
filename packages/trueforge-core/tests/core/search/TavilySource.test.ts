@@ -1,8 +1,10 @@
 import { isCallToolResponseResult, type CallToolResponse } from '../../../src/core/mcp/IMCPServer';
-import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
+import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
 import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
 import { CANAL_URL, GARDEN_URL, HARBOUR_URL, extractResponse, searchResponse } from './tavilyFixtures';
+
+const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
 function harness(input: { status?: number; body?: unknown }) {
   const calls: { url: string; body: unknown }[] = [];
@@ -14,7 +16,7 @@ function harness(input: { status?: number; body?: unknown }) {
     },
   });
   const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
-  const source = new TavilySource({ id: 'tavily', name: 'tavily', client, pages });
+  const source = new TavilySource({ id: 'tavily', name: 'tavily', client, pages, scope: SCOPE });
   return { source, pages, calls };
 }
 
@@ -77,7 +79,10 @@ describe('TavilySource', () => {
     expect(parsed.pages.map((p: { url: string }) => p.url)).toEqual([HARBOUR_URL, GARDEN_URL]);
     expect(parsed.pages[0].fetched_at).toBe('2026-10-17T10:00:00.000Z');
     expect(parsed.not_fetched).toEqual([{ url: CANAL_URL, error: 'Could not load the page' }]);
-    expect(pages.recall(HARBOUR_URL)?.text).toContain('Harbour Family Clinic');
+    expect(pages.recall({ scope: SCOPE, url: HARBOUR_URL })?.text).toContain('Harbour Family Clinic');
+    expect(
+      pages.recall({ scope: { tenant_id: 'tenant-1', conversation_id: 'chat-b' }, url: HARBOUR_URL }),
+    ).toBeUndefined();
   });
 
   it('keeps a hostile page inside its text field and never lets it change the result shape', async () => {
@@ -116,7 +121,7 @@ describe('TavilySource', () => {
       textOf(await source.callTool({ name: 'tavily_extract', arguments: { urls: [HARBOUR_URL] } })).text,
     );
     expect(parsed.pages[0].text.length).toBeLessThanOrEqual(8000);
-    expect(pages.recall(HARBOUR_URL)?.text).toBe(parsed.pages[0].text);
+    expect(pages.recall({ scope: SCOPE, url: HARBOUR_URL })?.text).toBe(parsed.pages[0].text);
   });
 
   it.each([

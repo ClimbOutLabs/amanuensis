@@ -20,7 +20,7 @@ import {
   SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
-import { recordFetchedPages, type FetchedPageStore } from '../search/fetchedPages';
+import { recordFetchedPages, type FetchedPageScope, type FetchedPageStore } from '../search/fetchedPages';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -159,6 +159,7 @@ export class ToolSet implements IToolSet {
   private readonly searchTools: ReadonlySet<string>;
   private readonly searchPlumbingFields: readonly string[];
   private readonly pages: FetchedPageStore | undefined;
+  private readonly pagesScope: FetchedPageScope | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -191,6 +192,11 @@ export class ToolSet implements IToolSet {
      * host only.
      */
     pages?: FetchedPageStore | undefined;
+    /**
+     * The tenant and chat the pages memory is written for; a page is recorded only when the
+     * host names the chat it belongs to. Set by the host only, alongside `pages`.
+     */
+    pagesScope?: FetchedPageScope | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -206,6 +212,7 @@ export class ToolSet implements IToolSet {
     this.searchTools = new Set(params.searchProvider?.tools);
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
     this.pages = params.pages;
+    this.pagesScope = params.pagesScope;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -299,11 +306,17 @@ export class ToolSet implements IToolSet {
       params,
       response: await this.source.callTool(params, decision, context),
     });
-    if (this.pages !== undefined && isCallToolResponseResult(response) && response.result.isError !== true) {
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true
+    ) {
       // Every page reading tool records what it read, not only one provider: a place claim is
       // checked against this memory, so a page read any other way must count too.
       recordFetchedPages({
         pages: this.pages,
+        scope: this.pagesScope,
         toolArguments: params.arguments ?? {},
         texts: resultTexts(response.result),
       });

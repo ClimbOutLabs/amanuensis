@@ -1,4 +1,4 @@
-import { mapsDestinationHosts } from '@truefoundry/trueforge-core/core';
+import { mapsDestinationHosts, type FetchedPageScope } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import {
@@ -18,6 +18,8 @@ import {
 import { MapsUpstreamError } from '../../../src/runtime/mapsErrors';
 import { UPSTREAM_JSON_MAX_BODY_BYTES } from '../../../src/runtime/mapsUpstream';
 import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
+
+const PAGES_SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -277,7 +279,11 @@ describe('MapsService.route origin privacy', () => {
 
 describe('maps connector binding', () => {
   it('binds approvals to the configured upstream hosts, matching what the approval card names', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
       throw new Error('maps capability has no tool sets');
@@ -291,7 +297,11 @@ describe('maps connector binding', () => {
   });
 
   it('names the walking, cycling and public transport services in the approval destination', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
     const binding = capability.systemToolSets?.[0]?.resolveConnector?.({
       name: 'render_route',
       arguments: { from_place: 'A', to_place: 'B', mode: 'transit' },

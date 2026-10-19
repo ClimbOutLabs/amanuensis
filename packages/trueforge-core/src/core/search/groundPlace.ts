@@ -1,4 +1,4 @@
-import type { FetchedPageStore } from './fetchedPages';
+import type { FetchedPageScope, FetchedPageStore } from './fetchedPages';
 
 /** What the model claims about one place. A claimed field the page does not contain is dropped. */
 export interface PlaceClaim {
@@ -95,8 +95,16 @@ function siteOf(url: string): string {
  * the place is refused; any other field it cannot find is dropped, never guessed. The source must
  * be a page this server fetched, and the fetch time is the server's.
  */
-export function groundPlace({ claim, pages }: { claim: PlaceClaim; pages: FetchedPageStore }): GroundResult {
-  const page = pages.recall(claim.source_url);
+export function groundPlace({
+  claim,
+  pages,
+  scope,
+}: {
+  claim: PlaceClaim;
+  pages: FetchedPageStore;
+  scope: FetchedPageScope;
+}): GroundResult {
+  const page = pages.recall({ scope, url: claim.source_url });
   if (page === undefined) {
     return { ok: false, reason: 'source_not_fetched' };
   }

@@ -27,6 +27,7 @@ import {
   RENDER_ROUTE_TOOL_NAME,
   resolveLocalTime,
   toolResultResponse,
+  type FetchedPageScope,
   type FetchedPageStore,
   type MapsRouteResult as MapsRouteResultBody,
   type MapsTravelMode,
@@ -507,7 +508,8 @@ const REFUSAL_REASONS = {
   address_not_found: 'The address is not on that page.',
 } as const;
 
-const OUT_OF_AREA_REASON = 'The place the map found is in a different area.';
+const OUT_OF_AREA_REASON =
+  'The place the map found is in a different area.';
 
 /**
  * US states, under the spellings normalizedWords folds their names to, with the code a geocoder
@@ -665,17 +667,19 @@ export function isInRequestedArea({ query, displayName }: { query: string; displ
 }
 
 /**
- * Pins places the model found on pages this server fetched. A place is kept only when its name and
- * address are on its source page, and each detail only when the page states it; the source and the
- * fetch time are the server's. Only the addresses go to the geocoder.
+ * Pins places the model found on pages this server fetched for this chat. A place is kept only
+ * when its name and address are on its source page, and each detail only when the page states it;
+ * the source and the fetch time are the server's. Only the addresses go to the geocoder.
  */
 export async function renderPlaces({
   service,
   pages,
+  scope,
   input,
 }: {
   service: MapsService;
   pages: FetchedPageStore;
+  scope: FetchedPageScope;
   input: RenderPlacesInput;
 }): Promise<ReturnType<typeof toolResultResponse>> {
   const refused: { name: string; reason: string }[] = [];
@@ -692,6 +696,7 @@ export async function renderPlaces({
         source_url: claim.source_url,
       },
       pages,
+      scope,
     });
     if (result.ok) {
       grounded.push(result.place);
@@ -737,6 +742,7 @@ class MapsTool extends LocalToolMCP {
 
   constructor(
     private readonly service: MapsService,
+    private readonly pagesScope: FetchedPageScope,
     private readonly logger: Logger,
     private readonly timezone: string,
     tracing: AgentTracing,
@@ -792,7 +798,8 @@ class MapsTool extends LocalToolMCP {
       description:
         "Pin places on one map card, each with the details found on the page it came from. Use after a page reading tool has read the pages, whichever one it was: tavily_extract, web_fetch, or another provider's fetch tool all count. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Short forms such as St for Street are fine. Pass the page's own link as source_url. Every refused place comes back with its name and the reason, so fix that one detail and call again for it. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
-      handler: async input => renderPlaces({ service: this.service, pages: fetchedPages, input }),
+      handler: async input =>
+        renderPlaces({ service: this.service, pages: fetchedPages, scope: this.pagesScope, input }),
     }),
   ];
 
@@ -905,6 +912,8 @@ class MapsTool extends LocalToolMCP {
 export interface MapsCapabilityOptions {
   tracing: AgentTracing;
   logger: Logger;
+  /** The tenant and chat read pages are checked for; a page read in another chat does not count. */
+  pages_scope: FetchedPageScope;
   /** IANA zone the user's local times are read in; UTC when the client sent none. */
   timezone?: string | undefined;
 }
@@ -946,7 +955,13 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
   });
   return {
     systemToolSets: [
-      new MapsTool(service, options.logger, resolveLocalTime(new Date(), options.timezone).zone, options.tracing),
+      new MapsTool(
+        service,
+        options.pages_scope,
+        options.logger,
+        resolveLocalTime(new Date(), options.timezone).zone,
+        options.tracing,
+      ),
     ],
   };
 }

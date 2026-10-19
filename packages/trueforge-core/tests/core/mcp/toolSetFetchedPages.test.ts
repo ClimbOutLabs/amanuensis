@@ -2,7 +2,7 @@ import { createLogger } from 'winston';
 import { RemoteMCP, ToolSet, createSentinelHostContext, createWebSearchTurnState, defaultSentinelServices } from '../../../src/core';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
-import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
+import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../src/core/search/groundPlace';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -37,10 +37,13 @@ function fetchTool(name: string): ToolSchema {
 const PAGE_URL = 'https://hope-house.example/';
 const PAGE_TEXT = 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.';
 
+const CHAT_SCOPE: FetchedPageScope = { tenant_id: 't1', conversation_id: 'c1' };
+
 function harness(
   result: (name: string) => string,
   toolNames: { search: string; fetch: string } = { search: 'web_search', fetch: 'web_fetch' },
-): { toolSet: ToolSet; pages: FetchedPageStore } {
+  shared?: { pages: FetchedPageStore; scope: FetchedPageScope },
+): { toolSet: ToolSet; pages: FetchedPageStore; scope: FetchedPageScope } {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
@@ -58,7 +61,9 @@ function harness(
     services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     web_search: createWebSearchTurnState(),
   });
-  const pages = new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+  const pages =
+    shared?.pages ?? new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+  const scope = shared?.scope ?? CHAT_SCOPE;
   const toolSet = new ToolSet({
     source: new RemoteMCP({
       name: 'finder',
@@ -76,9 +81,20 @@ function harness(
     sentinel: host,
     searchProvider: { tools: [toolNames.search, toolNames.fetch], plumbing_fields: [] },
     pages,
+    pagesScope: scope,
   });
-  return { toolSet, pages };
+  return { toolSet, pages, scope };
 }
+
+const hopeClaim = {
+  name: 'Hope House',
+  address: '916 St Andrew St',
+  languages: null,
+  hours: null,
+  price: null,
+  phone: null,
+  source_url: PAGE_URL,
+};
 
 describe('ToolSet records pages read through the search provider', () => {
   it('records a page read with web_fetch, so a place from it can be pinned', async () => {
@@ -87,30 +103,43 @@ describe('ToolSet records pages read through the search provider', () => {
       outcome: { disposition: 'executed_ok' },
       result: { results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] },
     });
-    const { toolSet, pages } = harness(name => (name === 'web_fetch' ? fetched : 'called'));
+    const { toolSet, pages, scope } = harness(name => (name === 'web_fetch' ? fetched : 'called'));
     await toolSet.callTool({ name: 'web_fetch', arguments: { url: PAGE_URL } }, { status: 'allow' });
-    expect(pages.recall(PAGE_URL)?.text).toBe(PAGE_TEXT);
-    expect(
-      groundPlace({
-        claim: {
-          name: 'Hope House',
-          address: '916 St Andrew St',
-          languages: null,
-          hours: null,
-          price: null,
-          phone: null,
-          source_url: PAGE_URL,
-        },
-        pages,
-      }),
-    ).toMatchObject({ ok: true });
+    expect(pages.recall({ scope, url: PAGE_URL })?.text).toBe(PAGE_TEXT);
+    expect(groundPlace({ claim: hopeClaim, pages, scope })).toMatchObject({ ok: true });
+  });
+
+  it('keeps a page read in one chat out of another chat sharing the same memory', async () => {
+    const fetched = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_ok' },
+      result: { results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] },
+    });
+    const sharedPages = new FetchedPageStore({
+      now: () => Date.parse('2026-10-17T10:00:00Z'),
+      ttlMs: 60_000,
+      maxPages: 10,
+    });
+    const otherChatScope: FetchedPageScope = { tenant_id: 't1', conversation_id: 'c2' };
+    harness(() => 'called', undefined, { pages: sharedPages, scope: otherChatScope });
+    const chatA = harness(name => (name === 'web_fetch' ? fetched : 'called'), undefined, {
+      pages: sharedPages,
+      scope: CHAT_SCOPE,
+    });
+    await chatA.toolSet.callTool({ name: 'web_fetch', arguments: { url: PAGE_URL } }, { status: 'allow' });
+    expect(sharedPages.recall({ scope: otherChatScope, url: PAGE_URL })).toBeUndefined();
+    expect(groundPlace({ claim: hopeClaim, pages: sharedPages, scope: otherChatScope })).toEqual({
+      ok: false,
+      reason: 'source_not_fetched',
+    });
+    expect(groundPlace({ claim: hopeClaim, pages: sharedPages, scope: CHAT_SCOPE })).toMatchObject({ ok: true });
   });
 
   it('does not record search results as read pages', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
-    const { toolSet, pages } = harness(() => searched);
+    const { toolSet, pages, scope } = harness(() => searched);
     await toolSet.callTool({ name: 'web_search', arguments: { query: 'food pantry New Orleans' } }, { status: 'allow' });
-    expect(pages.recall(PAGE_URL)).toBeUndefined();
+    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
   });
 
   it('does not record a search result when the search text is itself the link', async () => {
@@ -119,9 +148,9 @@ describe('ToolSet records pages read through the search provider', () => {
       outcome: { disposition: 'executed_ok' },
       result: { results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] },
     });
-    const { toolSet, pages } = harness(() => searched);
+    const { toolSet, pages, scope } = harness(() => searched);
     await toolSet.callTool({ name: 'web_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
-    expect(pages.recall(PAGE_URL)).toBeUndefined();
+    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
   });
 });
 
@@ -130,15 +159,15 @@ describe('ToolSet records pages read through a Tavily shaped server', () => {
 
   it('does not record a search result when the search text is itself the link', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
-    const { toolSet, pages } = harness(() => searched, names);
+    const { toolSet, pages, scope } = harness(() => searched, names);
     await toolSet.callTool({ name: 'tavily_search', arguments: { query: PAGE_URL } }, { status: 'allow' });
-    expect(pages.recall(PAGE_URL)).toBeUndefined();
+    expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
   });
 
   it('records the pages an extract read, so a place from one can be pinned', async () => {
     const extracted = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', raw_content: PAGE_TEXT }] });
-    const { toolSet, pages } = harness(() => extracted, names);
+    const { toolSet, pages, scope } = harness(() => extracted, names);
     await toolSet.callTool({ name: 'tavily_extract', arguments: { urls: [PAGE_URL] } }, { status: 'allow' });
-    expect(pages.recall(PAGE_URL)?.text).toBe(PAGE_TEXT);
+    expect(pages.recall({ scope, url: PAGE_URL })?.text).toBe(PAGE_TEXT);
   });
 });

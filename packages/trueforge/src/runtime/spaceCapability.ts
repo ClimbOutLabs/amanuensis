@@ -1307,7 +1307,12 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
+        mapsCapability({
+          tracing: input.tracing,
+          logger: this.#space.logger,
+          pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
+          timezone: this.clientTimezone,
+        }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
         ...(schedules === undefined
