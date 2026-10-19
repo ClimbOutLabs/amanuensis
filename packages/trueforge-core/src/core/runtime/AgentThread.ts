@@ -4036,7 +4036,7 @@ export class AgentThread {
       false,
     );
 
-    // The repeat budget: the same call made three times in one turn is a loop,
+    // The repeat budget: the same call made four times in one turn is a loop,
     // whatever came back in between. Memoized replays and repeated side effects
     // already stop tighter loops; this catches the ones they cannot see, such as
     // a write with changing content alternating with an identical failing run.
@@ -4253,7 +4253,7 @@ export class AgentThread {
     if (repeatedSignature !== undefined) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
-        errorMessage: `The model made the same ${repeatedSignature.function.name} call three times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
+        errorMessage: `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
       });
     }
 
