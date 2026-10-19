@@ -52,6 +52,11 @@ const HOST_GIT_LIMITS: HostCommandLimits = {
 };
 const TAR_BINARY = '/usr/bin/tar';
 const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
+/**
+ * The guest is unpacked as its own root, which cannot give files to the server's owner (only one uid is
+ * mapped into the guest), so the files are kept as the guest creates them.
+ */
+const GUEST_UNPACK_FLAGS = '--no-same-owner --no-same-permissions';
 
 /** The guest the bridge moves repositories into and out of. */
 export interface BridgeGuest {
@@ -106,6 +111,21 @@ function ok(output: string): ExecResult {
 
 function failed(output: string): ExecResult {
   return { success: true, response: { exitCode: 1, result: output } };
+}
+
+/** One plain sentence for why the sandbox could not unpack; tar's own words are logged, never shown. */
+function unpackFailure(input: { stderr: string; subcommand: string }): string {
+  if (/No space left on device|File too large|Disk quota exceeded/u.test(input.stderr)) {
+    return input.subcommand === 'clone'
+      ? 'fatal: the sandbox is out of space for this repository. Start a new chat and clone it there.'
+      : 'fatal: the sandbox is out of space. Start a new chat and clone the repository there.';
+  }
+  if (
+    /Operation not permitted|Permission denied|Invalid argument|Cannot change (?:ownership|mode)/u.test(input.stderr)
+  ) {
+    return 'fatal: the sandbox could not save the repository files. Restart Aman and try again.';
+  }
+  return 'fatal: the sandbox could not unpack the repository. Restart Aman and try again.';
 }
 
 function hostFailure(stderr: string): string {
@@ -363,14 +383,16 @@ export class GitBridge {
     try {
       await guest.putFile({ path: `${dir}/repo.tar`, content: tar, signal });
       const unpacked = await guest.exec({
-        command: `tar -xf ${shellEscape(`${dir}/repo.tar`)} -C ${shellEscape(dir)} && rm -f ${shellEscape(`${dir}/repo.tar`)}`,
+        command: `tar ${GUEST_UNPACK_FLAGS} -xf ${shellEscape(`${dir}/repo.tar`)} -C ${shellEscape(dir)} && rm -f ${shellEscape(`${dir}/repo.tar`)}`,
         env: undefined,
         cwd: undefined,
         timeoutSeconds: 120,
         signal,
       });
       if (!unpacked.success || unpacked.response.exitCode !== 0) {
-        throw new Refusal('fatal: the sandbox could not unpack the repository.');
+        const stderr = unpacked.success ? unpacked.response.result : unpacked.error;
+        this.options.logger.warn('git bridge could not unpack a repository in the sandbox', { stderr });
+        throw new Refusal(unpackFailure({ stderr, subcommand: input.input.plan.subcommand }));
       }
       // Every spelling of the repository's address is mapped, so the remote resolves however its URL is written.
       const address = `https://github.com/${input.slug}`;
