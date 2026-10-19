@@ -250,7 +250,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
     const card = info.tier3_card;
     expect(card?.plain_what).toBe(
-      "Search the web through finder for: debug sy••••••11 now. Held because it contains one of this computer's keys.",
+      "Web search: debug sy••••••11 now. Held because it contains one of this computer's keys.",
     );
     expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
     expect(card?.why_asked_again).toBeNull();
@@ -363,9 +363,23 @@ describe('provider plumbing fields on the designated provider', () => {
     const tooLong = 'quillfeather '.repeat(20);
     const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toContain(tooLong.trim());
+    expect(result.tier3_card?.outbound_text).toContain(tooLong.trim());
     expect(result.tier3_card?.plain_what).toContain('Held because it is longer than');
     expect(result.tier3_card?.why_asked_again).toBeNull();
+  });
+
+  it('names a held search in one plain line: its objective, with the ids, model and provider left out', async () => {
+    const h = harness({ searchProvider: true, plumbingFields, searchWithoutAsking: false });
+    const result = await info(h, {
+      objective,
+      search_queries: queries,
+      session_id: uuid,
+      model_name: 'invented-model-7',
+    });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.plain_what).toBe(`Web search: ${objective}`);
+    expect(result.tier3_card?.outbound_text).toContain(uuid);
+    expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
 
   it('counts the same fields as text when the catalog does not declare them', async () => {
@@ -416,14 +430,16 @@ describe('provider plumbing fields on the designated provider', () => {
     expect((await info(h, { objective: 'loom', session_id: 'invented-server-secret-9f2c' })).tier).toBe(3);
   });
 
-  it('masks a key held in a plumbing field and still lists the other plumbing on the card', async () => {
+  it('masks a key held in a plumbing field and still lists the other plumbing in the details', async () => {
     const key = 'invented-server-secret-9f2c';
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
     expect(result.tier3_card?.plain_what).toBe(
-      "Search the web through finder for: loom | in••••••2c | 424242. Held because it contains one of this computer's keys.",
+      "Web search: loom. Held because it contains one of this computer's keys.",
     );
+    expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
+    expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
       "Search the web through finder. Held because it contains one of this computer's keys.",
     );

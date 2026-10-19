@@ -172,17 +172,19 @@ async function setup() {
 }
 
 describe('a scheduled run that held an action', () => {
-  it('finishes without pausing, then runs exactly the stored call once when the owner approves', async () => {
+  it('finishes without pausing, then runs exactly the stored call once when the owner approves, and the model continues with its result', async () => {
     const { session, run, approval, callTool, create } = await setup();
     const brief = await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
 
     const finished = await session.getTurn(brief.id);
     expect(finished?.state).toMatchObject({ status: 'done', required_actions: [] });
     expect(callTool).not.toHaveBeenCalled();
-    expect(await session.answersOnlyHeldActions({ previous_turn_id: undefined, input: approval('allow') })).toBe(true);
+    expect(await session.answersOnlyDeniedHeldActions({ previous_turn_id: undefined, input: approval('allow') })).toBe(
+      false,
+    );
 
     const modelCalls = create.mock.calls.length;
-    const replay = await run(approval('allow'), { stop: true });
+    const replay = await run(approval('allow'));
 
     expect(replay.state.status).toBe('done');
     expect(callTool).toHaveBeenCalledTimes(1);
@@ -191,10 +193,11 @@ describe('a scheduled run that held an action', () => {
       expect.objectContaining({ status: 'allow' }),
       expect.anything(),
     );
-    expect(create.mock.calls.length).toBe(modelCalls);
+    // The result goes back into this run's chat, and the model is asked again to finish with it.
+    expect(create.mock.calls.length).toBe(modelCalls + 1);
+    expect(JSON.stringify(create.mock.calls.at(-1)?.[0])).toContain('sent');
 
     // The answer is on record: a second one is no longer about a waiting action, and is only replayed.
-    expect(await session.answersOnlyHeldActions({ previous_turn_id: undefined, input: approval('allow') })).toBe(false);
     await expect(run(approval('allow'))).rejects.toThrow('no pending approval');
     expect(callTool).toHaveBeenCalledTimes(1);
     const again = await session.classifyApprovalResubmission({
@@ -210,9 +213,12 @@ describe('a scheduled run that held an action', () => {
   });
 
   it('drops a denied action and asks the model nothing', async () => {
-    const { run, approval, callTool, create } = await setup();
+    const { session, run, approval, callTool, create } = await setup();
     await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
     const modelCalls = create.mock.calls.length;
+    expect(await session.answersOnlyDeniedHeldActions({ previous_turn_id: undefined, input: approval('deny') })).toBe(
+      true,
+    );
 
     const replay = await run(approval('deny'), { stop: true });
 

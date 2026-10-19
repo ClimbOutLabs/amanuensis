@@ -33,6 +33,23 @@ const NOT_SAVED_MESSAGES: Record<NotSavedReason, string> = {
 /** The line the chat shows when the owner turns a held action down. */
 export const HELD_DENIED_NOTE = 'Denied. Nothing was done.';
 
+/**
+ * The last words of a run that ends with actions waiting for its owner. `waiting` holds each action's
+ * card sentence, so the owner learns what was held without opening the card.
+ */
+export function heldActionsNote(waiting: readonly string[]): string {
+  const lines = waiting.map(sentence => sentence.trim().replace(/\.$/, ''));
+  const [first = '', ...rest] = lines;
+  if (rest.length === 0) {
+    return `I need your OK for one thing: ${first}. Approve it on your Needs your OK list and I'll add it here.`;
+  }
+  return [
+    `I need your OK for ${String(lines.length)} things:`,
+    ...lines.map(line => `- ${line}`),
+    "Approve them on your Needs your OK list and I'll add them here.",
+  ].join('\n');
+}
+
 /** Why answering a held action was refused. The code travels to the client; the text is for logs and API users. */
 export const HELD_REFUSAL_REASONS = ['expired', 'changed', 'not_allowed', 'tool_gone', 'sign_in'] as const;
 export type HeldRefusalReason = (typeof HELD_REFUSAL_REASONS)[number];
