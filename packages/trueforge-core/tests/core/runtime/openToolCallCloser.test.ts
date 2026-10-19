@@ -5,7 +5,10 @@ import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils'
 import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
 import '../harnessMocks';
 
-const NOT_EXECUTED = JSON.stringify({ error: 'Tool call was not executed. Please retry this tool call.' });
+const NOT_EXECUTED = JSON.stringify({
+  error:
+    'Tool call was not executed. Only make this call again if the person asks for it again, or it is still needed for what they just asked.',
+});
 const UNKNOWN_OUTCOME = JSON.stringify({
   error:
     'Tool call outcome unknown: it may have run without its result being recorded. Do not repeat it blindly. Establish whether it already took effect, then continue.',

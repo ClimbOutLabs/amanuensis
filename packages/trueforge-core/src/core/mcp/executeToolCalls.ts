@@ -650,7 +650,7 @@ export const POLICY_BLOCKED_NUDGE_AT = 2;
 /** Policy-blocked calls in one turn before the host ends the turn. */
 export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
-export const IDENTICAL_CALL_STOP_AT = 4;
+export const IDENTICAL_CALL_STOP_AT = 3;
 /**
  * Occurrence at which the host nudges instead of stopping: the second time a signature repeats,
  * one internal system message is appended telling the model the result is already above and it

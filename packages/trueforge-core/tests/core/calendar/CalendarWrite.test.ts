@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { clearRecentCalendarCreates } from '../../../src/core/calendar/recentCreates';
 import { MAX_IDEOGRAPHIC_SELECTORS } from '../../../src/core/email/gmail/mimeText';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
@@ -133,7 +134,7 @@ describe('the approval card', () => {
       action: 'create',
       calendar: 'ada@example.com',
       title: 'Dentist',
-      when: 'Monday, October 19, 2026, 9:00 am to 10:00 am',
+      when: 'Mon Oct 19, 9:00 to 10:00 am',
       time_zone: 'America/New_York',
       duration: '1 hour',
       location: '12 Main St',
@@ -144,7 +145,7 @@ describe('the approval card', () => {
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add "Dentist" to your Google Calendar on Monday, October 19, 2026, 9:00 am to 10:00 am (America/New_York). Google emails lin@example.com and sam@example.com about it.',
+      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York). Google emails lin@example.com and sam@example.com about it.',
     );
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });
@@ -173,11 +174,11 @@ describe('the approval card', () => {
     expect(info.tier3_card?.calendar_event).toMatchObject({
       action: 'change',
       title: 'Team sync',
-      when: 'Tuesday, October 20, 2026, 2:00 pm to 2:30 pm',
+      when: 'Tue Oct 20, 2:00 to 2:30 pm',
       duration: '30 minutes',
       attendees: ['lin@example.com'],
       guests_emailed: true,
-      before: { title: 'Team sync', when: 'Monday, October 19, 2026, 8:00 am to 8:30 am', duration: '30 minutes' },
+      before: { title: 'Team sync', when: 'Mon Oct 19, 8:00 to 8:30 am', duration: '30 minutes' },
     });
   });
 
@@ -669,5 +670,69 @@ describe('hidden text', () => {
       arguments: { ...change, ...spread(MAX_IDEOGRAPHIC_SELECTORS + 1) },
     });
     expect(over.pre_dispatch_failure?.message).toContain('Nothing was saved');
+  });
+});
+
+describe('card date wording and duplicate creates', () => {
+  // A title no other test in this file uses, so the recent-create registry cannot leak between tests.
+  const CHECKUP = { title: 'Yearly checkup', start: '2026-10-27T14:30', end: '2026-10-27T15:00' };
+
+  beforeEach(() => {
+    clearRecentCalendarCreates();
+  });
+
+  afterEach(() => {
+    clearRecentCalendarCreates();
+  });
+
+  it('shows the date plainly and warns when an event runs over 2 days', async () => {
+    const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await cardFor(built, {
+      name: 'create_event',
+      arguments: { title: 'Retreat', start: '2026-10-27T14:30', end: '2026-10-28T15:00' },
+    });
+    expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 pm to Wed Oct 28, 3:00 pm');
+    expect(info.tier3_card?.plain_what).toContain('This event runs over 2 days. Is that right?');
+  });
+
+  it('shows a same-day event in the short form, with no warning', async () => {
+    const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
+    expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 to 3:00 pm');
+    expect(info.tier3_card?.plain_what).not.toContain('runs over');
+    expect(info.tier3_card?.plain_what).not.toContain('You already have this event');
+  });
+
+  it('asks before adding the same event twice in one chat', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: CHECKUP });
+    expect(outcome.disposition).toBe('executed_ok');
+
+    const again = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
+    expect(again.tier3_card?.plain_what).toContain('You already have this event. Add another?');
+    // It still asks as a normal card: approving it is the owner's choice, not a refusal.
+    expect(again.tier).toBe(3);
+    expect(again.is_approval_required).toBe(true);
+
+    const different = await cardFor(built, {
+      name: 'create_event',
+      arguments: { ...CHECKUP, start: '2026-10-28T14:30', end: '2026-10-28T15:00' },
+    });
+    expect(different.tier3_card?.plain_what).not.toContain('You already have this event');
+  });
+
+  it('says an event the owner already removed was already removed, not an error', async () => {
+    const cancelled = { ...STANDUP, status: 'cancelled' };
+    const built = await build({
+      routes: [eventRoutes(() => cancelled)],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+    });
+    const info = await built.tools.toolCallInfo({
+      name: 'update_event',
+      arguments: { event_id: 'ev1', title: 'Team sync (moved)', send_updates: 'none' },
+    });
+    expect(info.pre_dispatch_failure?.message).toContain('That event was already removed.');
+    expect(info.pre_dispatch_failure?.message).not.toContain('no such event');
   });
 });

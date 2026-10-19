@@ -1084,3 +1084,114 @@ describe('enforceStreamDeadlines', () => {
     void draining;
   });
 });
+
+// ─────────── leaked tool-call markup ───────────
+
+describe('mapStreamToChunks leaked tool-call markup', () => {
+  function chunkText(chunks: ExtendedChatCompletionChunk[]): string {
+    return chunks.map(chunk => chunk.choices[0]?.delta.content ?? '').join('');
+  }
+
+  it('never streams DSML markup or the claim after it, and rebuilds the call', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Let me add that for you. ' },
+      { type: 'text-delta', id: 't1', text: '<｜DSML｜tool' },
+      { type: 'text-delta', id: 't1', text: '_calls><｜DSML｜invoke name="create_event">' },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="title" string="true">Dentist</｜DSML｜parameter>',
+      },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="start" string="false">{"date_time": "2026-10-27T14:30:00", "time_zone": "America/New_York"}</｜DSML｜parameter>',
+      },
+      { type: 'text-delta', id: 't1', text: '</｜DSML｜invoke></｜DSML｜tool_calls>' },
+      { type: 'text-delta', id: 't1', text: ' Done, I added the appointment to your calendar.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('tool-calls'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    const shown = chunkText(chunks);
+    expect(shown).toBe('Let me add that for you. ');
+    expect(shown).not.toContain('DSML');
+    expect(shown).not.toContain('added the appointment');
+    expect(final.tool_markup).toBe('recovered');
+    expect(final.output.content).toBe('Let me add that for you. ');
+    expect(final.output.tool_calls).toHaveLength(1);
+    const call = final.output.tool_calls?.[0];
+    expect(call?.function.name).toBe('create_event');
+    expect(JSON.parse(call?.function.arguments ?? '{}')).toEqual({
+      title: 'Dentist',
+      start: { date_time: '2026-10-27T14:30:00', time_zone: 'America/New_York' },
+    });
+  });
+
+  it('flags an invented function_results block as broken and streams none of it', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Adding it now. ' },
+      { type: 'text-delta', id: 't1', text: '<function_results>Event created: Dentist, Oct 27.</function_results>' },
+      { type: 'text-delta', id: 't1', text: ' Done, I added the appointment to your calendar.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Adding it now. ');
+    expect(final.tool_markup).toBe('broken');
+    expect(final.output.tool_calls).toBeUndefined();
+    expect(final.output.content).toBe('Adding it now. ');
+  });
+
+  it('streams a reply whose text merely ends near an opener in full', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Use a < b in code, then stop' },
+      { type: 'text-delta', id: 't1', text: ' <' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Use a < b in code, then stop <');
+    expect(final.tool_markup).toBeUndefined();
+    expect(final.output.content).toBe('Use a < b in code, then stop <');
+  });
+
+  it('keeps a nested-argument call streamed in multi-token pieces exact', async () => {
+    // The owner's calendar failure shape: nested start/end blocks and an attendees list whose
+    // argument JSON arrives in pieces of several tokens at once. The pieces must concatenate into
+    // the exact JSON, or the call downstream is half-formed.
+    const pieces = [
+      '{"title":"Dentist","start":{"date_time":"2026-10-27T14:30:00","time_zone":"America/New_York"},',
+      '"end":{"date_time":"2026-10-27T15:00:00","time_zone":"America/New_York"},',
+      '"attendees":[{"email":"sam@example.com","display_name":"Sam"},',
+      '{"email":"pat@example.com","display_name":"Pat"}]}',
+    ];
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'tool-input-start', id: 'call-0', toolName: 'create_event' },
+      ...pieces.map((delta): TextStreamPart<ToolSet> => ({ type: 'tool-input-delta', id: 'call-0', delta })),
+      { type: 'tool-input-end', id: 'call-0' },
+      makeFinishStep('tool-calls'),
+    ];
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    const call = final.output.tool_calls?.[0];
+    expect(call?.function.name).toBe('create_event');
+    expect(JSON.parse(call?.function.arguments ?? '{}')).toEqual({
+      title: 'Dentist',
+      start: { date_time: '2026-10-27T14:30:00', time_zone: 'America/New_York' },
+      end: { date_time: '2026-10-27T15:00:00', time_zone: 'America/New_York' },
+      attendees: [
+        { email: 'sam@example.com', display_name: 'Sam' },
+        { email: 'pat@example.com', display_name: 'Pat' },
+      ],
+    });
+  });
+});

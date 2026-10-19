@@ -20,6 +20,67 @@ export interface ConvertMCPServersToToolsResult {
   authRequirementInfo: MCPAuthRequired[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The member types of a union-shaped schema (anyOf, oneOf, or a type list); undefined when not a union. */
+function unionMemberTypes(schema: Record<string, unknown>): string[] | undefined {
+  const members = schema['anyOf'] ?? schema['oneOf'];
+  if (Array.isArray(members)) {
+    const types: string[] = [];
+    for (const member of members) {
+      if (!isRecord(member) || typeof member['type'] !== 'string') {
+        return undefined;
+      }
+      types.push(member['type']);
+    }
+    return types;
+  }
+  if (Array.isArray(schema['type'])) {
+    return schema['type'].filter((entry): entry is string => typeof entry === 'string');
+  }
+  return undefined;
+}
+
+/**
+ * One property schema with boolean-or-nothing unions collapsed to a plain boolean, recursing
+ * into nested objects and list items. Some tool servers declare a simple true/false argument as
+ * an either-or (a boolean or null); offered that way, models answer it with junk like "[" and
+ * the call fails inside the provider. A plain true/false type is all the argument ever meant.
+ * Anything that is not exactly a boolean-or-null union is returned unchanged.
+ */
+export function plainBooleanSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const memberTypes = unionMemberTypes(schema);
+  if (
+    memberTypes !== undefined &&
+    memberTypes.length > 0 &&
+    memberTypes.every(type => type === 'boolean' || type === 'null') &&
+    memberTypes.includes('boolean')
+  ) {
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (key !== 'anyOf' && key !== 'oneOf' && key !== 'type') {
+        rest[key] = value;
+      }
+    }
+    return { ...rest, type: 'boolean' };
+  }
+  const result: Record<string, unknown> = { ...schema };
+  if (isRecord(schema['properties'])) {
+    result['properties'] = Object.fromEntries(
+      Object.entries(schema['properties']).map(([key, value]) => [
+        key,
+        isRecord(value) ? plainBooleanSchema(value) : value,
+      ]),
+    );
+  }
+  if (isRecord(schema['items'])) {
+    result['items'] = plainBooleanSchema(schema['items']);
+  }
+  return result;
+}
+
 export async function convertMCPServersToTools(params: {
   tfyManagedServers: IToolSet[];
   userServers: IToolSet[];
@@ -83,7 +144,12 @@ export async function convertMCPServersToTools(params: {
           ...(managedServers.has(toolSet) ? { strict: true } : {}),
           parameters: {
             type: 'object',
-            properties: mcpTool.inputSchema.properties ?? {},
+            properties: Object.fromEntries(
+              Object.entries(mcpTool.inputSchema.properties ?? {}).map(([key, value]) => [
+                key,
+                isRecord(value) ? plainBooleanSchema(value) : value,
+              ]),
+            ),
             required: mcpTool.inputSchema.required ?? [],
             ...(managedServers.has(toolSet) ? { additionalProperties: false } : {}),
           },

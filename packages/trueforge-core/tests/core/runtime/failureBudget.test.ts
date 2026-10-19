@@ -525,13 +525,13 @@ describe('repeat budget', () => {
     expect(JSON.stringify(requests.at(-1)?.messages)).toContain('You already made this exact run call in this request');
   });
 
-  it("nudges each argument variant on its own second occurrence, and still stops at that variant's fourth call", async () => {
+  it("nudges each argument variant on its own second occurrence, and still stops at that variant's third call", async () => {
     // Regression for the Qodo finding on this PR: dedupe, the durable "already sent" check, and
     // the deferred/pending list must all key off the full call signature (tool plus canonical
     // arguments), not the tool name alone. Otherwise the first argument variant's nudge silently
     // marks every other variant of the same tool as already warned. Exact sequence from the
-    // finding: run({a:1}) twice, then run({a:2}) four times. The a:2 variant must get its own
-    // nudge at its own second occurrence, and the turn must still stop at a:2's fourth occurrence.
+    // finding: run({a:1}) twice, then run({a:2}) until it stops. The a:2 variant must get its own
+    // nudge at its own second occurrence, and the turn must still stop at a:2's third occurrence.
     // A succeeding tool, not a failing one: consecutive_failed_batches has its own, lower stop
     // threshold (FAILED_BATCH_STOP_AT), and six straight failures would trip that budget first,
     // masking the repeat-budget behavior this test exists to check.
@@ -547,15 +547,15 @@ describe('repeat budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    // Seven provider calls: the a:2 variant's fourth occurrence triggers the
-    // guard, the recovery pass runs a fifth identical call, and the guard
+    // Six provider calls: the a:2 variant's third occurrence triggers the
+    // guard, the recovery pass runs a fourth identical call, and the guard
     // fires again to end the turn.
-    expect(create).toHaveBeenCalledTimes(7);
+    expect(create).toHaveBeenCalledTimes(6);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
         status: 'error',
-        error: expect.stringContaining('the same run call four times in this request'),
+        error: expect.stringContaining('the same run call three times in this request'),
         handoff_cause: 'loop_detected',
       }),
     );
@@ -594,7 +594,8 @@ describe('repeat budget', () => {
     const create = jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
       round += 1;
-      // rounds=6: write, run(1st), write, run(2nd, nudged), write, run(3rd) — still no stop.
+      // rounds=6: write, run(1st), write, run(2nd, nudged), write, run(3rd, guard recovery
+      // pass; the model then answers, so the turn still ends done).
       return rewriteThenRerun(round, 6);
     });
 
@@ -613,25 +614,26 @@ describe('repeat budget', () => {
     expect(finalMessages.split(nudgeText)).toHaveLength(2); // one occurrence splits into two parts
   });
 
-  it('stops the fourth identical call even when writes with new content sit between them', async () => {
+  it('stops the third identical call even when writes with new content sit between them', async () => {
     const toolSet = makeWorkspaceToolSet({ runFailure: 'never_ran', hostOwned: true });
     let round = 0;
     const create = jest.fn(() => {
       round += 1;
-      // rounds=16: run occurs on rounds 2, 4, 6, 8 — the fourth stops the turn.
+      // rounds=16: run occurs on rounds 2, 4, 6, 8 — the third stops the turn.
       return rewriteThenRerun(round, 16);
     });
 
     const events = await runThread(toolSet, create);
 
-    // Ten provider calls: the fourth identical run triggers the guard, the
-    // recovery pass runs another call, and the guard fires again to end the turn.
-    expect(create).toHaveBeenCalledTimes(10);
+    // Eight provider calls: the third identical run triggers the guard, the
+    // recovery pass runs more calls, and the guard fires again on the fourth
+    // identical run to end the turn.
+    expect(create).toHaveBeenCalledTimes(8);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
         status: 'error',
-        error: expect.stringContaining('the same run call four times in this request'),
+        error: expect.stringContaining('the same run call three times in this request'),
         // A deliberate host guard stop, not an unrecoverable model/provider error: TurnHandle
         // maps a root_agent_error with no handoff_cause to 'fatal_error', so this must be set.
         handoff_cause: 'loop_detected',
@@ -644,7 +646,7 @@ describe('repeat budget', () => {
     // from a snapshot written by an earlier turn (or, as here, an earlier AgentThread
     // instance continuing the same durable memo — the harness builds one instance per
     // turn). The stop decision must count only calls made in the current turn, or a call
-    // repeated once in turn 9 falsely reports "four times in this request" because three
+    // repeated once in turn 9 falsely reports "three times in this request" because three
     // earlier, unrelated occurrences from turn 3 are still in the hydrated map.
     const toolSet = makeWorkspaceToolSet({ runFailure: 'never_ran', hostOwned: true });
     const repeatedArgs = {
@@ -652,7 +654,7 @@ describe('repeat budget', () => {
       command: 'cd /opt/tf/workspace && python3 qwen_search.py',
     };
 
-    // "Turn 3": the same call three times, which stays under the four-call stop threshold.
+    // "Turn 3": the same call three times, which reaches the three-call stop threshold only as a recovery pass, so the turn still ends without an error.
     let earlierRound = 0;
     const earlierCreate = jest.fn(() => {
       earlierRound += 1;
@@ -691,7 +693,7 @@ describe('repeat budget', () => {
       command: 'cd /opt/tf/workspace && python3 qwen_search.py',
     };
 
-    // Before the pause: the same call twice, which stays under the four-call stop threshold
+    // Before the pause: the same call twice, which stays under the three-call stop threshold
     // (and reaches the nudge point).
     let beforeRound = 0;
     const beforeCreate = jest.fn(() => {
@@ -706,7 +708,8 @@ describe('repeat budget', () => {
 
     // After the pause: a fresh AgentThread instance hydrated from that same request's
     // durable memo, marked as a continuation, makes the same call again until it stops —
-    // a third time (no nudge; already sent before the pause) and a fourth time (stop).
+    // a third time overall (stop; the nudge was already sent before the pause) and a
+    // fourth time (the guard ends the turn after its one recovery pass).
     let afterRound = 0;
     const afterCreate = jest.fn(() => {
       afterRound += 1;
@@ -714,10 +717,10 @@ describe('repeat budget', () => {
     });
     const { events: afterEvents } = await runThreadInstance(toolSet, afterCreate, pausedToolCallMemo, true);
 
-    // Three calls after the pause: the identical-call counts combine across the
-    // pause (2 before + 3 after). The guard triggers recovery on the fourth
-    // occurrence, and the turn ends safely without looping forever.
-    expect(afterCreate).toHaveBeenCalledTimes(3);
+    // Two calls after the pause: the identical-call counts combine across the
+    // pause (2 before + 2 after). The guard triggers recovery on the third
+    // occurrence overall, and the turn ends safely without looping forever.
+    expect(afterCreate).toHaveBeenCalledTimes(2);
     expect(afterEvents.at(-1)).toMatchObject({ type: 'internal.agent.done' });
   });
 
@@ -832,8 +835,8 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(3);
-    // With loop recovery, the fourth identical spawn triggers a recovery note
+    expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(2);
+    // With loop recovery, the third identical spawn triggers a recovery note
     // rather than an immediate error. The turn still ends safely (with an error)
     // without running forever.
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'error' });
@@ -1064,13 +1067,14 @@ describe('repeat budget', () => {
     expect(nudgeIndex).toBeGreaterThan(spawnResultIndex);
   });
 
-  it('re-sends the nudge after compaction removes it, and still stops at the fourth call', async () => {
+  it('still warns the model when compaction removes the nudge, and stops at the third call', async () => {
     // Regression for the compaction bug: callSignatureCountsThisTurn === 2 used to double as
     // both trigger and permanent "already sent" latch, but the nudge itself is an ordinary
     // context message that compaction (which explicitly skips internal system messages) can
     // drop. Once dropped, the third call ran with no warning and the model had no notice before
-    // the fourth call stopped the turn. The fix re-derives "already sent" from context each
-    // time, so a nudge compaction erased is sent again rather than staying silently lost.
+    // the stop. "Already sent" is now re-derived from context each time, and the stop itself
+    // comes with a recovery pass whose note tells the model to answer from what it has, so the
+    // model is never stopped without a word even when compaction erased the earlier nudge.
     const toolSet = makeSucceedingRunToolSet();
     const runArgs = { command: 'cd /opt/tf/workspace && python3 qwen_search.py' };
     const nudgeText = 'You already made this exact run call in this request';
@@ -1109,14 +1113,14 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    // Five provider calls: four identical calls trigger the guard, the recovery
-    // pass runs a fifth identical call, and the guard fires again to end the turn.
-    expect(create).toHaveBeenCalledTimes(5);
+    // Four provider calls: the third identical call triggers the guard, the recovery
+    // pass runs a fourth identical call, and the guard fires again to end the turn.
+    expect(create).toHaveBeenCalledTimes(4);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
         status: 'error',
-        error: expect.stringContaining('the same run call four times in this request'),
+        error: expect.stringContaining('the same run call three times in this request'),
         handoff_cause: 'loop_detected',
       }),
     );
@@ -1124,10 +1128,10 @@ describe('repeat budget', () => {
     // Compaction wiped the nudge (and everything else) before the third call's request was
     // built, so that request must not carry it.
     expect(JSON.stringify(requests[2]?.messages)).not.toContain(nudgeText);
-    // The third occurrence still gets a nudge in the request that follows it: the durable guard
-    // found no nudge for `run` left in context (compaction erased it), so it is re-sent rather
-    // than staying suppressed by a one-shot latch on the count.
-    expect(JSON.stringify(requests[3]?.messages)).toContain(nudgeText);
+    // The request that follows the third call carries the guard's recovery note instead: the
+    // model is told to answer from what the call already returned, so the stop never lands
+    // without a word of warning, compaction or not.
+    expect(JSON.stringify(requests[3]?.messages)).toContain('You keep making the same run call');
   });
 
   it('does not stop a streak of grep with no matches (exit 1 treated as ok)', async () => {
@@ -1288,11 +1292,11 @@ describe('repeat budget', () => {
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'error' });
   });
 
-  it('does not stop five different "exited" commands, but does stop the fourth identical "exited" call', async () => {
+  it('does not stop five different "exited" commands, but does stop the third identical "exited" call', async () => {
     // Neither guard sees an "exited" result as a failure (isError is false), so five different
     // exited commands run to completion untouched by the failure budget. But the identical-call
     // guard is keyed on the call signature, not on the result: the model repeating the exact same
-    // command four times still trips it, whatever status that command reports.
+    // command three times still trips it, whatever status that command reports.
     const toolSet = makeMockIMCPServer({
       name: 'search',
       preload: true,
@@ -1337,9 +1341,9 @@ describe('repeat budget', () => {
     expect(toolSet.callTool).toHaveBeenCalledTimes(5);
     expect(differentEvents.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
 
-    // Then, the same exited command called four times in a row: the identical-call guard stops
-    // the turn on the fourth occurrence, never reaching a fifth call, even though every one of
-    // those results is "exited" and never sets isError.
+    // Then, the same exited command called in a row: the identical-call guard stops
+    // the turn on the third occurrence, even though every one of those results is
+    // "exited" and never sets isError.
     jest.mocked(toolSet.callTool).mockClear();
     let identicalRound = 0;
     const identicalCommandCreate = jest.fn(() => {
@@ -1353,14 +1357,14 @@ describe('repeat budget', () => {
     });
     const identicalEvents = await runThread(toolSet, identicalCommandCreate);
 
-    // Five calls: four identical trigger the guard, the recovery pass runs a
-    // fifth identical call, and the guard fires again to end the turn.
-    expect(toolSet.callTool).toHaveBeenCalledTimes(5);
+    // Four calls: three identical trigger the guard, the recovery pass runs a
+    // fourth identical call, and the guard fires again to end the turn.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(4);
     expect(identicalEvents).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
         status: 'error',
-        error: expect.stringContaining('the same exec call four times in this request'),
+        error: expect.stringContaining('the same exec call three times in this request'),
         handoff_cause: 'loop_detected',
       }),
     );
