@@ -146,7 +146,17 @@ function claimVerbOffset(matched: string): number {
 
 /** Whether the text leading into a match, up to its claim verb, negates it. */
 function isNegated(input: { text: string; matchIndex: number; matched: string }): boolean {
-  const before = input.text.slice(Math.max(0, input.matchIndex - 30), input.matchIndex);
+  // The lookback stays inside the sentence the claim stands in: a "not" in the sentence
+  // before ("Not sure which day you meant.") says nothing about this one.
+  let sentenceStart = 0;
+  for (let index = input.matchIndex - 1; index >= 0; index--) {
+    const char = input.text[index];
+    if (char === '.' || char === '!' || char === '?' || char === '\n') {
+      sentenceStart = index + 1;
+      break;
+    }
+  }
+  const before = input.text.slice(Math.max(sentenceStart, input.matchIndex - 30), input.matchIndex);
   return NEGATION.test(before) || NEGATION.test(input.matched.slice(0, claimVerbOffset(input.matched)));
 }
 
@@ -171,7 +181,17 @@ function quotedSpans(text: string): { start: number; end: number }[] {
     }
   }
   if (openAt !== undefined) {
-    spans.push({ start: openAt, end: text.length });
+    // A quote that never closes covers only the line or sentence it opened in, so a stray
+    // quote (a measurement mark, a typo) cannot hide every claim that follows it.
+    let end = text.length;
+    for (let index = openAt + 1; index < text.length; index++) {
+      const char = text[index];
+      if (char === '\n' || char === '.' || char === '!' || char === '?') {
+        end = index;
+        break;
+      }
+    }
+    spans.push({ start: openAt, end });
   }
   return spans;
 }

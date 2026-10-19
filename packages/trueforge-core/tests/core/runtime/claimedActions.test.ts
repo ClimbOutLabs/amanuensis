@@ -64,6 +64,23 @@ describe('detectActionClaims', () => {
     const mixed = '"I sent the email yesterday," is what the draft said. I deleted the old draft.';
     expect(detectActionClaims(mixed)).toEqual(['delete']);
   });
+
+  it('still hears a claim after a stray quote that never closes', () => {
+    // The quote here is a measurement mark, not speech: it opens nothing, so it cannot
+    // quietly swallow the claim that follows it in the next sentence or on the next line.
+    expect(detectActionClaims('The shelf is 12" wide. I\'ve added the appointment to your calendar.')).toContain(
+      'calendar',
+    );
+    expect(detectActionClaims('It is 12" wide\nI have added the appointment to your calendar.')).toContain('calendar');
+  });
+
+  it('does not let a negation in the sentence before hide a claim', () => {
+    // "Not" belongs to the first sentence; the claim stands in its own sentence and counts.
+    expect(detectActionClaims("Not sure which day you meant. I've added the appointment.")).toContain('calendar');
+    expect(
+      claimedActionNote({ content: "Not sure which day you meant. I've added the appointment.", successes: [] }),
+    ).toBe(CLAIMED_ACTION_NOTE);
+  });
 });
 
 describe('claimedActionNote', () => {
