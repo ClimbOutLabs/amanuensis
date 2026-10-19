@@ -110,6 +110,14 @@ describe('SkillMounter', () => {
     expect(rendered).not.toContain('git-skill-tvly</skill>'); // Should not be in available section
   });
 
+  it('leaves out the preamble when every skill is unavailable', () => {
+    const mounter = new SkillMounter({ skills: [GIT_SKILL] });
+    const rendered = renderSkills(mounter, new Map([['git-skill', 'this sandbox has no internet access']]));
+
+    expect(rendered).toContain('git-skill: unavailable (this sandbox has no internet access)');
+    expect(rendered).not.toContain('The skill is present');
+  });
+
   it('separates available and unavailable skills in the prompt', () => {
     const mounter = new SkillMounter({ skills: [GIT_SKILL, GIT_SKILL_WITH_REQUIRES] });
     const unavailable = new Map([['git-skill-tvly', 'missing prerequisite: tvly']]);

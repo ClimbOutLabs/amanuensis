@@ -108,7 +108,7 @@ import {
   type SandboxExecParams,
   type SandboxProvider,
 } from './provider/Provider';
-import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
+import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import { pushCardFields } from './slots/git/pushCard';
 import {
@@ -123,6 +123,7 @@ import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
+import { SKILLS_NO_NETWORK_REASON } from './skills/constants';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
@@ -2877,16 +2878,22 @@ export class Sandbox extends LocalToolMCP {
   private renderSkillsSection(): string {
     if (this.cachedSkillsSection === undefined) {
       const skills = new InstructionBuilder('skills');
-      // Pass unavailable skills (empty map if none checked yet or all available)
-      const unavailable = this.unavailableSkillsCache.size > 0 ? this.unavailableSkillsCache : undefined;
       this.skillMounter?.instruction(
         skills,
         { skillsDir: this.provider.getSkillsDir(this.promptSandboxId()) },
-        unavailable,
+        this.unavailableSkillsForPrompt(),
       );
       this.cachedSkillsSection = skills.build();
     }
     return this.cachedSkillsSection;
+  }
+
+  /** Skills download over the network, so a sandbox without one reports every skill unavailable. */
+  private unavailableSkillsForPrompt(): Map<string, string> | undefined {
+    if (!this.hasNetwork()) {
+      return new Map((this.skillMounter?.skillNames() ?? []).map(name => [name, SKILLS_NO_NETWORK_REASON]));
+    }
+    return this.unavailableSkillsCache.size > 0 ? this.unavailableSkillsCache : undefined;
   }
 
   buildInstruction(builder: InstructionBuilder): void {
@@ -4302,8 +4309,8 @@ export class Sandbox extends LocalToolMCP {
       return;
     }
 
-    // Only check if there are skills; the sandbox is guaranteed live here.
-    if (!this.skillMounter) {
+    // Only check if there are skills; the sandbox is guaranteed live here. Without a network none can load.
+    if (!this.skillMounter || !this.hasNetwork()) {
       this.prerequisitesChecked = true;
       return;
     }
@@ -4723,9 +4730,8 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (e) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
-      const message = e instanceof Error ? e.message : 'Sandbox initialization failed';
       const fallback = this.existingSandboxInfo;
-      return hostRefusalResponse(`Sandbox initialization failed: ${message}`, {
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE, {
         sandboxCreated: Boolean(fallback),
         ...(fallback !== undefined ? { sandboxInfo: fallback } : {}),
       });
@@ -5245,8 +5251,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
@@ -5469,8 +5474,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
@@ -6278,11 +6282,14 @@ export class Sandbox extends LocalToolMCP {
     }
 
     // Fold skill installation into this single init exec. The mounter returns a declarative
-    // command + env + timeout; runs even when empty so existing skills are cleaned up.
-    const skillInit = this.skillMounter?.getSandboxInit({
-      skillsDir,
-      skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId),
-    });
+    // command + env + timeout; runs even when empty so existing skills are cleaned up. A sandbox
+    // with no network skips it: the downloader can't fetch, and the provider refuses its env.
+    const skillInit = this.hasNetwork()
+      ? this.skillMounter?.getSandboxInit({
+          skillsDir,
+          skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId),
+        })
+      : undefined;
     if (skillInit) {
       for (const upload of skillInit.uploads) {
         await this.provider.uploadFile({
