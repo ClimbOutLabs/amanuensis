@@ -4245,6 +4245,14 @@ describe('Sandbox skills without a network', () => {
       const prompt = builder.build();
       expect(prompt).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
       expect(prompt).not.toContain('alpha: unavailable');
+      if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill gamma couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.",
+        ],
+      });
     } finally {
       await archives.close();
       rmSync(root, { recursive: true, force: true });

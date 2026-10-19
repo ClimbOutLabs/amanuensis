@@ -21,8 +21,13 @@ const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
 const OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u;
 const REF_PATTERN = /^[A-Za-z0-9._/-]+$/u;
 
-/** What a person sees for a skill that could not be copied. The full error is not shown. */
+/** What the model sees for a skill that could not be copied. The full error is not shown. */
 export const SKILL_COPY_FAILED_REASON = "couldn't be copied into the sandbox";
+
+/** The one plain line a person sees when a skill is left out. */
+export function skillCopyFailedNotice(name: string): string {
+  return `The skill ${name} couldn't be loaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+}
 
 export interface SkillCopyDeps {
   /** Downloads a registry skill's tarball. Defaults to an HTTPS fetch with a timeout. */

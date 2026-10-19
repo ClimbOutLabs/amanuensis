@@ -111,6 +111,7 @@ import {
 } from './provider/Provider';
 import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
+import { skillCopyFailedNotice } from './skills/slotSkillCopy';
 import { pushCardFields } from './slots/git/pushCard';
 import {
   GIT_INDEX_ENTRIES_COMMAND,
@@ -1972,6 +1973,8 @@ export class Sandbox extends LocalToolMCP {
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   // Kept apart from the prerequisite cache, which the prerequisite check clears.
   private skillCopyFailures: ReadonlyMap<string, string> = new Map<string, string>();
+  // Plain lines for the person, shown once on the next exec result.
+  private pendingSkillNotices: string[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -2888,6 +2891,13 @@ export class Sandbox extends LocalToolMCP {
       this.cachedSkillsSection = skills.build();
     }
     return this.cachedSkillsSection;
+  }
+
+  /** Exec output as text, with any skill notices for the person added once. */
+  private execResultText(serialized: Record<string, unknown>): string {
+    const notices = this.pendingSkillNotices;
+    this.pendingSkillNotices = [];
+    return JSON.stringify(notices.length === 0 ? serialized : { ...serialized, notices });
   }
 
   /** Skills left out when they were copied into the sandbox, plus any missing prerequisites. */
@@ -4784,7 +4794,7 @@ export class Sandbox extends LocalToolMCP {
 
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(execution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(execution.serialized) }],
           isError: !isExecResultOk(execution.result) || execution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -4842,7 +4852,7 @@ export class Sandbox extends LocalToolMCP {
       }
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(retryExecution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(retryExecution.serialized) }],
           isError: !isExecResultOk(retryExecution.result) || retryExecution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -6291,7 +6301,9 @@ export class Sandbox extends LocalToolMCP {
     } else {
       const offline = await this.skillMounter?.getOfflineSandboxInit(skillPaths, { signal });
       skillInit = offline?.init;
-      this.skillCopyFailures = offline?.failed ?? new Map<string, string>();
+      const failed = offline?.failed ?? new Map<string, string>();
+      this.skillCopyFailures = failed;
+      this.pendingSkillNotices = [...failed.keys()].map(name => skillCopyFailedNotice(name));
       this.cachedSkillsSection = undefined;
     }
     if (skillInit) {
