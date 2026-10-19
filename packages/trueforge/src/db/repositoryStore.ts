@@ -13,6 +13,8 @@ export interface RepositoryRecord {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  /** Whether the person has allowed this repo's packages to be downloaded through the mirrors. */
+  package_downloads_allowed: boolean;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -51,6 +53,11 @@ export interface BindSessionInput extends GetRepositoryInput {
 
 export interface UnbindSessionInput extends RepositoryOwnerInput {
   session_id: string;
+  expected_revision: number | undefined;
+}
+
+export interface SetPackageDownloadsInput extends GetRepositoryInput {
+  allowed: boolean;
   expected_revision: number | undefined;
 }
 
@@ -214,6 +221,10 @@ export interface IRepositoryStore<TTransaction = never> {
   listRepositories(input: RepositoryOwnerInput, transaction?: TTransaction): Promise<RepositoryRecord[]>;
   bindSession(input: BindSessionInput, transaction?: TTransaction): Promise<SessionBindingRecord | undefined>;
   unbindSession(input: UnbindSessionInput, transaction?: TTransaction): Promise<SessionBindingRecord | undefined>;
+  setPackageDownloadsAllowed(
+    input: SetPackageDownloadsInput,
+    transaction?: TTransaction,
+  ): Promise<RepositoryRecord | undefined>;
   listVerifyCommands(input: GetRepositoryInput, transaction?: TTransaction): Promise<VerifyCommandRecord[]>;
   upsertVerifyCommand(
     input: VerifyCommandInput,

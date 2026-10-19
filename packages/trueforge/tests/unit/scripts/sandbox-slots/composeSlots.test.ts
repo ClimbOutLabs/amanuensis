@@ -59,8 +59,12 @@ describe('docker-compose.slots.yml', () => {
       );
       expect(service.security_opt.some(option => /unconfined/.test(option))).toBe(false);
       expect(service.tmpfs.map(entry => entry.split(':')[0]).sort()).toEqual(['/run/runsc', '/tmp']);
-      expect(service.volumes).toHaveLength(2);
-      expect(service.volumes.every(volume => /^slot_(ws|ctl)_[1-4]:\/(workspace|run\/aman)$/.test(volume))).toBe(true);
+      expect(service.volumes).toHaveLength(3);
+      expect(
+        service.volumes.every(volume =>
+          /^slot_(ws|ctl|mirror)_[1-4]:\/(workspace|run\/aman|run\/aman\/mirror)$/.test(volume),
+        ),
+      ).toBe(true);
       expect(
         service.volumes.some(
           volume => volume.includes('docker.sock') || volume.startsWith('/') || volume.startsWith('.'),
@@ -86,6 +90,10 @@ describe('docker-compose.slots.yml', () => {
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_1',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_2',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_3',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_4',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_1',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_2',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_3',
@@ -142,8 +150,20 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
       'main_slot_ctl_2',
       'main_slot_ctl_3',
       'main_slot_ctl_4',
+      'main_slot_mirror_1',
+      'main_slot_mirror_2',
+      'main_slot_mirror_3',
+      'main_slot_mirror_4',
     ]);
     expect(JSON.stringify(app)).not.toContain('slot_ws_');
+  });
+
+  test('mounts each mirror volume writable, so the app can run the package mirrors there', () => {
+    const mounts = app.services.app.volumes.filter(volume => volume.startsWith('slot_mirror_'));
+    expect(mounts).toHaveLength(4);
+    for (const [index, volume] of mounts.entries()) {
+      expect(volume).toBe(`slot_mirror_${String(index + 1)}:/run/aman-slots/${String(index + 1)}/mirror`);
+    }
   });
 
   test('the slot image tag the installer builds is the one the slot services run', () => {

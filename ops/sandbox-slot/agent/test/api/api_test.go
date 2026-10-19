@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -564,5 +566,183 @@ func TestExecTellsTheCallerWhichFilesWereDeletedToStayWithinTheLimit(t *testing.
 	rec = e.do("POST", "/v1/exec", execBody(nil))
 	if !strings.Contains(rec.Body.String(), `"notices":[]`) {
 		t.Fatalf("an ordinary call has an empty list, not null: %s", rec.Body.String())
+	}
+}
+
+const mirrorToken = "0123456789abcdef0123456789abcdef"
+
+func envValue(env []string, name string) (string, bool) {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, name+"=") {
+			return strings.TrimPrefix(entry, name+"="), true
+		}
+	}
+	return "", false
+}
+
+func TestExecWithMirrorTokenPointsToolsAtTheMirror(t *testing.T) {
+	e := newEnv(t, true)
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["package_mirror_token"] = mirrorToken
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	spec := e.runner.spec
+	if !spec.SharedNetwork {
+		t.Fatal("a call with a mirror grant must run in the slot's loopback namespace")
+	}
+	base := "http://127.0.0.1:18771/m/" + mirrorToken
+	for name, want := range map[string]string{
+		"PIP_INDEX_URL":                       base + "/pypi/simple",
+		"npm_config_registry":                 base + "/npm",
+		"GOPROXY":                             base + "/go",
+		"CARGO_SOURCE_CRATES_IO_REPLACE_WITH": "aman-mirror",
+		"CARGO_SOURCE_AMAN_MIRROR_REGISTRY":   "sparse+" + base + "/cargo",
+		"npm_config_audit":                    "false",
+		"npm_config_fund":                     "false",
+	} {
+		got, ok := envValue(spec.Env, name)
+		if !ok || got != want {
+			t.Errorf("%s = %q (present %v), want %q", name, got, ok, want)
+		}
+	}
+	for _, name := range []string{"PIP_NO_INDEX", "CARGO_NET_OFFLINE"} {
+		if _, ok := envValue(spec.Env, name); ok {
+			t.Errorf("%s must not be set when mirrors are granted", name)
+		}
+	}
+	if goproxy, _ := envValue(spec.Env, "GOPROXY"); strings.Contains(goproxy, "direct") {
+		t.Errorf("GOPROXY must name the mirror only, got %q", goproxy)
+	}
+}
+
+func TestExecWithoutMirrorTokenStaysOffline(t *testing.T) {
+	e := newEnv(t, true)
+	rec := e.do("POST", "/v1/exec", execBody(nil))
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	spec := e.runner.spec
+	if spec.SharedNetwork {
+		t.Fatal("a call without a mirror grant must keep its isolated network")
+	}
+	for name, want := range map[string]string{
+		"PIP_NO_INDEX":      "1",
+		"GOPROXY":           "off",
+		"CARGO_NET_OFFLINE": "true",
+		"npm_config_audit":  "false",
+		"npm_config_fund":   "false",
+	} {
+		got, ok := envValue(spec.Env, name)
+		if !ok || got != want {
+			t.Errorf("%s = %q (present %v), want %q", name, got, ok, want)
+		}
+	}
+}
+
+func TestExecRejectsAMalformedMirrorToken(t *testing.T) {
+	e := newEnv(t, true)
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["package_mirror_token"] = "not-a-token"
+	}))
+	if rec.Code != 400 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestMirrorForwarder runs a held exec so a grant is active, then speaks to the forwarder the way
+// a guest would: only GET and HEAD for the granted token are carried to the gateway socket.
+func TestMirrorForwarder(t *testing.T) {
+	e := newEnv(t, true)
+	gatewaySocket := filepath.Join(e.tmp, "mirror.sock")
+	type seen struct {
+		path  string
+		token string
+	}
+	seenCh := make(chan seen, 8)
+	ln, err := net.Listen("unix", gatewaySocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	gateway := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenCh <- seen{path: r.URL.EscapedPath(), token: r.Header.Get("X-Aman-Mirror-Token")}
+		_, _ = io.WriteString(w, "gateway answer")
+	})}
+	go func() { _ = gateway.Serve(ln) }()
+	defer gateway.Close()
+	e.srv.MirrorSocketPath = gatewaySocket
+	if err := e.srv.StartMirrorForwarder(); err != nil {
+		t.Fatal(err)
+	}
+	e.runner.hold = make(chan struct{})
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+			m["package_mirror_token"] = mirrorToken
+		}))
+	}()
+	base := "http://127.0.0.1:18771/m/" + mirrorToken
+	client := &http.Client{Timeout: 5 * time.Second}
+	call := func(method, url string) (int, string) {
+		req, err := http.NewRequest(method, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	// Wait until the held call's grant is active.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		code, _ := call("GET", base+"/npm/leftpad")
+		if code == 200 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the grant never opened the forwarder; last status %d", code)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if got := <-seenCh; got.path != "/npm/leftpad" || got.token != mirrorToken {
+		t.Fatalf("gateway saw %+v", got)
+	}
+	if code, _ := call("PUT", base+"/npm/leftpad"); code != 405 {
+		t.Errorf("PUT to the mirror = %d, want 405", code)
+	}
+	if code, _ := call("POST", base+"/npm/leftpad/-/leftpad-1.0.0.tgz"); code != 405 {
+		t.Errorf("POST to the mirror = %d, want 405", code)
+	}
+	other := "http://127.0.0.1:18771/m/ffffffffffffffffffffffffffffffff/npm/leftpad"
+	if code, _ := call("GET", other); code != 403 {
+		t.Errorf("another token = %d, want 403", code)
+	}
+	if code, _ := call("GET", base+"/npm/%2e%2e/secret"); code != 404 {
+		t.Errorf("a dot step = %d, want 404", code)
+	}
+	if code, _ := call("GET", base+"/npm/..%2fsecret"); code != 404 {
+		t.Errorf("an encoded dot step = %d, want 404", code)
+	}
+	code, body := call("GET", base+"/npm/@scope%2fpkg")
+	if code != 200 || body != "gateway answer" {
+		t.Fatalf("scoped name = %d %q", code, body)
+	}
+	if got := <-seenCh; got.path != "/npm/@scope%2fpkg" {
+		t.Fatalf("gateway saw %q for the scoped name", got.path)
+	}
+	close(e.runner.hold)
+	rec := <-done
+	if rec.Code != 200 {
+		t.Fatalf("the held exec finished with %d %s", rec.Code, rec.Body.String())
+	}
+	// With the call over, the grant is closed again.
+	if code, _ := call("GET", base+"/npm/leftpad"); code != 403 {
+		t.Errorf("after the call the forwarder = %d, want 403", code)
 	}
 }

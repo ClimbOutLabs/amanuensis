@@ -120,6 +120,7 @@ describe('SlotDriver', () => {
       sandboxIdentity: { uid: 1, gid: 1, chownRunDirs: false },
       signal: undefined,
       harvestGraceMs: 0,
+      packageMirrorToken: undefined,
     };
   }
 

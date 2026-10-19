@@ -24,9 +24,11 @@ import {
   listRepositoriesRoute,
   listVerifyCommandProposalsRoute,
   listVerifyCommandsRoute,
+  setPackageDownloadsRoute,
   unbindSessionRepositoryRoute,
   upsertVerifyCommandRoute,
 } from '../routes/repositoryRoutes';
+import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import type { RepositoryWire, VerifyCommandProposalWire, VerifyCommandWire } from '../schemas/repository';
 import { checkSessionAccess, FORBIDDEN_SESSION_ACCESS, TENANT_ID } from './sessions';
 
@@ -36,6 +38,7 @@ function toWireRepository(record: RepositoryRecord): RepositoryWire {
     name: record.name,
     clone_url: record.clone_url,
     default_branch: record.default_branch,
+    package_downloads_allowed: record.package_downloads_allowed,
     revision: record.revision,
     created_at: record.created_at,
     updated_at: record.updated_at,
@@ -122,6 +125,33 @@ export function createRepositoriesRouter(deps: RepositoriesRouterDeps) {
     return record === undefined
       ? c.json({ error: { message: `Repository not found: ${repositoryId}` } }, 404)
       : c.json({ data: toWireRepository(record) }, 200);
+  };
+
+  const setPackageDownloadsHandler: RouteHandler<typeof setPackageDownloadsRoute> = async c => {
+    const requestContext = deps.resolveRequestContext(c);
+    const { repository_id: repositoryId } = c.req.valid('param');
+    const body = c.req.valid('json');
+    const owner = { tenant_id: TENANT_ID, created_by: requestContext.subject.id, repository_id: repositoryId };
+    try {
+      const record = await deps.repositoryStore.setPackageDownloadsAllowed({
+        ...owner,
+        allowed: body.allowed,
+        expected_revision: body.expected_revision,
+      });
+      if (record === undefined) {
+        return c.json({ error: { message: `Repository not found: ${repositoryId}` } }, 404);
+      }
+      if (!body.allowed) {
+        // Taking the allowance back ends every live mirror grant for this repo at once.
+        packageMirrorTokens.revokeRepository(owner);
+      }
+      return c.json({ data: toWireRepository(record) }, 200);
+    } catch (error) {
+      if (error instanceof RepositoryRevisionConflictError) {
+        return c.json({ error: { message: error.message } }, 409);
+      }
+      throw error;
+    }
   };
 
   const listCommandsHandler: RouteHandler<typeof listVerifyCommandsRoute> = async c => {
@@ -252,6 +282,7 @@ export function createRepositoriesRouter(deps: RepositoriesRouterDeps) {
   router.openapi(listRepositoriesRoute, listHandler);
   router.openapi(createRepositoryRoute, createHandler);
   router.openapi(getRepositoryRoute, getHandler);
+  router.openapi(setPackageDownloadsRoute, setPackageDownloadsHandler);
   router.openapi(listVerifyCommandsRoute, listCommandsHandler);
   router.openapi(upsertVerifyCommandRoute, upsertCommandHandler);
   router.openapi(deleteVerifyCommandRoute, deleteCommandHandler);

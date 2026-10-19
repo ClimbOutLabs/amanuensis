@@ -74,6 +74,8 @@ type execRequest struct {
 	Env       map[string]string `json:"env"`
 	TimeoutMS int               `json:"timeout_ms"`
 	DiskMB    int               `json:"disk_mb"`
+	// PackageMirrorToken grants this call the package mirrors; empty keeps the guest offline.
+	PackageMirrorToken string `json:"package_mirror_token"`
 }
 
 type execResponse struct {
@@ -104,6 +106,9 @@ func (r *execRequest) validate() error {
 	}
 	if r.DiskMB < 1 || r.DiskMB > MaxDiskMB {
 		return fmt.Errorf("disk_mb must be 1 to %d", MaxDiskMB)
+	}
+	if r.PackageMirrorToken != "" && !validMirrorToken(r.PackageMirrorToken) {
+		return errors.New("package_mirror_token must be 32 lowercase hex characters")
 	}
 	return nil
 }
@@ -158,7 +163,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
 		return
 	}
-	env := guestEnv()
+	env := guestEnv(req.PackageMirrorToken)
 	for name, value := range req.Env {
 		env = append(env, name+"="+value)
 	}
@@ -173,6 +178,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		GID:    guestGID,
 		Binds:  []guest.Bind{{Dest: tree.GuestRoot, Source: root}},
 		Tmpfs:  []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
+		SharedNetwork: req.PackageMirrorToken != "",
 	}
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
@@ -186,6 +192,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	}
 	started := time.Now()
 	oomBefore := s.OOMKills()
+	endGrant := s.beginMirrorGrant(req.PackageMirrorToken)
 	res := s.Runner.Run(r.Context(), spec, guest.Options{
 		Timeout:       time.Duration(req.TimeoutMS) * time.Millisecond,
 		StreamCap:     StreamCapBytes,
@@ -193,6 +200,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Guard:         watch.guard,
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	endGrant()
 	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
 	notices = reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, notices)
 	writeJSON(w, http.StatusOK, execResponse{

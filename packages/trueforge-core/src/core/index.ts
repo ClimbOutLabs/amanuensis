@@ -307,6 +307,7 @@ export type {
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
+export { PACKAGE_GIT_DEPENDENCY_MESSAGE, commandDownloadsPackages, findGitDependency } from './sandbox/packageMirrors';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -374,7 +375,13 @@ export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
-export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
+export {
+  DEFAULT_SESSION_DISK_MB,
+  SLOT_MIRROR_GUEST_PORT,
+  SLOT_MIRROR_SOCKET_NAME,
+  slotMirrorSocketPathsIn,
+  slotSocketPathsIn,
+} from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';

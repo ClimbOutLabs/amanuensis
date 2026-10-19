@@ -259,11 +259,15 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
   assert_contains "$compose" "- slot_ctl_1:/run/aman-slots/1:ro"
   assert_contains "$compose" "- slot_ctl_4:/run/aman-slots/4:ro"
+  assert_contains "$compose" "- slot_mirror_1:/run/aman-slots/1/mirror"
+  assert_contains "$compose" "- slot_mirror_4:/run/aman-slots/4/mirror"
   assert_contains "$compose" "name: main_slot_ctl_3"
+  assert_contains "$compose" "name: main_slot_mirror_2"
   assert_not_contains "$compose" "docker.sock"
   assert_not_contains "$compose" "slot_ws_"
   assert_not_contains "$compose" "@@"
   assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_ctl_1" "the slots project created the volumes the app mounts"
+  assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_mirror_1" "the slots project created the mirror volumes the app writes"
   sandbox_drop
 }
 
@@ -394,7 +398,7 @@ test_healthy_slots_need_no_root() {
   sandbox_new
   mkdir -p "$SB_STATE/up"
   : >"$SB_STATE/up/main-slots"
-  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\n' >"$SB_STATE/volumes"
+  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\nmain_slot_mirror_1\nmain_slot_mirror_2\nmain_slot_mirror_3\nmain_slot_mirror_4\n' >"$SB_STATE/volumes"
   printf 'ready\n' >"$SB_STATE/slots_state"
   install_machine
   assert_contains "$OUT" "The sandboxes of instance main are already running"
