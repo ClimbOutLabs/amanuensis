@@ -60,6 +60,36 @@ function tagHasName(tag: string): boolean {
   return /\sname\s*=/.test(tag);
 }
 
+type InvokeEnvelope = 'complete' | 'forming' | 'none';
+
+/**
+ * Where the text starting at an invoke opening tag stands as a call envelope. The opening tag
+ * alone is not a call: the envelope completes only when the closing tag has arrived after the
+ * call's parameters. Text after the tag that is neither a parameter nor the start of the
+ * closing tag means the envelope can never form (the tag was prose, an example or an
+ * explanation), and an envelope still forming when the reply ends is released as text.
+ */
+function invokeEnvelope(text: string): InvokeEnvelope {
+  const tagEnd = text.indexOf('>');
+  if (tagEnd === -1) {
+    return 'forming';
+  }
+  const rest = text.slice(tagEnd + 1).trimStart();
+  if (rest === '') {
+    return 'forming';
+  }
+  if (rest.startsWith('</invoke>')) {
+    return 'complete';
+  }
+  if (rest.startsWith('<parameter')) {
+    return rest.includes('</invoke>') ? 'complete' : 'forming';
+  }
+  if ('</invoke>'.startsWith(rest) || '<parameter'.startsWith(rest)) {
+    return 'forming';
+  }
+  return 'none';
+}
+
 /**
  * Judges held candidate text (starting at a candidate opener) against the full shape of a real
  * call. Markup when that shape is present; dead, with the length of text that is plain prose,
@@ -78,7 +108,7 @@ function judgeCandidate(text: string): CandidateVerdict {
     return rest.startsWith('[') ? { verdict: 'markup' } : { verdict: 'dead', deadLength: '[TOOL_CALLS]'.length };
   }
   if (text.startsWith('<tool_calls')) {
-    // The plain XML form: a call is an invoke carrying a name inside the wrapper.
+    // The plain XML form: a call is an invoke inside the wrapper whose envelope completes.
     const closeAt = text.indexOf('</tool_calls>');
     let searchFrom = 0;
     for (;;) {
@@ -93,7 +123,13 @@ function judgeCandidate(text: string): CandidateVerdict {
         return { verdict: 'undecided' };
       }
       if (tagHasName(text.slice(invokeAt, tagEnd + 1))) {
-        return { verdict: 'markup' };
+        const envelope = invokeEnvelope(text.slice(invokeAt));
+        if (envelope === 'complete') {
+          return { verdict: 'markup' };
+        }
+        if (envelope === 'forming') {
+          return { verdict: 'undecided' };
+        }
       }
       searchFrom = tagEnd + 1;
     }
@@ -111,12 +147,23 @@ function judgeCandidate(text: string): CandidateVerdict {
     return after.startsWith('{') ? { verdict: 'markup' } : { verdict: 'dead', deadLength: tagEnd + 1 };
   }
   if (text.startsWith('<invoke')) {
-    // A lone invoke is a call only when its own tag names the tool.
+    // A lone invoke is a call only when its envelope completes: the parameters and then the
+    // closing tag. The named opening tag alone is prose as often as it is a call.
     const tagEnd = text.indexOf('>');
     if (tagEnd === -1) {
       return { verdict: 'undecided' };
     }
-    return tagHasName(text.slice(0, tagEnd + 1)) ? { verdict: 'markup' } : { verdict: 'dead', deadLength: tagEnd + 1 };
+    if (!tagHasName(text.slice(0, tagEnd + 1))) {
+      return { verdict: 'dead', deadLength: tagEnd + 1 };
+    }
+    const envelope = invokeEnvelope(text);
+    if (envelope === 'complete') {
+      return { verdict: 'markup' };
+    }
+    if (envelope === 'forming') {
+      return { verdict: 'undecided' };
+    }
+    return { verdict: 'dead', deadLength: tagEnd + 1 };
   }
   return { verdict: 'undecided' };
 }

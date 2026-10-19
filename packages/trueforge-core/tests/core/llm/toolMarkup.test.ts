@@ -142,6 +142,40 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     expect(guard.finish()).toEqual({ status: 'clean' });
   });
 
+  it('keeps a sentence that shows a bare invoke tag as an example, byte for byte', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Use <invoke name="x"> to start a call.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps that sentence whole when it streams in pieces, split at the tag', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Use <invoke name="x">');
+    shown += guard.push(' to start a call.');
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe('Use <invoke name="x"> to start a call.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('releases an invoke whose envelope never completes when the reply ends', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'It opens like <invoke name="create_event"><parameter name="title">Den';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('still stops a lone invoke whose envelope completes, which is broken markup', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('<invoke name="create_event"><parameter name="title">Dentist</parameter></invoke>');
+    expect(shown).toBe('');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+
   it('keeps a [TOOL_CALLS] mention that no list follows as text', () => {
     const guard = new ToolMarkupGuard();
     const text = 'The reply opens with a [TOOL_CALLS] marker, written out in full, then explains itself.';
