@@ -1,6 +1,6 @@
 /** What a person sees when the sandbox will not start. The full error goes to the log. */
 export const SANDBOX_START_FAILED_MESSAGE =
-  "Aman's sandbox couldn't start. Try again in a minute. If it still fails, ask the person who runs Aman for help.";
+  "Aman's sandbox couldn't start. Try again in a minute. If it keeps failing, restart Aman.";
 
 export abstract class SandboxError extends Error {
   /**
