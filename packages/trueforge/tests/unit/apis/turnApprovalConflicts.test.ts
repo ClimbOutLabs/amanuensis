@@ -458,7 +458,7 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
     const app = await buildApp(undefined, { heldAction: true });
     const createTurn = captureCreateTurnOptions();
 
-    await postTurn(app, approvalInput({ status: 'deny' }));
+    await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
 
     expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
   });
