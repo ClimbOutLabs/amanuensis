@@ -144,7 +144,7 @@ describe('render_places', () => {
   });
 
   it('pins a place read from a page whose address uses abbreviations', async () => {
-    const { service, pages } = setup(query => hit('29.9', '-90.1', '916 St Andrew Street, New Orleans'));
+    const { service, pages } = setup(() => hit('29.9', '-90.1', '916 St Andrew Street, New Orleans'));
     pages.remember({
       url: 'https://hope-house.example/',
       text: 'Hope House\n916 St. Andrew Street, New Orleans\nA food pantry open to everyone.',

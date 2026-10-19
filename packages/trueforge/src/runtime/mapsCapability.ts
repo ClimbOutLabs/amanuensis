@@ -524,7 +524,7 @@ export function isInRequestedArea({ query, displayName }: { query: string; displ
     .trim()
     .split(' ')
     .filter(token => /^\p{L}+$/u.test(token));
-  const numbers =
+  const numbers: string[] =
     segments
       .slice(1)
       .join(',')
@@ -535,7 +535,7 @@ export function isInRequestedArea({ query, displayName }: { query: string; displ
   if (cityTokens.length > 0 && normalizedWords(displayName).includes(` ${cityTokens.join(' ')} `)) {
     return true;
   }
-  const displayNumbers = displayName.match(/\d{3,}/g) ?? [];
+  const displayNumbers: string[] = displayName.match(/\d{3,}/g) ?? [];
   return numbers.length > 0 && numbers.every(number => displayNumbers.includes(number));
 }
 
