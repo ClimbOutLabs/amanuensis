@@ -261,8 +261,17 @@ describe('extractSentinelFromEvent', () => {
     expect(card(null)).toBeNull();
     expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
     expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
-    // The older form, with bare address strings, is not read here; a data import upgrades it first.
-    expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
+    // A card stored before names were kept holds bare address strings; each is read as a recipient with no name.
+    expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toEqual({
+      action: 'send',
+      to: [{ name: '', address: 'grace@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 's',
+      body: 'b',
+      replaces: null,
+      reply_in_thread: null,
+    });
   });
 
   const CALENDAR_EVENT = {

@@ -5,7 +5,8 @@
  */
 import { z } from '@hono/zod-openapi';
 
-import type { ShellApprovalBinding } from './approvalTokens';
+import type { ShellApprovalBinding } from './approvalTokens.js';
+import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export type Tier = 1 | 2 | 3;
@@ -41,17 +42,6 @@ export const AUTO_DENY_REASONS = [
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
-
-/** One recipient of an email: the name shown for it, or empty, and the address that mail goes to. */
-export const Tier3MailboxSchema = z
-  .object({
-    name: z.string().describe('Display name of the recipient, or an empty string when it has none.'),
-    address: z.string().describe('Email address the message is delivered to.'),
-  })
-  .describe('One email recipient: its name and its address.')
-  .openapi('Tier3Mailbox');
-
-export type Tier3Mailbox = z.infer<typeof Tier3MailboxSchema>;
 
 export const Tier3EmailSchema = z
   .object({

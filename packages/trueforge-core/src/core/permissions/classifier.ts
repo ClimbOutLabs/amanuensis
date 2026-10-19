@@ -91,11 +91,11 @@ import {
   tier3Decision,
   type Tier2ActionKind,
   type Tier3Card,
-  type Tier3Mailbox,
   type Tier3Schedule,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
+import type { Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,

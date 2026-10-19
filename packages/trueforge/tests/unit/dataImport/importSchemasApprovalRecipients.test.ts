@@ -1,4 +1,4 @@
-import { ImportEventListSchema } from '../../../src/dataImport/importSchemas';
+import { ImportEventListSchema, ImportTurnRecordSchema } from '../../../src/dataImport/importSchemas';
 
 /** The email block as archives written before recipients carried a name hold it: bare address strings. */
 const OLDER_EMAIL = {
@@ -74,6 +74,37 @@ describe('importing approval cards written before recipients carried names', () 
     const [event] = ImportEventListSchema.parse([structuredClone(named)]);
     expect(event).toMatchObject({
       tool_calls: [{ tier3_card: { email: { to: [{ name: 'Grace Lee', address: 'grace@example.com' }] } } }],
+    });
+  });
+});
+
+describe('importing a finished turn whose approval is still pending and was written before names', () => {
+  it('upgrades the card in the turn state, so the strict read of the turn succeeds', () => {
+    const turn = ImportTurnRecordSchema.parse({
+      turn_id: 'turn-1',
+      session_id: 'session-1',
+      first_turn_id: 'turn-1',
+      ancestor_ids: [],
+      previous_turn_id: null,
+      state: {
+        status: 'done',
+        output: null,
+        required_actions: [structuredClone(APPROVAL)],
+        completed_at: '2026-09-30T10:05:00.000Z',
+      },
+      input: [],
+      custom: null,
+      created_at: '2026-09-30T10:00:00.000Z',
+      updated_at: '2026-09-30T10:05:00.000Z',
+      snapshot: { threads: {} },
+    });
+    expect(turn.state).toMatchObject({
+      status: 'done',
+      required_actions: [
+        {
+          tool_calls: [{ tier3_card: { email: { to: [{ name: '', address: 'grace@example.com' }] } } }],
+        },
+      ],
     });
   });
 });

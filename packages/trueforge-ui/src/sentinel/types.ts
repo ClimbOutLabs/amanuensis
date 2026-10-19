@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { mailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
 import {
   heldBecause,
   savedSearchHoldReason,
@@ -347,7 +348,9 @@ function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefin
   return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
 }
 
+/** A recipient as stored: the name-and-address form, or a bare address string from before names were kept. */
 function parseMailbox(value: unknown): SentinelApprovalMailbox | undefined {
+  if (typeof value === 'string') return mailboxOf(value);
   if (!isRecord(value)) return undefined;
   const name = optionalString(value, 'name');
   const address = optionalString(value, 'address');

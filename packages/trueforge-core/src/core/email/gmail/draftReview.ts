@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { stableStringify } from '../../permissions/approvalTokens';
-import type { Tier3Mailbox } from '../../permissions/tier';
+import type { Tier3Mailbox } from '../../permissions/tierMailbox';
 
 export interface ReviewableDraft {
   to: readonly Tier3Mailbox[];

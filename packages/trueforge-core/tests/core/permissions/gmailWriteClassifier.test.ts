@@ -1,5 +1,5 @@
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
-import { mailboxOf } from '../../../src/core/email/gmail/results';
+import { mailboxOf } from '../../../src/core/email/gmail/mailbox';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,

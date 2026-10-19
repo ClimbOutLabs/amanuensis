@@ -1,8 +1,9 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
 import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
-import type { Tier3Mailbox } from '../../permissions/tier';
+import type { Tier3Mailbox } from '../../permissions/tierMailbox';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
+import { mailboxOf, MAX_ANGLE_ADDRESS_CHARS } from './mailbox';
 import {
   headerOf,
   labelIdsOf,
@@ -13,7 +14,7 @@ import {
   readBody,
   type AttachmentInfo,
 } from './message';
-import { decodeEncodedWords, stripInvisible } from './mimeText';
+import { stripInvisible } from './mimeText';
 import { MAX_TOKENS_PER_CALL, snippetOf, TokenBudget, truncateToTokens } from './tokenBound';
 
 export const UNTRUSTED_NOTICE =
@@ -85,7 +86,6 @@ const CHARS_PER_TOKEN = 4;
 /** Most addresses one header lists in a result; a longer list is cut so a result stays inside its bound. */
 const MAX_ADDRESSES = 50;
 const MAX_LISTED_RECIPIENTS = 10;
-const MAX_ANGLE_ADDRESS_CHARS = 320;
 
 /** Said plainly when a list stopped waiting; the page token is withheld then, since it would skip the rest. */
 function slowNote(input: { shown: number; notReached: number }) {
@@ -156,23 +156,6 @@ function addressParts(rawHeader: string): { parts: string[]; balanced: boolean }
   }
   parts.push(header.slice(start));
   return { parts, balanced: !inQuotes };
-}
-
-/**
- * One address of a header, as a reader sees it: the name it is shown with (decoded, empty when there is none)
- * and the address. A part with no usable `<address>` is taken whole as the address.
- */
-export function mailboxOf(part: string): Tier3Mailbox {
-  const close = part.indexOf('>');
-  const open = close === -1 ? -1 : part.lastIndexOf('<', close);
-  const inner = open === -1 ? '' : part.slice(open + 1, close).trim();
-  if (inner === '' || inner.length > MAX_ANGLE_ADDRESS_CHARS) {
-    return { name: '', address: part.trim() };
-  }
-  const rawName = part.slice(0, open).trim();
-  const unquoted =
-    rawName.length >= 2 && rawName.startsWith('"') && rawName.endsWith('"') ? rawName.slice(1, -1) : rawName;
-  return { name: decodeEncodedWords(unquoted), address: inner };
 }
 
 /**

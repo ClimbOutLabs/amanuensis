@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCalendarEvent, SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
+import { extractSentinelFromEvent } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
   return {
@@ -249,6 +250,35 @@ describe('PermissionApprovalCard for mail', () => {
     });
     expect(screen.getByText('To: Grace Lee (grace@example.com), lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('Copy: Sam Lee (sam.lee.long.address@example.org)')).toBeInTheDocument();
+  });
+
+  it('still shows the recipients of a card stored before names were kept, as bare addresses', () => {
+    const [approval] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          id: 'call-old',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Send "Lease" from your Gmail to grace@example.com and lin@example.com.',
+            cannot_be_undone: "Once this is sent, it can't be unsent.",
+            email: {
+              action: 'send',
+              to: ['grace@example.com', 'lin@example.com'],
+              cc: ['sam@example.com'],
+              bcc: [],
+              subject: 'Lease',
+              body: 'Thursday works.',
+              replaces: null,
+              reply_in_thread: null,
+            },
+          },
+        },
+      ],
+    });
+    renderCard({ email: approval?.card.email ?? null }, { toolName: 'send_draft' });
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
   });
 
   it('shows the real address when a name looks like another address', () => {

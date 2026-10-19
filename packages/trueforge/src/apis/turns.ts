@@ -33,6 +33,7 @@ import {
   type BoundRepository,
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
+import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -146,7 +147,7 @@ export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnap
     session_id: record.session_id,
     previous_turn_id: record.previous_turn_id,
     input: record.input,
-    state: record.state,
+    state: upgradeStoredTurnState(record.state),
     created_at: record.created_at.toISOString(),
   };
 }

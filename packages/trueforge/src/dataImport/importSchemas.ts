@@ -35,6 +35,10 @@ import {
   ContextMessageSchema,
 } from '@truefoundry/trueforge-core/core/events/schema';
 import { InternalToolCallInfoSchema, LLMToolMessageSchema } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import {
+  upgradeArchivedApprovalEvent,
+  upgradeArchivedTurnState,
+} from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
@@ -201,44 +205,17 @@ function withKnownToolTypes(value: unknown): unknown {
   return value;
 }
 
-/** Recipients written before each carried a name were bare address strings: the same recipient, with no name. */
-function namedRecipients(value: unknown): unknown {
+/** Approval cards an archive holds are upgraded to the name-and-address form, before the strict read. */
+function withStoredApprovalCards(value: unknown): unknown {
   if (!Array.isArray(value)) {
     return value;
   }
-  const recipients: unknown[] = value;
-  return recipients.map(recipient => (typeof recipient === 'string' ? { name: '', address: recipient } : recipient));
-}
-
-/** Upgrades the recipients of each approval card an archive holds to the name-and-address form, before the strict read. */
-function withNamedRecipients(value: unknown): unknown {
-  if (!Array.isArray(value)) {
-    return value;
-  }
-  for (const event of value) {
-    if (!isRecord(event) || event['type'] !== EventType.TOOL_APPROVAL_REQUIRED || !Array.isArray(event['tool_calls'])) {
-      continue;
-    }
-    for (const call of event['tool_calls']) {
-      const card = isRecord(call) ? call['tier3_card'] : undefined;
-      const email = isRecord(card) ? card['email'] : undefined;
-      if (!isRecord(email)) {
-        continue;
-      }
-      email['to'] = namedRecipients(email['to']);
-      email['cc'] = namedRecipients(email['cc']);
-      email['bcc'] = namedRecipients(email['bcc']);
-      const replaces = email['replaces'];
-      if (isRecord(replaces)) {
-        replaces['to'] = namedRecipients(replaces['to']);
-      }
-    }
-  }
-  return value;
+  const events: unknown[] = value;
+  return events.map(upgradeArchivedApprovalEvent);
 }
 
 export const ImportEventListSchema = z.preprocess(
-  value => withNamedRecipients(withKnownToolTypes(value)),
+  value => withStoredApprovalCards(withKnownToolTypes(value)),
   mixedList({
     schema: ImportEventSchema,
     label: LEFT_OUT.turnEvent,
@@ -374,7 +351,8 @@ const ImportTurnFieldsSchema = z.object({
   first_turn_id: z.string(),
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
-  state: z.unknown().transform((value, ctx) => {
+  state: z.unknown().transform((stored, ctx) => {
+    const value = upgradeArchivedTurnState(stored);
     // A finished or failed turn's output is what people read, so it stays strict.
     const parsed =
       isRecord(value) && (value['status'] === 'done' || value['status'] === 'error')

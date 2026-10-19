@@ -2,7 +2,6 @@
  * DB-backed sessions APIs (mounted at /api/v1/sessions and /api/internal/sessions).
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, SessionHandle, SessionRecord, Sessions } from '@truefoundry/trueforge-core/agent-session';
 import {
   abnormalHandoffCauseForCancellation,
   CancellationReason,
@@ -10,8 +9,13 @@ import {
   SessionStoreInvariantError,
   SessionStoreNotFoundError,
   TurnNotFoundError,
+  type ISessionStore,
+  type SessionHandle,
+  type SessionRecord,
+  type Sessions,
 } from '@truefoundry/trueforge-core/agent-session';
 import { extractErrorLogFields, mechanicalAbnormalHandoff } from '@truefoundry/trueforge-core/core';
+import { upgradeStoredSessionEventItem } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import {
   redisRequest,
   RequestTimeoutError,
@@ -640,7 +644,13 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         types: query.types,
         after_event_id: query.after_event_id,
       });
-      return c.json({ data, pagination }, 200);
+      return c.json(
+        {
+          data: data.map(item => upgradeStoredSessionEventItem(item)),
+          pagination,
+        },
+        200,
+      );
     } catch (error) {
       if (error instanceof SessionStoreConflictError) {
         return c.json({ error: { message: error.message } }, 400);
