@@ -1,9 +1,5 @@
 // @vitest-environment jsdom
-import {
-  heldBecause,
-  searchHoldCardText,
-  SERVER_SECRET_REASON,
-} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -104,12 +100,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: oslo weather',
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
+      // A card saved before the wording changed keeps its own sentence and gets the reason after it.
       expect(card?.plain_what).toBe(
-        searchHoldCardText({
-          server: 'finder',
-          query: 'oslo weather',
-          why: 'this turn already ran 8 searches without asking',
-        }),
+        `Search the web through finder for: oslo weather${heldBecause('this turn already ran 8 searches without asking')}`,
       );
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
