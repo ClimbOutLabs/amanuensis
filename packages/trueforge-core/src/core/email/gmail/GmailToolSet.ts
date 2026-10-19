@@ -27,6 +27,7 @@ import {
   getDraftResult,
   listDraftsResult,
   listThreadsResult,
+  mailboxOf,
   readEmailResult,
   threadResult,
   UNTRUSTED_NOTICE,
@@ -429,9 +430,9 @@ export class GmailToolSet extends LocalToolMCP {
     const body = call.body.trim();
     const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
     const reviewable: ReviewableDraft = {
-      to: call.to,
-      cc: call.cc ?? [],
-      bcc: call.bcc ?? [],
+      to: call.to.map(address => mailboxOf(address)),
+      cc: (call.cc ?? []).map(address => mailboxOf(address)),
+      bcc: (call.bcc ?? []).map(address => mailboxOf(address)),
       subject,
       body,
       threadId: threadId ?? '',
@@ -686,7 +687,9 @@ export class GmailToolSet extends LocalToolMCP {
       if (
         !recipientsAllowed({
           allowlist: this.#options.sentinel.services.demoSendAllowlist,
-          recipients: [...assessed.draft.to, ...assessed.draft.cc, ...assessed.draft.bcc],
+          recipients: [...assessed.draft.to, ...assessed.draft.cc, ...assessed.draft.bcc].map(
+            mailbox => mailbox.address,
+          ),
         })
       ) {
         return errorResult(DEMO_SEND_REFUSAL);

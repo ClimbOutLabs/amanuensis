@@ -1,8 +1,8 @@
 import { readMessage } from '../../../../src/core/email/gmail/message';
 import {
-  addressesOf,
   getDraftResult,
   listThreadsResult,
+  mailboxesOf,
   readEmailResult,
   threadResult,
   UNTRUSTED_NOTICE,
@@ -33,10 +33,19 @@ describe('message reading', () => {
     expect(read.body).toBe('Hello Ada');
   });
 
-  it('splits an address header on commas outside quotes', () => {
-    expect(addressesOf('"Lovelace, Ada" <ada@example.com>, grace@example.com')).toEqual([
-      'ada@example.com',
-      'grace@example.com',
+  it('splits an address header on commas outside quotes, keeping each name with its address', () => {
+    expect(mailboxesOf('"Lovelace, Ada" <ada@example.com>, grace@example.com')).toEqual([
+      { name: 'Lovelace, Ada', address: 'ada@example.com' },
+      { name: '', address: 'grace@example.com' },
+    ]);
+  });
+
+  it('decodes an encoded name, and takes the address from the brackets when a name looks like one', () => {
+    expect(
+      mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@evil.example>'),
+    ).toEqual([
+      { name: 'Maya López', address: 'maya@example.com' },
+      { name: 'boss@example.com', address: 'other@evil.example' },
     ]);
   });
 });

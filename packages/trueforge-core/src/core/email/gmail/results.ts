@@ -1,5 +1,6 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
 import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
+import type { Tier3Mailbox } from '../../permissions/tier';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
 import {
@@ -12,7 +13,7 @@ import {
   readBody,
   type AttachmentInfo,
 } from './message';
-import { stripInvisible } from './mimeText';
+import { decodeEncodedWords, stripInvisible } from './mimeText';
 import { MAX_TOKENS_PER_CALL, snippetOf, TokenBudget, truncateToTokens } from './tokenBound';
 
 export const UNTRUSTED_NOTICE =
@@ -158,22 +159,31 @@ function addressParts(rawHeader: string): { parts: string[]; balanced: boolean }
 }
 
 /**
- * Bare addresses out of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The
- * header is cut at a fixed length and split before any name is decoded, so a name like "Doe, John" stays one
- * name. One linear pass: no pattern here can be made to backtrack.
+ * One address of a header, as a reader sees it: the name it is shown with (decoded, empty when there is none)
+ * and the address. A part with no usable `<address>` is taken whole as the address.
  */
-export function addressesOf(rawHeader: string): string[] {
-  const out: string[] = [];
-  for (const part of addressParts(rawHeader).parts) {
-    const close = part.indexOf('>');
-    const open = close === -1 ? -1 : part.lastIndexOf('<', close);
-    const inner = open === -1 ? '' : part.slice(open + 1, close);
-    const address = inner !== '' && inner.length <= MAX_ANGLE_ADDRESS_CHARS ? inner : part.trim();
-    if (address !== '') {
-      out.push(address);
-    }
+export function mailboxOf(part: string): Tier3Mailbox {
+  const close = part.indexOf('>');
+  const open = close === -1 ? -1 : part.lastIndexOf('<', close);
+  const inner = open === -1 ? '' : part.slice(open + 1, close).trim();
+  if (inner === '' || inner.length > MAX_ANGLE_ADDRESS_CHARS) {
+    return { name: '', address: part.trim() };
   }
-  return out;
+  const rawName = part.slice(0, open).trim();
+  const unquoted =
+    rawName.length >= 2 && rawName.startsWith('"') && rawName.endsWith('"') ? rawName.slice(1, -1) : rawName;
+  return { name: decodeEncodedWords(unquoted), address: inner };
+}
+
+/**
+ * Every mailbox of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The header is
+ * cut at a fixed length and split before any name is decoded, so a name like "Doe, John" stays one name. One
+ * linear pass: no pattern here can be made to backtrack.
+ */
+export function mailboxesOf(rawHeader: string): Tier3Mailbox[] {
+  return addressParts(rawHeader)
+    .parts.map(part => mailboxOf(part))
+    .filter(mailbox => mailbox.address !== '');
 }
 
 /** One mailbox address: a single `@`, and nothing a parser could read as a comment, group, quote or route. */
@@ -208,11 +218,16 @@ export function addressListIsPlain(rawHeader: string): boolean {
   return balanced && (rawHeader.trim() === '' || parts.every(isPlainMailbox));
 }
 
-/** Every address of a header, uncapped: a send must be shown and hashed with all of them. */
-export function addressesIn(input: { message: GmailMessage; name: string }): string[] {
+/** Every mailbox of a header, uncapped: a send must be shown and hashed with all of them. */
+export function mailboxesIn(input: { message: GmailMessage; name: string }): Tier3Mailbox[] {
   return input.message.payload === undefined
     ? []
-    : addressesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+    : mailboxesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+}
+
+/** Every address of a header, uncapped. */
+export function addressesIn(input: { message: GmailMessage; name: string }): string[] {
+  return mailboxesIn(input).map(mailbox => mailbox.address);
 }
 
 /** Gmail's snippet is HTML-escaped plain text. */

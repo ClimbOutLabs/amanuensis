@@ -172,8 +172,8 @@ describe('draft_email', () => {
       recipient: null,
       email: {
         action: 'save',
-        to: ['grace@example.com'],
-        cc: ['lin@example.com'],
+        to: [{ name: '', address: 'grace@example.com' }],
+        cc: [{ name: '', address: 'lin@example.com' }],
         bcc: [],
         subject: 'Lease',
         body: 'Thursday works.',
@@ -202,11 +202,19 @@ describe('update_draft', () => {
       name: 'update_draft',
       arguments: { draft_id: 'd1', to: ['mallory@example.com'], subject: 'Keys', body: 'Send them.' },
     });
-    expect(info.tier3_card?.plain_what).toContain('It replaces "Lease" to grace@example.com and lin@example.com');
+    expect(info.tier3_card?.plain_what).toContain(
+      'It replaces "Lease" to Grace (grace@example.com) and lin@example.com',
+    );
     expect(info.tier3_card?.email).toMatchObject({
       action: 'change',
       subject: 'Keys',
-      replaces: { subject: 'Lease', to: ['grace@example.com', 'lin@example.com'] },
+      replaces: {
+        subject: 'Lease',
+        to: [
+          { name: 'Grace', address: 'grace@example.com' },
+          { name: '', address: 'lin@example.com' },
+        ],
+      },
     });
   });
 
@@ -266,12 +274,15 @@ describe('send_draft', () => {
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Sent as "Ada".',
+      'Send "Lease" from your Gmail to Grace (grace@example.com) and lin@example.com. Sent as "Ada".',
     );
     expect(info.tier3_card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(info.tier3_card?.email).toMatchObject({
       action: 'send',
-      to: ['grace@example.com', 'lin@example.com'],
+      to: [
+        { name: 'Grace', address: 'grace@example.com' },
+        { name: '', address: 'lin@example.com' },
+      ],
       subject: 'Lease',
       body: 'Thursday works.',
     });

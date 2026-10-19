@@ -201,8 +201,44 @@ function withKnownToolTypes(value: unknown): unknown {
   return value;
 }
 
-const ImportEventListSchema = z.preprocess(
-  withKnownToolTypes,
+/** Recipients written before each carried a name were bare address strings: the same recipient, with no name. */
+function namedRecipients(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const recipients: unknown[] = value;
+  return recipients.map(recipient => (typeof recipient === 'string' ? { name: '', address: recipient } : recipient));
+}
+
+/** Upgrades the recipients of each approval card an archive holds to the name-and-address form, before the strict read. */
+function withNamedRecipients(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  for (const event of value) {
+    if (!isRecord(event) || event['type'] !== EventType.TOOL_APPROVAL_REQUIRED || !Array.isArray(event['tool_calls'])) {
+      continue;
+    }
+    for (const call of event['tool_calls']) {
+      const card = isRecord(call) ? call['tier3_card'] : undefined;
+      const email = isRecord(card) ? card['email'] : undefined;
+      if (!isRecord(email)) {
+        continue;
+      }
+      email['to'] = namedRecipients(email['to']);
+      email['cc'] = namedRecipients(email['cc']);
+      email['bcc'] = namedRecipients(email['bcc']);
+      const replaces = email['replaces'];
+      if (isRecord(replaces)) {
+        replaces['to'] = namedRecipients(replaces['to']);
+      }
+    }
+  }
+  return value;
+}
+
+export const ImportEventListSchema = z.preprocess(
+  value => withNamedRecipients(withKnownToolTypes(value)),
   mixedList({
     schema: ImportEventSchema,
     label: LEFT_OUT.turnEvent,

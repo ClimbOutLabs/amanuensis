@@ -402,6 +402,7 @@ export * from "./Tier3Email.js";
 export * from "./Tier3EmailAction.js";
 export * from "./Tier3EmailReplaces.js";
 export * from "./Tier3EmailReplyInThread.js";
+export * from "./Tier3Mailbox.js";
 export * from "./Tier3Schedule.js";
 export * from "./Tier3ScheduleAction.js";
 export * from "./Timezone.js";

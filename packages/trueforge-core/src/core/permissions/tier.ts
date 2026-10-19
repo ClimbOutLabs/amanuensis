@@ -42,20 +42,31 @@ export const AUTO_DENY_REASONS = [
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
+/** One recipient of an email: the name shown for it, or empty, and the address that mail goes to. */
+export const Tier3MailboxSchema = z
+  .object({
+    name: z.string().describe('Display name of the recipient, or an empty string when it has none.'),
+    address: z.string().describe('Email address the message is delivered to.'),
+  })
+  .describe('One email recipient: its name and its address.')
+  .openapi('Tier3Mailbox');
+
+export type Tier3Mailbox = z.infer<typeof Tier3MailboxSchema>;
+
 export const Tier3EmailSchema = z
   .object({
     action: z
       .enum(['send', 'save', 'change'])
       .describe('What happens to the message: sent, saved as a draft, or a saved draft changed.'),
-    to: z.array(z.string()).describe('Recipients.'),
-    cc: z.array(z.string()).describe('Copied recipients.'),
-    bcc: z.array(z.string()).describe('Hidden copy recipients.'),
+    to: z.array(Tier3MailboxSchema).describe('Recipients.'),
+    cc: z.array(Tier3MailboxSchema).describe('Copied recipients.'),
+    bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
     subject: z.string().describe('Subject line.'),
     body: z.string().describe('The whole message text, exactly as it will be sent.'),
     replaces: z
       .object({
         subject: z.string().describe('Subject of the draft being replaced.'),
-        to: z.array(z.string()).describe('Recipients of the draft being replaced.'),
+        to: z.array(Tier3MailboxSchema).describe('Recipients of the draft being replaced.'),
       })
       .nullable()
       .describe('The saved draft a change replaces, or null.'),

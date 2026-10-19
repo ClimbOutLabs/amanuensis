@@ -225,12 +225,12 @@ describe('extractSentinelFromEvent', () => {
               outbound_truncated: false,
               email: {
                 action: 'change',
-                to: ['grace@example.com'],
+                to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
                 cc: [],
-                bcc: ['audit@example.com'],
+                bcc: [{ name: '', address: 'audit@example.com' }],
                 subject: 'Lease',
                 body: 'Thursday works.\n\nAda',
-                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+                replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
                 reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
               },
             },
@@ -241,12 +241,12 @@ describe('extractSentinelFromEvent', () => {
     );
     expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
       action: 'change',
-      to: ['grace@example.com'],
+      to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
       cc: [],
-      bcc: ['audit@example.com'],
+      bcc: [{ name: '', address: 'audit@example.com' }],
       subject: 'Lease',
       body: 'Thursday works.\n\nAda',
-      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+      replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
       reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
     });
   });
@@ -261,6 +261,8 @@ describe('extractSentinelFromEvent', () => {
     expect(card(null)).toBeNull();
     expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
     expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
+    // The older form, with bare address strings, is not read here; a data import upgrades it first.
+    expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
   });
 
   const CALENDAR_EVENT = {

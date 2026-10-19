@@ -47,8 +47,11 @@ function hostGmailSend(draft: ReviewableDraft | undefined): SentinelAction {
   };
 }
 
+/** A recipient with no display name: the bare address. */
+const bare = (address: string) => ({ name: '', address });
+
 const DRAFT: ReviewableDraft = {
-  to: ['a@demo.example'],
+  to: [bare('a@demo.example')],
   cc: [],
   bcc: [],
   subject: 'Hi',
@@ -125,16 +128,16 @@ describe('demo instance and connector calls', () => {
 describe("demo instance and Aman's own Gmail send", () => {
   it('asks as usual when every recipient is listed, however it is written', async () => {
     const decision = await classifyTier(
-      hostGmailSend({ ...DRAFT, to: [' A@Demo.example '], cc: ['a@demo.example'] }),
+      hostGmailSend({ ...DRAFT, to: [bare(' A@Demo.example ')], cc: [bare('a@demo.example')] }),
       ctx(['a@demo.example']),
     );
     expect(decision).toMatchObject({ tier: 3, auto_deny: null });
   });
 
   it.each([
-    ['a stray To', { to: ['x@outside.example'] }],
-    ['a stray Cc', { cc: ['x@outside.example'] }],
-    ['a stray Bcc', { bcc: ['x@outside.example'] }],
+    ['a stray To', { to: [bare('x@outside.example')] }],
+    ['a stray Cc', { cc: [bare('x@outside.example')] }],
+    ['a stray Bcc', { bcc: [bare('x@outside.example')] }],
     ['no recipients at all', { to: [] }],
   ])('refuses %s with no card', async (_name, change) => {
     const decision = await classifyTier(hostGmailSend({ ...DRAFT, ...change }), ctx(['a@demo.example']));

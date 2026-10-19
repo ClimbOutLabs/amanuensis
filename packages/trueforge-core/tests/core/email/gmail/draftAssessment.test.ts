@@ -33,9 +33,12 @@ describe('assessDraft', () => {
     expect(result).toEqual({
       ok: true,
       draft: {
-        to: ['grace@example.com', 'lin@example.com'],
-        cc: ['sam@example.com'],
-        bcc: ['audit@example.com'],
+        to: [
+          { name: 'Grace', address: 'grace@example.com' },
+          { name: '', address: 'lin@example.com' },
+        ],
+        cc: [{ name: '', address: 'sam@example.com' }],
+        bcc: [{ name: '', address: 'audit@example.com' }],
         subject: 'Lease',
         body: 'Thursday works.',
         threadId: 't9',

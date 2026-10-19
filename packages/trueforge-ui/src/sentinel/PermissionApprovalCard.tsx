@@ -7,7 +7,12 @@ import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
+import type {
+  SentinelApprovalCard,
+  SentinelApprovalEmail,
+  SentinelApprovalEmailAction,
+  SentinelApprovalMailbox,
+} from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
@@ -81,11 +86,21 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** What a change replaces; the recipients are in the box below, which is the one place they are listed. */
+/** One recipient as `Name (address)`, or the bare address when it has no name. The address is always in full. */
+function mailboxText({ name, address }: SentinelApprovalMailbox): string {
+  return name === '' ? address : `${name} (${address})`;
+}
+
+function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+  return mailboxes.map(mailboxText).join(', ');
+}
+
+/** What a change replaces, with the recipients of that saved draft. */
 function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
   return (
     <dl className="rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="Replaces" value={`${replaces.subject} (to ${replaces.to.join(', ')})`} />
+      <DetailRow label="Replaces" value={replaces.subject} />
+      <DetailRow label="Replaced draft to" value={mailboxListText(replaces.to)} />
     </dl>
   );
 }
@@ -101,10 +116,12 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
           <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
         </dl>
       )}
-      <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
-      {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
+      <p className="break-words text-sm text-text-primary">To: {mailboxListText(email.to)}</p>
+      {email.cc.length > 0 && (
+        <p className="break-words text-sm text-text-primary">Copy: {mailboxListText(email.cc)}</p>
+      )}
       {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
+        <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">

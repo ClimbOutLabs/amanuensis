@@ -5,11 +5,12 @@
  */
 import { createHash } from 'node:crypto';
 import { stableStringify } from '../../permissions/approvalTokens';
+import type { Tier3Mailbox } from '../../permissions/tier';
 
 export interface ReviewableDraft {
-  to: readonly string[];
-  cc: readonly string[];
-  bcc: readonly string[];
+  to: readonly Tier3Mailbox[];
+  cc: readonly Tier3Mailbox[];
+  bcc: readonly Tier3Mailbox[];
   subject: string;
   body: string;
   threadId: string;

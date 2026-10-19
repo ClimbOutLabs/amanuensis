@@ -49,16 +49,22 @@ const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 
+/** One recipient of a mail card: the name it is shown with, empty when it has none, and the address mail goes to. */
+export type SentinelApprovalMailbox = {
+  name: string;
+  address: string;
+};
+
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
   action: SentinelApprovalEmailAction;
-  to: string[];
-  cc: string[];
-  bcc: string[];
+  to: SentinelApprovalMailbox[];
+  cc: SentinelApprovalMailbox[];
+  bcc: SentinelApprovalMailbox[];
   subject: string;
   body: string;
   /** The saved draft a change replaces, or null. */
-  replaces: { subject: string; to: string[] } | null;
+  replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
   reply_in_thread: { subject: string; from: string } | null;
 };
@@ -341,19 +347,37 @@ function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefin
   return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
 }
 
+function parseMailbox(value: unknown): SentinelApprovalMailbox | undefined {
+  if (!isRecord(value)) return undefined;
+  const name = optionalString(value, 'name');
+  const address = optionalString(value, 'address');
+  return name === undefined || address === undefined ? undefined : { name, address };
+}
+
+function mailboxList(value: unknown): SentinelApprovalMailbox[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const mailboxes: SentinelApprovalMailbox[] = [];
+  for (const item of value) {
+    const mailbox = parseMailbox(item);
+    if (mailbox === undefined) return undefined;
+    mailboxes.push(mailbox);
+  }
+  return mailboxes;
+}
+
 function parseEmail(value: unknown): SentinelApprovalEmail | null {
   if (!isRecord(value)) return null;
   const action = parseEmailAction(value.action);
-  const to = stringList(value.to);
-  const cc = stringList(value.cc);
-  const bcc = stringList(value.bcc);
+  const to = mailboxList(value.to);
+  const cc = mailboxList(value.cc);
+  const bcc = mailboxList(value.bcc);
   const subject = optionalString(value, 'subject');
   const body = optionalString(value, 'body');
   if (action === undefined || to === undefined || cc === undefined || bcc === undefined) return null;
   if (subject === undefined || body === undefined) return null;
   const replaced = value.replaces;
   const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
-  const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
+  const replacedTo = isRecord(replaced) ? mailboxList(replaced.to) : undefined;
   // The SDK camel-cases the keys it knows, so a card that came through it names this one replyInThread.
   const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
