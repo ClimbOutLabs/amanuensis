@@ -179,6 +179,33 @@ describe('findGitDependency', () => {
       findGitDependency([{ name: 'requirements.txt', content: 'pkg @ file:./wheels/pkg-1.0-py3-none-any.whl' }]),
     ).toBeUndefined();
   });
+
+  it('ignores a direct reference to a file at an absolute path', () => {
+    expect(
+      findGitDependency([
+        { name: 'requirements.txt', content: 'pkg @ file:///home/user/wheels/pkg-1.0-py3-none-any.whl' },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('ignores an editable install of a project on this machine', () => {
+    expect(findGitDependency([{ name: 'requirements.txt', content: '-e file:///home/user/project' }])).toBeUndefined();
+  });
+
+  it('ignores a pyproject direct reference to a file at an absolute path', () => {
+    const hit = findGitDependency([
+      {
+        name: 'pyproject.toml',
+        content: '[project]\ndependencies = ["pkg @ file:///home/user/wheels/pkg-1.0-py3-none-any.whl"]\n',
+      },
+    ]);
+    expect(hit).toBeUndefined();
+  });
+
+  it('ignores a package.json file dependency at an absolute path', () => {
+    const content = JSON.stringify({ dependencies: { local: 'file:///home/user/project' } });
+    expect(findGitDependency([{ name: 'package.json', content }])).toBeUndefined();
+  });
 });
 
 describe('PACKAGE_GIT_DEPENDENCY_MESSAGE', () => {

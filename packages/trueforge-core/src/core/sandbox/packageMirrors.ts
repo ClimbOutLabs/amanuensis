@@ -228,7 +228,8 @@ const GIT_SPEC_PATTERNS: readonly RegExp[] = [
   /(?:^|\s)[^\s/@]+@[^\s/:]+:/,
   // A PEP 508 direct reference to a web address (name @ https://...): pip fetches that address
   // itself instead of asking the package index, so the mirrors would never see the download.
-  /@\s*[A-Za-z][A-Za-z0-9+.-]*:\/\//,
+  // A file: reference points at this machine instead, so it stays allowed.
+  /@\s*(?!file:)[A-Za-z][A-Za-z0-9+.-]*:\/\//i,
   // Cargo and Poetry: a dependency written with a git key.
   /\bgit\s*=\s*["'][^"']+["']/,
 ];
