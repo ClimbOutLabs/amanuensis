@@ -1942,9 +1942,9 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
 const SPACE_NAME_MAX_CHARS = 80;
 
 /**
- * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, and
- * capped the way the Gmail card caps a subject. Null when the call carries no name, or the name
- * is only whitespace, so the line falls back to naming no space.
+ * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, made safe
+ * to show, then capped the way the Gmail card caps a subject. Null when the call carries no name, or
+ * the name is only whitespace, so the line falls back to naming no space.
  */
 function spaceDisplayName(name: string | null): string | null {
   if (name === null) {
@@ -1954,8 +1954,8 @@ function spaceDisplayName(name: string | null): string | null {
   if (oneLine === '') {
     return null;
   }
-  const chars = Array.from(oneLine);
-  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : oneLine;
+  const chars = Array.from(escapeDisplayText(oneLine));
+  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : chars.join('');
 }
 
 /**
