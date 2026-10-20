@@ -24,6 +24,7 @@ import {
   type EventWriteRequest,
   type ResolvedEventWrite,
 } from './eventWrite';
+import { createStartKey, recordRecentCalendarCreate, wasRecentlyCreated } from './recentCreates';
 import { getEventResult, listEventsResult } from './results';
 import { resolveBounds } from './timeRange';
 import {
@@ -211,6 +212,16 @@ export class CalendarToolSet extends LocalToolMCP {
       if (!resolved.ok) {
         return { failure: `Nothing was saved. ${resolved.error}` };
       }
+      // A create of the same event this chat already made in the last few minutes asks first:
+      // the card says so, so the owner can stop a duplicate instead of approving a second copy.
+      const createStart = resolved.request.body.start;
+      if (resolved.review.action === 'create' && createStart !== undefined) {
+        resolved.review.already_created = wasRecentlyCreated({
+          conversationId: this.#options.sentinel.conversation_id,
+          title: resolved.review.title,
+          startKey: createStartKey({ date: createStart.date, dateTime: createStart.dateTime }),
+        });
+      }
       return {
         approved: {
           ...(params.arguments ?? {}),
@@ -382,6 +393,14 @@ export class CalendarToolSet extends LocalToolMCP {
       outcome: 'ran',
       description: `${input.status === 'created' ? 'Added to' : 'Changed in'} Google Calendar after the owner approved it: ${what}`,
     });
+    const createdStart = resolved.request.body.start;
+    if (input.status === 'created' && createdStart !== undefined) {
+      recordRecentCalendarCreate({
+        conversationId: this.#options.sentinel.conversation_id,
+        title: review.title,
+        startKey: createStartKey({ date: createdStart.date, dateTime: createdStart.dateTime }),
+      });
+    }
     return jsonResult({
       account: this.#options.account,
       event_id: saved.id,

@@ -90,13 +90,13 @@ test_blocker_stops_before_any_prompt() {
   t_begin "a runtime blocker exits non-zero before the instance prompts"
   sandbox_new
   STUB_COMPOSE_VERSION=1.29.2
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "Stopped before changing anything"
   assert_flat_contains "$OUT" "Compose 1.29.2 is too old"
-  assert_not_contains "$OUT" "Instance name"
+  assert_not_contains "$OUT" "Name for this instance"
   assert_not_contains "$OUT" "Password"
   assert_no_path "$AMAN_HOME"
   sandbox_drop

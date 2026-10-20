@@ -50,6 +50,7 @@ export const RepositorySchema = z
     name: RepositoryNameSchema,
     clone_url: CloneUrlSchema,
     default_branch: DefaultBranchSchema,
+    package_downloads_allowed: z.boolean(),
     revision: RepositoryRevisionSchema,
     created_at: z.iso.datetime(),
     updated_at: z.iso.datetime(),
@@ -70,6 +71,14 @@ export const CreateRepositoryRequestSchema = z
   .object({ repository: CreateRepositoryPayloadSchema })
   .strict()
   .openapi('CreateRepositoryRequest');
+
+export const SetPackageDownloadsRequestSchema = z
+  .object({
+    allowed: z.boolean(),
+    expected_revision: RepositoryRevisionSchema.optional(),
+  })
+  .strict()
+  .openapi('SetPackageDownloadsRequest');
 
 export const VerifyCommandSchema = z
   .object({

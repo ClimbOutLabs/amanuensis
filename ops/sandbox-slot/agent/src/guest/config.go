@@ -33,6 +33,11 @@ type Spec struct {
 	GID    uint32
 	Binds  []Bind
 	Tmpfs  []Tmpfs
+	// SharedNetwork runs the guest in the slot's own network namespace instead of an isolated one.
+	// The slot's namespace holds only loopback (the agent attests to that, and the compose file gives
+	// the slot no other network), so the guest can reach the agent's loopback mirror forwarder and
+	// nothing else. Set only for a call carrying a package mirror grant.
+	SharedNetwork bool
 	// MaxFileBytes caps the size of any one file a guest process writes (RLIMIT_FSIZE); zero means no cap.
 	MaxFileBytes int64
 	// MaxProcesses caps the processes the guest can create (RLIMIT_NPROC); zero means no cap.

@@ -20,6 +20,15 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -43,14 +52,7 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
-
-export const SPACE_SERVER_ID = 'space';
-export const LIST_SPACES_TOOL_NAME = 'list_spaces';
-export const GET_SPACE_TOOL_NAME = 'get_space';
-export const CREATE_SPACE_TOOL_NAME = 'create_space';
-export const UPDATE_SPACE_TOOL_NAME = 'update_space';
-export const REVERT_SPACE_TOOL_NAME = 'revert_space';
-export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
+import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no
@@ -1248,6 +1250,8 @@ export interface SpaceTurnContext {
   sessionId: string;
   /** Operational log for delta-edit failures. */
   logger: Logger;
+  /** Present only where schedules run (standalone); absent, no schedule tools mount. */
+  schedules?: ScheduleTurnContext | undefined;
 }
 
 /**
@@ -1297,16 +1301,45 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const sentinel = this.#sentinel(input);
+    const schedules = this.#space.schedules;
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
+        mapsCapability({
+          tracing: input.tracing,
+          logger: this.#space.logger,
+          pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
+          timezone: this.clientTimezone,
+        }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
+        ...(schedules === undefined
+          ? []
+          : [
+              scheduleCapability({
+                ...schedules,
+                tracing: input.tracing,
+                timeZone: this.clientTimezone,
+                sentinel,
+                now: () => new Date(),
+              }),
+            ]),
       ],
     };
+  }
+
+  #sentinel(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    return createSentinelHostContext({
+      services: input.sentinel_services,
+      tenant_id: input.tenant_id,
+      created_by: input.created_by,
+      conversation_id: input.session_id,
+      workspace_cwd: input.workspace_cwd ?? null,
+      web_search: this.webSearchTurn,
+    });
   }
 
   /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
@@ -1322,14 +1355,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
         timeZone: this.clientTimezone,
-        sentinel: createSentinelHostContext({
-          services: input.sentinel_services,
-          tenant_id: input.tenant_id,
-          created_by: input.created_by,
-          conversation_id: input.session_id,
-          workspace_cwd: input.workspace_cwd ?? null,
-          web_search: this.webSearchTurn,
-        }),
+        sentinel: this.#sentinel(input),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
         logger: this.#space.logger,
       });

@@ -1,12 +1,19 @@
 'use client';
 
+import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
+import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
+import type {
+  SentinelApprovalCard,
+  SentinelApprovalEmail,
+  SentinelApprovalEmailAction,
+  SentinelApprovalMailbox,
+} from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
@@ -80,11 +87,16 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** What a change replaces; the recipients are in the box below, which is the one place they are listed. */
+function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+  return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
+}
+
+/** What a change replaces, with the recipients of that saved draft. */
 function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
   return (
     <dl className="rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="Replaces" value={`${replaces.subject} (to ${replaces.to.join(', ')})`} />
+      <DetailRow label="Replaces" value={replaces.subject} />
+      <DetailRow label="Replaced draft to" value={mailboxListText(replaces.to)} />
     </dl>
   );
 }
@@ -100,10 +112,12 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
           <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
         </dl>
       )}
-      <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
-      {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
+      <p className="break-words text-sm text-text-primary">To: {mailboxListText(email.to)}</p>
+      {email.cc.length > 0 && (
+        <p className="break-words text-sm text-text-primary">Copy: {mailboxListText(email.cc)}</p>
+      )}
       {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
+        <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -162,9 +176,15 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email, calendar_event: calendarEvent } = card;
+  const { email, calendar_event: calendarEvent, schedule } = card;
   const badge =
-    email !== null ? EMAIL_BADGES[email.action] : calendarEvent !== null ? CALENDAR_BADGES[calendarEvent.action] : null;
+    email !== null
+      ? EMAIL_BADGES[email.action]
+      : calendarEvent !== null
+        ? CALENDAR_BADGES[calendarEvent.action]
+        : schedule !== null
+          ? SCHEDULE_BADGES[schedule.action]
+          : null;
   return (
     <div className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
@@ -216,6 +236,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         {email !== null && <EmailMessage email={email} />}
 
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
+
+        {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 

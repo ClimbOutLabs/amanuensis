@@ -8,6 +8,7 @@ import type { Transaction } from 'kysely';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
+import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -184,12 +185,9 @@ describe('Data import route', () => {
     expect(body.data.spaces).toBe(1);
     expect(body.data.schedules).toBe(2);
     expect(body.data.schedules_off).toBe(true);
-    expect(body.data.summary).toContain(
-      'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off).',
-    );
-    expect(body.data.summary).toContain(
-      'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
-    );
+    expect(body.data.summary).toContain('Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 space\n  1 agent');
+    expect(body.data.summary).toContain('2 schedules (they will be off)');
+    expect(body.data.summary).toContain('Permissions start fresh, so each tool will ask again.');
 
     // Everything landed owned by bob with ids kept, schedules off, and the
     // dcr connector reading "needs credentials".
@@ -222,7 +220,7 @@ describe('Data import route', () => {
   it('refuses an export made by a newer version', async () => {
     const newer = await repack(archive, entries => {
       const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
-      manifest['schema_version'] = 2;
+      manifest['schema_version'] = EXPORT_SCHEMA_VERSION + 1;
       entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
     });
     const response = await postImport('carol', newer);

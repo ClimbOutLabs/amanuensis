@@ -22,7 +22,7 @@ test_dry_run_plans_the_sandbox() {
   assert_flat_contains "$OUT" "--sandbox-root"
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
   run_install --dry-run --verbose --email owner@example.invalid
-  assert_flat_contains "$OUT" "The sandbox: base images, Ubuntu packages"
+  assert_flat_contains "$OUT" "The sandbox: base images, system packages"
   assert_log_lacks "aman-sandbox.mjs"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME"
@@ -199,16 +199,16 @@ test_host_node_opt_in_needs_a_new_enough_node() {
 }
 
 test_cgroup_and_low_disk() {
-  t_begin "cgroup v1 only warns, an unknown cgroup setup blocks, and too little disk for the slot disks blocks"
+  t_begin "an older memory-limit setup only warns, an unknown memory-limit setup blocks, and too little disk for the slot disks blocks"
   sandbox_new
   STUB_CGROUP=1
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT$ERR" "cgroup v1"
+  assert_flat_contains "$OUT$ERR" "older memory-limit setup"
   STUB_CGROUP=3
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "unknown cgroup setup"
+  assert_flat_contains "$OUT$ERR" "unknown memory-limit setup"
   assert_flat_contains "$OUT$ERR" "--no-sandbox"
   STUB_CGROUP=2
   STUB_DF_KB=$((15 * 1024 * 1024))
@@ -259,11 +259,15 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
   assert_contains "$compose" "- slot_ctl_1:/run/aman-slots/1:ro"
   assert_contains "$compose" "- slot_ctl_4:/run/aman-slots/4:ro"
+  assert_contains "$compose" "- slot_mirror_1:/run/aman-slots/1/mirror"
+  assert_contains "$compose" "- slot_mirror_4:/run/aman-slots/4/mirror"
   assert_contains "$compose" "name: main_slot_ctl_3"
+  assert_contains "$compose" "name: main_slot_mirror_2"
   assert_not_contains "$compose" "docker.sock"
   assert_not_contains "$compose" "slot_ws_"
   assert_not_contains "$compose" "@@"
   assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_ctl_1" "the slots project created the volumes the app mounts"
+  assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_mirror_1" "the slots project created the mirror volumes the app writes"
   sandbox_drop
 }
 
@@ -337,13 +341,13 @@ test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
   assert_rc 1
   assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so instance main was not started. Run the same command again in a terminal window."
   assert_log_lacks "sudo -v"
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" --sandbox-root
+Enter password again=>$SENTINEL_PASSWORD" --sandbox-root
   unset STUB_SUDO_REFUSE
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
@@ -357,13 +361,13 @@ test_root_steps_answered_yes_on_a_terminal() {
   t_begin "on a terminal the root steps are shown and run after a yes"
   sandbox_new
   printf 'needs_disk\n' >"$SB_STATE/slots_state"
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
@@ -377,13 +381,13 @@ test_root_steps_declined_on_a_terminal() {
   t_begin "on a terminal a no leaves the instance uncreated and the run stops with the options"
   sandbox_new
   printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>n"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT$ERR" "administrator rights that were not given"
@@ -397,7 +401,7 @@ test_healthy_slots_need_no_root() {
   sandbox_new
   mkdir -p "$SB_STATE/up"
   : >"$SB_STATE/up/main-slots"
-  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\n' >"$SB_STATE/volumes"
+  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\nmain_slot_mirror_1\nmain_slot_mirror_2\nmain_slot_mirror_3\nmain_slot_mirror_4\n' >"$SB_STATE/volumes"
   printf 'ready\n' >"$SB_STATE/slots_state"
   install_machine
   assert_contains "$OUT" "The sandboxes of instance main are already running"
@@ -580,11 +584,11 @@ test_remove_deletes_slots_left_by_a_removed_instance() {
   assert_rc 0
   assert_log_has "aman-sandbox.mjs --down --purge --instance main"
   assert_log_has "sudo -n true"
-  assert_flat_contains "$OUT" "Deleted the sandboxes that instance main left behind."
+  assert_flat_contains "$OUT" "Removed instance main."
   assert_no_path "$SB/aman-slots/main"
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main does not exist; nothing to do."
+  assert_no_path "$SB/aman-slots/main"
   sandbox_drop
 }
 

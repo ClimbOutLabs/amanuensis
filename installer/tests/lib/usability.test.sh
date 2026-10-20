@@ -123,7 +123,7 @@ test_password_in_the_environment_is_ignored() {
 test_end_of_input_at_the_password_prompt_aborts() {
   t_begin "Ctrl-D at the password prompt stops the run cleanly"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
@@ -140,15 +140,15 @@ Enter a password for owner@example.invalid=><EOF>"
 test_prompts_and_summary_use_plain_words() {
   t_begin "prompts and the summary avoid jargon and say nothing about the sign-in service as a page"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter)"
+  assert_contains "$OUT" "Name for this instance [main]:"
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Enter a password for owner@example.invalid"
   assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"

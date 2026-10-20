@@ -301,6 +301,7 @@ describe('demo seed against the real stores', () => {
         sourceLabel: 'Pasted text',
       });
       const agent = await stores.agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: 'real-agent',
         description: 'Mine.',
@@ -314,6 +315,7 @@ describe('demo seed against the real stores', () => {
             tenant_id: TENANT_ID,
             agent_id: agent.id,
             agent_name: agent.name,
+            persona_id: null,
             name: 'real-schedule',
             manifest: worldFor(DAY_ONE).scheduleManifest,
             created_by_subject: { subject_id: USER_ID, subject_type: 'user', subject_display_name: USER_ID },
@@ -343,6 +345,7 @@ describe('demo seed against the real stores', () => {
     /** What an earlier demo seed left: a briefing schedule under its old name and a prewritten briefing chat. */
     async function plantLegacyWorld(): Promise<{ sessionId: string }> {
       const agent = await stores.agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: DEMO_AGENT_NAME,
         description: `Synthetic demo assistant (${DEMO_MARKER}).`,
@@ -356,6 +359,7 @@ describe('demo seed against the real stores', () => {
             tenant_id: TENANT_ID,
             agent_id: agent.id,
             agent_name: agent.name,
+            persona_id: null,
             name: LEGACY_SCHEDULE_NAME,
             manifest: worldFor(DAY_ONE).scheduleManifest,
             created_by_subject: subject,

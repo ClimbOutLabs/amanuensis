@@ -71,7 +71,7 @@ password_problem() {
     return 0
   fi
   if [ "${#1}" -lt 8 ]; then missing+=("at least 8 characters"); fi
-  if [[ $1 != *[0-9]* ]]; then missing+=("a number"); fi
+  if [[ $1 != *[[:digit:]]* ]]; then missing+=("a number"); fi
   if [[ $1 != *[[:punct:]]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
   case ${#missing[@]} in
     0) ;;
@@ -86,7 +86,7 @@ password_problem() {
 # (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
-  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Repeat the password"}
+  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Enter password again"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
@@ -156,6 +156,27 @@ step_fail() {
   exit 1
 }
 
+# ---- the app's own reason when one of its commands fails -------------------------------------------
+
+# cli_log NAME: an emptied private file to send a CLI run's error output to; prints its path.
+cli_log() {
+  ensure_private_dir "$STATE_DIR/logs"
+  : >"$STATE_DIR/logs/$1.log"
+  printf '%s' "$STATE_DIR/logs/$1.log"
+}
+
+# cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
+# or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump instead, so it is named here.
+cli_reason() {
+  local line
+  if grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
+    printf '%s' "Aman ran out of memory. Give Docker more memory, then run this again."
+    return 0
+  fi
+  line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)
+  printf '%s' "${line:-$2}"
+}
+
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum | cut -d' ' -f1
@@ -215,8 +236,11 @@ has_control_chars() {
   [[ $1 == *[[:cntrl:]]* ]]
 }
 
-# Whole-string match of $1 against the extended regex $2, never accepting control characters.
+# Whole-string match of $1 against the extended regex $2, never accepting control characters. Bracket ranges
+# follow the locale's collation on macOS (bash 3.2 under a UTF-8 locale: [A-Z] also matches lowercase), so the
+# match runs as plain ASCII.
 matches_whole() {
+  local LC_ALL=C
   has_control_chars "$1" && return 1
   [[ $1 =~ $2 ]]
 }
@@ -229,32 +253,41 @@ valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
 
-# The reason a value is refused, as one sentence, or nothing when it is fine. The prompts show it and ask again.
+# The name checks below read ranges such as [A-Z] as plain ASCII, whatever the locale's collation says.
+name_has_capitals() { local LC_ALL=C; [[ $1 == *[A-Z]* ]]; }
+name_starts_with_letter() { local LC_ALL=C; [[ $1 == [a-z]* ]]; }
+# What is left of $1 once the allowed characters are removed, so the caller can show the first one.
+name_other_chars() { local LC_ALL=C; printf '%s' "${1//[a-z0-9-]/}"; }
+
+# The reason a value is refused, or nothing when it is fine. The prompts show it and ask again.
+NAME_RULE="Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
 name_problem() {
   local v=$1 rest
   if [ -z "$v" ]; then
-    echo "A name is needed."
+    echo "A name is needed. $NAME_RULE"
   elif [ "$v" = machine ]; then
-    echo "\"machine\" is reserved; pick another name."
+    echo "\"machine\" is kept for Aman's own use. Pick another name."
   elif has_control_chars "$v"; then
-    echo "The name has a control character; use lowercase letters, digits or hyphens."
+    echo "The name has a control character. $NAME_RULE"
   elif [[ $v == *_* ]]; then
-    echo "\"$v\" has an underscore; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has an underscore. $NAME_RULE"
   elif [[ $v == *[[:space:]]* ]]; then
-    echo "\"$v\" has a space; use lowercase letters, digits or hyphens."
-  elif [[ $v == *[A-Z]* ]]; then
-    echo "\"$v\" has capital letters; use lowercase letters, digits or hyphens."
-  elif [[ $v == [!a-z]* ]]; then
-    echo "\"$v\" must start with a letter."
-  elif [[ $v == *[!a-z0-9-]* ]]; then
-    rest=${v//[a-z0-9-]/}
-    echo "\"$v\" has the character ${rest:0:1}; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has a space. $NAME_RULE"
+  elif name_has_capitals "$v"; then
+    echo "\"$v\" has capital letters. $NAME_RULE"
+  elif ! name_starts_with_letter "$v"; then
+    echo "\"$v\" does not start with a letter. $NAME_RULE"
+  elif rest=$(name_other_chars "$v") && [ -n "$rest" ]; then
+    echo "\"$v\" has the character ${rest:0:1}. $NAME_RULE"
   elif [ "${#v}" -gt 24 ]; then
-    echo "\"$v\" is longer than 24 characters."
+    echo "\"$v\" is longer than 24 characters. $NAME_RULE"
   elif [[ $v == *- ]]; then
-    echo "\"$v\" must not end with a hyphen."
+    echo "\"$v\" ends with a hyphen. End it with a letter or a number."
+  # Instance "x-slots" runs as project aman-x-slots, which is the sandbox project of instance "aman-x".
+  elif [[ $v == *-slots ]]; then
+    echo "\"$v\" must not end with -slots; that ending is used for the run-code sandbox of another instance."
   elif ! valid_name "$v"; then
-    echo "\"$v\" is not a usable name; use lowercase letters, digits or hyphens, starting with a letter."
+    echo "\"$v\" cannot be used as a name. $NAME_RULE"
   fi
 }
 
@@ -268,11 +301,11 @@ email_problem() {
 
 # A bare origin: scheme, host and optional port; no path, query or userinfo.
 valid_origin() {
-  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[[:digit:]]{1,5})?$'
 }
 
 valid_port() {
-  matches_whole "$1" '^[0-9]{1,5}$' || return 1
+  matches_whole "$1" '^[[:digit:]]{1,5}$' || return 1
   [ "$((10#$1))" -ge 1024 ] && [ "$((10#$1))" -le 65535 ]
 }
 
@@ -282,5 +315,5 @@ valid_home_path() {
 }
 
 is_loopback_origin() {
-  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
+  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[[:digit:]]+)?$'
 }

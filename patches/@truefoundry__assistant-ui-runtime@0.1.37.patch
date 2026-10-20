@@ -65,7 +65,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..95372efd452ad9399f7cb3634a8869ff
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9c8dd14f9 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..2f7423c5f8b753515f01a492248692f436f5a56a 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -811,7 +811,35 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3662,12 +3854,13 @@ function useTrueFoundryAgentMessages({
+@@ -3587,7 +3779,12 @@ function useTrueFoundryAgentMessages({
+                 snapshotRef.current.fold,
+                 { inputs: options.inputs, ...streamHeaders },
+                 signal,
+-                groupRootBaseline
++                groupRootBaseline,
++                // A continuation runs as a new gateway turn: adopt its id so downloads and
++                // edits address the turn the server actually holds.
++                (gatewayTurnId) => {
++                  turnIdRef.current = gatewayTurnId;
++                }
+               );
+             }
+             if ("resumeMcpAuth" in options) {
+@@ -3597,7 +3794,12 @@ function useTrueFoundryAgentMessages({
+                 snapshotRef.current.fold,
+                 { resumeMcpAuth: true, ...streamHeaders },
+                 signal,
+-                groupRootBaseline
++                groupRootBaseline,
++                // A continuation runs as a new gateway turn: adopt its id so downloads and
++                // edits address the turn the server actually holds.
++                (gatewayTurnId) => {
++                  turnIdRef.current = gatewayTurnId;
++                }
+               );
+             }
+             return streamTurnContent(
+@@ -3662,12 +3864,13 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -827,7 +855,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        resolveConversationSessionIdRef.current
      );
      await server.cancelSession({ sessionId: conversationSessionId }).catch(() => void 0);
-@@ -3677,11 +3870,26 @@ function useTrueFoundryAgentMessages({
+@@ -3677,11 +3880,26 @@ function useTrueFoundryAgentMessages({
        setIsRunning(false);
      }
    }, [server, sessionId, markResumeUnavailable]);
@@ -857,7 +885,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3898,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3908,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -889,7 +917,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3929,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3939,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -897,7 +925,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +3946,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +3956,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -905,7 +933,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4101,7 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4111,7 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -913,7 +941,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4180,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4190,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -921,7 +949,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4010,9 +4233,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4243,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
            "This session has not been saved yet, so its files cannot be downloaded."
          );
        }
@@ -931,7 +959,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        return await server.downloadSandboxFile({
          sessionId,
          turnId,
-@@ -4047,6 +4267,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4277,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -939,7 +967,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4470,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4480,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -955,7 +983,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4524,7 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4534,7 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -963,7 +991,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4635,7 @@ export {
+@@ -4408,6 +4645,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -971,7 +999,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4655,7 @@ export {
+@@ -4427,6 +4665,7 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -980,7 +1008,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..39aae3e9893042992c9a39e1356a9bf9
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..eabcf39e1a700c73a44f5cdfe4c09e702ed9b62f 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb52c311d6 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1141,6 +1169,15 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..eabcf39e1a700c73a44f5cdfe4c09e70
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
+@@ -994,6 +1041,8 @@ interface Schedule {
+     agentId: string;
+     /** Display name; omit when the host only has `agentId`. */
+     agentName?: string;
++    /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++    runsAs?: string;
+     task: string;
+     cron: string;
+     timezone: string;
 diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
 index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbeaf0547d7 100644
 --- a/src/convertTurnMessages.test.ts
@@ -2277,7 +2314,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad82
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..1d51c5438aad3fdc2a91fd1c628d91212763315d 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb635675b362 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2317,6 +2354,15 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..1d51c5438aad3fdc2a91fd1c628d9121
      path: string;
    }): Promise<Blob>;
  }
+@@ -970,6 +976,8 @@ export interface Schedule {
+   agentId: string;
+   /** Display name; omit when the host only has `agentId`. */
+   agentName?: string;
++  /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++  runsAs?: string;
+   task: string;
+   cron: string;
+   timezone: string;
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
 index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..e4b5770819d0a2beaec8069383b6704ac508bc5e 100644
 --- a/src/sessionSnapshot.ts
@@ -3099,7 +3145,7 @@ index 979a49f6b7d89068628ff53fb93ef268b032dc58..62e899b8c614b1d4b00026a3f60dc06c
          it("reports and restores a user message when initializeSession fails", async () => {
              const onError = vi.fn();
 diff --git a/src/useTrueFoundryAgentMessages.ts b/src/useTrueFoundryAgentMessages.ts
-index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea00334c1bfe91 100644
+index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..d00efecf1e9df5d73d7c39fe9d505385277f9091 100644
 --- a/src/useTrueFoundryAgentMessages.ts
 +++ b/src/useTrueFoundryAgentMessages.ts
 @@ -38,8 +38,10 @@ import {
@@ -3315,7 +3361,31 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  void runStream(
                      (signal) =>
                          resumeTurnStream(
-@@ -838,12 +919,13 @@ export function useTrueFoundryAgentMessages({
+@@ -749,6 +830,11 @@ export function useTrueFoundryAgentMessages({
+                                 { inputs: options.inputs, ...streamHeaders },
+                                 signal,
+                                 groupRootBaseline,
++                                // A continuation runs as a new gateway turn: adopt its id so
++                                // downloads and edits address the turn the server holds.
++                                (gatewayTurnId) => {
++                                    turnIdRef.current = gatewayTurnId;
++                                },
+                             );
+                         }
+                         if ("resumeMcpAuth" in options) {
+@@ -759,6 +845,11 @@ export function useTrueFoundryAgentMessages({
+                                 { resumeMcpAuth: true, ...streamHeaders },
+                                 signal,
+                                 groupRootBaseline,
++                                // A continuation runs as a new gateway turn: adopt its id so
++                                // downloads and edits address the turn the server holds.
++                                (gatewayTurnId) => {
++                                    turnIdRef.current = gatewayTurnId;
++                                },
+                             );
+                         }
+                         return streamTurnContent(
+@@ -838,12 +929,13 @@ export function useTrueFoundryAgentMessages({
      );
  
      const cancel = useCallback(async () => {
@@ -3331,7 +3401,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              resolveConversationSessionIdRef.current,
          );
          // Request cancellation but keep consuming the stream. After cancel(),
-@@ -863,12 +945,26 @@ export function useTrueFoundryAgentMessages({
+@@ -863,12 +955,26 @@ export function useTrueFoundryAgentMessages({
          }
      }, [server, sessionId, markResumeUnavailable]);
  
@@ -3362,7 +3432,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  return;
              }
              const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -877,13 +973,24 @@ export function useTrueFoundryAgentMessages({
+@@ -877,13 +983,24 @@ export function useTrueFoundryAgentMessages({
                  return;
              }
              const inputs = collectRequiredActionInputs(paused);
@@ -3390,7 +3460,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
  
      const respondToToolApproval = useCallback(
          (response: RespondToToolApprovalOptions) => {
-@@ -891,6 +998,9 @@ export function useTrueFoundryAgentMessages({
+@@ -891,6 +1008,9 @@ export function useTrueFoundryAgentMessages({
              const approvals = new Map(prev.requiredActions.approvals);
              approvals.set(response.approvalId, {
                  approved: response.approved,
@@ -3400,7 +3470,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  ...(response.reason != null ? { reason: response.reason } : {}),
              });
              const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -899,6 +1009,7 @@ export function useTrueFoundryAgentMessages({
+@@ -899,6 +1019,7 @@ export function useTrueFoundryAgentMessages({
                      approvals,
                  },
              });
@@ -3408,7 +3478,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -916,6 +1027,7 @@ export function useTrueFoundryAgentMessages({
+@@ -916,6 +1037,7 @@ export function useTrueFoundryAgentMessages({
                      toolResponses,
                  },
              });
@@ -3416,7 +3486,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -1094,6 +1206,7 @@ export function useTrueFoundryAgentMessages({
+@@ -1094,6 +1216,7 @@ export function useTrueFoundryAgentMessages({
  
      return {
          messages,

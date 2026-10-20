@@ -22,6 +22,7 @@ import {
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
   ScheduleNotFoundError,
+  SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   startScheduleRun,
@@ -32,6 +33,8 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import {
@@ -49,6 +52,7 @@ import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { buildPersonaContext } from '../personas/persona';
 import {
   createScheduleRoute,
   createScheduleRunRoute,
@@ -60,18 +64,13 @@ import {
   putScheduleRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
+import { scheduleRunsAs } from '../runtime/chatAssistant';
+import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
-import {
-  InvalidCronError,
-  SCHEDULE_MIN_INTERVAL_SECONDS,
-  type Schedule,
-  type ScheduleManifest,
-  type ScheduleRun,
-} from '../schemas/schedule';
+import type { Schedule, ScheduleRun } from '../schemas/schedule';
 import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
 import { getTurnExecutionError, startTurnInProcess } from './turns';
 
@@ -92,6 +91,9 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
   /** Persistence agent store (schedule agent binding is not caller-scoped). */
   agentStore: IAgentStore<TTransaction>;
+  /** A run answers as the persona its chat had, with the owner's personalization, like a chat turn. */
+  personaStore: Pick<IPersonaStore<TTransaction>, 'getPersona'>;
+  personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   /**
    * Fork-only, mirroring `TurnsRouterDeps`: not agent-scoped upstream, so these stay directly
    * injected rather than resolved per-request. Required so a scheduled run resolves memory and
@@ -135,10 +137,15 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     item,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
+    personaStore: deps.personaStore,
   });
   if (prepared === undefined) {
     return;
   }
+  const personalizationProfile = await deps.personalizationStore.getProfile({
+    tenant_id: item.schedule.tenant_id,
+    created_by: prepared.userRef,
+  });
   await startTurnInProcess({
     session: prepared.session,
     input: prepared.input,
@@ -165,6 +172,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      personalizationProfile,
+      personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       logger: deps.logger,
       // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
       clientTimezone: item.schedule.manifest.timezone,
@@ -172,16 +181,44 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   });
 }
 
-function toWireSchedule(record: ScheduleRecord): Schedule {
+function toWireSchedule(record: ScheduleRecord, runsAs: string): Schedule {
   return {
     id: record.id,
     agent_name: record.agent_name,
+    runs_as: runsAs,
     name: record.name,
     manifest: record.manifest,
     created_by_subject: record.created_by_subject,
     created_at: record.created_at,
     updated_at: record.updated_at,
   };
+}
+
+/** Wire schedules with the same plain "runs as" name the chat shows. */
+async function toWireSchedules<TTransaction>(input: {
+  records: readonly ScheduleRecord[];
+  tenant_id: string;
+  deps: ScheduleTurnExecutionDeps<TTransaction>;
+}): Promise<Schedule[]> {
+  const runsAs = scheduleRunsAs({
+    tenant_id: input.tenant_id,
+    agentStore: input.deps.agentStore,
+    personaStore: input.deps.personaStore,
+    personalizationStore: input.deps.personalizationStore,
+  });
+  return Promise.all(input.records.map(async record => toWireSchedule(record, await runsAs(record))));
+}
+
+async function toWireOneSchedule<TTransaction>(input: {
+  record: ScheduleRecord;
+  tenant_id: string;
+  deps: ScheduleTurnExecutionDeps<TTransaction>;
+}): Promise<Schedule> {
+  const [wire] = await toWireSchedules({ records: [input.record], tenant_id: input.tenant_id, deps: input.deps });
+  if (wire === undefined) {
+    throw new Error('A schedule could not be shown.');
+  }
+  return wire;
 }
 
 function toWireScheduleRun(record: ScheduleRunRecord): ScheduleRun {
@@ -197,36 +234,6 @@ function toWireScheduleRun(record: ScheduleRunRecord): ScheduleRun {
     created_at: record.created_at,
     updated_at: record.updated_at,
   };
-}
-
-export function validateManifest(manifest: Pick<ScheduleManifest, 'cron' | 'timezone'>, from: Date = new Date()): void {
-  // Reject if the cron has no upcoming trigger time (impossible / exhausted calendar).
-  // 5-field cron has no year, so a valid expression always recurs — no one-shot check.
-  try {
-    nextTriggerAfter({ cron: manifest.cron, timezone: manifest.timezone, from });
-  } catch (error) {
-    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
-      cause: error,
-    });
-  }
-
-  // Reject expressions that trigger < SCHEDULE_MIN_INTERVAL_SECONDS seconds apart.
-  let tightest: number;
-  try {
-    tightest = minIntervalSeconds(manifest, from);
-  } catch (error) {
-    throw new InvalidCronError(`Cron expression "${manifest.cron}" has no next trigger time in ${manifest.timezone}`, {
-      cause: error,
-    });
-  }
-
-  if (tightest < SCHEDULE_MIN_INTERVAL_SECONDS) {
-    throw new InvalidCronError(
-      `Cron expression "${manifest.cron}" triggers every ${String(tightest)}s; the minimum interval is ${String(
-        SCHEDULE_MIN_INTERVAL_SECONDS,
-      )}s`,
-    );
-  }
 }
 
 const FORBIDDEN_SCHEDULE_ACCESS = 'Only the schedule creator can access this schedule';
@@ -256,7 +263,8 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
       if (
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
-        error instanceof ScheduleAgentNotFoundError
+        error instanceof ScheduleAgentNotFoundError ||
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -292,7 +300,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
           agent_ids: managedAgentIds,
         },
       });
-      return c.json({ data: data.map(toWireSchedule), pagination }, 200);
+      const wire = await toWireSchedules({ records: data, tenant_id: requestContext.tenant_id, deps });
+      return c.json({ data: wire, pagination }, 200);
     } catch (error) {
       if (error instanceof InvalidPageTokenError) {
         return c.json({ error: { message: error.message } }, 400);
@@ -400,7 +409,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
       if (
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
-        error instanceof ScheduleAgentNotFoundError
+        error instanceof ScheduleAgentNotFoundError ||
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -443,6 +453,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             agent_id: agent.id,
             agent_name: agent.name,
             name: body.name,
+            persona_id: null,
             manifest: body.manifest,
             created_by_subject: createdBySubjectFromRequestContext(requestContext),
             runFrom: new Date(),
@@ -461,7 +472,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
       throw error;
     }
 
-    return c.json({ data: toWireSchedule(record) }, 201);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 201);
   };
 
   const getHandler: RouteHandler<typeof getScheduleRoute> = async c => {
@@ -485,7 +496,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
     ) {
       return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
     }
-    return c.json({ data: toWireSchedule(record) }, 200);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
   };
 
   /**
@@ -544,7 +555,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
     if (record === undefined) {
       return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
     }
-    return c.json({ data: toWireSchedule(record) }, 200);
+    return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
   };
 
   const deleteHandler: RouteHandler<typeof deleteScheduleRoute> = async c => {

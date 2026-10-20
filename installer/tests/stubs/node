@@ -71,6 +71,7 @@ case "$mode" in
     mkdir -p "$S/up"
     echo slots >"$S/up/$instance-slots"
     for n in 1 2 3 4; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done
+    for n in 1 2 3 4; do grep -Fxq "${instance}_slot_mirror_$n" "$S/volumes" || echo "${instance}_slot_mirror_$n" >>"$S/volumes"; done
     echo ready >"$S/slots_state"
     # The slots now run the image as it is.
     { cat "$S/image_id" 2>/dev/null || echo first; } >"$S/slots_run_image_id"

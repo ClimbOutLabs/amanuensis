@@ -33,6 +33,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
 import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
@@ -1053,6 +1054,16 @@ export interface SharedServerConfiguration {
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
+   * Directory holding the package mirror cache. Derived: `{app data dir}/package-mirror-cache`.
+   * The mirrors are the download-only package gateways the sandbox slots reach; their cache is the
+   * only thing that lives here.
+   */
+  SANDBOX_MIRROR_CACHE_DIR: string;
+  /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
+  /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -1144,7 +1155,8 @@ export interface SharedServerConfiguration {
   /**
    * Max total bytes of a data export archive. The export aborts (and the download fails) rather
    * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
-   * Default 1 GiB; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
+   * Default 1 GiB, the same as `DATA_IMPORT_MAX_BYTES`, so a default export always fits a default
+   * import; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
    */
   DATA_EXPORT_MAX_BYTES: number;
   /**
@@ -1858,6 +1870,17 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
+  SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+  }),
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_CACHE_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
+    defaultValue: 10 * 1024 * 1024 * 1024,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -1922,13 +1945,13 @@ const shared: SharedServerConfiguration = {
   DATA_EXPORT_MAX_BYTES: parsePositiveInt({
     envKey: 'DATA_EXPORT_MAX_BYTES',
     raw: getEnv('DATA_EXPORT_MAX_BYTES'),
-    defaultValue: 1024 * 1024 * 1024,
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
     maxValue: ZIP_MAX_ARCHIVE_BYTES,
   }),
   DATA_IMPORT_MAX_BYTES: parsePositiveInt({
     envKey: 'DATA_IMPORT_MAX_BYTES',
     raw: getEnv('DATA_IMPORT_MAX_BYTES'),
-    defaultValue: 1024 * 1024 * 1024,
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',

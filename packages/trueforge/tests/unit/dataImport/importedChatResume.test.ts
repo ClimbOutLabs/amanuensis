@@ -32,7 +32,8 @@ import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../
 import { CollectingWritable, exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import type { DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
-import { listAt, parseJson, recordAt, type JsonRecord } from '../../fixtures/jsonGuards';
+import { listAt, recordAt, type JsonRecord } from '../../fixtures/jsonGuards';
+import { legacySessionsOf, setLegacySessions } from '../../fixtures/legacySessions';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(240_000);
@@ -126,7 +127,7 @@ interface PausedTurnEdit {
  */
 function tamper(archive: Buffer, sessionId: string, mutate: (edit: PausedTurnEdit) => void): Promise<Buffer> {
   return repack(archive, entries => {
-    const sessions = listAt(parseJson(entries.get('sessions.json'), 'sessions.json'), 'sessions.json');
+    const sessions = legacySessionsOf(entries);
     const entry = recordAt(
       sessions.find(item => recordAt(recordAt(item, 'entry')['session'], 'session')['session_id'] === sessionId),
       'paused chat',
@@ -145,7 +146,7 @@ function tamper(archive: Buffer, sessionId: string, mutate: (edit: PausedTurnEdi
     );
     const toolCalls = listAt(assistant['tool_calls'], 'tool_calls').map(item => recordAt(item, 'call'));
     mutate({ main, context, toolCalls });
-    entries.set('sessions.json', Buffer.from(JSON.stringify(sessions)));
+    setLegacySessions(entries, sessions);
   });
 }
 

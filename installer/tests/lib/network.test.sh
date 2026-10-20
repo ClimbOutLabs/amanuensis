@@ -365,13 +365,13 @@ test_no_question_about_the_address() {
   t_begin "the interactive flow asks for a name and an email and never about the address"
   sandbox_new_plain
   fixture_full_machine
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" --tls off
+Enter password again=>$SENTINEL_PASSWORD" --tls off
   assert_eq "$RC" 0
   assert_not_contains "$OUT" "Address you will use"
   assert_not_contains "$OUT" "Address for other devices"

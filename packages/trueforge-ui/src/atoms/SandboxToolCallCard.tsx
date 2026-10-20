@@ -19,6 +19,8 @@ export type SandboxToolCallCardProps = {
   argsJson?: string;
   resultText?: string;
   resultJson?: string;
+  /** Plain lines for the person, such as a skill that could not be loaded. Shown even when collapsed. */
+  notices?: readonly string[];
   viewMode?: 'terminal' | 'code';
   hasContent?: boolean;
   onViewModeChange?: (viewMode: 'terminal' | 'code') => void;
@@ -210,6 +212,16 @@ function SandboxBody({
   );
 }
 
+function SandboxNotices({ notices }: { notices: readonly string[] }) {
+  return (
+    <div className="px-3 pb-1 font-sans text-xs leading-5 text-text-primary" data-testid="sandbox-notices">
+      {notices.map(notice => (
+        <div key={notice}>{notice}</div>
+      ))}
+    </div>
+  );
+}
+
 export function SandboxToolCallCard({
   name,
   intent,
@@ -222,6 +234,7 @@ export function SandboxToolCallCard({
   argsJson,
   resultText,
   resultJson,
+  notices,
   viewMode = 'terminal',
   hasContent = false,
   onViewModeChange,
@@ -251,6 +264,7 @@ export function SandboxToolCallCard({
       approvalSlot={approvalSlot}
       approvalId={approvalId}
       dataTestPrefix={dataTestPrefix}
+      noticeSlot={notices !== undefined && notices.length > 0 ? <SandboxNotices notices={notices} /> : undefined}
       requestSlot={
         hasContent ? (
           <SandboxBody

@@ -5,7 +5,9 @@
  * carries the previous turn's threads forward and applies appends), so an
  * exported snapshot is decomposed per turn: threads new to the turn start
  * with their full context, retained threads contribute only the suffix past
- * the longest common prefix with the previous turn's exported snapshot, and
+ * the longest common prefix with the exported snapshot of the turn it
+ * continues (its previous_turn_id, so a chat whose first message was edited
+ * starts its second root from nothing), and
  * a retained thread whose context was rewritten (compaction) is repaired
  * with an overwrite after creation. Turns are terminated immediately after
  * creation, in export order, so the next turn's predecessor is never still
@@ -18,6 +20,7 @@
 import {
   CancellationReason,
   EventType,
+  InMemorySessionStore,
   MAIN_THREAD_ID,
   abnormalHandoffCauseForCancellation,
   type CreatedBySubject,
@@ -28,9 +31,13 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import { mechanicalAbnormalHandoff, newEventId } from '@truefoundry/trueforge-core/core';
 import { ActionRequiredEventSchema } from '@truefoundry/trueforge-core/core/events/schema';
+import { getHeapStatistics } from 'node:v8';
 
-import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import { formatArchiveBytes } from '../dataExport/archiveLimits';
+
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { detachConnectors } from './connectorImport';
+import { DataImportError } from './importError';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
 
 /** Shown in the chat for a request that was waiting on the owner when the archive was made. */
@@ -63,8 +70,9 @@ function resolveAgentBinding(
   return resolved === undefined ? agent : { type: 'reference', id: resolved.id, name: resolved.name };
 }
 
+/** A sessions/ archive shares unchanged messages between turns, so most compare by identity. */
 function sameMessage(left: ContextMessage, right: ContextMessage): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 /** Length of the longest common prefix of two contexts, compared message by message. */
@@ -157,7 +165,7 @@ async function restoreTurn(
       previous_turn_id: turn.previous_turn_id,
       state: { status: 'running' },
       input: turn.input,
-      custom: parseTurnCustom(turn.custom ?? null),
+      custom: turn.custom,
       created_at: new Date(turn.created_at),
       updated_at: new Date(turn.updated_at),
     },
@@ -275,6 +283,98 @@ async function restoreTurn(
   await store.updateTurnState({ session_id: sessionId, turn_id: turn.turn_id, state, turn_done_event: doneEvent });
 }
 
+type TurnEntry = ImportSessionEntry['turns'][number];
+
+/**
+ * The earlier turn of the chat that a turn continues, which the store builds it on. A turn without
+ * one is a root: the chat's first turn, or the new first turn after its first message was edited.
+ */
+function baseTurn(
+  turns: readonly TurnEntry[],
+  { index, indexById }: { index: number; indexById: ReadonlyMap<string, number> },
+): TurnEntry | undefined {
+  const baseId = turns[index]?.turn.previous_turn_id ?? null;
+  const baseIndex = baseId === null ? undefined : indexById.get(baseId);
+  return baseIndex !== undefined && baseIndex < index ? turns[baseIndex] : undefined;
+}
+
+function threadsOf(turn: TurnEntry | undefined): Map<string, ThreadSnapshot> {
+  return new Map(turn === undefined ? [] : Object.entries(turn.turn.snapshot.threads));
+}
+
+function turnIndexById(turns: readonly TurnEntry[]): Map<string, number> {
+  return new Map(turns.map(({ turn }, index) => [turn.turn_id, index]));
+}
+
+async function createRestoredSession(
+  store: ISessionStore<SessionCustom, TurnCustom>,
+  context: SessionRestoreContext,
+  session: ImportSessionEntry['session'],
+): Promise<void> {
+  await store.createSession({
+    tenant_id: context.tenantId,
+    session_id: session.session_id,
+    created_by_subject: context.subject,
+    agent: resolveAgentBinding(session.agent, context),
+    external_id: session.external_id,
+    metadata: session.metadata,
+    source: session.source,
+    custom: null,
+  });
+  context.onSessionCreated?.(session.session_id);
+  if (session.folder_id !== null) {
+    await store.setSessionFolder({
+      tenant_id: context.tenantId,
+      session_id: session.session_id,
+      created_by: context.subject.subject_id,
+      folder_id: session.folder_id,
+    });
+  }
+}
+
+/** The title of a chat without turns, its checklist, and the archived dates and totals of the chat and `turns`. */
+async function finishRestoredSession(
+  store: ISessionStore<SessionCustom, TurnCustom>,
+  context: SessionRestoreContext,
+  { entry, turns }: { entry: ImportSessionEntry; turns: readonly TurnEntry[] },
+): Promise<void> {
+  const session = entry.session;
+  if (entry.turns.length === 0 && session.title !== null) {
+    await store.updateSession({
+      tenant_id: context.tenantId,
+      session_id: session.session_id,
+      agent: undefined,
+      title: session.title,
+      metadata: undefined,
+    });
+  }
+
+  const checklist = session.task_checklist;
+  if (checklist.items.length > 0 || checklist.revision > 0) {
+    const current = await store.getTaskChecklist({ tenant_id: context.tenantId, session_id: session.session_id });
+    await store.replaceTaskChecklist({
+      tenant_id: context.tenantId,
+      session_id: session.session_id,
+      expected_revision: current.revision,
+      items: checklist.items,
+    });
+  }
+
+  await store.stampImportedSession({
+    tenant_id: context.tenantId,
+    session_id: session.session_id,
+    created_at: new Date(session.created_at),
+    updated_at: new Date(session.updated_at),
+    last_activity_timestamp_ms: session.last_activity_timestamp_ms,
+    metrics: session.metrics,
+    turns: turns.map(({ turn }) => ({
+      turn_id: turn.turn_id,
+      created_at: new Date(turn.created_at),
+      updated_at: new Date(turn.updated_at),
+    })),
+  });
+}
+
 /**
  * Restores every exported session, in export order. Folders must already
  * exist in the store; artifacts are restored separately by the caller.
@@ -282,76 +382,96 @@ async function restoreTurn(
 export async function restoreSessions(
   store: ISessionStore<SessionCustom, TurnCustom>,
   context: SessionRestoreContext,
-  sessions: readonly ImportSessionEntry[],
+  sessions: Iterable<ImportSessionEntry>,
 ): Promise<void> {
   for (const entry of sessions) {
     const session = entry.session;
-    await store.createSession({
-      tenant_id: context.tenantId,
-      session_id: session.session_id,
-      created_by_subject: context.subject,
-      agent: resolveAgentBinding(session.agent, context),
-      external_id: session.external_id,
-      metadata: session.metadata,
-      source: session.source,
-      custom: null,
-    });
-    context.onSessionCreated?.(session.session_id);
-    if (session.folder_id !== null) {
-      await store.setSessionFolder({
-        tenant_id: context.tenantId,
-        session_id: session.session_id,
-        created_by: context.subject.subject_id,
-        folder_id: session.folder_id,
-      });
-    }
-
+    await createRestoredSession(store, context, session);
     const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
-    let previousThreads = new Map<string, ThreadSnapshot>();
-    let isFirstTurn = true;
-    for (const turnEntry of entry.turns) {
+    const indexById = turnIndexById(entry.turns);
+    for (const [index, turnEntry] of entry.turns.entries()) {
       await restoreTurn(store, session, turnEntry, {
-        threads: previousThreads,
-        isFirstTurn,
+        threads: threadsOf(baseTurn(entry.turns, { index, indexById })),
+        isFirstTurn: index === 0,
         answered: continuedTurnIds.has(turnEntry.turn.turn_id),
       });
-      previousThreads = new Map(Object.entries(turnEntry.turn.snapshot.threads));
-      isFirstTurn = false;
     }
+    await finishRestoredSession(store, context, { entry, turns: entry.turns });
+  }
+}
 
-    if (entry.turns.length === 0 && session.title !== null) {
-      await store.updateSession({
+/** Below V8's own heap limit, which would end the process without saying which chat was too large. */
+const REPLAY_HEAP_STOP_FRACTION = 0.9;
+
+function assertHeapRoom(sessionId: string): void {
+  const { used_heap_size: used, heap_size_limit: limit } = getHeapStatistics();
+  if (used > REPLAY_HEAP_STOP_FRACTION * limit) {
+    throw new DataImportError(
+      `Chat ${sessionId} is too large to import with the memory Aman has here (${formatArchiveBytes(used)} of ${formatArchiveBytes(limit)} in use), so nothing was imported. Give Docker more memory, then run the import again.`,
+      500,
+    );
+  }
+}
+
+/**
+ * The dry run of restoreSessions, which proves every chat lands before anything is written. An
+ * in-memory store keeps a full copy of every turn's snapshot, so a long chat replayed in one
+ * store grows with the square of its turns. Each turn lands instead in a fresh store that holds
+ * only the chat, the turn it continues (rebuilt alone first) and itself.
+ */
+export async function replaySessions(
+  context: SessionRestoreContext,
+  { sessions, folderNames }: { sessions: Iterable<ImportSessionEntry>; folderNames: ReadonlyMap<string, string> },
+): Promise<void> {
+  const openChat = async (session: ImportSessionEntry['session']) => {
+    const store = new InMemorySessionStore<SessionCustom, TurnCustom>();
+    const folderName = session.folder_id === null ? undefined : folderNames.get(session.folder_id);
+    if (session.folder_id !== null && folderName !== undefined) {
+      await store.createSessionFolder({
         tenant_id: context.tenantId,
-        session_id: session.session_id,
-        agent: undefined,
-        title: session.title,
-        metadata: undefined,
+        folder_id: session.folder_id,
+        created_by: context.subject.subject_id,
+        name: folderName,
       });
     }
+    await createRestoredSession(store, context, session);
+    return store;
+  };
 
-    const checklist = session.task_checklist;
-    if (checklist.items.length > 0 || checklist.revision > 0) {
-      const current = await store.getTaskChecklist({ tenant_id: context.tenantId, session_id: session.session_id });
-      await store.replaceTaskChecklist({
-        tenant_id: context.tenantId,
-        session_id: session.session_id,
-        expected_revision: current.revision,
-        items: checklist.items,
-      });
+  for (const entry of sessions) {
+    const session = entry.session;
+    try {
+      const indexById = turnIndexById(entry.turns);
+      const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
+      let store: ISessionStore<SessionCustom, TurnCustom> | undefined;
+      let landed: TurnEntry[] = [];
+      for (const [index, turnEntry] of entry.turns.entries()) {
+        assertHeapRoom(session.session_id);
+        store = await openChat(session);
+        landed = [];
+        const base = baseTurn(entry.turns, { index, indexById });
+        if (base !== undefined) {
+          // Every thread of the base is new to this store, so it lands with its whole context.
+          await restoreTurn(store, session, base, { threads: new Map(), isFirstTurn: false, answered: true });
+          landed.push(base);
+        }
+        await restoreTurn(store, session, turnEntry, {
+          threads: threadsOf(base),
+          isFirstTurn: index === 0,
+          answered: continuedTurnIds.has(turnEntry.turn.turn_id),
+        });
+        landed.push(turnEntry);
+      }
+      await finishRestoredSession(store ?? (await openChat(session)), context, { entry, turns: landed });
+    } catch (cause) {
+      if (cause instanceof DataImportError) {
+        throw cause;
+      }
+      throw new DataImportError(
+        `Chat '${session.title ?? 'Untitled chat'}' in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        400,
+        { cause },
+      );
     }
-
-    await store.stampImportedSession({
-      tenant_id: context.tenantId,
-      session_id: session.session_id,
-      created_at: new Date(session.created_at),
-      updated_at: new Date(session.updated_at),
-      last_activity_timestamp_ms: session.last_activity_timestamp_ms,
-      metrics: session.metrics,
-      turns: entry.turns.map(({ turn }) => ({
-        turn_id: turn.turn_id,
-        created_at: new Date(turn.created_at),
-        updated_at: new Date(turn.updated_at),
-      })),
-    });
   }
 }

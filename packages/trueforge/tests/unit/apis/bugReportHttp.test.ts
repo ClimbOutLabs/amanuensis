@@ -211,6 +211,7 @@ describe('bug-report HTTP endpoint', () => {
 
   it('resolves the registry agent name and model for a named session', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: TENANT_ID,
       created_by_subject: { subject_id: 'tester', subject_type: 'user', subject_display_name: 'tester' },
       name: 'named-agent',

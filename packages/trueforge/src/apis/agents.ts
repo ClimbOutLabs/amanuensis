@@ -121,6 +121,7 @@ export function createAgentsRouter<TTransaction>(deps: AgentsRouterDeps<TTransac
         description: body.description,
         manifest,
         external_id: null,
+        host_managed: false,
         created_by_subject: createdBySubjectFromRequestContext(requestContext),
       });
       return c.json({ data: toWireAgent(record) }, 201);

@@ -7,70 +7,70 @@ set -euo pipefail
 
 ESC=$'\033'
 PASSWORD_ANSWERS="Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
 
 test_prompts_state_their_rule() {
   t_begin "each question shows the rule for its answer, with an example, and Enter keeps the default"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter) [main]"
-  assert_contains "$OUT" "Example: main"
+  assert_contains "$OUT" "Name for this instance [main]:"
+  assert_contains "$OUT" "Each person gets a new instance."
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Example: you@example.com"
   assert_contains "$OUT" "Go ahead? [Y/n]"
   assert_contains "$OUT" "Enter a password for owner@example.invalid (not shown)"
-  assert_contains "$OUT" "Repeat the password (not shown)"
+  assert_contains "$OUT" "Enter password again (not shown)"
   sandbox_drop
 }
 
 test_an_invalid_name_asks_again_with_the_reason() {
   t_begin "an invalid instance name prints one plain line and asks again; a valid one then continues"
   sandbox_new
-  run_install_tty "Instance name=>My_Name
-Instance name=>main
+  run_install_tty "Name for this instance=>My_Name
+Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
-  assert_flat_contains "$OUT" "\"My_Name\" has an underscore; use lowercase letters, digits or hyphens."
+  assert_flat_contains "$OUT" "\"My_Name\" has an underscore. Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
   assert_not_contains "$OUT" "Run \"install.sh --help\""
   assert_file "$AMAN_HOME/state/instances/main.conf"
-  assert_eq "$(printf '%s' "$OUT" | grep -c 'Instance name (a-z')" 2 "the question is asked twice"
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Name for this instance \[main\]:')" 2 "the question is asked twice"
   sandbox_drop
 }
 
 test_each_kind_of_bad_name_gets_its_own_reason() {
   t_begin "capital letters, a leading digit, a trailing hyphen, a reserved word and a long name each say what is wrong"
   sandbox_new
-  run_install_tty "Instance name=>Main
-Instance name=>1main
-Instance name=>main-
-Instance name=>machine
-Instance name=>main
+  run_install_tty "Name for this instance=>Main
+Name for this instance=>1main
+Name for this instance=>main-
+Name for this instance=>machine
+Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"Main\" has capital letters"
-  assert_flat_contains "$OUT" "\"1main\" must start with a letter."
-  assert_flat_contains "$OUT" "\"main-\" must not end with a hyphen."
-  assert_flat_contains "$OUT" "\"machine\" is reserved; pick another name."
+  assert_flat_contains "$OUT" "\"1main\" does not start with a letter. Use 1 to 24"
+  assert_flat_contains "$OUT" "\"main-\" ends with a hyphen. End it with a letter or a number."
+  assert_flat_contains "$OUT" "\"machine\" is kept for Aman's own use. Pick another name."
   assert_eq "$RC" 0
-  run_install_tty "Instance name=>abcdefghijklmnopqrstuvwxyz
-Instance name=>main
+  run_install_tty "Name for this instance=>abcdefghijklmnopqrstuvwxyz
+Name for this instance=>main
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>n"
-  assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters."
+  assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters. Use 1 to 24"
   assert_eq "$RC" 0
   sandbox_drop
 }
@@ -78,7 +78,7 @@ Go ahead?=>n"
 test_an_invalid_email_asks_again() {
   t_begin "an invalid email asks again with an example"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>not-an-email
 Your email=>owner@example.invalid
 What should Aman call you?=>
@@ -96,11 +96,11 @@ env_email() { sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "$AMAN_HOME/instances/main/.en
 test_five_wrong_answers_stop_with_a_clear_message() {
   t_begin "after five invalid answers the run stops, says so, and changes nothing"
   sandbox_new
-  run_install_tty "Instance name=>a_b
-Instance name=>c_d
-Instance name=>e_f
-Instance name=>g_h
-Instance name=>i_j"
+  run_install_tty "Name for this instance=>a_b
+Name for this instance=>c_d
+Name for this instance=>e_f
+Name for this instance=>g_h
+Name for this instance=>i_j"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "No valid answer after 5 tries, so nothing was changed."
   assert_no_path "$AMAN_HOME/state/instances"
@@ -111,7 +111,7 @@ Instance name=>i_j"
 test_the_end_of_the_input_stops_instead_of_looping() {
   t_begin "the end of the input at a question stops the run at once"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=><EOF>"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "The input ended before a valid answer"
@@ -123,8 +123,8 @@ test_flags_and_yes_fail_fast_without_a_prompt() {
   sandbox_new
   run_install --yes --name My_Name --email owner@example.invalid
   assert_rc 2
-  assert_flat_contains "$ERR" "\"My_Name\" has an underscore; use lowercase letters, digits or hyphens."
-  assert_not_contains "$OUT$ERR" "Instance name ("
+  assert_flat_contains "$ERR" "\"My_Name\" has an underscore. Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
+  assert_not_contains "$OUT$ERR" "Name for this instance"
   run_install --yes --name main --email nope
   assert_rc 2
   assert_flat_contains "$ERR" "\"nope\" is not an email address"
@@ -141,15 +141,15 @@ test_flags_and_yes_fail_fast_without_a_prompt() {
 test_a_short_password_asks_again_and_states_the_rule_each_time() {
   t_begin "a short password is refused with the reason and the question, with its rule, is asked again"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>short
-Repeat the password=>short
+Enter password again=>short
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "That password still needs at least 8 characters, a number and a symbol"
   assert_eq "$(printf '%s' "$OUT" | grep -c 'At least one symbol, like @ # \$ % ! -')" 2 "the rules are shown above both questions"
@@ -161,21 +161,21 @@ Repeat the password=>$SENTINEL_PASSWORD"
 test_five_bad_passwords_stop() {
   t_begin "five bad passwords stop the run with a clear message"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>a1
-Repeat the password=>a1
+Enter password again=>a1
 Enter a password for owner@example.invalid=>a2
-Repeat the password=>a2
+Enter password again=>a2
 Enter a password for owner@example.invalid=>a3
-Repeat the password=>a3
+Enter password again=>a3
 Enter a password for owner@example.invalid=>a4
-Repeat the password=>a4
+Enter password again=>a4
 Enter a password for owner@example.invalid=>a5
-Repeat the password=>a5"
+Enter password again=>a5"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "No valid password after 5 tries, so nothing was changed."
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -186,14 +186,14 @@ test_a_blocker_asks_nothing() {
   t_begin "a failed check stops the run before the first question, with the way out under it"
   sandbox_new
   STUB_COMPOSE_VERSION=1.29.2
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "x Docker Compose 1.29.2 is too old"
   assert_flat_contains "$OUT" "Next: Run install.sh docker to update it, then run this again."
   assert_flat_contains "$OUT" "Stopped before changing anything."
-  assert_not_contains "$OUT" "Instance name"
+  assert_not_contains "$OUT" "Name for this instance"
   assert_not_contains "$OUT" "Go ahead?"
   assert_not_contains "$OUT" "Password"
   assert_no_path "$AMAN_HOME"

@@ -23,6 +23,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryClient, MemoryVaultEntry } from '../../../src/runtime/memory/memoryClient';
+import { legacySessionsOf } from '../../fixtures/legacySessions';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
@@ -363,7 +364,7 @@ describe('runDataExport on a large instance', () => {
       const entries = readZipEntries(sink.buffer());
       const sessions = z
         .array(z.object({ turns: z.array(z.object({ events: z.array(z.unknown()) })) }))
-        .parse(JSON.parse(zipEntryText(entries, 'sessions.json')));
+        .parse(legacySessionsOf(entries));
       expect(sessions).toHaveLength(SESSION_COUNT);
       const totalEvents = sessions.reduce(
         (sum, session) => sum + session.turns.reduce((turnSum, turn) => turnSum + turn.events.length, 0),

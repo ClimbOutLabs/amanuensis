@@ -207,6 +207,105 @@ test_yes_does_not_bypass_purge_confirmation() {
   sandbox_drop
 }
 
+test_purge_removes_leftovers_that_were_never_saved() {
+  t_begin "a purge removes the sandbox containers, networks and volumes of an instance that has no registry entry"
+  sandbox_new
+  install_machine
+  printf '%s\n' "ghost-slots c-ghost1" "ghost-slots c-ghost2" >"$SB_STATE/leftover_containers"
+  printf '%s\n' "ghost-slots net-ghost" >"$SB_STATE/leftover_networks"
+  printf '%s\n' ghost_slot_ws_1 ghost_slot_ctl_1 aman_ghost_data >>"$SB_STATE/volumes"
+  assert_no_path "$AMAN_HOME/state/instances/ghost.conf"
+  run_install instance remove ghost
+  assert_rc 0
+  assert_contains "$OUT" "already removed"
+  assert_contains "$OUT" "instance remove ghost --purge-data"
+  assert_no_path "$SB_STATE/volumes_removed"
+  run_install instance remove ghost --purge-data --confirm-name ghost
+  assert_rc 0
+  assert_contains "$OUT" "Removed instance ghost and deleted its data:"
+  assert_contains "$OUT" "also removed 2 containers and 1 networks"
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-ghost1"
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-ghost2"
+  assert_contains "$(cat "$SB_STATE/networks_removed")" "net-ghost"
+  # The sandbox tools delete the slot volumes themselves, so they are gone rather than listed as removed here.
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "ghost_slot_ws_1"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "ghost_slot_ctl_1"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_ghost_data"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the saved instance is untouched"
+  assert_file "$SB_STATE/up/aman-machine"
+  run_install instance remove ghost --purge-data --confirm-name ghost
+  assert_contains "$OUT" "nothing to do"
+  sandbox_drop
+}
+
+test_removing_the_last_instance_takes_the_machine_project_with_it() {
+  t_begin "purging the last instance removes the shared project and the installer's files, but keeps the log and backups"
+  sandbox_new
+  install_machine
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  mkdir -p "$AMAN_HOME/backups/one"
+  run_install instance remove main
+  assert_rc 0
+  assert_contains "$OUT" "shared speech-to-text service and its downloaded model are kept"
+  assert_contains "$OUT" "instance remove main --purge-data"
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_file "$AMAN_HOME/machine/compose.yaml"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_contains "$OUT" "this was the last instance"
+  assert_contains "$OUT" "Your backups in $AMAN_HOME/backups were kept"
+  assert_no_path "$SB_STATE/up/aman-machine"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_stt_cache"
+  assert_no_path "$AMAN_HOME/machine"
+  assert_no_path "$AMAN_HOME/instances"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/state/installed"
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "instance main purged"
+  if [ -d "$AMAN_HOME/backups/one" ]; then t_pass; else t_fail "the backups were deleted"; fi
+  sandbox_drop
+}
+
+test_removing_one_of_two_instances_leaves_the_machine_project() {
+  t_begin "purging one of two instances leaves the shared project running"
+  sandbox_new
+  install_machine
+  add_instance second
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_not_contains "$OUT" "last instance"
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  assert_file "$AMAN_HOME/machine/compose.yaml"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_a_failed_first_install_names_its_cleanup() {
+  t_begin "an install that fails before the instance is saved ends with the one cleanup command, and it works"
+  sandbox_new
+  echo needs_apparmor >"$SB_STATE/slots_state"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  case "$ERR" in
+    *"install.sh instance remove main --purge-data") t_pass ;;
+    *) t_fail "the error output does not end with the cleanup command: [$ERR]" ;;
+  esac
+  printf '%s\n' "main-slots c-left" >"$SB_STATE/leftover_containers"
+  printf '%s\n' main_slot_ctl_1 >>"$SB_STATE/volumes"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-left"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "main_slot_ctl_1"
+  sandbox_drop
+}
+
 test_name_validation() {
   t_begin "unsafe or reserved instance names are rejected"
   sandbox_new
@@ -274,6 +373,60 @@ test_a_new_instance_points_to_settings_for_a_model() {
   assert_rc 0
   assert_flat_contains "$OUT" "not set: add one in Settings > Models"
   assert_not_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint"
+  sandbox_drop
+}
+
+test_add_warns_when_the_installed_version_is_older() {
+  local builds
+  t_begin "instance add says once when the installed Aman is older than this checkout, and nothing when they match"
+  sandbox_new
+  install_machine
+  add_instance same
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "older than this copy"
+  repo_commit_change "newer code"
+  builds=$(log_count "docker build")
+  add_instance later
+  assert_rc 0
+  assert_flat_contains "$ERR" "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
+  assert_eq "$(printf '%s' "$ERR" | grep -c 'older than this copy')" 1 "the warning shows once"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  sandbox_drop
+}
+
+test_add_without_a_name_asks_for_one() {
+  t_begin "instance add with no name asks for one at a terminal, with no default, and refuses an empty, taken or invalid name"
+  sandbox_new
+  install_machine
+  run_install_tty "Name for this instance:=>
+Name for this instance:=>main
+Name for this instance:=>Bad_Name
+Name for this instance:=>work
+Your email=>work@example.invalid
+Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD" instance add
+  assert_eq "$RC" 0
+  assert_not_contains "$OUT" "Name for this instance ["
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Name for this instance:')" 4 "the question is asked until the name is usable"
+  assert_flat_contains "$OUT" "A name is needed. Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
+  assert_flat_contains "$OUT" "An instance called main already exists. Pick another name."
+  assert_flat_contains "$OUT" "\"Bad_Name\" has an underscore."
+  assert_file "$AMAN_HOME/state/instances/work.conf"
+  assert_flat_contains "$OUT" "Instance work is ready."
+  sandbox_drop
+}
+
+test_add_without_a_name_and_no_terminal_is_a_usage_error() {
+  t_begin "instance add with no name and no terminal stops with the usage line, as before"
+  sandbox_new
+  install_machine
+  run_install instance add
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
+  assert_not_contains "$OUT$ERR" "Name for this instance"
+  run_install instance add --yes --email work@example.invalid
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
   sandbox_drop
 }
 
@@ -526,7 +679,14 @@ test_purge_after_remove_deletes_the_leftover_volumes
 test_purge_failure_is_not_reported_as_success
 test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
+test_purge_removes_leftovers_that_were_never_saved
+test_removing_the_last_instance_takes_the_machine_project_with_it
+test_removing_one_of_two_instances_leaves_the_machine_project
+test_a_failed_first_install_names_its_cleanup
 test_name_validation
+test_add_warns_when_the_installed_version_is_older
+test_add_without_a_name_asks_for_one
+test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
 test_url_validation
 test_a_new_instance_points_to_settings_for_a_model

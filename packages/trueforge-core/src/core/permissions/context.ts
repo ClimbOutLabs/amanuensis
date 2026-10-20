@@ -30,6 +30,8 @@ export interface SentinelServices {
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
   /** Whether the user lets the designated search provider run without asking. Default on. */
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Whether the user lets embedded maps run without asking, once the silent-run rules hold. Default off. */
+  mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
@@ -66,6 +68,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
+    mapsWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
     demoSendAllowlist: null,

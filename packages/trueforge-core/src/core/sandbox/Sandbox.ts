@@ -1,3 +1,4 @@
+import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import dedent from 'dedent';
 import type { Logger } from 'winston';
@@ -13,12 +14,13 @@ import {
   StructuredEditPreconditionBlockedError,
   ToolPreDispatchError,
 } from '../errors';
-import type { ApprovalDecision } from '../events/schema';
+import type { ApprovalDecision, TextContentPart } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import { estimateTokensForString } from '../llm/usage';
 import type { MappedMCPTool } from '../mcp/convertMCPServers';
 import {
+  isCallToolResponseResult,
   toolResultResponse,
   type CallToolResponse,
   type IToolSet,
@@ -101,15 +103,31 @@ import {
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
 import {
+  commandDownloadsPackages,
+  findCommandLineGitDependency,
+  findGitDependency,
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  PACKAGE_MANIFEST_FILES,
+  packageDownloadCardWhat,
+} from './packageMirrors';
+import {
   ensureExecSuccess,
   shellEscape,
   withTrustedPath,
   type ExecResult,
   type SandboxExecParams,
+  type SandboxInit,
   type SandboxProvider,
 } from './provider/Provider';
-import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
+import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
+import {
+  SKILL_COPY_FAILED_REASON,
+  skillCopyFailedNotice,
+  type SkillCopyCause,
+  type SkillCopyFailure,
+  type StagedSkill,
+} from './skills/slotSkillCopy';
 import { pushCardFields } from './slots/git/pushCard';
 import {
   GIT_INDEX_ENTRIES_COMMAND,
@@ -234,6 +252,24 @@ export interface SandboxOptions {
   boundRepository?: BoundRepository | undefined;
   /** Re-reads the owner-scoped repository record for final plan admission. */
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
+  /**
+   * Resolves the package mirror token for the bound repository when the person has allowed package
+   * downloads for it, or undefined when downloads are not allowed. Re-read on every command, so
+   * removing the allowance takes effect on the next call. Absent outside the server runtime.
+   */
+  loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  /**
+   * Whether the person has allowed package downloads for the bound repository. Re-read whenever a
+   * download command is stamped, so the first download in a repo shows its own approval card.
+   * Absent outside the server runtime; the ordinary card is shown then.
+   */
+  loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
+  /**
+   * Records that the person allowed package downloads for the bound repository. Called when a
+   * download command the person approved is about to run, before the mirror token is resolved, so
+   * the approved command itself can download. Absent outside the server runtime.
+   */
+  allowPackageDownloads?: (() => Promise<void>) | undefined;
   /** Receives bounded repository command-source files after the checkout is verified. */
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
   /** Durable cross-replica coordinator for semantic verification and workspace mutations. */
@@ -282,6 +318,23 @@ export interface SandboxOptions {
    * is preserved.
    */
   sentinel?: SentinelHostContext | undefined;
+}
+
+/**
+ * Adds setup notices to a tool result's structured `notices` field. A JSON object keeps its own fields;
+ * other text is kept as the response's result.
+ */
+function withNoticesField(input: { text: string; notices: readonly string[] }): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(input.text);
+  } catch {
+    value = undefined;
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return JSON.stringify({ ...value, notices: input.notices });
+  }
+  return JSON.stringify({ response: { result: input.text }, notices: input.notices });
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
@@ -1336,7 +1389,7 @@ function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string 
  */
 export function createSandboxRunCodeDescription({ offline }: { offline: boolean }): string {
   return `Run Python or Node.js code in an isolated, offline sandbox.
-language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256 — bytes never inline into context; download from the UI). Reference files_out in your response as run_code/<name> (e.g. [chart](run_code/chart.png)) — that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
+language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline })}
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
@@ -1942,6 +1995,9 @@ export class Sandbox extends LocalToolMCP {
   private readonly sentinelContext: SentinelHostContext | undefined;
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
+  private readonly loadPackageMirrorToken: (() => Promise<string | undefined>) | undefined;
+  private readonly loadPackageDownloadsAllowed: (() => Promise<boolean>) | undefined;
+  private readonly allowPackageDownloads: (() => Promise<void>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
   private readonly onRepositorySources: RepositoryCommandSourceObserver | undefined;
   private readonly workspaceVerificationCoordinator: WorkspaceVerificationCoordinator | undefined;
@@ -1969,6 +2025,10 @@ export class Sandbox extends LocalToolMCP {
   private mcpClientInstall: CodeModeClientInstall | undefined;
   /** Cached prerequisite check results: skill name -> reason unavailable. Empty map = all available. */
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
+  // Kept apart from the prerequisite cache, which the prerequisite check clears.
+  private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
+  // Plain lines for the person, shown once on the next exec result.
+  private pendingSkillNotices: string[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -2036,6 +2096,9 @@ export class Sandbox extends LocalToolMCP {
     this.provider = options.provider;
     this.boundRepository = options.boundRepository;
     this.loadBoundRepository = options.loadBoundRepository;
+    this.loadPackageMirrorToken = options.loadPackageMirrorToken;
+    this.loadPackageDownloadsAllowed = options.loadPackageDownloadsAllowed;
+    this.allowPackageDownloads = options.allowPackageDownloads;
     this.onRepositorySources = options.onRepositorySources;
     this.workspaceVerificationCoordinator = options.workspaceVerificationCoordinator;
     this.workspaceLeaseOwnerId = options.workspaceLeaseOwnerId;
@@ -2317,6 +2380,30 @@ export class Sandbox extends LocalToolMCP {
         }`;
       }
     }
+    // The first download in a repo that has not allowed downloads gets its own card wording: what the
+    // person is agreeing to is downloads for this repo, not just this one command. A failed read
+    // leaves the ordinary card in place; the command still runs offline, never the reverse.
+    let packageCard: { plain_what: string } | undefined;
+    if (
+      params.name === SANDBOX_EXEC_TOOL_NAME &&
+      !invalidExecPreflight &&
+      this.boundRepository !== undefined &&
+      this.loadPackageDownloadsAllowed !== undefined &&
+      commandDownloadsPackages(command)
+    ) {
+      try {
+        if (!(await this.loadPackageDownloadsAllowed())) {
+          const what = packageDownloadCardWhat(command);
+          if (what !== undefined) {
+            packageCard = { plain_what: what };
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Could not read the package download setting; the ordinary card is shown', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     const gitRemotePrecondition =
       params.name === SANDBOX_EXEC_TOOL_NAME && !invalidExecPreflight
         ? await this.observeHostAuthenticatedGitRemotes({ command, env, cwd })
@@ -2341,7 +2428,13 @@ export class Sandbox extends LocalToolMCP {
       // The whole stamp is carried; the failure and approval fields below are resolved against host checks.
       ...(sentinelStamp === undefined
         ? {}
-        : { ...sentinelStamp, tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }) }),
+        : {
+            ...sentinelStamp,
+            tier3_card: withPackageDownloadCard({
+              card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
+              packageCard,
+            }),
+          }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
       // the raw wire arguments. Record the exact mint identity so pre-dispatch
@@ -2877,16 +2970,60 @@ export class Sandbox extends LocalToolMCP {
   private renderSkillsSection(): string {
     if (this.cachedSkillsSection === undefined) {
       const skills = new InstructionBuilder('skills');
-      // Pass unavailable skills (empty map if none checked yet or all available)
-      const unavailable = this.unavailableSkillsCache.size > 0 ? this.unavailableSkillsCache : undefined;
       this.skillMounter?.instruction(
         skills,
         { skillsDir: this.provider.getSkillsDir(this.promptSandboxId()) },
-        unavailable,
+        this.unavailableSkillsForPrompt(),
       );
       this.cachedSkillsSection = skills.build();
     }
     return this.cachedSkillsSection;
+  }
+
+  /**
+   * Setup can raise skill notices outside an exec (an upload, a patch, a file read). They reach the
+   * person on the next tool result of any kind, not on an unrelated exec.
+   */
+  override async callTool(
+    params: CallToolRequest['params'],
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
+    const response = await super.callTool(params, approvalDecision, context);
+    if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+      return response;
+    }
+    const notices = this.takeSkillNotices();
+    const [first, ...rest] = response.result.content;
+    const head: TextContentPart =
+      first?.type === 'text'
+        ? { type: 'text', text: withNoticesField({ text: first.text, notices }) }
+        : { type: 'text', text: JSON.stringify({ notices }) };
+    return {
+      ...response,
+      result: { ...response.result, content: [head, ...(first?.type === 'text' ? rest : response.result.content)] },
+    };
+  }
+
+  private takeSkillNotices(): string[] {
+    const notices = this.pendingSkillNotices;
+    this.pendingSkillNotices = [];
+    return notices;
+  }
+
+  /** Exec output as text, with any skill notices for the person added once. */
+  private execResultText(serialized: Record<string, unknown>): string {
+    const notices = this.takeSkillNotices();
+    return JSON.stringify(notices.length === 0 ? serialized : { ...serialized, notices });
+  }
+
+  /** Skills left out when they were copied into the sandbox, plus any missing prerequisites. */
+  private unavailableSkillsForPrompt(): Map<string, string> | undefined {
+    const merged = new Map(this.unavailableSkillsCache);
+    for (const name of this.skillCopyFailures.keys()) {
+      merged.set(name, SKILL_COPY_FAILED_REASON);
+    }
+    return merged.size > 0 ? merged : undefined;
   }
 
   buildInstruction(builder: InstructionBuilder): void {
@@ -3559,6 +3696,46 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * Uploads one staged skill and runs its move step. Returns the cause when the skill does not land;
+   * only an abort is rethrown.
+   */
+  private async stageOfflineSkill(input: {
+    sandboxId: string;
+    staged: StagedSkill;
+    signal: AbortSignal | undefined;
+  }): Promise<SkillCopyCause | undefined> {
+    const { sandboxId, staged, signal } = input;
+    try {
+      await this.provider.uploadFile({
+        sandboxId,
+        remotePath: staged.archive.remotePath,
+        content: staged.archive.content,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      const result = await awaitWithAbort({
+        operation: this.hostExec({
+          sandboxId,
+          command: staged.command,
+          ...(signal === undefined ? {} : { signal }),
+        }),
+        signal,
+      });
+      if (!result.success || result.response.exitCode !== 0) {
+        this.logger.warn('Skill could not be put in place in the sandbox', { skill: staged.name });
+        return 'damaged';
+      }
+      return undefined;
+    } catch (error) {
+      throwIfSignalAborted(signal);
+      this.logger.warn('Skill could not be copied into the sandbox', {
+        skill: staged.name,
+        ...extractErrorLogFields(error),
+      });
+      return 'damaged';
+    }
+  }
+
+  /**
    * Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH.
    * Every host-authored exec goes through here; only sandboxPathExec may reach the sandbox PATH.
    */
@@ -3583,6 +3760,22 @@ export class Sandbox extends LocalToolMCP {
     signal?: AbortSignal | undefined;
     approvedGitRemotes?: GitRemotePrecondition | undefined;
   }): Promise<ExecResult> {
+    // Only the model's own commands can carry a package mirror grant: host-built commands (git,
+    // verification, file reads) never download packages and never see the token.
+    let packageMirrorToken: string | undefined;
+    if (!input.hostAuthored) {
+      packageMirrorToken = await this.resolvePackageMirrorToken();
+      if (packageMirrorToken !== undefined && commandDownloadsPackages(input.command)) {
+        const refusal = await this.packageGitDependencyRefusal({
+          sandboxId: input.sandboxId,
+          cwd: input.cwd,
+          command: input.command,
+        });
+        if (refusal !== undefined) {
+          return { success: false, error: refusal };
+        }
+      }
+    }
     // A command carrying the token never runs inside the in-sandbox lock wrapper, so the token reaches
     // only the pinned git process. The host-side workspace mutation lock already serialises it.
     const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
@@ -3594,12 +3787,115 @@ export class Sandbox extends LocalToolMCP {
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.approvedGitRemotes === undefined ? {} : { approvedGitRemotes: input.approvedGitRemotes }),
+      ...(packageMirrorToken === undefined ? {} : { packageMirrorToken }),
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
     };
     const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
+  }
+
+  /**
+   * The package mirror token for this session's bound repository, or undefined when the person has
+   * not allowed downloads for it. A resolver failure keeps the sandbox offline, never the reverse.
+   */
+  private async resolvePackageMirrorToken(): Promise<string | undefined> {
+    const load = this.loadPackageMirrorToken;
+    if (load === undefined || this.boundRepository === undefined) {
+      return undefined;
+    }
+    try {
+      return await load();
+    } catch (error) {
+      this.logger.warn('Could not resolve the package mirror grant; the command runs offline', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Records the bound repository's download allowance after the person approved a download command,
+   * or returns the plain refusal to run the command when the record cannot be saved. Running the
+   * command offline after an approval would fail in a way that hides why, so a failed save stops it
+   * before anything runs. Anything that is not an unapproved download command is left alone.
+   */
+  private async recordPackageDownloadsApproval(input: { command: string }): Promise<string | undefined> {
+    const allow = this.allowPackageDownloads;
+    const loadAllowed = this.loadPackageDownloadsAllowed;
+    if (
+      allow === undefined ||
+      loadAllowed === undefined ||
+      this.boundRepository === undefined ||
+      !commandDownloadsPackages(input.command)
+    ) {
+      return undefined;
+    }
+    try {
+      if (await loadAllowed()) {
+        return undefined;
+      }
+      await allow();
+      return undefined;
+    } catch (error) {
+      this.logger.error('Could not save the package download setting for this repository', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 'Aman could not save the download setting for this repo. Try again.';
+    }
+  }
+
+  /**
+   * Refuses a download command when the command itself, or the project's dependency files, name a
+   * package from a git address, with the one plain sentence for that case. The command's own words
+   * are read first: a spec typed into the command never reaches a manifest. Then the manifests at
+   * the command's directory and, when different, the bound repo's root; an unreadable manifest is
+   * skipped, because the tool itself will report a broken file better than a guess here.
+   */
+  private async packageGitDependencyRefusal(input: {
+    sandboxId: string;
+    cwd: string | undefined;
+    command: string;
+  }): Promise<string | undefined> {
+    if (findCommandLineGitDependency(input.command) !== undefined) {
+      return PACKAGE_GIT_DEPENDENCY_MESSAGE;
+    }
+    const workspaceDir = this.provider.getWorkspaceDir();
+    const dirs = new Set<string>();
+    const addDir = (dir: string | undefined): void => {
+      if (dir === undefined || dir === '') {
+        return;
+      }
+      if (dir.startsWith('/')) {
+        dirs.add(dir);
+      } else if (workspaceDir !== undefined) {
+        dirs.add(`${workspaceDir}/${dir}`);
+      }
+    };
+    addDir(input.cwd);
+    addDir(this.boundRepository?.workspace_cwd);
+    if (dirs.size === 0) {
+      dirs.add(workspaceDir ?? '/workspace');
+    }
+    for (const dir of dirs) {
+      const manifests: { name: string; content: string }[] = [];
+      for (const name of PACKAGE_MANIFEST_FILES) {
+        try {
+          const bytes = await this.provider.downloadFile({
+            sandboxId: input.sandboxId,
+            path: `${dir}/${name}`,
+          });
+          manifests.push({ name, content: bytes.subarray(0, 256 * 1024).toString('utf8') });
+        } catch {
+          // Missing or unreadable manifests are the tool's story to tell, not this check's.
+        }
+      }
+      if (findGitDependency(manifests) !== undefined) {
+        return PACKAGE_GIT_DEPENDENCY_MESSAGE;
+      }
+    }
+    return undefined;
   }
 
   private async captureWorkspaceVerificationIdentity(
@@ -4429,6 +4725,7 @@ export class Sandbox extends LocalToolMCP {
     try {
       result = await service.runCode(input, {
         signal: context?.signal,
+        packageMirrorToken: await this.resolvePackageMirrorToken(),
         attachments: [...this.runCodeIngressStaging.values()],
         onProgress: (message: string) => {
           provisioningMessages.push(message);
@@ -4717,15 +5014,23 @@ export class Sandbox extends LocalToolMCP {
       // Nothing was shown for approval, so the remotes just read are the ones this call runs against.
       approvedRemotes = tool_info.git_remote_precondition;
     }
+    if (approvalDecision !== undefined) {
+      // The person approved this call. When it is a download command in a repo that has not allowed
+      // downloads yet, that approval is the repo's allowance: record it before the command runs, so
+      // the mirror token resolves for this command and later ones in the repo.
+      const allowanceRefusal = await this.recordPackageDownloadsApproval({ command: resolvedInput.command });
+      if (allowanceRefusal !== undefined) {
+        return hostRefusalResponse(allowanceRefusal);
+      }
+    }
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
     try {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (e) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
-      const message = e instanceof Error ? e.message : 'Sandbox initialization failed';
       const fallback = this.existingSandboxInfo;
-      return hostRefusalResponse(`Sandbox initialization failed: ${message}`, {
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE, {
         sandboxCreated: Boolean(fallback),
         ...(fallback !== undefined ? { sandboxInfo: fallback } : {}),
       });
@@ -4778,7 +5083,7 @@ export class Sandbox extends LocalToolMCP {
 
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(execution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(execution.serialized) }],
           isError: !isExecResultOk(execution.result) || execution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -4836,7 +5141,7 @@ export class Sandbox extends LocalToolMCP {
       }
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(retryExecution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(retryExecution.serialized) }],
           isError: !isExecResultOk(retryExecution.result) || retryExecution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -5245,8 +5550,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
@@ -5469,8 +5773,7 @@ export class Sandbox extends LocalToolMCP {
       ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
     } catch (error) {
       this.logger.error('Sandbox initialization failed', extractErrorLogFields(error));
-      const message = error instanceof Error ? error.message : 'Sandbox initialization failed';
-      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+      return toolResultResponse({ text: JSON.stringify({ error: SANDBOX_START_FAILED_MESSAGE }), isError: true });
     }
 
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
@@ -6278,11 +6581,35 @@ export class Sandbox extends LocalToolMCP {
     }
 
     // Fold skill installation into this single init exec. The mounter returns a declarative
-    // command + env + timeout; runs even when empty so existing skills are cleaned up.
-    const skillInit = this.skillMounter?.getSandboxInit({
-      skillsDir,
-      skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId),
-    });
+    // command + env + timeout. With network it runs even when empty so existing skills are cleaned
+    // up; without it the host copies the skills in and nothing is sent when there are none.
+    const skillPaths = { skillsDir, skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId) };
+    let skillInit: SandboxInit | undefined;
+    if (this.hasNetwork()) {
+      skillInit = this.skillMounter?.getSandboxInit(skillPaths);
+    } else {
+      // Each skill is staged and moved into place by its own step; only the ones that land are handed
+      // to the downloader, so a bad skill cannot fail the start for the others.
+      const archiveDir =
+        this.provider.getDocumentSnapshotDir?.(sandboxId) ?? this.provider.getFileUploadsDir(sandboxId);
+      const plan = await this.skillMounter?.planOfflineSkills({ skillsDir, archiveDir }, { signal });
+      const failed = new Map<string, SkillCopyFailure>(plan?.failed ?? []);
+      const accepted: StagedSkill[] = [];
+      for (const staged of plan?.staged ?? []) {
+        const cause = await this.stageOfflineSkill({ sandboxId, staged, signal });
+        if (cause === undefined) {
+          accepted.push(staged);
+        } else {
+          failed.set(staged.name, { cause });
+        }
+      }
+      skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);
+      this.skillCopyFailures = failed;
+      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
+        skillCopyFailedNotice({ name, cause: failure.cause }),
+      );
+      this.cachedSkillsSection = undefined;
+    }
     if (skillInit) {
       for (const upload of skillInit.uploads) {
         await this.provider.uploadFile({
@@ -6379,4 +6706,15 @@ function withHostGitCard(input: {
     destination: input.hostGitCard.destination,
     parsed_command: input.hostGitCard.parsed_command,
   };
+}
+
+/** The Sentinel card with the package download sentence in place of its generic wording. */
+function withPackageDownloadCard(input: {
+  card: Tier3Card | null | undefined;
+  packageCard: { plain_what: string } | undefined;
+}): Tier3Card | null | undefined {
+  if (input.card === null || input.card === undefined || input.packageCard === undefined) {
+    return input.card;
+  }
+  return { ...input.card, plain_what: input.packageCard.plain_what };
 }

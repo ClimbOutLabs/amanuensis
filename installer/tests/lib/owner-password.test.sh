@@ -6,7 +6,7 @@ set -euo pipefail
 
 OWNER=owner@example.invalid
 NEW_PASSWORD='a-brand-new-secret-9'
-BCRYPT='^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$'
+BCRYPT='^[$]2[aby][$][[:digit:]]{2}[$][./A-Za-z0-9]{53}$'
 
 dex_env() { cat "$AMAN_HOME/instances/${1:-main}/dex.env"; }
 hash_of() { sed -n "s/^DEX_USER_PASSWORD_HASH='\(.*\)'\$/\1/p" "$AMAN_HOME/instances/${1:-main}/dex.env"; }
@@ -142,12 +142,12 @@ test_prompts_on_a_terminal() {
   sandbox_new
   install_machine
   run_install_tty "Enter a new password for $OWNER (not shown):=>wrong-first-time-1
-Repeat the new password (not shown):=>not-the-same
+Enter the new password again (not shown):=>not-the-same
 Enter a new password for $OWNER (not shown):=>$NEW_PASSWORD
-Repeat the new password (not shown):=>$NEW_PASSWORD" instance password
+Enter the new password again (not shown):=>$NEW_PASSWORD" instance password
   assert_rc 0
   assert_contains "$OUT" "Enter a new password for $OWNER (not shown):"
-  assert_contains "$OUT" "Repeat the new password (not shown):"
+  assert_contains "$OUT" "Enter the new password again (not shown):"
   assert_contains "$OUT" "Your password needs:"
   assert_contains "$OUT" "The passwords do not match. Type them again."
   assert_not_contains "$OUT" "$NEW_PASSWORD" "not echoed"

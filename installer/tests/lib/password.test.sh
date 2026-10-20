@@ -4,13 +4,13 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
-ANSWERS="Instance name=>
+ANSWERS="Name for this instance=>
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter password again=>$SENTINEL_PASSWORD"
 
 test_password_is_not_echoed() {
   t_begin "the password typed at the prompts is not echoed to the terminal"
@@ -18,7 +18,7 @@ test_password_is_not_echoed() {
   run_install_tty "$ANSWERS"
   assert_rc 0
   assert_contains "$OUT" "Enter a password for owner@example.invalid"
-  assert_contains "$OUT" "Repeat the password"
+  assert_contains "$OUT" "Enter password again"
   assert_contains "$OUT" "owner@example.invalid" "ordinary answers are echoed, so the transcript is a real terminal"
   assert_not_contains "$OUT" "$SENTINEL_PASSWORD"
   assert_eq "$(cat "$SB_STATE/hash_stdin")" "$SENTINEL_PASSWORD" "the password still reached the hashing step"

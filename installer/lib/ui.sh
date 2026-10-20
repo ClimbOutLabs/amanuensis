@@ -24,7 +24,7 @@ ui_init() {
   local loc=${LC_ALL:-} term=${TERM:-} cols=
   if [ -z "$loc" ]; then loc=${LC_CTYPE:-}; fi
   if [ -z "$loc" ]; then loc=${LANG:-}; fi
-  loc=$(printf '%s' "$loc" | tr '[:upper:]' '[:lower:]')
+  loc=$(printf '%s' "$loc" | LC_ALL=C tr '[:upper:]' '[:lower:]')
   UI_UTF8=0
   case "$loc" in *utf-8* | *utf8*) UI_UTF8=1 ;; esac
   if [ "$term" = dumb ]; then UI_UTF8=0; fi
@@ -45,13 +45,13 @@ ui_init() {
   if [ -t 2 ]; then
     cols=${COLUMNS:-}
     case "$cols" in
-      '' | *[!0-9]*)
+      '' | *[![:digit:]]*)
         cols=
         if command -v stty >/dev/null 2>&1; then cols=$(stty size <&2 2>/dev/null | awk '{print $2}'); fi
         ;;
     esac
     case "$cols" in
-      '' | *[!0-9]*) ;;
+      '' | *[![:digit:]]*) ;;
       *) if [ "$cols" -lt "$UI_WIDTH" ]; then UI_WIDTH=$cols; fi ;;
     esac
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
@@ -285,11 +285,15 @@ ui_summary_end() { # [total elapsed]
 
 # ---- prompts (stderr) -----------------------------------------------------------------------------
 
-# "  > Label [default] " without a newline.
+# "  > Label [default] " without a newline. A label ending in a colon keeps the colon after the default.
 ui_prompt_head() { # label [default]
-  local UI_FD=2 line
-  line="  $(_ui_s 1 "$S_PROMPT") $1"
-  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")"; fi
+  local UI_FD=2 line label=$1 colon=''
+  if [ -n "${2:-}" ] && [[ $label == *: ]]; then
+    label=${label%:}
+    colon=:
+  fi
+  line="  $(_ui_s 1 "$S_PROMPT") $label"
+  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")$colon"; fi
   printf '%s ' "$line" >&2
 }
 
@@ -326,7 +330,7 @@ ui_confirm() { # question y|n
       printf '\n' >&2
       return 1
     fi
-    case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+    case "$(printf '%s' "$answer" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
       y | yes) return 0 ;;
       n | no) return 1 ;;
       '') [ "$def" = y ] && return 0 || return 1 ;;

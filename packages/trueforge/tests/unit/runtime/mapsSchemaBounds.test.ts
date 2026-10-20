@@ -18,7 +18,11 @@ describe('maps tool schema bounds', () => {
   const logger = createLogger({ silent: true });
 
   function getServer() {
-    const capability = mapsCapability({ tracing, logger });
+    const capability = mapsCapability({
+      tracing,
+      logger,
+      pages_scope: { tenant_id: 'tenant-1', conversation_id: 'chat-a' },
+    });
     const server = capability.systemToolSets?.[0];
     if (server === undefined) {
       throw new Error('maps capability has no tool sets');

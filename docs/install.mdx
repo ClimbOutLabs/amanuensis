@@ -41,7 +41,7 @@ The installer works in phases and shows you a printed plan before changing anyth
 
 For the first instance it asks, with defaults in brackets:
 
-- Instance name `[main]`
+- `Name for this instance [main]:` (skipped when you pass `--name` or `--yes`, or when the input is not a terminal; the name is then `main` unless `--name` gives one)
 - Your email, used to sign in (skipped when you pass `--email`)
 - What should Aman call you? `[the part of your email before the @]` (skipped when you pass `--your-name`). The app shows this name, and Personalization starts with it
 - Whether to back up automatically every day `[Y/n]` (skipped when you pass `--backups`)
@@ -108,12 +108,14 @@ Your password is never stored anywhere. The installer hashes it once and keeps o
 Each person gets their own instance with their own ports, secrets, data, and login.
 
 ```bash
-installer/install.sh instance add <name>    # create and start another instance
-installer/install.sh instance list          # show name, ports, URL, owner, and state
-installer/install.sh instance remove <name> # stop and remove it; data volumes are kept
+installer/install.sh instance add [<name>]  # create and start another instance; asks the name when left out
+installer/install.sh instance list            # show name, ports, URL, owner, and state
+installer/install.sh instance remove <name>   # stop and remove it; data volumes are kept
 ```
 
-`instance add` prompts for the new owner's details, picks free loopback ports by testing binds (override with `--port` and `--login-port`), generates fresh secrets, and waits for the instance to answer its health check.
+`instance add` prompts for the new owner's details (and, at a terminal, `Name for this instance:` when no name is given; an empty, taken or invalid name is refused and asked again), picks free loopback ports by testing binds (override with `--port` and `--login-port`), generates fresh secrets, and waits for the instance to answer its health check.
+
+`instance add`, `instance refresh` and `instance password` use the installed version of Aman and never build. When the checked-out code is newer, they say so; run `installer/install.sh upgrade` to install it.
 
 `instance remove` stops the stack and its sandbox slots and deletes their containers and config, but keeps the data volumes. To delete the data too:
 

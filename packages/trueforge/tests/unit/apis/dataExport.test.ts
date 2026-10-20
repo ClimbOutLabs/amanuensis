@@ -16,6 +16,7 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { CommonChatExportFileSchema } from '../../../src/dataExport/commonChatFormat';
+import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -32,6 +33,7 @@ import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledg
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { legacySessionsOf } from '../../fixtures/legacySessions';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
@@ -227,6 +229,7 @@ describe('Data export route', () => {
     // Agents: alice has one, bob has one of his own.
     const agentStore = new SqliteAgentStore(db);
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: TENANT_ID,
       created_by_subject: subject('alice'),
       name: 'reporter',
@@ -235,6 +238,7 @@ describe('Data export route', () => {
       external_id: 'reporter-external',
     });
     await agentStore.createAgent({
+      host_managed: false,
       tenant_id: TENANT_ID,
       created_by_subject: subject('bob'),
       name: 'bob-agent',
@@ -279,6 +283,7 @@ describe('Data export route', () => {
       tenant_id: TENANT_ID,
       agent_id: agent.id,
       agent_name: 'reporter',
+      persona_id: null,
       name: 'alice-daily',
       manifest: { task: 'Write the daily summary', cron: '0 9 * * *', timezone: 'UTC', status: 'active' },
       created_by_subject: subject('alice'),
@@ -288,6 +293,7 @@ describe('Data export route', () => {
       tenant_id: TENANT_ID,
       agent_id: agent.id,
       agent_name: 'reporter',
+      persona_id: null,
       name: 'bob-weekly',
       manifest: { task: 'Bob weekly task', cron: '0 10 * * 1', timezone: 'UTC', status: 'paused' },
       created_by_subject: subject('bob'),
@@ -424,6 +430,7 @@ describe('Data export route', () => {
       offline_mode: true,
       tier2_auto_allow: undefined,
       search_without_asking: undefined,
+      maps_without_asking: undefined,
     });
 
     // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.
@@ -550,13 +557,13 @@ describe('Data export route', () => {
 
     const manifest = ManifestSchema.parse(zipEntryJson(entries, 'manifest.json'));
     expect(manifest.format).toBe('aman-export');
-    expect(manifest.schema_version).toBe(1);
+    expect(manifest.schema_version).toBe(EXPORT_SCHEMA_VERSION);
     expect(manifest.tenant_id).toBe(TENANT_ID);
     expect(manifest.include_uploads).toBe(false);
     expect(manifest.redactions).toBeGreaterThan(0);
     expect(manifest.sections).toEqual([
       'chats.json',
-      'sessions.json',
+      'sessions/0001.json',
       'folders.json',
       'personas.json',
       'personalization.json',
@@ -581,7 +588,7 @@ describe('Data export route', () => {
     expect(zipEntryText(entries, 'chats.json')).not.toContain('Host note');
 
     // Full-fidelity sessions with events, and artifact index rows.
-    const sessions = z.array(SessionEntrySchema).parse(zipEntryJson(entries, 'sessions.json'));
+    const sessions = z.array(SessionEntrySchema).parse(legacySessionsOf(entries));
     expect(sessions.map(entry => entry.session.session_id)).toEqual(['alice-session-1']);
     expect(sessions[0]?.turns).toHaveLength(1);
     expect(sessions[0]?.turns[0]?.events.length).toBeGreaterThanOrEqual(2);
@@ -674,7 +681,7 @@ describe('Data export route', () => {
 
   it('carries the timestamps and counters an import restores', async () => {
     const entries = readZipEntries(await exportZip('alice', { uploads: true }));
-    const [entry] = z.array(SessionEntrySchema).parse(zipEntryJson(entries, 'sessions.json'));
+    const [entry] = z.array(SessionEntrySchema).parse(legacySessionsOf(entries));
     expect(Date.parse(entry?.session.created_at ?? '')).not.toBeNaN();
     expect(Date.parse(entry?.session.updated_at ?? '')).not.toBeNaN();
     expect(entry?.session.last_activity_timestamp_ms).toBeGreaterThan(0);
@@ -747,7 +754,7 @@ describe('Data export route', () => {
     for (const marker of ['sandbox-handle-should-not-ship', AUTH_URL, 'sandbox.created', 'sandbox_info']) {
       expect(zipBytes.includes(Buffer.from(marker))).toBe(false);
     }
-    const [entry] = z.array(SessionEntrySchema).parse(zipEntryJson(readZipEntries(zipBytes), 'sessions.json'));
+    const [entry] = z.array(SessionEntrySchema).parse(legacySessionsOf(readZipEntries(zipBytes)));
     expect(entry?.turns[0]?.events.map(event => event.type)).toContain('mcp.auth_required');
     expect(entry?.turns[0]?.events.map(event => event.type)).not.toContain('sandbox.created');
     expect(zipBytes.includes(Buffer.from(APPROVAL_TOKEN_ID))).toBe(false);
@@ -768,7 +775,7 @@ describe('Data export route', () => {
       expect(zipBytes.includes(Buffer.from(marker))).toBe(false);
     }
     const bobEntries = readZipEntries(await exportZip('bob'));
-    const bobSessions = z.array(SessionEntrySchema).parse(zipEntryJson(bobEntries, 'sessions.json'));
+    const bobSessions = z.array(SessionEntrySchema).parse(legacySessionsOf(bobEntries));
     expect(bobSessions.map(entry => entry.session.session_id).sort()).toEqual(['bob-on-alice-agent', 'bob-session-1']);
     expect(zipEntryText(bobEntries, 'agents.json')).toContain('bob-agent');
     expect(zipEntryText(bobEntries, 'agents.json')).not.toContain('reporter');
@@ -790,7 +797,7 @@ describe('Data export route', () => {
     expect(blob?.data.equals(Buffer.from([0x00, 0x9f, 0xff, 0x10, 0x42]))).toBe(true);
     const [entry] = z
       .array(z.object({ artifacts: z.array(z.object({ path: z.string(), archive_entry: z.string() })) }))
-      .parse(zipEntryJson(withUploads, 'sessions.json'));
+      .parse(legacySessionsOf(withUploads));
     expect(
       Object.fromEntries((entry?.artifacts ?? []).map(artifact => [artifact.path, artifact.archive_entry])),
     ).toEqual({

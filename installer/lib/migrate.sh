@@ -72,8 +72,8 @@ migrate_export() {
 # the line is not such a list.
 migrate_owners() {
   case "$1" in *'"users":['*) ;; *) return 1 ;; esac
-  { printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[0-9]*' || true; } |
-    sed 's/^"user_id":"\([^"]*\)","display_name":"\([^"]*\)","sessions":\([0-9]*\)$/\1\t\3\t\2/'
+  { printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[[:digit:]]*' || true; } |
+    sed 's/^"user_id":"\([^"]*\)","display_name":"\([^"]*\)","sessions":\([[:digit:]]*\)$/\1\t\3\t\2/'
 }
 
 # "id (N chats), ..." for a message.
@@ -83,7 +83,7 @@ migrate_owner_list() {
 
 cmd_migrate() {
   local folder=$OPT_FROM_COMPOSE old_pg='' old_app='' project id memory knowledge pg_image listing owners with_chats count
-  local user display include=() stamp dest volume tries=0
+  local user display include=() stamp dest volume tries=0 log
   [ -n "$folder" ] || usage_die "usage: install.sh migrate --from-compose FOLDER"
   [ -d "$folder" ] || die "There is no folder at $folder. Pass --from-compose the folder the old Aman runs from."
   folder=$(cd -- "$folder" && pwd)
@@ -162,7 +162,9 @@ cmd_migrate() {
     sh -c "cp -a /from/memory/. /to/memory/ && cp -a /from/knowledge/. /to/knowledge/ && chown -R $APP_UID:$APP_UID /to /out" ||
     die "The old memory and knowledge folders could not be copied. Run: aman doctor disk"
 
-  listing=$(migrate_export --migrate --list-users) || die "The copy of the old database could not be read. The message above says why. Fix that, then run this again."
+  log=$(cli_log migrate)
+  listing=$(migrate_export --migrate --list-users 2>"$log") ||
+    die "Reading the copy of the old database failed: $(cli_reason "$log" "The app stopped without giving a reason. Run this again.")"
   owners=$(migrate_owners "$listing") ||
     die "Aman could not read the list of people from the copy of the old database. Run this again."
   with_chats=$(printf '%s\n' "$owners" | awk -F '\t' '$2 > 0')
@@ -184,8 +186,10 @@ cmd_migrate() {
 
   say "Exporting the chats of $user from the copy"
   migrate_export --migrate --include-uploads ${include[@]+"${include[@]}"} --user "$user" \
-    --secrets-env /migrate/old.env --out /out/aman-export.zip >/dev/null ||
-    die "The export from the copy failed. The message above says why. Fix that, then run this again."
+    --secrets-env /migrate/old.env --out /out/aman-export.zip >/dev/null 2>"$log" ||
+    die "Export failed: $(cli_reason "$log" "The export stopped without giving a reason. Run this again.")"
+  # What the export says it left out.
+  cat "$log" >&2
   ensure_private_dir "$AMAN_HOME/exports"
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   dest=$AMAN_HOME/exports/aman-export-$stamp.zip

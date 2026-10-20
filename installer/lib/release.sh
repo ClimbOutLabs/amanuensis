@@ -24,7 +24,7 @@ pins_validate() {
 # The Node.js runtime for the sandbox setup is pinned by version and by the published SHA-256 of each tarball.
 node_pins_validate() {
   local key
-  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[0-9]+\.[0-9]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
+  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[[:digit:]]+\.[[:digit:]]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
   for key in node_sha256_linux_x64 node_sha256_linux_arm64 node_sha256_darwin_x64 node_sha256_darwin_arm64; do
     matches_whole "$(json_get "$PINS_FILE" "$key")" '^[a-f0-9]{64}$' || die "$key in $PINS_FILE must be a sha256 digest"
   done
@@ -59,11 +59,13 @@ source_id() {
   printf '%s-d%s\n' "$base" "$dirty"
 }
 
+checkout_app_tag() { printf 'aman-app:%s\n' "$(source_id .)"; }
+
 # Resolves tags for the current checkout into REL_* globals (read-only).
 release_resolve() {
   pins_validate
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
-  REL_APP_TAG=aman-app:$(source_id .)
+  REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
 }

@@ -116,7 +116,7 @@ root_ready() {
   # sudo reads the password from the terminal, so a run without one cannot be asked.
   (: </dev/tty) 2>/dev/null ||
     die "This needs your computer password, which can only be typed in a terminal window, so $1. Run the same command again in a terminal window."
-  sudo -v -p 'Your computer password (it stays hidden as you type): ' ||
+  sudo -v ||
     die "The password was not accepted, so $1. Type the password you use to log in to this computer, then run the same command again."
 }
 
@@ -170,7 +170,7 @@ print_root_steps() {
     say "Root steps to install Docker Engine (run as root; the download key must be $DOCKER_APT_KEY_FPR):"
     docker_root_steps_script | sed 's/^/    /'
   else
-    say "This system is not Debian or Ubuntu with apt, so the installer cannot install Docker for you."
+    say "This computer does not use apt, so the installer cannot install Docker for you."
     say "Install Docker Engine (Linux) or Docker Desktop (macOS, Windows) by hand, then run this again."
   fi
 }
@@ -281,7 +281,7 @@ docker_runtime_problem() {
   engine=$(D version --format '{{.Server.Version}}' 2>/dev/null || true)
   major=${engine%%.*}
   case "$major" in
-    '' | *[!0-9]*)
+    '' | *[![:digit:]]*)
       RUNTIME_PROBLEM="Could not read the Docker Engine version."
       return 0
       ;;
@@ -296,7 +296,7 @@ docker_runtime_problem() {
   fi
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
-  if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+  if [[ ! $compose =~ ^([[:digit:]]+)\.[[:digit:]]+ ]]; then
     RUNTIME_PROBLEM="Docker Compose is missing; version $DOCKER_MIN_COMPOSE_MAJOR is needed. Run install.sh docker to install it, then run this again."
     return 0
   fi
@@ -383,7 +383,7 @@ docker_fix() {
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
   major=${compose%%.*}
-  if [[ ! $major =~ ^[0-9]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+  if [[ ! $major =~ ^[[:digit:]]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
     docker_install_compose
   fi
   docker_runtime_check

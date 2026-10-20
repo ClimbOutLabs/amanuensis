@@ -3,7 +3,7 @@
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
 #        install.sh instance demo-seed [--reset]
-#        install.sh instance import <name> <file.zip> [--display-name NAME]
+#        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
 #        install.sh instance password [<name>]
@@ -125,13 +125,14 @@ Amanuensis installer
 
   install.sh                      set up Aman on this computer: check it, show the plan, build, start a first instance
   install.sh --dry-run            show the plan and change nothing
-  install.sh instance add <name>  add an instance for another person
+  install.sh instance add [<name>]
+                                  add an instance for another person; asks the name when left out
   install.sh instance list        show every instance
   install.sh instance remove <name> [--purge-data]
                                   remove an instance; --purge-data deletes its data too
   install.sh instance demo-seed [--reset] [--instance NAME]
                                   fill a demo instance with example data, or clear it with --reset
-  install.sh instance import <name> <file.zip> [--display-name NAME]
+  install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
                                   put an exported file into an instance (it is backed up first; its app pauses meanwhile)
   install.sh migrate --from-compose <folder> [--user ID]
                                   export your data from an older Aman in that folder; the old Aman is only read
@@ -150,14 +151,15 @@ Amanuensis installer
 Options
   --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
   --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses admin rights)
-  --install-docker      let the installer install Docker with admin rights (Debian, Ubuntu)
+  --install-docker      let the installer install Docker with admin rights (Linux systems that use apt)
   --add-docker-group    let the installer give your user access to Docker (needs admin rights)
   --sandbox-root        let the installer do the sandbox steps that need admin rights without asking
   --tls-root            let the installer do the --tls caddy steps that need admin rights without asking
   --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
   --verbose             show technical details and the full list of downloads
-  --dry-run             show the plan and stop
+  --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
+                        (an instance that has never started is started once first, so the file can be checked)
   --name NAME           name of the first instance (default main)
   --email ADDRESS       the email you sign in with
   --your-name NAME      what Aman should call you (default: asked, or the start of your email)
@@ -177,7 +179,7 @@ Options
   --port N              the port for the app on this computer
   --login-port N        the port for the sign-in service on this computer
   --tls local|off|caddy  https on your network with a certificate made on this computer (default), plain http, or
-                        https at --public-url and --login-url with Caddy on this computer (Ubuntu, Let's Encrypt)
+                        https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
@@ -353,6 +355,7 @@ on_exit() {
   upgrade_on_exit
   import_on_exit
   migrate_on_exit
+  if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
 }
@@ -388,8 +391,8 @@ main() {
   fi
   if [ "$DRY_RUN" = 1 ]; then
     case "$COMMAND:$SUBCOMMAND" in
-      install: | upgrade: | instance:add) ;;
-      *) usage_die "--dry-run applies to install, upgrade and instance add" ;;
+      install: | upgrade: | instance:add | instance:import) ;;
+      *) usage_die "--dry-run applies to install, upgrade, instance add and instance import" ;;
     esac
   fi
   case "$COMMAND" in

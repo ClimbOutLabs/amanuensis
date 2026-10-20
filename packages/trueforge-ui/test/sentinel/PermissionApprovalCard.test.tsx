@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCalendarEvent, SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
+import { extractSentinelFromEvent } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
   return {
@@ -20,6 +21,7 @@ function baseCard(): SentinelApprovalCard {
     outbound_truncated: false,
     email: null,
     calendar_event: null,
+    schedule: null,
   };
 }
 
@@ -204,11 +206,13 @@ describe('PermissionApprovalCard', () => {
 });
 
 describe('PermissionApprovalCard for mail', () => {
+  /** A recipient with no display name: the bare address. */
+  const bare = (address: string) => ({ name: '', address });
   const email: SentinelApprovalEmail = {
     action: 'send',
-    to: ['grace@example.com', 'lin@example.com'],
-    cc: ['sam@example.com'],
-    bcc: ['audit@example.com'],
+    to: [bare('grace@example.com'), bare('lin@example.com')],
+    cc: [bare('sam@example.com')],
+    bcc: [bare('audit@example.com')],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
     replaces: null,
@@ -237,6 +241,50 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText('Copy')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('(Bcc)');
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
+  });
+
+  it('shows each recipient with its name, then its address in full', () => {
+    renderMail({
+      to: [{ name: 'Grace Lee', address: 'grace@example.com' }, bare('lin@example.com')],
+      cc: [{ name: 'Sam Lee', address: 'sam.lee.long.address@example.org' }],
+    });
+    expect(screen.getByText('To: Grace Lee (grace@example.com), lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: Sam Lee (sam.lee.long.address@example.org)')).toBeInTheDocument();
+  });
+
+  it('still shows the recipients of a card stored before names were kept, as bare addresses', () => {
+    const [approval] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          id: 'call-old',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Send "Lease" from your Gmail to grace@example.com and lin@example.com.',
+            cannot_be_undone: "Once this is sent, it can't be unsent.",
+            email: {
+              action: 'send',
+              to: ['grace@example.com', 'lin@example.com'],
+              cc: ['sam@example.com'],
+              bcc: [],
+              subject: 'Lease',
+              body: 'Thursday works.',
+              replaces: null,
+              reply_in_thread: null,
+            },
+          },
+        },
+      ],
+    });
+    renderCard({ email: approval?.card.email ?? null }, { toolName: 'send_draft' });
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
+  });
+
+  it('shows the real address when a name looks like another address', () => {
+    renderMail({ to: [{ name: 'boss@example.com', address: 'other@evil.example' }], cc: [], bcc: [] });
+    expect(screen.getByText('To: boss@example.com (other@evil.example)')).toBeInTheDocument();
+    expect(screen.queryByText('To: boss@example.com')).not.toBeInTheDocument();
   });
 
   it('names the action in the badge instead of the tool id', () => {
@@ -273,10 +321,15 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
   });
 
-  it('shows what a change replaces', () => {
-    renderMail({ action: 'change', replaces: { subject: 'Old lease', to: ['sam@example.com'] } });
+  it('shows what a change replaces, with the name and address of each recipient it had', () => {
+    renderMail({
+      action: 'change',
+      replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
+    });
     expect(screen.getByText('Replaces')).toBeInTheDocument();
-    expect(screen.getByText('Old lease (to sam@example.com)')).toBeInTheDocument();
+    expect(screen.getByText('Old lease')).toBeInTheDocument();
+    expect(screen.getByText('Replaced draft to')).toBeInTheDocument();
+    expect(screen.getByText('Sam Lee (sam@example.com)')).toBeInTheDocument();
   });
 
   it('says which thread a reply is in, as separate labelled fields', () => {

@@ -195,6 +195,8 @@ export interface SentinelUserSettingsTable {
   tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
   /** SQLite's 0/1 integer boolean. */
   search_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  maps_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -488,6 +490,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JsonbColumn<AgentSpec>;
   external_id: string | null;
+  /** 1 for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<number>;
   created_by_subject: JsonbColumn<CreatedBySubject>;
   created_at: string;
   updated_at: string;
@@ -508,6 +512,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JsonbColumn<ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */
@@ -665,6 +671,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<number>;
   revision: Generated<number>;
   created_at: string;
   updated_at: string;

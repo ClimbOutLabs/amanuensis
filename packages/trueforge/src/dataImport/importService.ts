@@ -21,25 +21,23 @@
  * The recall and tool-output screen toggles come along; permission settings
  * and Always allow choices never do, so each tool asks again.
  */
-import {
-  AgentSpecSchema,
-  InMemorySessionStore,
-  type CreatedBySubject,
-  type ISessionStore,
-} from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Logger } from 'winston';
-import type { z } from 'zod';
+import { z } from 'zod';
 
+import { ARCHIVE_MAX_ENTRY_BYTES, formatArchiveBytes } from '../dataExport/archiveLimits';
 import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
+import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords';
+import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
-import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
@@ -64,7 +62,7 @@ import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScr
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
-import { DataImportError } from './importError';
+import { damagedExportError, DataImportError } from './importError';
 import {
   compensate,
   emptyLedger,
@@ -85,6 +83,7 @@ import {
   type PreflightDeps,
 } from './importPreflight';
 import {
+  forEachToolCall,
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
   ImportConnectorsFileSchema,
@@ -93,9 +92,14 @@ import {
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportSchedulesFileSchema,
-  ImportSessionsFileSchema,
+  ImportSessionEntrySchema,
+  ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  isToolType,
+  LEFT_OUT_PLURALS,
+  UnknownToolTypeError,
+  withToolTypeResolver,
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
@@ -105,11 +109,17 @@ import {
   type ImportPersonasFile,
   type ImportScheduleRecord,
   type ImportSessionEntry,
+  type ImportSessionPartRecord,
   type ImportSettingsFile,
   type ImportSpacesFile,
+  type ToolType,
+  type ToolTypeResolver,
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
-import { restoreSessions, type SessionRestoreContext } from './sessionRestore';
+import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
+import { repairPersonaNames } from './personaNames';
+import { assembleSessionParts } from './sessionParts';
+import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
 
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
@@ -135,13 +145,69 @@ export interface DataImportRequest {
   };
   /** Cap for the archive itself and for its total uncompressed size. */
   maxBytes: number;
+  /** Per-file uncompressed cap; defaults to the limit export writes to. */
+  maxEntryBytes?: number;
+  /** Checks the archive and reports what an import would bring, writing nothing. */
+  dryRun?: boolean;
 }
 
-/** Per-file uncompressed cap inside the archive. */
-const MAX_ENTRY_BYTES = 256 * 1024 * 1024;
-const MAX_ENTRIES = 100_000;
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
+/** Chats or sections whose left-out rows are shown in the summary; the import log has them all. */
+const LEFT_OUT_OWNERS_SHOWN = 20;
+/** Longest name shown in the left-out table before it is cut short with "...". */
+const LEFT_OUT_NAME_SHOWN = 36;
+/** Width of the name column in the left-out table, so the counts line up. */
+const LEFT_OUT_NAME_COLUMN = 42;
+/** Persona name changes shown in the summary; the import log has them all. */
+const PERSONA_CHANGES_SHOWN = 20;
+
+const SECTION_OWNERS: Readonly<Record<string, string>> = { 'settings.json': 'Your settings' };
+
+/** One row of the summary's left-out table: whose detail it was, and how many of one kind were left out. */
+interface LeftOutRow {
+  /** The report's key for the chat or section, so the summary can cap the table by owner, not by row. */
+  owner: string;
+  name: string;
+  count: number;
+  /** Singular label, such as "tool detail"; the plural comes from LEFT_OUT_PLURALS. */
+  label: string;
+}
+
+/** One row per chat or section and kind of internal detail an older version lost. */
+function leftOutRows({
+  report,
+  titles,
+}: {
+  report: LeftOutReport;
+  titles: ReadonlyMap<string, string | null>;
+}): LeftOutRow[] {
+  const merged: LeftOutByOwner = new Map();
+  for (const owners of report.values()) {
+    for (const [owner, counts] of owners) {
+      const into = merged.get(owner) ?? new Map<string, number>();
+      addCounts({ into, counts });
+      merged.set(owner, into);
+    }
+  }
+  const rows: LeftOutRow[] = [];
+  for (const [owner, counts] of merged) {
+    const name = owner.startsWith('chat:')
+      ? (titles.get(owner.slice('chat:'.length)) ?? 'Untitled chat')
+      : (SECTION_OWNERS[owner.slice('section:'.length)] ?? `The ${owner.slice('section:'.length)} section`);
+    for (const [label, count] of counts) {
+      if (count > 0) {
+        rows.push({ owner, name, count, label });
+      }
+    }
+  }
+  return rows;
+}
+
+/** A name for the left-out table, cut short with "..." when it is longer than the table shows. */
+function leftOutName(name: string): string {
+  return name.length > LEFT_OUT_NAME_SHOWN ? `${name.slice(0, LEFT_OUT_NAME_SHOWN - 3)}...` : name;
+}
 
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
@@ -154,7 +220,6 @@ const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
 const REQUIRED_SECTIONS = [
   'manifest.json',
   'chats.json',
-  'sessions.json',
   'folders.json',
   'agents.json',
   'personas.json',
@@ -178,34 +243,106 @@ function formatIssuePath(issuePath: readonly PropertyKey[]): string {
   return out === '' ? 'the top level' : out;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** The chat and turn ids around an issue in sessions.json, so a log line points at the damaged turn. */
+/**
+ * The chat and turn ids around an issue in a sessions file, so a log line points at the damaged
+ * turn. A sessions.json entry holds a chat and its turns; a sessions/ record holds one or the other.
+ */
 function locateSessionIds(json: unknown, issuePath: readonly PropertyKey[]): { session_id?: string; turn_id?: string } {
-  const [sessionIndex, turnsKey, turnIndex] = issuePath;
-  if (!Array.isArray(json) || typeof sessionIndex !== 'number') {
+  const [index, turnsKey, turnIndex] = issuePath;
+  if (!Array.isArray(json) || typeof index !== 'number') {
     return {};
   }
-  const entry: unknown = json[sessionIndex];
+  const entry: unknown = json[index];
   if (!isRecord(entry)) {
     return {};
   }
   const located: { session_id?: string; turn_id?: string } = {};
   const session = entry['session'];
+  const turns = entry['turns'];
+  const nestedTurn: unknown =
+    turnsKey === 'turns' && typeof turnIndex === 'number' && Array.isArray(turns) ? turns[turnIndex] : undefined;
+  const turn = isRecord(nestedTurn) ? nestedTurn['turn'] : entry['turn'];
   if (isRecord(session) && typeof session['session_id'] === 'string') {
     located.session_id = session['session_id'];
+  } else if (isRecord(turn) && typeof turn['session_id'] === 'string') {
+    located.session_id = turn['session_id'];
   }
-  const turns = entry['turns'];
-  if (turnsKey === 'turns' && typeof turnIndex === 'number' && Array.isArray(turns)) {
-    const turnEntry: unknown = turns[turnIndex];
-    const turn = isRecord(turnEntry) ? turnEntry['turn'] : undefined;
-    if (isRecord(turn) && typeof turn['turn_id'] === 'string') {
-      located.turn_id = turn['turn_id'];
-    }
+  if (isRecord(turn) && typeof turn['turn_id'] === 'string') {
+    located.turn_id = turn['turn_id'];
   }
   return located;
+}
+
+function isSessionsSection(name: string): boolean {
+  return name === 'sessions.json' || sessionPartIndex(name) !== undefined;
+}
+
+/** Who lost an internal detail: `chat:<id>` or `section:<file name>`, with what was lost. */
+type LeftOutByOwner = Map<string, Map<string, number>>;
+
+/** Per file read, so a file read again on a later pass replaces what it reported. */
+type LeftOutReport = Map<string, LeftOutByOwner>;
+
+function readSectionJson({ files, name }: { files: ReadonlyMap<string, Buffer>; name: string }): unknown {
+  const data = files.get(name);
+  if (data === undefined) {
+    throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+  }
+  try {
+    const json: unknown = JSON.parse(data.toString('utf8'));
+    return json;
+  } catch (cause) {
+    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
+      cause,
+    });
+  }
+}
+
+function rejectSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): never {
+  logRejectedSection({ name, json, error, logger });
+  const [first] = error.issues;
+  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
+  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
+    cause: error,
+  });
+}
+
+/** Where a section failed, by path and issue kind only: the archive's own values never reach the log. */
+function logRejectedSection({
+  name,
+  json,
+  error,
+  logger,
+}: {
+  name: string;
+  json: unknown;
+  error: z.ZodError;
+  logger: DataImportDeps<never>['logger'];
+}): void {
+  const [first] = error.issues;
+  const ids = first === undefined || !isSessionsSection(name) ? {} : locateSessionIds(json, first.path);
+  logger.warn('Data import rejected an export section', {
+    section: name,
+    issue_count: error.issues.length,
+    issues: error.issues.slice(0, MAX_LOGGED_ISSUES).map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
+    ...ids,
+  });
+}
+
+function addCounts({ into, counts }: { into: Map<string, number>; counts: LeftOutCounts }): void {
+  for (const [label, count] of counts) {
+    into.set(label, (into.get(label) ?? 0) + count);
+  }
 }
 
 function parseSection<TSchema extends z.ZodType>({
@@ -213,48 +350,119 @@ function parseSection<TSchema extends z.ZodType>({
   name,
   schema,
   logger,
+  leftOut,
+  prepare,
 }: {
   files: ReadonlyMap<string, Buffer>;
   name: string;
   schema: TSchema;
   logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+  /** Brings an older version's values up to today's rules before the strict read. */
+  prepare: (json: unknown) => unknown;
 }): z.infer<TSchema> {
-  const data = files.get(name);
-  if (data === undefined) {
-    throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+  const json = prepare(readSectionJson({ files, name }));
+  const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(json));
+  if (!result.success) {
+    rejectSection({ name, json, error: result.error, logger });
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(data.toString('utf8'));
-  } catch (cause) {
-    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
-      cause,
-    });
+  leftOut.set(name, new Map([[`section:${name}`, new Map(counts)]]));
+  return result.data;
+}
+
+/** The chat a raw sessions record belongs to, and its title as far as it is known yet. */
+function rawChat(item: unknown, titles: ReadonlyMap<string, string | null>): { id: string; title: string | null } {
+  const session = isRecord(item) ? item['session'] : undefined;
+  const turn = isRecord(item) ? item['turn'] : undefined;
+  const fromSession = isRecord(session) && typeof session['session_id'] === 'string' ? session['session_id'] : '';
+  const fromTurn = isRecord(turn) && typeof turn['session_id'] === 'string' ? turn['session_id'] : '';
+  const id = fromSession === '' ? fromTurn : fromSession;
+  const rawTitle = isRecord(session) && typeof session['title'] === 'string' ? session['title'] : null;
+  return { id, title: titles.get(id) ?? rawTitle };
+}
+
+/** A sessions file read one record at a time, so each detail left out is told against its own chat. */
+function parseChatRecords<TSchema extends z.ZodType>({
+  files,
+  name,
+  schema,
+  chatOf,
+  chats,
+  logger,
+  leftOut,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  name: string;
+  schema: TSchema;
+  chatOf: (record: z.output<TSchema>) => { id: string; title: string | null | undefined };
+  chats: ChatReading;
+  logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+}): z.output<TSchema>[] {
+  const json = readSectionJson({ files, name });
+  const list = z.array(z.unknown()).safeParse(json);
+  if (!list.success) {
+    rejectSection({ name, json, error: list.error, logger });
   }
-  const result = schema.safeParse(json);
-  if (result.success) {
-    return result.data;
+  const owners: LeftOutByOwner = new Map();
+  const records: z.output<TSchema>[] = [];
+  for (const [index, item] of list.data.entries()) {
+    let parsed: { result: z.ZodSafeParseResult<z.output<TSchema>>; leftOut: LeftOutCounts };
+    try {
+      parsed = withToolTypeResolver(chats.resolveToolType, () => countingLeftOut(() => schema.safeParse(item)));
+    } catch (cause) {
+      if (!(cause instanceof UnknownToolTypeError)) {
+        throw cause;
+      }
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' uses the tool ${cause.toolName}, and this Aman cannot tell what kind of tool it was, so nothing was imported. If the file came from a newer Aman, update this one. Otherwise delete that chat in the Aman it came from, export again and import the new file.`,
+        400,
+        { cause },
+      );
+    }
+    const { result, leftOut: counts } = parsed;
+    if (!result.success) {
+      const issues = result.error.issues.map(issue => ({ ...issue, path: [index, ...issue.path] }));
+      logRejectedSection({ name, json, error: new z.ZodError(issues), logger });
+      const chat = rawChat(item, chats.titles);
+      throw new DataImportError(
+        `Chat '${chat.title ?? 'Untitled chat'}' in this export has a message this Aman cannot read, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
+        400,
+        { cause: result.error },
+      );
+    }
+    const chat = chatOf(result.data);
+    if (chat.title !== undefined) {
+      chats.titles.set(chat.id, chat.title);
+    }
+    const owner = `chat:${chat.id}`;
+    const into = owners.get(owner) ?? new Map<string, number>();
+    addCounts({ into, counts });
+    owners.set(owner, into);
+    records.push(result.data);
   }
-  const [first] = result.error.issues;
-  const ids = first === undefined || name !== 'sessions.json' ? {} : locateSessionIds(json, first.path);
-  logger.warn('Data import rejected an export section', {
-    section: name,
-    issue_count: result.error.issues.length,
-    // Paths and issue kinds only: the archive's own values never reach the log.
-    issues: result.error.issues
-      .slice(0, MAX_LOGGED_ISSUES)
-      .map(issue => `${formatIssuePath(issue.path)} (${issue.code})`),
-    ...ids,
-  });
-  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
-  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
-    cause: result.error,
-  });
+  leftOut.set(name, owners);
+  return records;
+}
+
+/**
+ * The archive's chats. Format 2 spreads them over sessions/ files, which are read again on each
+ * pass, so only one file is held at a time; a format 1 sessions.json is read once.
+ */
+interface ArchiveSessions {
+  /** Chat ids in archive order. */
+  ids: string[];
+  /** Agent names the chats refer to. */
+  agentNames: ReadonlySet<string>;
+  /** Chat titles by id, for telling the person which chat lost a detail. */
+  titles: ReadonlyMap<string, string | null>;
+  entries: () => Iterable<ImportSessionEntry>;
 }
 
 interface ArchiveContents {
   manifest: ImportManifest;
-  sessions: ImportSessionEntry[];
+  sessions: ArchiveSessions;
   folders: ImportFolderRecord[];
   agents: ImportAgentRecord[];
   personas: ImportPersonasFile;
@@ -266,20 +474,164 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
+  /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
+  leftOutReport: LeftOutReport;
+  /** Persona names and aliases an older version wrote that today's rules changed or dropped. */
+  personaRepairLines: string[];
+}
+
+/** The sessions/ file names in order; a gap in the numbering is a missing file. */
+function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
+  const indices = [...files.keys()]
+    .map(sessionPartIndex)
+    .filter(index => index !== undefined)
+    .sort((a, b) => a - b);
+  return indices.map((index, position) => {
+    const expected = sessionPartName(position + 1);
+    if (index !== position + 1) {
+      throw new DataImportError(`This export is missing its ${expected} section, so nothing was imported.`, 400);
+    }
+    return expected;
+  });
+}
+
+/** What reading chat records needs beyond the file: titles seen so far, and how to tell a tool's kind. */
+interface ChatReading {
+  titles: Map<string, string | null>;
+  resolveToolType: ToolTypeResolver;
+}
+
+/**
+ * Tells the kind of a tool call recorded with a kind this version does not know, from facts and
+ * never by guessing: a call to a connector in the export or in this Aman's connector catalog is a
+ * connector tool; otherwise every other call to the same tool on the same server in the export must
+ * agree on one kind.
+ */
+function toolTypeResolver({
+  files,
+  connectorNames,
+}: {
+  files: ReadonlyMap<string, Buffer>;
+  connectorNames: ReadonlySet<string>;
+}): ToolTypeResolver {
+  let recorded: Map<string, ToolType | 'conflicting'> | undefined;
+  const recordedTypes = (): Map<string, ToolType | 'conflicting'> => {
+    if (recorded !== undefined) {
+      return recorded;
+    }
+    const found = new Map<string, ToolType | 'conflicting'>();
+    for (const [name, data] of files) {
+      if (name !== 'sessions.json' && sessionPartIndex(name) === undefined) {
+        continue;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(data.toString('utf8'));
+      } catch {
+        // A damaged file is reported by the parse that needs it.
+        continue;
+      }
+      forEachToolCall(json, ({ toolName, serverName, toolInfo }) => {
+        const type = toolInfo['type'];
+        if (isToolType(type)) {
+          const key = toolKey({ serverName, toolName });
+          const before = found.get(key);
+          found.set(key, before === undefined || before === type ? type : 'conflicting');
+        }
+      });
+    }
+    recorded = found;
+    return found;
+  };
+  return ({ toolName, serverName }) => {
+    if (serverName !== '' && connectorNames.has(serverName)) {
+      return 'mcp';
+    }
+    const type = recordedTypes().get(toolKey({ serverName, toolName }));
+    // A connector tool always names its server, so a call without one is never taken for one.
+    if (type === undefined || type === 'conflicting' || (type === 'mcp' && serverName === '')) {
+      return undefined;
+    }
+    return type;
+  };
+}
+
+/** The same tool name on two servers is two tools. */
+function toolKey({ serverName, toolName }: { serverName: string; toolName: string }): string {
+  return `${serverName}\u0000${toolName}`;
+}
+
+function readSessionEntries(input: {
+  files: ReadonlyMap<string, Buffer>;
+  logger: DataImportDeps<never>['logger'];
+  leftOut: LeftOutReport;
+  chats: ChatReading;
+}): () => Iterable<ImportSessionEntry> {
+  const { files, logger, leftOut, chats } = input;
+  const partNames = sessionPartNames(files);
+  if (files.has('sessions.json')) {
+    if (partNames.length > 0) {
+      throw damagedExportError('it holds chats both in sessions.json and in sessions/ files.');
+    }
+    const entries = parseChatRecords({
+      files,
+      name: 'sessions.json',
+      schema: ImportSessionEntrySchema,
+      chatOf: entry => ({ id: entry.session.session_id, title: entry.session.title }),
+      chats,
+      logger,
+      leftOut,
+    });
+    return () => entries;
+  }
+  if (partNames.length === 0) {
+    throw new DataImportError(
+      `This export is missing its ${sessionPartName(1)} section, so nothing was imported.`,
+      400,
+    );
+  }
+  // The last file read is kept, so an export with one sessions/ file is parsed once for every pass.
+  let last: { name: string; records: ImportSessionPartRecord[] } | undefined;
+  function* records() {
+    for (const name of partNames) {
+      if (last?.name !== name) {
+        last = {
+          name,
+          records: parseChatRecords({
+            files,
+            name,
+            schema: ImportSessionPartRecordSchema,
+            chatOf: record =>
+              record.kind === 'session'
+                ? { id: record.session.session_id, title: record.session.title }
+                : { id: record.turn.session_id, title: undefined },
+            chats,
+            logger,
+            leftOut,
+          }),
+        };
+      }
+      yield* last.records;
+    }
+  }
+  return () => assembleSessionParts(records());
 }
 
 function loadArchive(input: {
   archive: Buffer;
   maxBytes: number;
+  maxEntryBytes: number;
+  /** Connector names this Aman's catalog knows, for telling the kind of a tool call. */
+  catalogConnectorNames: ReadonlySet<string>;
   logger: DataImportDeps<never>['logger'];
 }): ArchiveContents {
-  const { archive, maxBytes, logger } = input;
+  const { archive, maxBytes, maxEntryBytes, catalogConnectorNames, logger } = input;
   let entries: ZipArchiveEntry[];
   try {
     entries = readZipArchive(archive, {
-      maxEntryBytes: Math.min(MAX_ENTRY_BYTES, maxBytes),
+      maxEntryBytes: Math.min(maxEntryBytes, maxBytes),
       maxTotalBytes: maxBytes,
-      maxEntries: MAX_ENTRIES,
+      maxEntries: ZIP_MAX_ENTRIES,
     });
   } catch (cause) {
     if (cause instanceof ZipArchiveError) {
@@ -293,8 +645,13 @@ function loadArchive(input: {
       throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
     }
   }
-  const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
-    parseSection({ files, name, schema, logger });
+  const leftOut: LeftOutReport = new Map();
+  const section = <TSchema extends z.ZodType>(
+    name: string,
+    schema: TSchema,
+    prepare: (json: unknown) => unknown = json => json,
+  ): z.infer<TSchema> => parseSection({ files, name, schema, logger, leftOut, prepare });
+  const personaRepairLines: string[] = [];
 
   const manifest = section('manifest.json', ImportManifestSchema);
   if (manifest.format !== 'aman-export') {
@@ -310,110 +667,133 @@ function loadArchive(input: {
     throw new DataImportError('This export uses a format version this Aman cannot read, so nothing was imported.', 400);
   }
 
-  // chats.json is validated even though sessions.json is the restore source:
+  // chats.json is validated even though the sessions section is the restore source:
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
+  const folders = section('folders.json', ImportFoldersFileSchema);
+  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const sessionEntries = readSessionEntries({
+    files,
+    logger,
+    leftOut,
+    chats: {
+      titles: new Map(),
+      resolveToolType: toolTypeResolver({
+        files,
+        connectorNames: new Set([...catalogConnectorNames, ...connectors.map(connector => connector.name)]),
+      }),
+    },
+  });
   const contents: ArchiveContents = {
     manifest,
-    sessions: section('sessions.json', ImportSessionsFileSchema),
-    folders: section('folders.json', ImportFoldersFileSchema),
+    sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
+    folders,
     agents: section('agents.json', ImportAgentsFileSchema),
-    personas: section('personas.json', ImportPersonasFileSchema),
+    personas: section('personas.json', ImportPersonasFileSchema, json => {
+      const repaired = repairPersonaNames(json);
+      personaRepairLines.push(...repaired.lines);
+      return repaired.json;
+    }),
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
-    connectors: section('connectors.json', ImportConnectorsFileSchema),
+    connectors,
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
     files,
     sourceTenantId: manifest.tenant_id,
+    leftOutReport: leftOut,
+    personaRepairLines,
   };
   validateCrossReferences(contents);
   return contents;
 }
 
-function damaged(detail: string): DataImportError {
-  return new DataImportError(`This export is damaged: ${detail} Nothing was imported.`, 400);
-}
-
-function validateCrossReferences(contents: ArchiveContents): void {
-  const { sessions, folders, agents, personas, spaces, schedules, connectors } = contents;
-
-  const agentIds = new Set<string>();
-  const agentNames = new Set<string>();
-  for (const agent of agents) {
-    if (agentIds.has(agent.id) || agentNames.has(agent.name)) {
-      throw damaged(`agent ${agent.name} appears twice.`);
-    }
-    agentIds.add(agent.id);
-    agentNames.add(agent.name);
-  }
-
+/** Checks every chat against the folders and itself, in one pass, and keeps what later steps need. */
+function checkSessions(
+  entries: Iterable<ImportSessionEntry>,
+  folders: readonly ImportFolderRecord[],
+): Pick<ArchiveSessions, 'ids' | 'agentNames' | 'titles'> {
   const folderIds = new Set<string>();
   for (const folder of folders) {
     if (folderIds.has(folder.folder_id)) {
-      throw damaged(`folder ${folder.folder_id} appears twice.`);
+      throw damagedExportError(`folder ${folder.folder_id} appears twice.`);
     }
     folderIds.add(folder.folder_id);
   }
 
   const sessionIds = new Set<string>();
-  for (const entry of sessions) {
+  const agentNames = new Set<string>();
+  const titles = new Map<string, string | null>();
+  for (const entry of entries) {
     const session = entry.session;
     if (sessionIds.has(session.session_id)) {
-      throw damaged(`chat ${session.session_id} appears twice.`);
+      throw damagedExportError(`chat ${session.session_id} appears twice.`);
     }
     sessionIds.add(session.session_id);
-    if (session.folder_id !== null && !folderIds.has(session.folder_id)) {
-      throw damaged(`chat ${session.session_id} points at a folder that is not in the export.`);
+    titles.set(session.session_id, session.title);
+    if (session.agent.type === 'reference' && session.agent.name !== null) {
+      agentNames.add(session.agent.name);
     }
-    const custom = session.custom;
-    if (custom !== null && custom !== undefined && !(typeof custom === 'object' && Object.keys(custom).length === 0)) {
-      throw damaged(`chat ${session.session_id} has custom data that this version does not store.`);
+    if (session.folder_id !== null && !folderIds.has(session.folder_id)) {
+      throw damagedExportError(`chat ${session.session_id} points at a folder that is not in the export.`);
     }
     const turnIds = new Set<string>();
     for (const { turn } of entry.turns) {
       if (turn.session_id !== session.session_id) {
-        throw damaged(`a turn in chat ${session.session_id} belongs to a different chat.`);
+        throw damagedExportError(`a turn in chat ${session.session_id} belongs to a different chat.`);
       }
       if (turnIds.has(turn.turn_id)) {
-        throw damaged(`turn ${turn.turn_id} appears twice in chat ${session.session_id}.`);
+        throw damagedExportError(`turn ${turn.turn_id} appears twice in chat ${session.session_id}.`);
       }
       turnIds.add(turn.turn_id);
-      try {
-        parseTurnCustom(turn.custom ?? null);
-      } catch (cause) {
-        throw new DataImportError(
-          `This export is damaged: a turn in chat ${session.session_id} has custom data that this version does not store. Nothing was imported.`,
-          400,
-          { cause },
-        );
-      }
     }
     for (const artifact of entry.artifacts) {
       if (artifact.session_id !== session.session_id || !turnIds.has(artifact.turn_id)) {
-        throw damaged(`a stored file in chat ${session.session_id} points at a turn that is not in the export.`);
+        throw damagedExportError(
+          `a stored file in chat ${session.session_id} points at a turn that is not in the export.`,
+        );
       }
     }
+  }
+  return { ids: [...sessionIds], agentNames, titles };
+}
+
+function validateCrossReferences(contents: ArchiveContents): void {
+  const { agents, personas, spaces, schedules, connectors } = contents;
+
+  const agentIds = new Set<string>();
+  const agentNames = new Set<string>();
+  for (const agent of agents) {
+    if (agentIds.has(agent.id) || agentNames.has(agent.name)) {
+      throw damagedExportError(`agent ${agent.name} appears twice.`);
+    }
+    agentIds.add(agent.id);
+    agentNames.add(agent.name);
   }
 
   const personaIds = new Set<string>();
   for (const { persona } of personas) {
     if (personaIds.has(persona.id)) {
-      throw damaged(`persona ${persona.id} appears twice.`);
+      throw damagedExportError(`persona ${persona.id} appears twice.`);
     }
     personaIds.add(persona.id);
   }
 
   for (const { space, revisions } of spaces) {
+    // Older versions pruned a space's early revisions, so the run may start late; it must still be unbroken.
     const numbers = revisions.map(revision => revision.revision).sort((a, b) => a - b);
-    const complete = numbers.length === space.revision && numbers.every((value, index) => value === index + 1);
+    const first = numbers[0] ?? 0;
+    const complete =
+      numbers.length > 0 &&
+      numbers.at(-1) === space.revision &&
+      numbers.every((value, index) => value === first + index);
     if (!complete) {
-      throw damaged(`space ${space.id} is missing some of its revisions.`);
+      throw damagedExportError(`space ${space.id} is missing some of its revisions.`);
     }
     if (revisions.some(revision => revision.id !== space.id)) {
-      throw damaged(`space ${space.id} has a revision that belongs to a different space.`);
+      throw damagedExportError(`space ${space.id} has a revision that belongs to a different space.`);
     }
   }
 
@@ -421,12 +801,12 @@ function validateCrossReferences(contents: ArchiveContents): void {
   const scheduleNames = new Set<string>();
   for (const schedule of schedules) {
     if (scheduleIds.has(schedule.id)) {
-      throw damaged(`schedule ${schedule.id} appears twice.`);
+      throw damagedExportError(`schedule ${schedule.id} appears twice.`);
     }
     scheduleIds.add(schedule.id);
     const nameKey = `${schedule.agent_name ?? ''}\n${schedule.name}`;
     if (scheduleNames.has(nameKey)) {
-      throw damaged(`two schedules named ${schedule.name} appear in the export.`);
+      throw damagedExportError(`two schedules named ${schedule.name} appear in the export.`);
     }
     scheduleNames.add(nameKey);
   }
@@ -434,7 +814,7 @@ function validateCrossReferences(contents: ArchiveContents): void {
   const connectorNames = new Set<string>();
   for (const connector of connectors) {
     if (connectorNames.has(connector.name)) {
-      throw damaged(`connector ${connector.name} appears twice.`);
+      throw damagedExportError(`connector ${connector.name} appears twice.`);
     }
     connectorNames.add(connector.name);
   }
@@ -583,43 +963,100 @@ function buildSummary({
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
+  leftOut,
+  personaChanges,
+  trimmedSpaces,
+  dryRun,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
+  /** Rows of the left-out table: internal details from an older version that did not come over. */
+  leftOut: readonly LeftOutRow[];
+  /** One sentence per persona name an older version wrote that today's rules changed or dropped. */
+  personaChanges: readonly string[];
+  dryRun: boolean;
+  /** Spaces whose history starts after revision 1 in the archive. */
+  trimmedSpaces: number;
   filesLeftBehind: number;
 }): string {
   const counts = [
-    pluralize(result.chats, 'chat', 'chats'),
-    pluralize(result.memories, 'memory', 'memories'),
-    pluralize(result.personas, 'persona', 'personas'),
-    pluralize(result.spaces, 'space', 'spaces'),
-    pluralize(result.agents, 'agent', 'agents'),
+    `  ${pluralize(result.chats, 'chat', 'chats')}`,
+    `  ${pluralize(result.memories, 'memory', 'memories')}`,
+    `  ${pluralize(result.personas, 'persona', 'personas')}`,
+    `  ${pluralize(result.spaces, 'space', 'spaces')}`,
+    `  ${pluralize(result.agents, 'agent', 'agents')}`,
     result.schedules === 0
-      ? pluralize(0, 'schedule', 'schedules')
-      : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
+      ? `  ${pluralize(0, 'schedule', 'schedules')}`
+      : `  ${pluralize(result.schedules, 'schedule', 'schedules')} (they will be off)`,
   ];
-  return [
-    `Imported ${counts.join(', ')}.`,
-    'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time.',
-    auditEntries === 0
-      ? ''
-      : `${pluralize(auditEntries, 'permission history entry', 'permission history entries')} came along.`,
-    filesLeftBehind === 0
-      ? ''
-      : `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
-    standInAgentNames.length === 0
-      ? ''
-      : `Also created ${pluralize(standInAgentNames.length, 'stand-in agent', 'stand-in agents')} (${standInAgentNames.join(', ')}) because a chat or schedule refers to an agent the export does not include. Open the Agents page and give each one a model before you use it.`,
-    connectorNames.length === 0
-      ? ''
-      : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
-    'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
-    'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
-  ]
-    .filter(part => part !== '')
-    .join(' ');
+  const notes: string[] = [];
+  if (trimmedSpaces > 0) {
+    notes.push(
+      trimmedSpaces === 1
+        ? '1 space had older history trimmed, so its versions start at 1.'
+        : `${String(trimmedSpaces)} spaces had older history trimmed, so their versions start at 1.`,
+    );
+  }
+  if (connectorNames.length > 0) {
+    notes.push(`Connectors (${connectorNames.join(', ')}) come without an agent. Attach them on the Agents page.`);
+  }
+  if (standInAgentNames.length === 1) {
+    notes.push(
+      `A stand-in agent (${standInAgentNames[0] ?? ''}) was made because a chat or schedule names an agent that is not in the export. Give it a model on the Agents page before you use it.`,
+    );
+  } else if (standInAgentNames.length > 1) {
+    notes.push(
+      `Stand-in agents (${standInAgentNames.join(', ')}) were made because chats or schedules name agents that are not in the export. Give each one a model on the Agents page before you use it.`,
+    );
+  }
+  if (filesLeftBehind > 0) {
+    notes.push(
+      `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
+    );
+  }
+  notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
+  notes.push('Approvals given for one chat only do not carry over.');
+  if (auditEntries > 0) {
+    notes.push(`${pluralize(auditEntries, 'past permission decision', 'past permission decisions')} came along.`);
+  }
+  notes.push(
+    'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
+  );
+  notes.push('Permissions start fresh, so each tool will ask again.');
+
+  const sections: string[] = [[dryRun ? 'This export has:' : 'Imported:', ...counts].join('\n')];
+  if (leftOut.length > 0) {
+    const owners: string[] = [];
+    for (const row of leftOut) {
+      if (!owners.includes(row.owner)) {
+        owners.push(row.owner);
+      }
+    }
+    const shown = new Set(owners.slice(0, LEFT_OUT_OWNERS_SHOWN));
+    const rows = leftOut
+      .filter(row => shown.has(row.owner))
+      .map(
+        row =>
+          `  ${leftOutName(row.name).padEnd(LEFT_OUT_NAME_COLUMN)}${String(row.count)} ${row.count === 1 ? row.label : (LEFT_OUT_PLURALS[row.label] ?? row.label)}`,
+      );
+    if (owners.length > LEFT_OUT_OWNERS_SHOWN) {
+      rows.push(`  And ${String(owners.length - LEFT_OUT_OWNERS_SHOWN)} more. The full list is in the import log.`);
+    }
+    sections.push(['Left out, from an older version of Aman (your chats are complete):', ...rows].join('\n'));
+  }
+  if (personaChanges.length > 0) {
+    const rows = personaChanges.slice(0, PERSONA_CHANGES_SHOWN).map(change => `  • ${change}`);
+    if (personaChanges.length > PERSONA_CHANGES_SHOWN) {
+      rows.push(
+        `  And ${String(personaChanges.length - PERSONA_CHANGES_SHOWN)} more. The full list is in the import log.`,
+      );
+    }
+    sections.push(["Persona names changed to fit today's rules:", ...rows].join('\n'));
+  }
+  sections.push(['Good to know:', ...notes.map(note => `  • ${note}`)].join('\n'));
+  return sections.join('\n\n');
 }
 
 interface AgentPlan {
@@ -644,11 +1081,8 @@ function planAgents(contents: ArchiveContents): AgentPlan {
       referencedNames.add(schedule.agent_name);
     }
   }
-  for (const entry of contents.sessions) {
-    const agent = entry.session.agent;
-    if (agent.type === 'reference' && agent.name !== null) {
-      referencedNames.add(agent.name);
-    }
+  for (const name of contents.sessions.agentNames) {
+    referencedNames.add(name);
   }
   const placeholders: AgentPlan['placeholders'] = [];
   for (const name of referencedNames) {
@@ -823,13 +1257,29 @@ export async function runDataImport<TTransaction>(
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
   if (request.archive.byteLength > request.maxBytes) {
-    throw new DataImportError('The file is larger than the import limit, so nothing was imported.', 400);
+    throw new DataImportError(
+      `The export file is ${formatArchiveBytes(request.archive.byteLength)}, over the ${formatArchiveBytes(request.maxBytes)} limit for an import. Export again without uploaded files.`,
+      400,
+    );
   }
   if (importsInFlight.has(tenantId)) {
     throw new DataImportError(IMPORT_BUSY_MESSAGE, 409);
   }
   importsInFlight.add(tenantId);
   try {
+    if (request.dryRun === true) {
+      // A dry run never takes the lock, since taking it cleans up after an interrupted import.
+      const existing = await readMarkerForRecovery(deps);
+      if (existing !== undefined) {
+        throw new DataImportError(
+          isLiveImportMarker(existing.marker, Date.now())
+            ? IMPORT_BUSY_MESSAGE
+            : 'An earlier import did not finish, so this file was not checked. Run the import without --dry-run to finish cleaning up, then check again.',
+          409,
+        );
+      }
+      return await importArchive(deps, { request, lock: undefined });
+    }
     const scope = { created_by_subject_id: subjectId, agent_ids: request.subject.agentIds };
     const lock = await acquireImportLock(deps, { tenantId, subjectId, scope });
     try {
@@ -844,10 +1294,17 @@ export async function runDataImport<TTransaction>(
 
 async function importArchive<TTransaction>(
   deps: DataImportDeps<TTransaction>,
-  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> },
+  /** No lock for a dry run, which writes nothing and returns before the first write. */
+  { request, lock }: { request: DataImportRequest; lock: ImportLock<TTransaction> | undefined },
 ): Promise<ImportDataResult> {
   const { tenantId, subjectId } = request.subject;
-  const contents = loadArchive({ archive: request.archive, maxBytes: request.maxBytes, logger: deps.logger });
+  const contents = loadArchive({
+    archive: request.archive,
+    maxBytes: request.maxBytes,
+    maxEntryBytes: request.maxEntryBytes ?? ARCHIVE_MAX_ENTRY_BYTES,
+    catalogConnectorNames: new Set(deps.mcpCatalog.list().map(preset => preset.name)),
+    logger: deps.logger,
+  });
   const { manifest, sessions, folders, personas, personalization, spaces, schedules, settings, audit } = contents;
   const connectors = normalizeImportedConnectors(contents.connectors);
   const connectorNames = new Set(connectors.map(connector => connector.name));
@@ -870,7 +1327,7 @@ async function importArchive<TTransaction>(
     tenantId,
     subjectId,
     ids: {
-      sessionIds: sessions.map(entry => entry.session.session_id),
+      sessionIds: sessions.ids,
       folderIds: folders.map(folder => folder.folder_id),
       personas: personas.map(entry => entry.persona),
       spaceIds: spaces.map(entry => entry.space.id),
@@ -965,32 +1422,64 @@ async function importArchive<TTransaction>(
     }
   }
   try {
-    const replayStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
-    for (const folder of folders) {
-      await replayStore.createSessionFolder({
-        tenant_id: tenantId,
-        folder_id: folder.folder_id,
-        created_by: subjectId,
-        name: folder.name,
+    await replaySessions(restoreContext, {
+      sessions: sessions.entries(),
+      folderNames: new Map(folders.map(folder => [folder.folder_id, folder.name])),
+    });
+  } catch (error) {
+    if (error instanceof DataImportError && error.cause instanceof Error) {
+      deps.logger.warn('Data import could not read a chat back', {
+        error: error.message,
+        message: error.cause.message,
+        stack: error.cause.stack,
       });
     }
-    await restoreSessions(replayStore, restoreContext, sessions);
-  } catch (cause) {
-    if (cause instanceof DataImportError) {
-      throw cause;
-    }
-    throw new DataImportError(
-      'The chats in this export could not be read back, so nothing was imported. The export may be damaged.',
-      400,
-      { cause },
-    );
+    throw error;
+  }
+
+  const leftOut = leftOutRows({ report: contents.leftOutReport, titles: sessions.titles });
+  if (leftOut.length > 0) {
+    deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
+  }
+  if (contents.personaRepairLines.length > 0) {
+    deps.logger.info('Data import repaired persona names from an older version', {
+      persona_changes: contents.personaRepairLines,
+    });
+  }
+  const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
+  if (lock === undefined) {
+    const result: Omit<ImportDataResult, 'summary'> = {
+      chats: sessions.ids.length,
+      memories: memoryCount,
+      personas: personas.length,
+      spaces: spaces.length,
+      schedules: schedules.length,
+      folders: folders.length,
+      agents: agentPlan.archived.length,
+      connectors: newConnectors.length,
+      schedules_off: schedules.length > 0,
+    };
+    return {
+      ...result,
+      summary: buildSummary({
+        result,
+        connectorNames: newConnectors.map(connector => connector.name),
+        auditEntries: audit.length,
+        standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
+        filesLeftBehind: 0,
+        leftOut,
+        personaChanges: contents.personaRepairLines,
+        trimmedSpaces,
+        dryRun: true,
+      }),
+    };
   }
 
   // --- Writes. The marker names everything planned before the first one lands. ---
   const planned: ImportLedger = {
     agent_ids: [...agentPlan.archived, ...agentPlan.placeholders].map(agent => agent.id),
     folder_ids: folders.map(folder => folder.folder_id),
-    session_ids: sessions.map(entry => entry.session.session_id),
+    session_ids: sessions.ids,
     knowledge_db_paths: knowledgePlan.map(library => library.dbPath),
     memory_files: plannedMemoryFiles.map(file => file.targetPath),
   };
@@ -1006,6 +1495,7 @@ async function importArchive<TTransaction>(
         description: agent.description,
         manifest: detachConnectors({ spec: agent.manifest, names: connectorNames }),
         external_id: agent.external_id,
+        host_managed: agent.host_managed,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(agent.id);
@@ -1022,6 +1512,7 @@ async function importArchive<TTransaction>(
           instructions: 'This agent was created by a data import. Set its instructions before use.',
         }),
         external_id: null,
+        host_managed: false,
         created_by_subject: importerSubject,
       });
       created.agent_ids.push(placeholder.id);
@@ -1039,7 +1530,7 @@ async function importArchive<TTransaction>(
     await restoreSessions(
       deps.sessionStore,
       { ...restoreContext, onSessionCreated: sessionId => created.session_ids.push(sessionId) },
-      sessions,
+      sessions.entries(),
     );
 
     for (const library of knowledgePlan) {
@@ -1095,15 +1586,6 @@ async function importArchive<TTransaction>(
         );
       }
 
-      for (const entry of sessions) {
-        for (const activation of entry.persona_activations) {
-          await deps.personaStore.recordPersonaActivation(
-            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
-            tx,
-          );
-        }
-      }
-
       if (!(tx instanceof Kysely)) {
         throw new Error('The import transaction is not a database transaction.');
       }
@@ -1154,7 +1636,8 @@ async function importArchive<TTransaction>(
           },
           tx,
         );
-        for (const revision of sorted.slice(1)) {
+        // A run that starts after revision 1 lands renumbered from 1, since a new space starts there.
+        for (const [index, revision] of sorted.slice(1).entries()) {
           aggregate = await deps.spaceStore.getAggregate({ tenant_id: tenantId, created_by: subjectId }, tx);
           await deps.spaceStore.updateSpace(
             {
@@ -1162,7 +1645,7 @@ async function importArchive<TTransaction>(
               created_by: subjectId,
               space_id: space.id,
               ...contentOf(revision),
-              expected_revision: revision.revision - 1,
+              expected_revision: index + 1,
               expected_aggregate_revision: aggregate.revision,
             },
             tx,
@@ -1182,6 +1665,11 @@ async function importArchive<TTransaction>(
             agent_id: agent.id,
             agent_name: agent.name,
             name: schedule.name,
+            // Personas keep their ids on import; one the export did not carry runs as the agent's own assistant.
+            persona_id:
+              schedule.persona_id !== null && personas.some(({ persona }) => persona.id === schedule.persona_id)
+                ? schedule.persona_id
+                : null,
             manifest: { ...schedule.manifest, status: 'paused' },
             created_by_subject: importerSubject,
             runFrom: new Date(),
@@ -1213,7 +1701,13 @@ async function importArchive<TTransaction>(
         }
       }
 
-      for (const entry of sessions) {
+      for (const entry of sessions.entries()) {
+        for (const activation of entry.persona_activations) {
+          await deps.personaStore.recordPersonaActivation(
+            { tenant_id: tenantId, session_id: entry.session.session_id, ...activation },
+            tx,
+          );
+        }
         for (const artifact of entry.artifacts) {
           const identity = {
             tenant_id: tenantId,
@@ -1262,7 +1756,7 @@ async function importArchive<TTransaction>(
     lock.committed();
 
     const result: Omit<ImportDataResult, 'summary'> = {
-      chats: sessions.length,
+      chats: sessions.ids.length,
       memories: memoryCount,
       personas: personas.length,
       spaces: spaces.length,
@@ -1280,6 +1774,10 @@ async function importArchive<TTransaction>(
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
+        leftOut,
+        personaChanges: contents.personaRepairLines,
+        trimmedSpaces,
+        dryRun: false,
       }),
     };
   } catch (cause) {

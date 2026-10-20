@@ -50,9 +50,9 @@ describe('SandboxArtifactDownload', () => {
     expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument();
   });
 
-  it('renders the raw block text when the fence body does not parse', () => {
-    render(<SandboxArtifactDownload code={'not an artifact'} />);
-    expect(screen.getByTestId('aui-sandbox-artifacts-raw')).toHaveTextContent('not an artifact');
+  it('renders nothing, never the raw block text, when the fence body names no file', () => {
+    const { container } = render(<SandboxArtifactDownload code={'not an artifact'} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('parses a bare absolute path line and renders a download link', () => {
@@ -75,6 +75,41 @@ describe('Markdown sandbox_artifacts fence', () => {
     );
     expect(screen.getByTestId('aui-sandbox-artifacts')).toBeInTheDocument();
     expect(screen.getByText('demo.js')).toBeInTheDocument();
+  });
+
+  const chart = '[Weekly food budget chart](/egress/weekly_food_budget.pdf)';
+  it.each([
+    ['glued to a sentence', `The chart is ready. \`\`\`sandbox_artifacts\n${chart}\n\`\`\``],
+    ['indented four spaces', `The chart is ready.\n\n    \`\`\`sandbox_artifacts\n    ${chart}\n    \`\`\``],
+    ['wrapped in another fence', `\`\`\`\`markdown\n\`\`\`sandbox_artifacts\n${chart}\n\`\`\`\n\`\`\`\``],
+    ['written on one line', `The chart is ready.\n\n\`\`\`sandbox_artifacts ${chart} \`\`\``],
+    ['spelled with a hyphen', `The chart is ready.\n\n\`\`\`sandbox-artifacts\n${chart}\n\`\`\``],
+  ])('shows a file card, never the raw block, when the block is %s', (_shape, content) => {
+    const { container } = render(
+      <ThemeProvider>
+        <SlotsProvider>
+          <Markdown content={content} />
+        </SlotsProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('aui-sandbox-artifacts')).toBeInTheDocument();
+    expect(screen.getByText('Weekly food budget chart')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('sandbox_artifacts');
+    expect(container).not.toHaveTextContent('```');
+    expect(container).not.toHaveTextContent('/egress/');
+  });
+
+  it('shows nothing for a block still streaming in', () => {
+    const { container } = render(
+      <ThemeProvider>
+        <SlotsProvider>
+          <Markdown content={`Done.\n\n\`\`\`sandbox_artifacts\n[Weekly food`} isStreaming />
+        </SlotsProvider>
+      </ThemeProvider>,
+    );
+    expect(container).toHaveTextContent('Done.');
+    expect(container).not.toHaveTextContent('sandbox_artifacts');
+    expect(container).not.toHaveTextContent('Weekly food');
   });
 });
 

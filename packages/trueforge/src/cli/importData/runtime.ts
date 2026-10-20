@@ -5,7 +5,7 @@ import { createLogger, format, transports } from 'winston';
 
 import type { ImportDataSession } from './session';
 
-/** Messages go to stderr so stdout stays the one JSON result. */
+/** Messages go to stderr so stdout stays the printed summary; the JSON result is on stderr too. */
 function stderrLogger() {
   return createLogger({
     format: format.combine(format.timestamp(), format.json()),
@@ -13,7 +13,7 @@ function stderrLogger() {
   });
 }
 
-/** Migration progress is printed with console.log, but stdout is reserved for the one JSON result. */
+/** Migration progress is printed with console.log, but stdout is reserved for the printed summary. */
 async function withLogsOnStderr<T>(run: () => Promise<T>): Promise<T> {
   const original = console.log;
   console.log = (...args: unknown[]) => {
@@ -122,7 +122,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
 
   return {
     owner,
-    importArchive: ({ archive, userId, displayName }) =>
+    importArchive: ({ archive, userId, displayName, dryRun }) =>
       runDataImport(
         {
           sessionStore: new SqliteSessionStore(db),
@@ -151,6 +151,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           archive,
           subject: { tenantId: TENANT_ID, subjectId: userId, subjectDisplayName: displayName, agentIds: [] },
           maxBytes: configuration.DATA_IMPORT_MAX_BYTES,
+          dryRun,
         },
       ),
     recordAudit: ({ userId, description }) =>

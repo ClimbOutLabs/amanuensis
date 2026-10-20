@@ -1,6 +1,7 @@
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { SANDBOX_EXEC_TOOL_NAME, SANDBOX_REPLACE_TEXT_TOOL_NAME, Sandbox } from '../../../src/core/sandbox/Sandbox';
+import { SANDBOX_START_FAILED_MESSAGE } from '../../../src/core/sandbox/SandboxErrors';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -364,7 +365,7 @@ describe('Sandbox exec result semantics', () => {
       }
       const response = JSON.parse(contentItem.text);
       expect(response.status).toBe('failed');
-      expect(response.error_summary).toContain('sandbox creation rejected by policy');
+      expect(response.error_summary).toContain(SANDBOX_START_FAILED_MESSAGE);
     });
   });
 

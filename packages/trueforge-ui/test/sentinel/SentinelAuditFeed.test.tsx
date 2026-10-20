@@ -24,12 +24,18 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
     offline_mode: false,
     tier2_auto_allow: [],
     search_without_asking: true,
+    maps_without_asking: false,
     ...patch,
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => entries),
     listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
-    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+    getUserSettings: vi.fn(async () => ({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
@@ -116,6 +122,7 @@ describe('SentinelAuditFeed', () => {
       offline_mode: false,
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
+      maps_without_asking: false,
     }));
     render(
       <SentinelApiProvider api={api}>
@@ -138,6 +145,7 @@ describe('SentinelAuditFeed', () => {
       offline_mode: false,
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
+      maps_without_asking: false,
     }));
     render(
       <SentinelApiProvider api={api}>

@@ -15,6 +15,7 @@ import type { Authorizer } from '../auth/authorizer';
 import { resolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
+import { formatArchiveBytes } from '../dataExport/archiveLimits';
 import { DataImportError } from '../dataImport/importError';
 import type { MemoryImportTarget } from '../dataImport/importPreflight';
 import { runDataImport } from '../dataImport/importService';
@@ -77,7 +78,7 @@ async function readBodyWithCap(c: Context, maxBytes: number): Promise<Buffer> {
     if (total > maxBytes) {
       await reader.cancel();
       throw new HTTPException(413, {
-        message: `The file is larger than the import limit of ${String(maxBytes)} bytes.`,
+        message: `The export file is over the ${formatArchiveBytes(maxBytes)} limit for an import. Export again without uploaded files.`,
       });
     }
     chunks.push(value);
