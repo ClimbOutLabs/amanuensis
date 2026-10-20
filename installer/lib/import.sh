@@ -67,7 +67,7 @@ search_model_state() {
   local name=$1 image=$2
   D run --rm --network none --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" "$image" aman import-data --check-ready 2>/dev/null |
-    sed -n 's/.*"search_model"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1
+    LC_ALL=C sed -n 's/.*"search_model"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1
 }
 
 # The import indexes persona knowledge with the search model, which the app downloads once when it starts.

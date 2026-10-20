@@ -12,7 +12,7 @@ hash_password() {
   out=$(printf '%s\n' "$AMAN_PASSWORD" | D run --rm -i --network none "$image" aman hash-password) ||
     die "The password could not be prepared for saving. This looks like a bug in Aman."
   hash=$(printf '%s' "$out" | sed -n 's/.*"hash"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
-  matches_whole "$hash" '^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$' ||
+  matches_whole "$hash" '^[$]2[aby][$][[:digit:]]{2}[$][./A-Za-z0-9]{53}$' ||
     die "The app returned something that is not a password hash. This looks like a bug in Aman."
   printf '%s\n' "$hash"
 }

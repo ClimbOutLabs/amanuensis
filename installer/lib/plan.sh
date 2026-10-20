@@ -92,7 +92,7 @@ preflight_docker_space() {
   fi
   free=$(free_kb "$root")
   case "${free:-}" in
-    '' | *[!0-9]*) ;;
+    '' | *[![:digit:]]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
         check_block "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free" "Make room on that disk (old Docker files go with: docker system prune), then run install.sh again."
@@ -108,7 +108,7 @@ preflight_docker_memory() {
   local bytes gb
   case "$DOCKER_ACCESS" in direct | sg) ;; *) return 0 ;; esac
   bytes=$(D info --format '{{.MemTotal}}' 2>/dev/null || true)
-  case "${bytes:-}" in '' | *[!0-9]*) return 0 ;; esac
+  case "${bytes:-}" in '' | *[![:digit:]]*) return 0 ;; esac
   gb=$(awk -v b="$bytes" 'BEGIN {printf "%.1f", b / 1073741824}')
   if [ "$bytes" -lt "$DOCKER_MEM_BLOCK_BYTES" ]; then
     check_block "Docker has only $gb GB of memory and needs at least 6 GB to build the app" "Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap, then run install.sh again."
@@ -146,7 +146,7 @@ preflight_system() {
   fi
   free=$(free_kb "$AMAN_HOME")
   case "${free:-}" in
-    '' | *[!0-9]*) ;;
+    '' | *[![:digit:]]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
         check_block "Less than 10 GB free on the disk holding $(ui_path "$AMAN_HOME") ($((free / 1024 / 1024)) GB free)" "Make room on that disk, then run install.sh again."
@@ -422,14 +422,20 @@ plan_aman_command() {
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
 # One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
 plan_existing_addresses() { # name
-  local name=$1 hosts port
+  local name=$1 hosts port origins
   port=$(reg_get "$name" app_port)
   if [ "$(instance_address_change "$name")" = close ]; then
     plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
     return 0
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
-  hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
+  origins=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)})
+  # Where Docker opens ports on this computer alone (Mac, Windows), nothing is opened to the network.
+  if ! origins_reach_the_network "$origins"; then
+    plan_add todo "Open instance $name on this computer only" "Docker here opens it on this computer alone, so addresses of your network are not used."
+    return 0
+  fi
+  hosts=$(printf '%s\n' "$origins" | sed "s|http://||g; s|:$port||g; s|,|, |g")
   if [ "$(tls_target "$name")" = local ]; then
     plan_add todo "Serve instance $name over https on your network" \
       "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
@@ -660,7 +666,7 @@ check_result() {
 # The plan row of an instance that answers at every address of this computer.
 plan_instance_with_addresses() {
   local hosts
-  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
+  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[[:digit:]]*||g; s|,|, |g")
   if [ -n "$I_TLS_PORT" ]; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
       "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate Aman makes on this computer. Sign-in uses port $I_LOGIN_PORT on this computer." \

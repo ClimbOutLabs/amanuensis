@@ -72,8 +72,8 @@ migrate_export() {
 # the line is not such a list.
 migrate_owners() {
   case "$1" in *'"users":['*) ;; *) return 1 ;; esac
-  { printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[0-9]*' || true; } |
-    sed 's/^"user_id":"\([^"]*\)","display_name":"\([^"]*\)","sessions":\([0-9]*\)$/\1\t\3\t\2/'
+  { printf '%s' "$1" | grep -o '"user_id":"[^"]*","display_name":"[^"]*","sessions":[[:digit:]]*' || true; } |
+    sed 's/^"user_id":"\([^"]*\)","display_name":"\([^"]*\)","sessions":\([[:digit:]]*\)$/\1\t\3\t\2/'
 }
 
 # "id (N chats), ..." for a message.

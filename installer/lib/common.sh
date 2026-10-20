@@ -71,7 +71,7 @@ password_problem() {
     return 0
   fi
   if [ "${#1}" -lt 8 ]; then missing+=("at least 8 characters"); fi
-  if [[ $1 != *[0-9]* ]]; then missing+=("a number"); fi
+  if [[ $1 != *[[:digit:]]* ]]; then missing+=("a number"); fi
   if [[ $1 != *[[:punct:]]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
   case ${#missing[@]} in
     0) ;;
@@ -236,8 +236,11 @@ has_control_chars() {
   [[ $1 == *[[:cntrl:]]* ]]
 }
 
-# Whole-string match of $1 against the extended regex $2, never accepting control characters.
+# Whole-string match of $1 against the extended regex $2, never accepting control characters. Bracket ranges
+# follow the locale's collation on macOS (bash 3.2 under a UTF-8 locale: [A-Z] also matches lowercase), so the
+# match runs as plain ASCII.
 matches_whole() {
+  local LC_ALL=C
   has_control_chars "$1" && return 1
   [[ $1 =~ $2 ]]
 }
@@ -249,6 +252,12 @@ valid_name() {
 valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
+
+# The name checks below read ranges such as [A-Z] as plain ASCII, whatever the locale's collation says.
+name_has_capitals() { local LC_ALL=C; [[ $1 == *[A-Z]* ]]; }
+name_starts_with_letter() { local LC_ALL=C; [[ $1 == [a-z]* ]]; }
+# What is left of $1 once the allowed characters are removed, so the caller can show the first one.
+name_other_chars() { local LC_ALL=C; printf '%s' "${1//[a-z0-9-]/}"; }
 
 # The reason a value is refused, or nothing when it is fine. The prompts show it and ask again.
 NAME_RULE="Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
@@ -264,17 +273,18 @@ name_problem() {
     echo "\"$v\" has an underscore. $NAME_RULE"
   elif [[ $v == *[[:space:]]* ]]; then
     echo "\"$v\" has a space. $NAME_RULE"
-  elif [[ $v == *[A-Z]* ]]; then
+  elif name_has_capitals "$v"; then
     echo "\"$v\" has capital letters. $NAME_RULE"
-  elif [[ $v == [!a-z]* ]]; then
+  elif ! name_starts_with_letter "$v"; then
     echo "\"$v\" does not start with a letter. $NAME_RULE"
-  elif [[ $v == *[!a-z0-9-]* ]]; then
-    rest=${v//[a-z0-9-]/}
+  elif rest=$(name_other_chars "$v") && [ -n "$rest" ]; then
     echo "\"$v\" has the character ${rest:0:1}. $NAME_RULE"
   elif [ "${#v}" -gt 24 ]; then
     echo "\"$v\" is longer than 24 characters. $NAME_RULE"
   elif [[ $v == *- ]]; then
     echo "\"$v\" ends with a hyphen. End it with a letter or a number."
+  elif [[ $v == *-slots ]]; then
+    echo "\"$v\" must not end with -slots; that ending is used for the run-code sandbox of another instance."
   elif ! valid_name "$v"; then
     echo "\"$v\" cannot be used as a name. $NAME_RULE"
   fi
@@ -290,11 +300,11 @@ email_problem() {
 
 # A bare origin: scheme, host and optional port; no path, query or userinfo.
 valid_origin() {
-  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[[:digit:]]{1,5})?$'
 }
 
 valid_port() {
-  matches_whole "$1" '^[0-9]{1,5}$' || return 1
+  matches_whole "$1" '^[[:digit:]]{1,5}$' || return 1
   [ "$((10#$1))" -ge 1024 ] && [ "$((10#$1))" -le 65535 ]
 }
 
@@ -304,5 +314,5 @@ valid_home_path() {
 }
 
 is_loopback_origin() {
-  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
+  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[[:digit:]]+)?$'
 }

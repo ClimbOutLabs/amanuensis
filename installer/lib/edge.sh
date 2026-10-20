@@ -104,7 +104,7 @@ edge_print_firewall_hint() {
 }
 
 edge_print_root_steps() {
-  say "Root steps for HTTPS with Caddy (installed from Ubuntu's packages; the installer writes the settings for instance $1):"
+  say "Root steps for HTTPS with Caddy (from the system package archive; the installer writes the settings for instance $1):"
   edge_root_script "$1" | sed 's/^/    /'
 }
 
@@ -177,7 +177,7 @@ plan_edge_instance() {
   if command -v caddy >/dev/null 2>&1; then
     plan_add have "Caddy is installed"
   else
-    plan_add root "Install Caddy from the Ubuntu package archive" "The steps: install.sh --print-root-steps --tls caddy"
+    plan_add root "Install Caddy from the system package archive" "The steps: install.sh --print-root-steps --tls caddy"
     dl_add caddy
   fi
   plan_add root "Apply the Caddyfile for $app_host and $login_host" "It goes under $CADDY_ETC/aman.d. Caddy is checked and reloaded, then asks Let's Encrypt for certificates for exactly those two names."

@@ -3,7 +3,9 @@
 package attest
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -76,6 +78,12 @@ type Report struct {
 	Facts        Facts   `json:"facts"`
 }
 
+// NetIface is the state of one network interface.
+type NetIface struct {
+	Up        bool
+	Addresses int
+}
+
 // Collector reads the cell. Paths are fields so tests can point them at fixtures.
 type Collector struct {
 	AgentVersion string
@@ -98,6 +106,8 @@ type Collector struct {
 	ConfiguredDiskMode string
 	// Statfs returns the filesystem type and size in bytes of a path; nil reads them from the kernel.
 	Statfs func(path string) (fsType int64, sizeBytes int64, err error)
+	// InterfaceInfo reports whether a named interface is up and how many addresses it holds; nil reads the kernel.
+	InterfaceInfo func(name string) (NetIface, error)
 	// Canary starts a real guest running a trivial program.
 	Canary func() error
 	// CanaryEvery bounds how often the canary runs; zero runs it every time.
@@ -256,12 +266,55 @@ func (c *Collector) rootFlags() (int64, error) {
 	return int64(st.Flags), nil
 }
 
+// fallbackTunnelDevices are created down and unaddressed in every new network namespace by kernels with the tunnel
+// drivers built in (Docker Desktop's); they carry no traffic until someone configures them.
+var fallbackTunnelDevices = map[string]bool{
+	"gre0": true, "gretap0": true, "erspan0": true, "ip_vti0": true, "ip6_vti0": true,
+	"sit0": true, "tunl0": true, "ip6tnl0": true, "ip6gre0": true,
+}
+
+func (c *Collector) interfaceInfo(name string) (NetIface, error) {
+	if c.InterfaceInfo != nil {
+		return c.InterfaceInfo(name)
+	}
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return NetIface{}, err
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return NetIface{}, err
+	}
+	return NetIface{Up: iface.Flags&net.FlagUp != 0, Addresses: len(addrs)}, nil
+}
+
+// routeInterfaces lists the interface of every route in a /proc/net route table; skip is the number of header lines
+// and column the position of the interface name.
+func routeInterfaces(path string, skip, column int) ([]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for i, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if i < skip || len(fields) == 0 {
+			continue
+		}
+		if len(fields) <= column {
+			return nil, errors.New("unreadable route line")
+		}
+		names = append(names, fields[column])
+	}
+	return names, nil
+}
+
 func (c *Collector) checkNetwork() Check {
 	raw, err := os.ReadFile(filepath.Join(c.Proc, "net", "dev"))
 	if err != nil {
 		return fail(CheckNetwork, "cannot read interfaces")
 	}
-	var names []string
+	var names, offenders []string
 	lines := strings.Split(string(raw), "\n")
 	for i, line := range lines {
 		if i < 2 || strings.TrimSpace(line) == "" {
@@ -274,10 +327,44 @@ func (c *Collector) checkNetwork() Check {
 		names = append(names, strings.TrimSpace(name))
 	}
 	sort.Strings(names)
-	if len(names) == 1 && names[0] == "lo" {
+	for _, name := range names {
+		switch {
+		case name == "lo":
+		case !fallbackTunnelDevices[name]:
+			offenders = append(offenders, name)
+		default:
+			info, err := c.interfaceInfo(name)
+			if err != nil {
+				offenders = append(offenders, name+" (unreadable)")
+			} else if info.Up {
+				offenders = append(offenders, name+" (up)")
+			} else if info.Addresses > 0 {
+				offenders = append(offenders, name+" (has an address)")
+			}
+		}
+	}
+	if len(offenders) > 0 {
+		return fail(CheckNetwork, "interfaces: "+strings.Join(offenders, " "))
+	}
+	// With nothing but lo and idle tunnel devices left, a route that leaves through any other interface would still
+	// be a way out.
+	routes, err := routeInterfaces(filepath.Join(c.Proc, "net", "route"), 1, 0)
+	if err != nil {
+		return fail(CheckNetwork, "cannot read routes")
+	}
+	routes6, err := routeInterfaces(filepath.Join(c.Proc, "net", "ipv6_route"), 0, 9)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fail(CheckNetwork, "cannot read routes")
+	}
+	for _, name := range append(routes, routes6...) {
+		if name != "lo" {
+			return fail(CheckNetwork, "route via "+name)
+		}
+	}
+	if len(names) == 1 {
 		return pass(CheckNetwork, "only lo")
 	}
-	return fail(CheckNetwork, "interfaces: "+strings.Join(names, " "))
+	return pass(CheckNetwork, "only lo and idle tunnel devices")
 }
 
 func (c *Collector) checkDockerSocket() Check {

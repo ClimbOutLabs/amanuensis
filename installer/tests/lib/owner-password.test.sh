@@ -6,7 +6,7 @@ set -euo pipefail
 
 OWNER=owner@example.invalid
 NEW_PASSWORD='a-brand-new-secret-9'
-BCRYPT='^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$'
+BCRYPT='^[$]2[aby][$][[:digit:]]{2}[$][./A-Za-z0-9]{53}$'
 
 dex_env() { cat "$AMAN_HOME/instances/${1:-main}/dex.env"; }
 hash_of() { sed -n "s/^DEX_USER_PASSWORD_HASH='\(.*\)'\$/\1/p" "$AMAN_HOME/instances/${1:-main}/dex.env"; }

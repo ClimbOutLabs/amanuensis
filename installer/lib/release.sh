@@ -24,7 +24,7 @@ pins_validate() {
 # The Node.js runtime for the sandbox setup is pinned by version and by the published SHA-256 of each tarball.
 node_pins_validate() {
   local key
-  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[0-9]+\.[0-9]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
+  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[[:digit:]]+\.[[:digit:]]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
   for key in node_sha256_linux_x64 node_sha256_linux_arm64 node_sha256_darwin_x64 node_sha256_darwin_arm64; do
     matches_whole "$(json_get "$PINS_FILE" "$key")" '^[a-f0-9]{64}$' || die "$key in $PINS_FILE must be a sha256 digest"
   done

@@ -4,7 +4,7 @@
 # @@IF_NAME@@ is kept without the marker when IF_NAME=1 is given and dropped otherwise.
 
 render_template() {
-  local file=$1 line pair key value marker
+  local file=$1 line pair key value marker LC_ALL=C
   shift
   [ -f "$file" ] || die "template missing: $file"
   while IFS= read -r line || [ -n "$line" ]; do

@@ -167,15 +167,15 @@ preflight_sandbox() {
     # The slot agent reads the limits of either cgroup version, so v1 is no blocker; it only reports a different line.
     cgroup=$(D info --format '{{.CgroupVersion}}' 2>/dev/null || true)
     case "$cgroup" in
-      1) check_warn "Docker here uses cgroup v1, an older setup. The sandbox runs on it." ;;
+      1) check_warn "Docker here uses an older memory-limit setup. The sandbox runs on it; its limits are read from the older files" ;;
       2 | '') ;;
-      *) check_block "Docker reports an unknown cgroup setup ($cgroup), which the sandbox cannot check" "Pass --no-sandbox to install without run code." ;;
+      *) check_block "Docker reports an unknown memory-limit setup ($cgroup), which the sandbox cannot check" "Pass --no-sandbox to install without run code." ;;
     esac
   fi
   if sandbox_native_linux; then
     free=$(free_kb "$SLOT_DISK_ROOT")
     case "${free:-}" in
-      '' | *[!0-9]*) ;;
+      '' | *[![:digit:]]*) ;;
       *)
         if [ "$free" -lt "$SLOT_MIN_FREE_KB" ]; then
           check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Make room there, or pass --no-sandbox to install without run code."
@@ -335,7 +335,7 @@ sandbox_ensure() {
       return 0
     fi
   fi
-  step=$(printf '%s' "$out" | sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
+  step=$(printf '%s' "$out" | LC_ALL=C sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
   case "$step" in
     apparmor | disk)
       sandbox_print_root_steps "$step"
