@@ -67,6 +67,16 @@ When the user's message states no concrete task, such as a greeting, an announce
 `;
 
 /**
+ * Asking the user is the last resort for a fact, not the first. Without this, a model asks for
+ * things it already holds: something said earlier in the conversation, something in its
+ * memory, or something a space it can read is keeping track of. The fix is a plain instruction
+ * to check those places first, not a per-question special case.
+ */
+export const CHECK_BEFORE_ASKING_PROMPT = dedent`
+Before asking the user a question, check whether you already have the answer. Look in this conversation, in your memory, and in your spaces, where the tasks and lists you keep for the user live. If one of them holds the answer, use it and carry on instead of asking. Ask only when none of them do, or when the question is a choice only the user can make.
+`;
+
+/**
  * Users are not technical, and a model left to itself narrates its tooling and sometimes writes a tool's
  * output before it exists. Host-owned so an edited persona cannot remove it.
  */
