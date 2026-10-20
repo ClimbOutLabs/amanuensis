@@ -283,6 +283,12 @@ describe('repairPersonaNames whitespace, marks and report text', () => {
     expect(lines).toEqual([]);
   });
 
+  it('treats a next-line control character (U+0085) as a space, and reports nothing', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara\u0085Quinn')]);
+    expect(namesOf(json)[0]?.display_name).toBe('Zara Quinn');
+    expect(lines).toEqual([]);
+  });
+
   it('treats a tab and a trailing newline as spaces, and reports nothing', () => {
     const { json, lines } = repairPersonaNames([entry('Zara\tQuinn\n')]);
     expect(namesOf(json)[0]?.display_name).toBe('Zara Quinn');

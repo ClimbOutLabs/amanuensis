@@ -175,7 +175,7 @@ function candidateOf(entry: unknown): PersonaCandidate | undefined {
 
 /** A value as it is shown in a line: whitespace and control characters become spaces. */
 function shown(value: string): string {
-  return value.replace(/[\s\p{Cc}]/gu, ' ');
+  return value.replace(/[\p{White_Space}\p{Cc}]/gu, ' ');
 }
 
 /** Whether a name is accepted as it is, by the same schema and reserved-word check a new name gets. */
@@ -205,10 +205,10 @@ function cleanName(raw: string): CleanedName {
     return { text: '', reason: MARK_REASON, unusable: MARK_REASON };
   }
   const charactersChanged = Array.from(kept).some(
-    character => !/\s/u.test(character) && !PERSONA_NAME_CHARACTER.test(character),
+    character => !/\p{White_Space}/u.test(character) && !PERSONA_NAME_CHARACTER.test(character),
   );
   const spaced = Array.from(kept, character =>
-    /\s/u.test(character) || !PERSONA_NAME_CHARACTER.test(character) ? ' ' : character,
+    /\p{White_Space}/u.test(character) || !PERSONA_NAME_CHARACTER.test(character) ? ' ' : character,
   )
     .join('')
     .replace(/ +/g, ' ')
