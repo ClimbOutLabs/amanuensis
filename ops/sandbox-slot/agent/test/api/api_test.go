@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -736,6 +737,25 @@ func TestMirrorForwarder(t *testing.T) {
 	if got := <-seenCh; got.path != "/npm/@scope%2fpkg" {
 		t.Fatalf("gateway saw %q for the scoped name", got.path)
 	}
+	// A trailing slash is part of the address, not an empty step: PyPI project pages are
+	// only ever requested with one, and the gateway wants the rest exactly as written.
+	for _, path := range []string{"/pypi/simple/requests/", "/pypi/simple/", "/pypi/", "/npm/leftpad/"} {
+		code, body := call("GET", base+path)
+		if code != 200 || body != "gateway answer" {
+			t.Errorf("GET %s = %d %q, want 200 from the gateway", path, code, body)
+			continue
+		}
+		if got := <-seenCh; got.path != path {
+			t.Errorf("gateway saw %q for %s", got.path, path)
+		}
+	}
+	// A doubled slash inside the path is still refused.
+	if code, _ := call("GET", base+"/pypi/simple//requests/"); code != 404 {
+		t.Errorf("a doubled slash inside the path = %d, want 404", code)
+	}
+	if code, _ := call("GET", base+"/pypi//simple/requests/"); code != 404 {
+		t.Errorf("a doubled slash after the ecosystem = %d, want 404", code)
+	}
 	close(e.runner.hold)
 	rec := <-done
 	if rec.Code != 200 {
@@ -744,5 +764,82 @@ func TestMirrorForwarder(t *testing.T) {
 	// With the call over, the grant is closed again.
 	if code, _ := call("GET", base+"/npm/leftpad"); code != 403 {
 		t.Errorf("after the call the forwarder = %d, want 403", code)
+	}
+}
+
+// TestMirrorForwarderLivePip is the live check for the mirror path: the real pip, talking to
+// this real forwarder, backed by a real gateway on the socket in AMAN_E2E_MIRROR_SOCKET, whose
+// grant token is in AMAN_E2E_MIRROR_TOKEN. It is skipped unless both are set, and it must run
+// alone (go test -run TestMirrorForwarderLivePip): the forwarder's loopback port belongs to
+// whichever server started it first in the process.
+func TestMirrorForwarderLivePip(t *testing.T) {
+	socket := os.Getenv("AMAN_E2E_MIRROR_SOCKET")
+	token := os.Getenv("AMAN_E2E_MIRROR_TOKEN")
+	if socket == "" || token == "" {
+		t.Skip("set AMAN_E2E_MIRROR_SOCKET and AMAN_E2E_MIRROR_TOKEN to run the live mirror check")
+	}
+	if _, err := exec.LookPath("pip3"); err != nil {
+		t.Skip("pip3 is not available")
+	}
+	e := newEnv(t, true)
+	e.srv.MirrorSocketPath = socket
+	if err := e.srv.StartMirrorForwarder(); err != nil {
+		t.Fatal(err)
+	}
+	e.runner.hold = make(chan struct{})
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+			m["package_mirror_token"] = token
+		}))
+	}()
+	defer func() {
+		close(e.runner.hold)
+		<-done
+	}()
+	base := "http://127.0.0.1:18771/m/" + token
+	client := &http.Client{Timeout: 30 * time.Second}
+	// Publishes are refused by the forwarder itself, before any grant question.
+	for _, method := range []string{"PUT", "POST"} {
+		for _, path := range []string{"/npm/leftpad", "/pypi/"} {
+			req, err := http.NewRequest(method, base+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != 405 {
+				t.Errorf("%s %s through the forwarder = %d, want 405", method, path, resp.StatusCode)
+			}
+		}
+	}
+	// Wait for the grant, then confirm the project page pip asks for comes through whole.
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := client.Get(base + "/pypi/simple/six/")
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 && strings.Contains(string(body), "six-1.16.0") {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the PyPI project page never came through the forwarder")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("pip3", "download", "six==1.16.0", "--no-deps", "-d", dir)
+	cmd.Env = append(os.Environ(), "PIP_INDEX_URL="+base+"/pypi/simple")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pip download through the forwarder failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "six-1.16.0-py2.py3-none-any.whl")); err != nil {
+		t.Fatalf("pip did not save the wheel: %v", err)
 	}
 }

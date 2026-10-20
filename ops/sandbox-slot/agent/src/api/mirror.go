@@ -165,7 +165,8 @@ func (s *Server) mirrorClient() (*http.Client, error) {
 // parseMirrorPath splits /m/<token>/<ecosystem>/<rest> and checks every segment of the rest: a
 // segment must decode cleanly, must not hide a dot step or a backslash, and must not carry control
 // characters. An encoded slash inside one segment (npm writes scoped names that way) stays as it
-// is and goes to the gateway still encoded.
+// is and goes to the gateway still encoded. One trailing empty segment is allowed: it is just a
+// trailing slash, which PyPI project pages always carry.
 func parseMirrorPath(escaped string) (token, ecosystem, rest string, ok bool) {
 	parts := strings.Split(strings.TrimPrefix(escaped, "/"), "/")
 	if len(parts) < 3 || parts[0] != "m" {
@@ -181,12 +182,20 @@ func parseMirrorPath(escaped string) (token, ecosystem, rest string, ok bool) {
 	}
 	rest = "/"
 	if len(parts) > 3 {
-		for _, segment := range parts[3:] {
-			if segment == "" || !safeMirrorSegment(segment) {
+		segments := parts[3:]
+		for index, segment := range segments {
+			if segment == "" {
+				// An empty segment anywhere but the end means a doubled slash.
+				if index != len(segments)-1 {
+					return "", "", "", false
+				}
+				continue
+			}
+			if !safeMirrorSegment(segment) {
 				return "", "", "", false
 			}
 		}
-		rest = "/" + strings.Join(parts[3:], "/")
+		rest = "/" + strings.Join(segments, "/")
 	}
 	return token, ecosystem, rest, true
 }
