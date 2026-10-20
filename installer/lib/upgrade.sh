@@ -97,12 +97,47 @@ upgrade_switch() {
   log_event "upgrade to $REL_APP_TAG"
 }
 
+# Whether the checkout is missing commits that its source has. The tags an upgrade compares come
+# from this checkout alone, so a checkout that fell behind its source looks current until the
+# source is asked. Fetching just the branch the checkout is on is enough to tell; nothing is
+# ever pulled. A checkout that cannot be compared (no git, no source) is not behind, and a
+# source that cannot be reached warns and counts as not behind, so an offline computer still
+# upgrades with the code it has.
+upgrade_checkout_behind() {
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || return 1
+  local branch remote tracked source_ref
+  branch=$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null) || branch=
+  tracked=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null) || tracked=
+  if [ -n "$tracked" ]; then
+    remote=${tracked%%/*}
+    source_ref=${tracked#*/}
+  elif [ -n "$branch" ]; then
+    remote=origin
+    source_ref=$branch
+  else
+    return 1
+  fi
+  git -C "$REPO_ROOT" remote get-url "$remote" >/dev/null 2>&1 || return 1
+  if ! GIT_TERMINAL_PROMPT=0 git -C "$REPO_ROOT" fetch --quiet "$remote" "+refs/heads/$source_ref:refs/remotes/$remote/$source_ref" 2>/dev/null; then
+    warn "Aman could not check for a newer version, because $remote could not be reached. The upgrade carries on with the code already on this computer. To check again, fix the connection and run: aman upgrade --check"
+    return 1
+  fi
+  [ -n "$(git -C "$REPO_ROOT" rev-list "HEAD..refs/remotes/$remote/$source_ref" 2>/dev/null)" ]
+}
+
 cmd_upgrade() {
   local name
   require_installed
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   docker_attach
   release_resolve
+  if upgrade_checkout_behind; then
+    say "A newer version of Aman is available."
+    say "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
+    say "To get the newer version, run: git -C $REPO_ROOT pull"
+    say "Then run: aman upgrade"
+    return 0
+  fi
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
   if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then

@@ -269,6 +269,30 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   sandbox_drop
 }
 
+# Gives the checkout an origin holding exactly what the checkout holds, so a test can move origin
+# ahead on its own. The checkout tracks the origin copy of its branch, as a real clone does.
+repo_remote_add() {
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add origin "$SB/origin.git"
+  git -C "$REPO" push -q origin "HEAD:refs/heads/$branch"
+  git -C "$REPO" fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+  git -C "$REPO" branch --set-upstream-to="origin/$branch" >/dev/null
+}
+
+# Moves origin one commit ahead of the checkout, the way a newer version lands on GitHub.
+repo_remote_advance() {
+  local branch work=$SB/origin-work
+  branch=$(git -C "$REPO" branch --show-current)
+  git clone -q --branch "$branch" "$SB/origin.git" "$work"
+  printf '%s\n' "newer version" >>"$work/Dockerfile.dev"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=t -c user.email=t@example.invalid commit -q -m "newer version"
+  git -C "$work" push -q origin "HEAD:refs/heads/$branch"
+  rm -rf "$work"
+}
+
 # The data volume exists (Docker made it when the app first started) but holds no database.
 no_database_yet() {
   mkdir -p "$SB_STATE/no_db"
@@ -317,7 +341,73 @@ test_owner_path_remove_upgrade_install() {
   sandbox_drop
 }
 
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin() {
+  t_begin "upgrade says a newer version exists when the checkout is behind origin, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  repo_remote_advance
+  local head_before builds
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C $REPO pull"
+  assert_flat_contains "$OUT" "aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin() {
+  t_begin "upgrade still says up to date when the checkout matches origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  sandbox_drop
+}
+
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin() {
+  t_begin "upgrade upgrades from the checkout as before when the checkout is ahead of origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  local old new
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  repo_commit_change "local work"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  new=$(app_tag "$AMAN_HOME/release/release.json")
+  if [ "$new" != "$old" ]; then t_pass; else t_fail "release not updated"; fi
+  sandbox_drop
+}
+
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached() {
+  t_begin "upgrade says it could not check for a newer version when origin cannot be reached, and carries on with the local check"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  rm -rf "$SB/origin.git"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "could not check for a newer version"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
 test_noop_when_current
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached
 test_backup_and_upgrade_force_cope_with_an_instance_without_a_database
 test_owner_path_remove_upgrade_install
 test_install_rerun_updates_instead_of_reusing_old_images
