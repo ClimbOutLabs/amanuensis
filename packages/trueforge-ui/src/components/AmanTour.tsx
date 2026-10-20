@@ -7,7 +7,7 @@ import { Button } from '../atoms/primitives/Button.js';
 
 export const TOUR_HEADLINE = 'Aman is your chief of staff.';
 export const TOUR_SUBLINE =
-  'It keeps track of your life. It runs on your own computer, and nothing leaves without your OK.';
+  'It keeps track of your life and checks with you before taking important actions. It runs on your own computer.';
 
 /** What this instance can do, so the tour only offers prompts that will work here. */
 export type TourCapabilities = {

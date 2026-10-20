@@ -38,7 +38,7 @@ describe('AmanTour', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'It keeps track of your life. It runs on your own computer, and nothing leaves without your OK.',
+        'It keeps track of your life and checks with you before taking important actions. It runs on your own computer.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Try a day with Aman' })).toBeInTheDocument();
