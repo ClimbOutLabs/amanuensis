@@ -25,7 +25,7 @@ const RESULT: ImportDataResult = {
   agents: 1,
   connectors: 2,
   schedules_off: true,
-  summary: 'Imported 3 chats, 2 memories, 1 persona, 0 spaces, 1 agent, 1 schedule (off).',
+  summary: 'Imported:\n  3 chats\n  2 memories\n  1 persona\n  0 spaces\n  1 agent\n  1 schedule (they will be off)',
 };
 
 interface Calls {
@@ -76,17 +76,19 @@ describe('aman import-data', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('imports for the owner by default, prints JSON on stdout and the summary on stderr', async () => {
+  it('imports for the owner by default, prints the summary on stdout and the JSON result on stderr', async () => {
     const { deps, calls } = fakeDeps();
     const io = fakeIo();
     const code = await createImportData(deps)({ args: ['--in', archivePath], io });
     expect(code).toBe(0);
     expect(calls.imports).toEqual([{ bytes: 'archive-bytes', userId: OWNER, displayName: OWNER, dryRun: false }]);
-    expect(JSON.parse(io.out.join(''))).toEqual({ user_id: OWNER, ...RESULT });
-    expect(io.err.join('')).toBe(`${RESULT.summary}\n`);
+    expect(io.out.join('')).toBe(`${RESULT.summary}\n`);
+    expect(JSON.parse(io.err.join(''))).toEqual({ user_id: OWNER, ...RESULT });
     expect(calls.audits).toHaveLength(1);
     expect(calls.audits[0]).toMatchObject({ userId: OWNER });
     expect(calls.audits[0]?.description).toContain('from the command line');
+    expect(calls.audits[0]?.description).toContain('Imported 3 chats, 2 memories, 1 persona, 0 spaces, 1 agent');
+    expect(calls.audits[0]?.description).not.toContain('\n');
     expect(calls.closed).toBe(1);
   });
 
@@ -96,8 +98,8 @@ describe('aman import-data', () => {
     const code = await createImportData(deps)({ args: ['--in', archivePath, '--dry-run'], io });
     expect(code).toBe(0);
     expect(calls.imports).toEqual([{ bytes: 'archive-bytes', userId: OWNER, displayName: OWNER, dryRun: true }]);
-    expect(JSON.parse(io.out.join(''))).toEqual({ user_id: OWNER, dry_run: true, ...RESULT });
-    expect(io.err.join('')).toBe(`${RESULT.summary}\n`);
+    expect(io.out.join('')).toBe(`${RESULT.summary}\n`);
+    expect(JSON.parse(io.err.join(''))).toEqual({ user_id: OWNER, dry_run: true, ...RESULT });
     expect(calls.audits).toEqual([]);
   });
 
@@ -170,7 +172,9 @@ describe('aman import-data', () => {
     const io = fakeIo();
     expect(await createImportData(deps)({ args: ['--in', archivePath], io })).toBe(0);
     expect(io.err.join('')).toContain('audit row was not written: audit table locked');
-    expect(JSON.parse(io.out.join(''))).toMatchObject({ user_id: OWNER, chats: 3 });
+    expect(io.err.join('')).toContain('"user_id":"owner@example.com"');
+    expect(io.err.join('')).toContain('"chats":3');
+    expect(io.out.join('')).toBe(`${RESULT.summary}\n`);
   });
 
   it('says whether the search model is on disk with --check-ready, without opening the instance', async () => {

@@ -484,10 +484,26 @@ case "$cmd" in
           fi
           exit 1
         fi
+        # Models the CLI: the printed summary goes to stdout; the JSON result goes to stderr, where the
+        # installer keeps it in the import log.
+        printf '{"user_id":"stub","chats":1}\n' >&2
         case "$*" in
-          *--dry-run*) echo "This was a dry run, so nothing was imported. The import would bring 1 chat." >&2 ;;
+          *--dry-run*) printf '%s\n' 'This export has:' ;;
+          *) printf '%s\n' 'Imported:' ;;
         esac
-        printf '{"user_id":"stub","chats":1}\n'
+        printf '%s\n' \
+          '  1 chat' \
+          '  0 memories' \
+          '  0 personas' \
+          '  0 spaces' \
+          '  0 agents' \
+          '  0 schedules' \
+          '' \
+          'Good to know:' \
+          '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.' \
+          '  • Not brought over: model keys, connector sign-ins, your own skills.' \
+          '    Add your model again and sign in to your connectors.' \
+          '  • Permissions start fresh, so each tool will ask again.'
         exit 0
         ;;
       *"aman backup"*)

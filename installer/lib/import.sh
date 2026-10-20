@@ -32,11 +32,15 @@ display_name_problem() {
 }
 
 # Starts the app this run stopped. The exit handler calls it as well, so an interrupt or hangup never leaves it stopped.
+# A successful import restarts it quietly (IMPORT_QUIET_RESTART=1): the stop and start lines are only shown when
+# something failed, or when the start itself does not come up properly.
 import_on_exit() {
   local name=$IMPORT_STOPPED_APP
   [ -n "$name" ] || return 0
   IMPORT_STOPPED_APP=
-  say "Starting the app of instance $name again"
+  if [ "${IMPORT_QUIET_RESTART:-0}" != 1 ]; then
+    say "Starting the app of instance $name again"
+  fi
   dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||
     warn "The app of instance $name did not start properly. Run: aman doctor instance --fix"
 }
@@ -95,46 +99,59 @@ import_wait_for_search_model() {
 # inside the image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env,
 # so it reads the same database and memory paths the app does.
 import_run() {
-  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log check=()
+  local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log layout check=()
   base=$(basename -- "$file")
   if [ "$DRY_RUN" = 1 ]; then check=(--dry-run); fi
   log=$(cli_log import)
+  # The CLI prints its summary on stdout and its log lines and JSON result on stderr: the summary is captured here
+  # so it can be shown as printed and kept in the log, and the JSON never reaches the screen.
+  layout=$log.layout
+  : >"$layout"
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
-    say "Stopping the app of instance $name for the import"
     IMPORT_STOPPED_APP=$name
     dc "$name" stop app >/dev/null || die "The app of instance $name did not stop, so nothing was imported."
   fi
   if [ "$DRY_RUN" = 1 ]; then
-    say "Checking $base against instance $name for $owner. Nothing is imported."
+    say "Checking $base for $name. Nothing will be changed."
   else
-    say "Importing $base into instance $name for $owner"
+    say "Importing $base into $name."
   fi
-  D run --rm -i --network none \
+  # The capture sits on a subshell, not on the run itself: a stop signal landing during the run fires the exit
+  # path while the run's own redirects are still in place, which would send the restart line into the capture
+  # file instead of onto the screen.
+  (D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"}" \
-    import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file" 2>"$log" || rc=$?
+    import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file") >"$layout" 2>"$log" || rc=$?
   if [ "$was_running" = 1 ]; then
+    if [ "$rc" = 0 ]; then IMPORT_QUIET_RESTART=1; fi
     import_on_exit
+    IMPORT_QUIET_RESTART=0
   else
     say "Instance $name was not running, so it was left stopped."
   fi
   if [ "$rc" != 0 ]; then
+    rm -f "$layout"
     warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix")"
     UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi
-  # The CLI's summary of what it imported, or would import, including anything from an older version it leaves out.
-  cat "$log" >&2
-  UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
+  # The CLI's summary of what it imported, or would import, including anything from an older version it left out.
+  cat "$layout"
+  cat "$layout" >>"$log"
+  rm -f "$layout"
   if [ "$DRY_RUN" = 1 ]; then
-    ui_ok "Checked $base. Nothing was imported. To import it, run the same command without --dry-run."
+    ui_ok "Checked. Nothing was imported."
+    UI_FD=2 ui_hint "To import, run the same command without --dry-run."
+    UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 0
   fi
   log_event "data import into instance $name from $base"
-  ui_ok "Imported into instance $name. Model keys and connector sign-ins are not part of an export. Set them up in Settings."
+  ui_ok "Imported into instance $name."
+  UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
 }
 
 cmd_instance_import() {

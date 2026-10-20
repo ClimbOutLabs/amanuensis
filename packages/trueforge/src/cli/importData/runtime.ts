@@ -5,7 +5,7 @@ import { createLogger, format, transports } from 'winston';
 
 import type { ImportDataSession } from './session';
 
-/** Messages go to stderr so stdout stays the one JSON result. */
+/** Messages go to stderr so stdout stays the printed summary; the JSON result is on stderr too. */
 function stderrLogger() {
   return createLogger({
     format: format.combine(format.timestamp(), format.json()),
@@ -13,7 +13,7 @@ function stderrLogger() {
   });
 }
 
-/** Migration progress is printed with console.log, but stdout is reserved for the one JSON result. */
+/** Migration progress is printed with console.log, but stdout is reserved for the printed summary. */
 async function withLogsOnStderr<T>(run: () => Promise<T>): Promise<T> {
   const original = console.log;
   console.log = (...args: unknown[]) => {

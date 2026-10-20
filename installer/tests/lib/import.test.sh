@@ -49,7 +49,15 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
     t_fail "expected stop ($stop_line) before the import ($run_line) before the restart ($up_line)"
   fi
   assert_flat_contains "$OUT" "Imported into instance main"
-  assert_flat_contains "$OUT" "Model keys and connector sign-ins are not part of an export"
+  assert_flat_contains "$OUT" "Imported:"
+  assert_flat_contains "$OUT" "Not brought over: model keys, connector sign-ins, your own skills."
+  # The JSON result and the stop and start lines stay off the screen; the log keeps the JSON and the summary.
+  assert_not_contains "$OUT" '"user_id"'
+  assert_not_contains "$ERR" '"user_id"'
+  assert_not_contains "$OUT" "Stopping the app"
+  assert_not_contains "$OUT" "Starting the app"
+  assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" '"user_id":"stub"'
+  assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" 'Not brought over: model keys'
   assert_flat_contains "$ERR" "Full log:"
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
@@ -113,9 +121,11 @@ test_a_dry_run_checks_the_file_and_imports_nothing() {
   assert_eq "$(import_count)" 1
   assert_contains "$(import_runs)" "import $OWNER owner --dry-run"
   assert_eq "$(kept_backups | wc -l | tr -d ' ')" 0 "a dry run takes no backup"
-  assert_flat_contains "$OUT" "Nothing is imported."
-  assert_flat_contains "$OUT" "Checked aman-export.zip. Nothing was imported."
-  assert_flat_contains "$ERR" "would bring"
+  assert_flat_contains "$OUT" "Checking aman-export.zip for main. Nothing will be changed."
+  assert_flat_contains "$OUT" "This export has:"
+  assert_flat_contains "$OUT" "Checked. Nothing was imported."
+  assert_flat_contains "$ERR" "To import, run the same command without --dry-run."
+  assert_not_contains "$OUT" '"user_id"'
   assert_not_contains "$OUT" "Imported into instance main"
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
