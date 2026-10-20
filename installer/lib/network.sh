@@ -183,26 +183,10 @@ network_default_hosts() {
   if [ -n "$name" ]; then printf '%s\n' "$name"; fi
 }
 
-# True where Docker runs in a virtual machine (every Mac, Docker Desktop, and WSL2 on Windows). There its port forwarding
-# fails when one container publishes on several specific host addresses, and the addresses seen from inside WSL2 are the
-# virtual machine's own, not the computer's home-network ones. So Aman is published on 127.0.0.1 alone there, which
-# Windows forwards to its own localhost. Looked up once.
-NETWORK_LOOPBACK_ONLY=
-network_publishes_on_loopback_only() {
-  local os
-  if [ -z "$NETWORK_LOOPBACK_ONLY" ]; then
-    NETWORK_LOOPBACK_ONLY=0
-    if [ "$(uname -s)" = Darwin ]; then
-      NETWORK_LOOPBACK_ONLY=1
-    elif case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) true ;; *) false ;; esac; then
-      NETWORK_LOOPBACK_ONLY=1
-    elif command -v docker >/dev/null 2>&1; then
-      os=$(run_bounded 8 docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)
-      case "$os" in *[Dd]ocker\ [Dd]esktop*) NETWORK_LOOPBACK_ONLY=1 ;; esac
-    fi
-  fi
-  [ "$NETWORK_LOOPBACK_ONLY" = 1 ]
-}
+# True on a Mac, where Docker runs in a virtual machine and its port forwarding fails when one container publishes on
+# several specific host addresses. So Aman is published on 127.0.0.1 alone there. Docker Desktop on Linux and WSL2 keep
+# the private addresses of this computer.
+network_publishes_on_loopback_only() { [ "$(uname -s)" = Darwin ]; }
 
 # Addresses of this computer that are public: plain http is never used at them and the app is never published there.
 network_public_addresses() {
@@ -281,13 +265,19 @@ network_bind_addresses() { # origin list
 # On native Linux, Engine 27 and older let other devices on the network reach ports published to 127.0.0.1 only.
 DOCKER_MIN_LINUX_ENGINE_MAJOR=28
 
-# True when Docker runs natively on Linux (not Docker Desktop, not WSL2) with an Engine that publishes loopback-only
-# ports to the whole network. Docker Desktop and WSL2 are unaffected. Arguments: engine version, operating system name.
-docker_engine_leaks_loopback() {
-  local engine=$1 os=$2 major=${1%%.*}
+# True when Docker runs on this Linux kernel itself: not inside WSL2 and not in Docker Desktop's virtual machine.
+# Argument: the operating system docker info reports, or nothing when it is unknown.
+docker_native_linux() { # operating system
   [ "$(uname -s)" = Linux ] || return 1
   case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) return 1 ;; esac
-  case "$os" in *[Dd]ocker\ [Dd]esktop*) return 1 ;; esac
+  case "$1" in *[Dd]ocker\ [Dd]esktop*) return 1 ;; esac
+}
+
+# True when Docker runs natively on Linux with an Engine that publishes loopback-only ports to the whole network.
+# Arguments: engine version, operating system name.
+docker_engine_leaks_loopback() {
+  local engine=$1 os=$2 major=${1%%.*}
+  docker_native_linux "$os" || return 1
   case "$major" in '' | *[![:digit:]]*) return 1 ;; esac
   [ "$major" -lt "$DOCKER_MIN_LINUX_ENGINE_MAJOR" ]
 }

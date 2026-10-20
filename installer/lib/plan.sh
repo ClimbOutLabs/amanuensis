@@ -422,20 +422,19 @@ plan_aman_command() {
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
 # One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
 plan_existing_addresses() { # name
-  local name=$1 hosts port origins
+  local name=$1 hosts port
   port=$(reg_get "$name" app_port)
   if [ "$(instance_address_change "$name")" = close ]; then
     plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
     return 0
   fi
-  # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
-  origins=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)})
-  # Where Docker opens ports on this computer alone (Mac, Windows), nothing is opened to the network.
-  if ! origins_reach_the_network "$origins"; then
+  # On a Mac Docker opens ports on this computer alone, so nothing is opened to the network.
+  if network_publishes_on_loopback_only; then
     plan_add todo "Open instance $name on this computer only" "Docker here opens it on this computer alone, so addresses of your network are not used."
     return 0
   fi
-  hosts=$(printf '%s\n' "$origins" | sed "s|http://||g; s|:$port||g; s|,|, |g")
+  # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
+  hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
   if [ "$(tls_target "$name")" = local ]; then
     plan_add todo "Serve instance $name over https on your network" \
       "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \

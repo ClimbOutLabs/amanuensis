@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Where Docker publishes on this computer alone (a Mac, Docker Desktop, WSL2), the default addresses stay on loopback.
+# A Mac publishes on this computer alone; Docker Desktop on Linux and WSL2 keep the private addresses, as before.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
@@ -35,6 +35,47 @@ test_mac_keeps_extra_addresses_off_the_network() {
   sandbox_drop
 }
 
+# Gives the sandbox a kernel release, so the installer sees a Linux computer that runs that kernel.
+fixture_kernel() { # kernel release
+  rm -f "$SB_BIN/uname"
+  cat >"$SB_BIN/uname" <<UNAME
+#!/usr/bin/env bash
+case "\${1:-}" in
+  -s) echo Linux ;;
+  -r) echo $1 ;;
+  -m) echo x86_64 ;;
+  *) echo Linux ;;
+esac
+UNAME
+  chmod 755 "$SB_BIN/uname"
+}
+
+test_docker_desktop_on_linux_plans_the_private_addresses() {
+  t_begin "Docker Desktop on Linux still opens the app on the private addresses of this computer"
+  sandbox_new
+  fixture_network eth0:192.168.1.20
+  fixture_kernel 6.8.0-generic
+  STUB_DOCKER_OS="Docker Desktop" run_install --dry-run --email owner@example.invalid --tls off
+  assert_rc 0
+  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20."
+  assert_flat_contains "$OUT" "the port is open to your network"
+  sandbox_drop
+}
+
+test_wsl2_plans_the_private_addresses() {
+  t_begin "WSL2 still opens the app on the private addresses of this computer"
+  sandbox_new
+  fixture_network eth0:192.168.1.20
+  fixture_kernel 5.15.153.1-microsoft-standard-WSL2
+  run_install --dry-run --email owner@example.invalid --tls off
+  assert_rc 0
+  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20."
+  assert_flat_contains "$OUT" "the port is open to your network"
+  sandbox_drop
+}
+
 test_mac_publishes_on_loopback_only
 test_mac_keeps_extra_addresses_off_the_network
+test_docker_desktop_on_linux_plans_the_private_addresses
+test_wsl2_plans_the_private_addresses
 tests_finish

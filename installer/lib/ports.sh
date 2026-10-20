@@ -19,23 +19,29 @@ port_bind_addresses() {
 # True when something already holds the port on any of those addresses, since an instance may publish it on each. A bind
 # attempt is the real test; the listener table and a loopback connect are fallbacks when python3 is absent.
 port_in_use() {
-  local port=$1
+  local port=$1 rc=0
   if command -v python3 >/dev/null 2>&1; then
+    # Exit 0 when every bind worked, 1 when a program holds the port, 2 when some bind failed for another reason.
     # shellcheck disable=SC2046 # addresses are single words
-    if python3 -c 'import errno, socket, sys
+    python3 -c 'import errno, socket, sys
+unknown = False
 for address in sys.argv[2:]:
     s = socket.socket()
     try:
         s.bind((address, int(sys.argv[1])))
     except OSError as error:
-        # An address this computer does not have says nothing about the port.
         if error.errno == errno.EADDRINUSE:
             sys.exit(1)
+        # An address this computer does not have says nothing about the port.
+        if error.errno != errno.EADDRNOTAVAIL:
+            unknown = True
     finally:
-        s.close()' "$port" $(port_bind_addresses) 2>/dev/null; then
-      return 1
-    fi
-    return 0
+        s.close()
+sys.exit(2 if unknown else 0)' "$port" $(port_bind_addresses) 2>/dev/null || rc=$?
+    case $rc in
+      0) return 1 ;;
+      1) return 0 ;;
+    esac
   fi
   if command -v ss >/dev/null 2>&1; then
     ss -ltn 2>/dev/null | awk 'NR > 1 {print $4}' | grep -Eq "[:.]${port}\$"

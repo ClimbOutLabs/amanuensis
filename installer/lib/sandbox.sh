@@ -140,12 +140,11 @@ sandbox_runtime_ensure() {
 
 # Native Docker on Linux: the slots get disks of their own and may need the AppArmor profile loaded.
 sandbox_native_linux() {
-  [ "$(uname -s)" = Linux ] || return 1
-  case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) return 1 ;; esac
+  local os=''
   if docker_available_for_probes; then
-    case "$(D info --format '{{.OperatingSystem}}' 2>/dev/null || true)" in *[Dd]ocker\ [Dd]esktop*) return 1 ;; esac
+    os=$(D info --format '{{.OperatingSystem}}' 2>/dev/null || true)
   fi
-  return 0
+  docker_native_linux "$os"
 }
 
 preflight_sandbox() {

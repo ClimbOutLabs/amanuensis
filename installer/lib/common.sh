@@ -283,6 +283,7 @@ name_problem() {
     echo "\"$v\" is longer than 24 characters. $NAME_RULE"
   elif [[ $v == *- ]]; then
     echo "\"$v\" ends with a hyphen. End it with a letter or a number."
+  # Instance "x-slots" runs as project aman-x-slots, which is the sandbox project of instance "aman-x".
   elif [[ $v == *-slots ]]; then
     echo "\"$v\" must not end with -slots; that ending is used for the run-code sandbox of another instance."
   elif ! valid_name "$v"; then
