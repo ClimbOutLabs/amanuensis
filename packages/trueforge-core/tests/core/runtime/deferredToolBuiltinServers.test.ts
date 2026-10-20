@@ -13,19 +13,19 @@
  */
 import { createLogger } from 'winston';
 import { z } from 'zod';
+import { RemoteMCP, ToolSet } from '../../../src/core';
 import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
+import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import { isCallToolResponseResult, toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
+import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ConnectorBinding } from '../../../src/core/permissions/approvalTokens';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
   type SentinelHostContext,
 } from '../../../src/core/permissions/context';
-import { RemoteMCP, ToolSet } from '../../../src/core';
-import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
-import { isCallToolResponseResult, toolResultResponse } from '../../../src/core/mcp/IMCPServer';
-import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
-import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
-import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
