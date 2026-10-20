@@ -107,8 +107,7 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
-  /** The turn's search state, shared by every thread's host context so one thread's reads bind the others. */
-  protected readonly webSearchTurn = createWebSearchTurnState();
+  readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
