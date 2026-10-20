@@ -182,8 +182,8 @@ describe('Gmail write classification', () => {
 
   it('leaves off a name that looks like an address, shows the real address, and says so on the card', async () => {
     // The display name is quoted in the header and looks like an address, so only the address in brackets is kept.
-    const spoofed = mailboxOf('"boss@example.com" <other@evil.example>');
-    expect(spoofed).toEqual({ name: '', address: 'other@evil.example' });
+    const spoofed = mailboxOf('"boss@example.com" <other@example.org>');
+    expect(spoofed).toEqual({ name: '', address: 'other@example.org' });
     const decision = await classifyTier(
       gmail(
         'send_draft',
@@ -192,24 +192,24 @@ describe('Gmail write classification', () => {
       ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toContain('to other@evil.example.');
+    expect(decision.card?.plain_what).toContain('to other@example.org.');
     expect(decision.card?.plain_what).toContain(
       'The name was left off this address because it looked like an address.',
     );
-    expect(decision.card?.email?.to).toEqual([{ name: '', address: 'other@evil.example' }]);
+    expect(decision.card?.email?.to).toEqual([{ name: '', address: 'other@example.org' }]);
   });
 
   it('shows a saved draft recipient with the name Gmail holds, and the real address in full', async () => {
     const to = [
-      { name: 'boss@company.com', address: 'other@evil.example' },
-      { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+      { name: 'boss@example.com', address: 'other@example.org' },
+      { name: 'Jane Doe (Acme)', address: 'jane@example.org' },
     ];
     const decision = await classifyTier(
       gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, to, cc: [], bcc: [] } }),
       makeCtx(),
     );
     expect(decision.card?.plain_what).toContain(
-      'to boss@company.com (other@evil.example) and Jane Doe (Acme) (jane@acme.example).',
+      'to boss@example.com (other@example.org) and Jane Doe (Acme) (jane@example.org).',
     );
     expect(decision.card?.email?.to).toEqual(to);
   });

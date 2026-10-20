@@ -54,7 +54,7 @@ describe('assessDraft', () => {
     const result = forSend(
       plainDraft({
         id: 'd2',
-        to: '"boss@company.com" <other@evil.example>, "Jane Doe (Acme)" <jane@acme.example>',
+        to: '"boss@example.com" <other@example.org>, "Jane Doe (Acme)" <jane@example.org>',
         subject: 'Lease',
         body: 'Thursday works.',
       }),
@@ -63,8 +63,8 @@ describe('assessDraft', () => {
       ok: true,
       draft: {
         to: [
-          { name: 'boss@company.com', address: 'other@evil.example' },
-          { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+          { name: 'boss@example.com', address: 'other@example.org' },
+          { name: 'Jane Doe (Acme)', address: 'jane@example.org' },
         ],
         nameLeftOff: false,
       },

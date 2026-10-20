@@ -43,10 +43,10 @@ describe('message reading', () => {
 
   it('decodes an encoded name, and takes the address from the brackets when a name looks like one', () => {
     expect(
-      mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@evil.example>'),
+      mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@example.org>'),
     ).toEqual([
       { name: 'Maya López', address: 'maya@example.com' },
-      { name: 'boss@example.com', address: 'other@evil.example' },
+      { name: 'boss@example.com', address: 'other@example.org' },
     ]);
   });
 });
@@ -172,12 +172,12 @@ describe('result shapes', () => {
 
 describe('mailbox headers that could read two ways', () => {
   it('keeps the name Gmail holds on a quoted display name that looks like an address', () => {
-    expect(addressListIsPlain('"boss@company.com" <other@evil.example>')).toBe(true);
-    expect(mailboxesOf('"boss@company.com" <other@evil.example>')).toEqual([
-      { name: 'boss@company.com', address: 'other@evil.example' },
+    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(true);
+    expect(mailboxesOf('"boss@example.com" <other@example.org>')).toEqual([
+      { name: 'boss@example.com', address: 'other@example.org' },
     ]);
-    expect(mailboxesOf('"Jane Doe (Acme)" <jane@acme.example>')).toEqual([
-      { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+    expect(mailboxesOf('"Jane Doe (Acme)" <jane@example.org>')).toEqual([
+      { name: 'Jane Doe (Acme)', address: 'jane@example.org' },
     ]);
     expect(mailboxesOf('"Grace Lee" <grace@example.com>')).toEqual([
       { name: 'Grace Lee', address: 'grace@example.com' },
@@ -185,8 +185,8 @@ describe('mailbox headers that could read two ways', () => {
   });
 
   it('shows a parenthesis around the address as the whole text, so nothing is hidden', () => {
-    expect(mailboxesOf('other@evil.example (<boss@company.com>)')).toEqual([
-      { name: '', address: 'other@evil.example (<boss@company.com>)' },
+    expect(mailboxesOf('other@example.org (<boss@example.com>)')).toEqual([
+      { name: '', address: 'other@example.org (<boss@example.com>)' },
     ]);
   });
 
