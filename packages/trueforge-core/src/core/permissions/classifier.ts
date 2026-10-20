@@ -102,6 +102,7 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
+import { mailboxText, type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
@@ -1556,15 +1557,32 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Said on a card when a recipient's name was left off because it looked like an address. */
+const NAME_LEFT_OFF_LINE = ' The name was left off this address because it looked like an address.';
+
 /** Most characters of subject the card shows inside its sentence. */
 const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
 
-function displayList(addresses: readonly string[]): string {
-  const shown = addresses.map(address => escapeDisplayText(address));
+/** One recipient as `Name (address)`, or the bare address when it has no name, so the address is always shown. */
+/** Already-escaped items in a sentence: `A, B and C`. */
+function joinSentence(shown: readonly string[]): string {
   if (shown.length <= 1) {
     return shown.join('');
   }
   return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
+}
+
+function displayList(addresses: readonly string[]): string {
+  return joinSentence(addresses.map(address => escapeDisplayText(address)));
+}
+
+function recipientList(recipients: readonly Tier3Mailbox[]): string {
+  return joinSentence(recipients.map(mailbox => mailboxText(mailbox, { escape: escapeDisplayText })));
+}
+
+/** A recipient for the structured email block: its name and address, each escaped as the card escapes text. */
+function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
+  return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
 }
 
 function cardText(text: string): string {
@@ -1596,9 +1614,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
         ? 'change'
         : 'save';
   const parts = [
-    `to ${displayList(content.to) === '' ? 'no one' : displayList(content.to)}`,
-    ...(content.cc.length > 0 ? [`Copy: ${displayList(content.cc)}`] : []),
-    ...(content.bcc.length > 0 ? [`Hidden copy: ${displayList(content.bcc)}`] : []),
+    `to ${recipientList(content.to) === '' ? 'no one' : recipientList(content.to)}`,
+    ...(content.cc.length > 0 ? [`Copy: ${recipientList(content.cc)}`] : []),
+    ...(content.bcc.length > 0 ? [`Hidden copy: ${recipientList(content.bcc)}`] : []),
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
@@ -1617,8 +1635,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (kind === 'send'
       ? `Send ${subject} from your Gmail ${recipientsLine}.`
       : kind === 'change'
-        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${displayList(replaces.to) === '' ? 'no one' : displayList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) + threadLine;
+        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) +
+    threadLine +
+    (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1633,9 +1653,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     outbound_truncated: false,
     email: {
       action: kind,
-      to: content.to.map(address => escapeDisplayText(address)),
-      cc: content.cc.map(address => escapeDisplayText(address)),
-      bcc: content.bcc.map(address => escapeDisplayText(address)),
+      to: content.to.map(escapedMailbox),
+      cc: content.cc.map(escapedMailbox),
+      bcc: content.bcc.map(escapedMailbox),
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
       replaces:
@@ -1643,7 +1663,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
           ? null
           : {
               subject: escapeDisplayText(replaces.subject),
-              to: replaces.to.map(address => escapeDisplayText(address)),
+              to: replaces.to.map(escapedMailbox),
             },
       reply_in_thread:
         answered === undefined
@@ -1706,7 +1726,7 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     (draft === undefined ||
       !recipientsAllowed({
         allowlist: ctx.services.demoSendAllowlist,
-        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc].map(mailbox => mailbox.address),
       }))
   ) {
     return demoRefusal(DEMO_SEND_REFUSAL);

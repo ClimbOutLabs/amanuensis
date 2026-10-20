@@ -35,6 +35,10 @@ import {
   ContextMessageSchema,
 } from '@truefoundry/trueforge-core/core/events/schema';
 import { InternalToolCallInfoSchema, LLMToolMessageSchema } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import {
+  upgradeArchivedApprovalEvent,
+  upgradeArchivedTurnState,
+} from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
@@ -201,8 +205,17 @@ function withKnownToolTypes(value: unknown): unknown {
   return value;
 }
 
-const ImportEventListSchema = z.preprocess(
-  withKnownToolTypes,
+/** Approval cards an archive holds are upgraded to the name-and-address form, before the strict read. */
+function withStoredApprovalCards(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const events: unknown[] = value;
+  return events.map(upgradeArchivedApprovalEvent);
+}
+
+export const ImportEventListSchema = z.preprocess(
+  value => withStoredApprovalCards(withKnownToolTypes(value)),
   mixedList({
     schema: ImportEventSchema,
     label: LEFT_OUT.turnEvent,
@@ -338,7 +351,8 @@ const ImportTurnFieldsSchema = z.object({
   first_turn_id: z.string(),
   ancestor_ids: z.array(z.string()),
   previous_turn_id: z.string().nullable(),
-  state: z.unknown().transform((value, ctx) => {
+  state: z.unknown().transform((stored, ctx) => {
+    const value = upgradeArchivedTurnState(stored);
     // A finished or failed turn's output is what people read, so it stays strict.
     const parsed =
       isRecord(value) && (value['status'] === 'done' || value['status'] === 'error')

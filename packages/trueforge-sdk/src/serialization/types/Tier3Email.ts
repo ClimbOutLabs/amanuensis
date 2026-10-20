@@ -6,27 +6,28 @@ import * as serializers from "../index.js";
 import { Tier3EmailAction } from "./Tier3EmailAction.js";
 import { Tier3EmailReplaces } from "./Tier3EmailReplaces.js";
 import { Tier3EmailReplyInThread } from "./Tier3EmailReplyInThread.js";
+import { Tier3Mailbox } from "./Tier3Mailbox.js";
 
 export const Tier3Email: core.serialization.ObjectSchema<serializers.Tier3Email.Raw, TrueForge.Tier3Email> = core.serialization.object({
         "action": Tier3EmailAction,
-        "bcc": core.serialization.list(core.serialization.string()),
+        "bcc": core.serialization.list(Tier3Mailbox),
         "body": core.serialization.string(),
-        "cc": core.serialization.list(core.serialization.string()),
+        "cc": core.serialization.list(Tier3Mailbox),
         "replaces": Tier3EmailReplaces.nullable(),
         "replyInThread": core.serialization.property("reply_in_thread", Tier3EmailReplyInThread.nullable()),
         "subject": core.serialization.string(),
-        "to": core.serialization.list(core.serialization.string())
+        "to": core.serialization.list(Tier3Mailbox)
     });
 
 export declare namespace Tier3Email {
     export interface Raw {
         action: Tier3EmailAction.Raw;
-        bcc: string[];
+        bcc: Tier3Mailbox.Raw[];
         body: string;
-        cc: string[];
+        cc: Tier3Mailbox.Raw[];
         replaces?: Tier3EmailReplaces.Raw | null;
         reply_in_thread?: Tier3EmailReplyInThread.Raw | null;
         subject: string;
-        to: string[];
+        to: Tier3Mailbox.Raw[];
     }
 }
