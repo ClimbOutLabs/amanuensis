@@ -335,7 +335,7 @@ sandbox_ensure() {
       return 0
     fi
   fi
-  step=$(printf '%s' "$out" | sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
+  step=$(printf '%s' "$out" | LC_ALL=C sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
   case "$step" in
     apparmor | disk)
       sandbox_print_root_steps "$step"

@@ -51,7 +51,7 @@ private_ipv4() {
 
 # A label made only of numbers or hex (0x7f, 1e3) is read as part of an address by some systems, so it is not a name.
 has_numeric_label() {
-  local label
+  local LC_ALL=C label
   for label in ${1//./ }; do
     if [[ $label =~ ^(0x[0-9a-f]*|[0-9]+(e[0-9]+)?)$ ]]; then return 0; fi
   done
@@ -60,7 +60,7 @@ has_numeric_label() {
 
 # A private address, or a name that only resolves on a private network: .local, .ts.net, or a single label.
 private_host() {
-  local host
+  local LC_ALL=C host
   host=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   if [[ $host =~ ^[0-9.]+$ ]]; then
     private_ipv4 "$host"
@@ -79,7 +79,7 @@ network_interface_addresses() {
   local out=''
   case "$(uname -s)" in
     Darwin)
-      ifconfig 2>/dev/null | awk '/^[a-z]/ { iface = $1; sub(/:$/, "", iface) } /^[ \t]+inet / { print iface, $2 }' || true
+      ifconfig 2>/dev/null | LC_ALL=C awk '/^[a-z]/ { iface = $1; sub(/:$/, "", iface) } /^[ \t]+inet / { print iface, $2 }' || true
       return 0
       ;;
   esac
@@ -148,7 +148,7 @@ network_ipv4_addresses() {
 
 # This computer's short name, lowercase, when it is a usable host name.
 network_hostname() {
-  local name=''
+  local LC_ALL=C name=''
   if command -v hostname >/dev/null 2>&1; then
     name=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
   fi
@@ -159,7 +159,7 @@ network_hostname() {
 # This computer's own MagicDNS name when Tailscale is running (for example spark.example.ts.net): the DNSName of
 # "Self", never one of the other machines on the tailnet.
 network_tailscale_name() {
-  local name=''
+  local LC_ALL=C name=''
   if command -v tailscale >/dev/null 2>&1; then
     name=$(run_bounded 3 tailscale status --json 2>/dev/null | awk '/"Self"/ { in_self = 1 } in_self && /"DNSName"/ { print; exit }' |
       sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' || true)
@@ -192,7 +192,7 @@ network_public_addresses() {
 
 # Why a host given with --address cannot be used, as one sentence, or nothing when it is fine.
 address_problem() {
-  local host
+  local LC_ALL=C host
   host=$(lowercase "$1")
   if [ -z "$host" ]; then
     echo "An address is needed. Example: --address 192.168.1.20 or --address spark.local"

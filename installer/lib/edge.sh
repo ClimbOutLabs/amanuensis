@@ -23,6 +23,7 @@ edge_main_managed() { grep -q 'Managed by the Amanuensis installer' "$CADDY_ETC/
 
 # A DNS name Let's Encrypt can issue for: dotted labels, no port, not an address.
 valid_edge_host() {
+  local LC_ALL=C
   matches_whole "$1" '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' && ! matches_whole "$1" '^[0-9.]+$'
 }
 

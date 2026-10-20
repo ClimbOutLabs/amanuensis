@@ -777,7 +777,7 @@ instance_enforce_single_owner() { # name
   [ -n "$list" ] || return 1
   while IFS= read -r key; do
     reg_unset "$name" "$key"
-  done < <(sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")
+  done < <(LC_ALL=C sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")
   if [ -f "$env" ]; then
     env_managed_set "$env" OIDC_ALLOWED_EMAILS "$(reg_get "$name" owner_email)"
     env_drop_outside_block "$env" OIDC_ALLOWED_EMAILS

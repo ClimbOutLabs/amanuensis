@@ -243,11 +243,32 @@ matches_whole() {
 }
 
 valid_name() {
+  local LC_ALL=C
   [ "$1" != machine ] && matches_whole "$1" '^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$'
 }
 
 valid_email() {
+  local LC_ALL=C
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
+}
+
+# The letter ranges in these helpers run in the C locale. On macOS, a range like A-Z follows the user's locale,
+# so lowercase letters could count as capitals. Only the ASCII tests are C; messages keep the user's locale.
+name_has_capital() {
+  local LC_ALL=C
+  [[ $1 == *[A-Z]* ]]
+}
+
+name_starts_wrong() {
+  local LC_ALL=C
+  [[ $1 == [!a-z]* ]]
+}
+
+# The characters of a name that are not lowercase letters, digits or hyphens, as bytes, so a multibyte
+# character stays whole for the message.
+name_other_chars() {
+  local LC_ALL=C
+  printf '%s' "${1//[a-z0-9-]/}"
 }
 
 # The reason a value is refused, or nothing when it is fine. The prompts show it and ask again.
@@ -264,12 +285,12 @@ name_problem() {
     echo "\"$v\" has an underscore. $NAME_RULE"
   elif [[ $v == *[[:space:]]* ]]; then
     echo "\"$v\" has a space. $NAME_RULE"
-  elif [[ $v == *[A-Z]* ]]; then
+  elif name_has_capital "$v"; then
     echo "\"$v\" has capital letters. $NAME_RULE"
-  elif [[ $v == [!a-z]* ]]; then
+  elif name_starts_wrong "$v"; then
     echo "\"$v\" does not start with a letter. $NAME_RULE"
-  elif [[ $v == *[!a-z0-9-]* ]]; then
-    rest=${v//[a-z0-9-]/}
+  elif [ -n "$(name_other_chars "$v")" ]; then
+    rest=$(name_other_chars "$v")
     echo "\"$v\" has the character ${rest:0:1}. $NAME_RULE"
   elif [ "${#v}" -gt 24 ]; then
     echo "\"$v\" is longer than 24 characters. $NAME_RULE"
@@ -290,6 +311,7 @@ email_problem() {
 
 # A bare origin: scheme, host and optional port; no path, query or userinfo.
 valid_origin() {
+  local LC_ALL=C
   matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
 }
 
@@ -300,6 +322,7 @@ valid_port() {
 
 # The state folder goes into shell profiles and scheduled jobs, so it must be an absolute path of plain characters.
 valid_home_path() {
+  local LC_ALL=C
   matches_whole "$1" '^/[A-Za-z0-9._/+@:=,-]*$' && case "$1" in *..* | *//*) return 1 ;; esac
 }
 
