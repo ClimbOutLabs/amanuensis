@@ -1678,14 +1678,19 @@ function demoRefusal(reason_detail: string): TierDecision {
 }
 
 /**
- * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance
- * refuses every connector call that is not declared read-only. Only Aman's own Gmail tools check recipients.
+ * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
+ * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
+ * name. Only Aman's own Gmail tools check recipients.
  */
-function demoRefusesConnector(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+function demoRefusesConnector(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  extraction: ExtractionResult;
+}): boolean {
   return (
     input.ctx.services.demoSendAllowlist !== null &&
     input.action.tool_type === 'mcp' &&
-    input.action.mcp_hints.read_only_hint !== true
+    (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
 }
 
@@ -2015,6 +2020,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     server_name: action.mcp_server_name,
     read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
   });
+  // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
+  const namedSend = extraction.external_service && !extraction.connector_read;
+  // A connector read is private data, so a search in the same chat asks afterwards.
+  const readsPrivateData = extraction.connector_read || sensitiveReadHit(action.canonical_params);
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -2044,7 +2053,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A send whose card would hide a recipient, hidden characters or cut content is refused: approval must cover all of it.
   if (extraction.incomplete_send !== null) {
     // A demo refuses the call whatever the message holds, so it says so rather than ask for a fuller one.
-    if (demoRefusesConnector({ action, ctx })) {
+    if (demoRefusesConnector({ action, ctx, extraction })) {
       return demoRefusal(DEMO_CONNECTOR_REFUSAL);
     }
     return autoDenyDecision({
@@ -2063,7 +2072,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     }
   }
 
-  if (demoRefusesConnector({ action, ctx })) {
+  if (demoRefusesConnector({ action, ctx, extraction })) {
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
@@ -2076,7 +2085,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier3Decision({
       card: {
         // The external-service sentence wins: it is the more specific warning about where this goes.
-        plain_what: extraction.external_service
+        plain_what: namedSend
           ? externalServiceWhat({
               tool_name: action.tool_name,
               destination: fields.destination,
@@ -2101,7 +2110,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       },
       reason: destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
-      sensitive_read: sensitiveReadHit(action.canonical_params),
+      sensitive_read: readsPrivateData,
       escalated: true,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -2115,9 +2124,9 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Name-based Tier 3 classes: external-service (non-fallback), destructive, install.
   const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
   const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
-  if (extraction.external_service || isDestructive || isInstall) {
+  if (namedSend || isDestructive || isInstall) {
     const { fields } = extraction;
-    const what = extraction.external_service
+    const what = namedSend
       ? externalServiceWhat({
           tool_name: action.tool_name,
           destination: fields.destination,
@@ -2141,7 +2150,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         destination_host: fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
       },
-      reason: extraction.external_service ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
+      reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
       approval_token_id: await mintPlainToken({
@@ -2155,7 +2164,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
   // tool (the user's standing grant) skips the card, but only after every escalation above, never
-  // for a sensitive read, and only while the tool still claims to be read-only and explicitly
+  // for a sensitive path, and only while the tool still claims to be read-only and explicitly
   // closed-world (an absent openWorldHint means open).
   if (
     action.tool_type === 'mcp' &&
@@ -2170,7 +2179,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         reason_detail: `First-party read-only tool \`${action.tool_name}\`${
           action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
         }.`,
-        sensitive_read: false,
+        sensitive_read: readsPrivateData,
       });
     }
     if (
@@ -2185,7 +2194,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       return tier1Decision({
         reason: TOOL_GRANT_REASON,
         reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
-        sensitive_read: false,
+        sensitive_read: readsPrivateData,
       });
     }
   }
@@ -2208,7 +2217,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     reason_detail: recognized
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
-    sensitive_read: sensitiveReadHit(action.canonical_params),
+    sensitive_read: readsPrivateData,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
