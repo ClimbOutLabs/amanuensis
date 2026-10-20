@@ -20,6 +20,15 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -44,14 +53,6 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
-
-export const SPACE_SERVER_ID = 'space';
-export const LIST_SPACES_TOOL_NAME = 'list_spaces';
-export const GET_SPACE_TOOL_NAME = 'get_space';
-export const CREATE_SPACE_TOOL_NAME = 'create_space';
-export const UPDATE_SPACE_TOOL_NAME = 'update_space';
-export const REVERT_SPACE_TOOL_NAME = 'revert_space';
-export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no

@@ -32,6 +32,13 @@ import {
   SCHEDULE_SERVER_ID,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  isSpaceReadToolName,
+  isSpaceWriteToolName,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -1916,6 +1923,57 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
   return failClosedDecision({ reason_detail: 'Unknown schedule tool.' });
 }
 
+/**
+ * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
+ * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
+ * that revert_space can restore. Any other name fails closed.
+ */
+function classifySpaceTool(action: SentinelAction): TierDecision {
+  if (isSpaceWriteToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_write', reason_detail: spaceWriteLine(action), sensitive_read: false });
+  }
+  if (isSpaceReadToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_read', reason_detail: 'Read your spaces.', sensitive_read: false });
+  }
+  return failClosedDecision({ reason_detail: 'Unknown space tool.' });
+}
+
+/** Most characters of a space's name the line in the chat shows. */
+const SPACE_NAME_MAX_CHARS = 80;
+
+/**
+ * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, made safe
+ * to show, then capped the way the Gmail card caps a subject. Null when the call carries no name, or
+ * the name is only whitespace, so the line falls back to naming no space.
+ */
+function spaceDisplayName(name: string | null): string | null {
+  if (name === null) {
+    return null;
+  }
+  const oneLine = name.replace(/\s+/g, ' ').trim();
+  if (oneLine === '') {
+    return null;
+  }
+  const chars = Array.from(escapeDisplayText(oneLine));
+  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : chars.join('');
+}
+
+/**
+ * The plain line a space write shows instead of a card, parallel to the line a silent search shows.
+ * Create and update calls carry the space's name; a revert call names only the space's id, so its
+ * line cannot.
+ */
+function spaceWriteLine(action: SentinelAction): string {
+  const shown = spaceDisplayName(stringParam(action.canonical_params, 'name'));
+  if (action.tool_name === CREATE_SPACE_TOOL_NAME) {
+    return shown === null ? 'Created a space.' : `Created space: ${shown}`;
+  }
+  if (action.tool_name === UPDATE_SPACE_TOOL_NAME) {
+    return shown === null ? 'Updated a space.' : `Updated space: ${shown}`;
+  }
+  return 'Restored a space to an earlier version.';
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -2200,6 +2258,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
+    return classifySpaceTool(action);
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
