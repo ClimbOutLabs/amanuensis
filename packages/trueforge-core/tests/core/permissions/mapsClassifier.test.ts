@@ -336,6 +336,7 @@ describe('maps without asking', () => {
     ...overrides,
   });
   const maps_on = withServices({ mapsWithoutAsking: () => Promise.resolve(true) });
+  const maps_off = withServices({ mapsWithoutAsking: () => Promise.resolve(false) });
 
   it("keeps today's card when the setting is off", async () => {
     for (const services of [defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), withServices({})]) {
@@ -346,6 +347,21 @@ describe('maps without asking', () => {
         'Send "Paris" to nominatim.openstreetmap.org to find it, then load map tiles for that area from tile.openstreetmap.org.',
       );
     }
+  });
+
+  it('gives the always-Tier-3 detail when the setting is off', async () => {
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(maps_off));
+    expect(decision.reason_detail).toBe('Maps tools are always Tier 3 by policy.');
+  });
+
+  it('says why a map asked when the setting is on but the chat is not clean', async () => {
+    const ctx = makeCtx(maps_on);
+    markPrivateDataRead(ctx.web_search);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.reason_detail).toBe(
+      'Maps asked this time because this chat read private data or the request holds text that must not leave.',
+    );
   });
 
   it('runs a clean chat silently when the setting is on', async () => {

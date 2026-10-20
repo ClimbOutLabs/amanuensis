@@ -1563,9 +1563,16 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Detail for a maps call that asks although the user let maps run without asking, because the chat is not clean. */
+const MAPS_ASKED_DETAIL =
+  'Maps asked this time because this chat read private data or the request holds text that must not leave.';
+
+/** Detail for a maps call that always asks, because the user has not let maps run without asking. */
+const MAPS_ALWAYS_ASKS_DETAIL = 'Maps tools are always Tier 3 by policy.';
+
 /**
- * An embedded maps call that runs without asking. Only when the user let maps run without asking and the
- * search provider's silent-run rules hold: the chat has read no private data, and the outbound guard
+ * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
+ * the search provider's silent-run rules hold: the chat has read no private data, and the outbound guard
  * finds nothing sensitive in the call's strings. Returns undefined when the call should show its card.
  */
 async function classifyMapsSilently(input: {
@@ -1573,9 +1580,6 @@ async function classifyMapsSilently(input: {
   ctx: ClassifyContext;
 }): Promise<TierDecision | undefined> {
   const { action, ctx } = input;
-  if (!(await ctx.services.mapsWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))) {
-    return undefined;
-  }
   const strings = collectOutboundStrings(action.canonical_params);
   const { verdict } = await outboundGuard({ ctx, strings });
   if (!verdict.ok) {
@@ -2384,7 +2388,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           sensitive_read: false,
         });
       }
-      const silent = await classifyMapsSilently({ action, ctx });
+      const runsWithoutAsking = await ctx.services.mapsWithoutAsking({
+        tenant_id: ctx.tenant_id,
+        created_by: ctx.created_by,
+      });
+      const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
       if (silent !== undefined) {
         return silent;
       }
@@ -2408,7 +2416,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: 'maps_tool',
-        reason_detail: 'Maps tools are always Tier 3 by policy.',
+        reason_detail: runsWithoutAsking ? MAPS_ASKED_DETAIL : MAPS_ALWAYS_ASKS_DETAIL,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
