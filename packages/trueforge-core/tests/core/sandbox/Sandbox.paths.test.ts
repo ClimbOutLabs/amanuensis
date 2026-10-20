@@ -1,4 +1,10 @@
-import { createHash } from 'node:crypto';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
@@ -24,9 +30,15 @@ import {
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
-import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
+import {
+  withTrustedPath,
+  type ExecResult,
+  type SandboxExecParams,
+  type SandboxProvider,
+} from '../../../src/core/sandbox/provider/Provider';
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
+  buildWriteAndRunScriptCommand,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -42,13 +54,21 @@ import {
   type RepositoryCommandSourceObserver,
   type WorkspaceVerificationCoordinator,
 } from '../../../src/core/sandbox/Sandbox';
-import { SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
-import { REQUESTED_SKILLS_FILE_NAME, SkillMounter, type GitSkill } from '../../../src/core/sandbox/skills/SkillMounter';
+import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError } from '../../../src/core/sandbox/SandboxErrors';
+import {
+  REQUESTED_SKILLS_FILE_NAME,
+  SkillMounter,
+  type GitSkill,
+  type Skill,
+} from '../../../src/core/sandbox/skills/SkillMounter';
 import { structuredEditObservationForTargets } from '../../../src/core/sandbox/structuredEditPrecondition';
+import { GIT_INDEX_ENTRIES_COMMAND, TRACKED_WORKTREE_COMMAND } from '../../../src/core/sandbox/workspaceStateCapture';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { withTimeout } from '../../../src/core/util/promiseUtils';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { fakeTrackedState } from './fakeTrackedState';
+import { realCommandExec } from './realCommandExec';
 
 function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
@@ -79,13 +99,21 @@ const DEFAULT_CHECKOUT_ID = implementationPlanCheckoutId({
 const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 
+const APP_INDEX_SHA = '1'.repeat(40);
+const APP_WORKTREE_SHA = '2'.repeat(40);
+const APP_CHANGED_LISTING =
+  fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: '3'.repeat(40) }])[
+    TRACKED_WORKTREE_COMMAND
+  ] ?? '';
+
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
+
 const BASE_GIT_STATE_RESULTS: Readonly<Record<string, string>> = {
   'git rev-parse --show-toplevel': '/repo',
   'git rev-parse --abbrev-ref HEAD': 'feature/reliable-agent',
   'git rev-parse HEAD': '0123456789abcdef',
   [GIT_TRACKED_PATH_TAGS_COMMAND]: 'H src/app.ts\0',
-  'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --': '',
-  'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts',
+  ...fakeTrackedState([{ path: 'src/app.ts', indexSha: APP_INDEX_SHA, worktreeSha: APP_WORKTREE_SHA }]),
   'git ls-files --others --exclude-standard -z': '',
 };
 
@@ -115,6 +143,10 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
   const { exec: overrideExec, ...providerOverrides } = overrides;
   const exec = async (params: SandboxExecParams): Promise<ExecResult> => {
     const result = overrideExec === undefined ? await readyExec() : await overrideExec(params);
+    const emptyTrackedState = EMPTY_TRACKED_STATE[params.command];
+    if (emptyTrackedState !== undefined && result.success && result.response.result === 'ok') {
+      return { success: true, response: { ...result.response, result: emptyTrackedState } };
+    }
     if (
       params.command === BOUND_REPOSITORY_STATE_COMMAND &&
       result.success &&
@@ -150,7 +182,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
         },
       };
     }
-    if (params.command.startsWith('python3 -c ') && result.success && result.response.result === 'ok') {
+    if (params.command.startsWith('python3 -I -S -c ') && result.success && result.response.result === 'ok') {
       const path = params.command.includes('src/runtime.ts')
         ? 'src/runtime.ts'
         : params.command.includes('src/app.ts')
@@ -187,7 +219,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
+    exec: realCommandExec(exec),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -804,7 +836,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result =
@@ -892,7 +924,7 @@ describe('Sandbox provider-owned paths', () => {
     );
 
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
-    const applyIndex = commandOrder.findIndex(command => command.startsWith('git apply --recount --unidiff-zero -- '));
+    const applyIndex = commandOrder.findIndex(command => command.includes('git apply --recount --unidiff-zero -- '));
     const durableIndex = commandOrder.lastIndexOf('load-durable-grant');
     const checkoutIndex = commandOrder.map(command => command.startsWith('ls -di ')).lastIndexOf(true);
     const branchIndex = commandOrder.findIndex(
@@ -929,7 +961,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse HEAD') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: grant.plan.head_sha } });
       }
-      if (params.command.startsWith('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
+      if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
         requestedDispatches += 1;
       }
       const result = params.command === 'git rev-parse --show-toplevel' ? '/repo' : 'ok';
@@ -1358,7 +1390,7 @@ describe('Sandbox provider-owned paths', () => {
     const grant = planGrant();
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -1427,7 +1459,7 @@ describe('Sandbox provider-owned paths', () => {
     });
     let requestedDispatches = 0;
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         requestedDispatches += 1;
       }
       const result =
@@ -2411,7 +2443,7 @@ describe('Sandbox provider-owned paths', () => {
         content: Buffer.from(patch.replace('@@ -1 +1 @@', '@@ -1,1 +1,1 @@'), 'utf-8'),
       }),
     );
-    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.startsWith('git apply'));
+    const patchCalls = exec.mock.calls.map(call => call[0]).filter(call => call.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]).toEqual(expect.objectContaining({ cwd: '/repo' }));
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
@@ -2486,7 +2518,7 @@ describe('Sandbox provider-owned paths', () => {
     // file's current content, rather than reject it and fall back to unstructured shell edits.
     const originalContent = 'export function add(a, b) {\n  return a + b;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2536,7 +2568,7 @@ describe('Sandbox provider-owned paths', () => {
     );
     const patchCalls = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .filter(callArgs => callArgs.command.startsWith('git apply'));
+      .filter(callArgs => callArgs.command.includes('git apply'));
     expect(patchCalls).toHaveLength(2);
     expect(patchCalls[0]?.command).toContain('git apply --recount --unidiff-zero --check');
     expect(patchCalls[1]?.command).toContain('git apply --recount --');
@@ -2553,7 +2585,7 @@ describe('Sandbox provider-owned paths', () => {
       if (params.command === 'git rev-parse --show-toplevel') {
         return Promise.resolve({ success: true, response: { exitCode: 0, result: '/repo' } });
       }
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         const content = params.command.includes('"sub/a.txt"') ? nestedContent : rootContent;
         return Promise.resolve({
           success: true,
@@ -2624,7 +2656,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toMatch(/mixes|embeds/i);
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(callArgs => callArgs[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(callArgs => callArgs[0].command.includes('git apply'))).toBe(false);
   });
 
   it('rejects ambiguous plain multi-file diffs instead of corrupting their hunk boundaries', async () => {
@@ -2647,7 +2679,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).toContain('Git-format unified diff');
     expect(uploadFile).not.toHaveBeenCalled();
-    expect(exec.mock.calls.some(call => call[0].command.startsWith('git apply'))).toBe(false);
+    expect(exec.mock.calls.some(call => call[0].command.includes('git apply'))).toBe(false);
   });
 
   it('sends exact text replacements as data through one approval-gated edit', async () => {
@@ -2688,9 +2720,9 @@ describe('Sandbox provider-owned paths', () => {
     expect(uploadedScript?.content.toString('utf-8')).toContain('replacement would not change the file');
     const executed = exec.mock.calls
       .map(callArgs => callArgs[0])
-      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c '));
+      .find(params => params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c '));
     expect(executed?.cwd).toBe('/repo');
-    expect(executed?.command).toMatch(/^python3 '.*\.py' '.*\.json'$/);
+    expect(executed?.command).toMatch(/^python3 -I -S '.*\.py' '.*\.json'$/);
     expect(executed?.command).not.toContain('yield update');
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
   });
@@ -2698,7 +2730,7 @@ describe('Sandbox provider-owned paths', () => {
   it('proceeds unchanged when old_text matches the current file content exactly once', async () => {
     const fileContent = 'function reconnect() {\n  break;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2741,7 +2773,7 @@ describe('Sandbox provider-owned paths', () => {
     // it never guesses — and point at the real (tab-indented) passage instead of substituting it.
     const fileContent = 'function connect() {\n  if (down) {\n\t\tbreak;\n  }\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2781,7 +2813,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text matches more than one location', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2819,7 +2851,7 @@ describe('Sandbox provider-owned paths', () => {
   it('dispatches replace_text when old_text matches more than one location and replace_all is true', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\nfunction g() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2860,7 +2892,7 @@ describe('Sandbox provider-owned paths', () => {
   it('rejects replace_text without dispatching when old_text has no acceptable match', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2899,7 +2931,7 @@ describe('Sandbox provider-owned paths', () => {
   it("surfaces the replace script's own {error: string} JSON output at the top level", async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2908,7 +2940,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         return Promise.resolve({
           success: true,
           response: { exitCode: 1, result: JSON.stringify({ error: 'replacement would not change the file' }) },
@@ -2941,7 +2973,7 @@ describe('Sandbox provider-owned paths', () => {
   it('falls back to a generic rejection when the failed script output is not a {error: string} shape', async () => {
     const fileContent = 'function f() {\n  return 1;\n}\n';
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-      if (params.command.startsWith('python3 -c ') && params.command.includes('base64')) {
+      if (params.command.startsWith('python3 -I -S -c ') && params.command.includes('base64')) {
         return Promise.resolve({
           success: true,
           response: {
@@ -2950,7 +2982,7 @@ describe('Sandbox provider-owned paths', () => {
           },
         });
       }
-      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -c ')) {
+      if (params.command.startsWith('python3 ') && !params.command.startsWith('python3 -I -S -c ')) {
         // Neither a string `error`, nor JSON at all in the second call — both must be handled
         // without throwing out of the `hasStringErrorProperty` narrowing.
         return Promise.resolve({ success: true, response: { exitCode: 1, result: JSON.stringify({ error: 42 }) } });
@@ -3007,7 +3039,7 @@ describe('Sandbox provider-owned paths', () => {
 
   it('does not apply a patch that fails validation', async () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> =>
-      params.command.startsWith('python3 -c ')
+      params.command.startsWith('python3 -I -S -c ')
         ? Promise.resolve({
             success: true,
             response: {
@@ -3041,7 +3073,7 @@ describe('Sandbox provider-owned paths', () => {
 
     const response = await sandbox.callTool(call, { status: 'allow', scope: 'once' }, context);
 
-    expect(exec.mock.calls.filter(call => call[0].command.startsWith('git apply'))).toHaveLength(1);
+    expect(exec.mock.calls.filter(call => call[0].command.includes('git apply'))).toHaveLength(1);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
   });
 
@@ -3163,16 +3195,11 @@ describe('Sandbox provider-owned paths', () => {
   it.each([
     {
       name: 'tracked worktree',
-      afterState: {
-        'git diff --binary --no-ext-diff --no-textconv --no-color --': 'diff --git a/src/app.ts b/src/app.ts\n+changed',
-      },
+      afterState: { [TRACKED_WORKTREE_COMMAND]: APP_CHANGED_LISTING },
     },
     {
       name: 'staged index',
-      afterState: {
-        'git diff --cached --binary --no-ext-diff --no-textconv --no-color HEAD --':
-          'diff --git a/src/app.ts b/src/app.ts\n+staged',
-      },
+      afterState: { [GIT_INDEX_ENTRIES_COMMAND]: `100644 ${'4'.repeat(40)} 0\tsrc/app.ts\0` },
     },
     { name: 'HEAD', afterState: { 'git rev-parse HEAD': 'fedcba9876543210' } },
     {
@@ -3336,18 +3363,15 @@ describe('Sandbox provider-owned paths', () => {
     try {
       let trackedChanged = false;
       const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
-        if (
-          params.command.startsWith('git apply --recount --unidiff-zero -- ') &&
-          !params.command.includes('--check')
-        ) {
+        if (params.command.includes('git apply --recount --unidiff-zero -- ') && !params.command.includes('--check')) {
           trackedChanged = true;
           // The provider mutated the checkout, then did not return until after
           // the original fixed 90-second workspace lease had expired.
           jest.setSystemTime(new Date(Date.now() + 91_000));
         }
         const result =
-          params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-            ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+          params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+            ? APP_CHANGED_LISTING
             : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
         return Promise.resolve({ success: true, response: { exitCode: 0, result } });
       });
@@ -3449,8 +3473,8 @@ describe('Sandbox provider-owned paths', () => {
     const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
       if (params.command === 'touch src/app.ts') trackedChanged = true;
       const result =
-        params.command === 'git diff --binary --no-ext-diff --no-textconv --no-color --' && trackedChanged
-          ? 'diff --git a/src/app.ts b/src/app.ts\n+changed'
+        params.command === TRACKED_WORKTREE_COMMAND && trackedChanged
+          ? APP_CHANGED_LISTING
           : (BASE_GIT_STATE_RESULTS[params.command] ?? 'ok');
       return Promise.resolve({ success: true, response: { exitCode: 0, result } });
     });
@@ -4060,5 +4084,476 @@ describe('Sandbox provider-owned paths', () => {
     expect(portableCommand).toContain("mv -f 'mcp-client/mcp_client.py.new' 'mcp-client/mcp_client.py'");
     expect(portableCommand).toContain("ln -sf '../mcp_client.py'");
     expect(portableCommand).toContain('mcp-client/bin/mcp-client');
+  });
+});
+
+/** Runs a guest command for real, in `cwd`, with only the env the test allows. */
+function runGuestCommand(input: { command: string; cwd: string; env: Record<string, string> }): Promise<ExecResult> {
+  return new Promise(resolve => {
+    execFile(
+      '/bin/sh',
+      ['-c', input.command],
+      { cwd: input.cwd, env: { PATH: '/usr/bin:/bin', ...input.env }, timeout: 60_000 },
+      (error, stdout, stderr) => {
+        const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
+        resolve({ success: true, response: { exitCode, result: `${stdout}${stderr}` } });
+      },
+    );
+  });
+}
+
+/**
+ * A slot-like provider: its commands and files are real, under `root`. Like the slot agent, it refuses
+ * every env name except TFY_SKILLS_DIR at the skills directory.
+ */
+function slotLikeProvider(input: {
+  root: string;
+  skillsDir: string;
+  execCalls: SandboxExecParams[];
+  refuseUpload?: ((remotePath: string) => boolean) | undefined;
+}): SandboxProvider {
+  const { root, skillsDir, execCalls, refuseUpload } = input;
+  const transferDir = join(root, 'transfer');
+  return makeProvider({
+    network: 'none',
+    exec: (params): Promise<ExecResult> => {
+      execCalls.push(params);
+      const env = params.env ?? {};
+      const refused = Object.keys(env).filter(name => name !== 'TFY_SKILLS_DIR' || env[name] !== skillsDir);
+      if (refused.length > 0) {
+        return Promise.resolve({ success: false, error: `env names are not allowed: ${refused.join(', ')}` });
+      }
+      return runGuestCommand({ command: params.command, cwd: root, env });
+    },
+    getWorkspaceDir: () => join(root, 'workspace'),
+    getDocumentSnapshotDir: () => transferDir,
+    getToolResultDumpDir: () => join(root, 'tool-results'),
+    getFileUploadsDir: () => join(root, 'uploads'),
+    getGitCredentialsPath: () => join(root, '.git-credentials'),
+    getSkillsDir: () => skillsDir,
+    getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
+    uploadFile: async ({ remotePath, content }) => {
+      if (refuseUpload?.(remotePath) === true) {
+        throw new Error('upload refused');
+      }
+      // Like the slot agent: one write is capped at 25 MB, except in the transfer folder (128 MB).
+      const limit = remotePath.startsWith(`${transferDir}/`) ? 128 * 1024 * 1024 : 25 * 1024 * 1024;
+      if (content.byteLength > limit) {
+        throw new Error('file is too large');
+      }
+      await mkdir(dirname(remotePath), { recursive: true });
+      await writeFile(remotePath, content);
+    },
+  });
+}
+
+/** A registry skill tarball holding one SKILL.md and a file of `bytes` bytes, built with the host's tar. */
+function bigSkillArchive(input: { root: string; name: string; bytes: number }): Buffer {
+  const { root, name, bytes } = input;
+  const source = mkdtempSync(join(root, `${name}-src-`));
+  writeFileSync(join(source, 'SKILL.md'), `# ${name}\n`);
+  writeFileSync(join(source, 'big.bin'), randomBytes(bytes));
+  const archive = join(root, `${name}.tar`);
+  execFileSync('/usr/bin/tar', ['-cf', archive, '-C', source, '.']);
+  return readFileSync(archive);
+}
+
+/** A registry skill tarball holding one SKILL.md, built with the host's tar. */
+function skillArchive(input: { root: string; name: string }): Buffer {
+  const { root, name } = input;
+  const source = mkdtempSync(join(root, `${name}-src-`));
+  writeFileSync(join(source, 'SKILL.md'), `# ${name}\n`);
+  const archive = join(root, `${name}.tar`);
+  execFileSync('/usr/bin/tar', ['-cf', archive, '-C', source, '.']);
+  return readFileSync(archive);
+}
+
+async function serveArchives(
+  archives: ReadonlyMap<string, Buffer>,
+): Promise<{ urlFor: (path: string) => string; close: () => Promise<void> }> {
+  const server: Server = createServer((request, response) => {
+    const bytes = archives.get(request.url ?? '');
+    if (bytes === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'application/x-tar' }).end(bytes);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 0;
+  return {
+    urlFor: path => `http://127.0.0.1:${String(port)}${path}`,
+    close: () => new Promise<void>(resolve => server.close(() => resolve())),
+  };
+}
+
+function registrySkill(input: { name: string; presignedUrl: string }): Skill {
+  const { name, presignedUrl } = input;
+  return {
+    type: 'registry',
+    name,
+    description: name,
+    fqn: `agent-skill:acme/team/${name}:1`,
+    preload: false,
+    skillMdContent: null,
+    presignedUrl,
+  };
+}
+
+type BrokenShape = 'file-then-folder' | 'file-then-subpath' | 'long-name' | 'dot-file' | 'dot-in-folder';
+
+const BROKEN_SHAPES: readonly BrokenShape[] = [
+  'file-then-folder',
+  'file-then-subpath',
+  'long-name',
+  'dot-file',
+  'dot-in-folder',
+];
+
+// Each shape lists fine on the host but cannot be unpacked in the sandbox.
+const BROKEN_ARCHIVE_SCRIPT = `
+import io, sys, tarfile
+out, shape = sys.argv[1], sys.argv[2]
+members = {
+    'file-then-folder': [('a/b', b'x'), ('a', b'y')],
+    'file-then-subpath': [('x', b'x'), ('x/y', b'y')],
+    'long-name': [('n' * 300 + '/SKILL.md', b'z')],
+    'dot-file': [('.', b'z')],
+    'dot-in-folder': [('a/.', b'z')],
+}[shape]
+with tarfile.open(out, 'w', format=tarfile.PAX_FORMAT) as tar:
+    for name, data in members:
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+`;
+
+function brokenArchive(shape: BrokenShape): Buffer {
+  const work = mkdtempSync(join(tmpdir(), 'broken-archive-'));
+  try {
+    const out = join(work, 'broken.tar');
+    execFileSync('python3', ['-I', '-c', BROKEN_ARCHIVE_SCRIPT, out, shape]);
+    return readFileSync(out);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+describe('Sandbox skills without a network', () => {
+  const gitSkill = {
+    type: 'git',
+    name: 'echo',
+    description: 'Echo',
+    url: 'https://github.com/acme/skills.git',
+    path: '',
+    ref: 'a'.repeat(40),
+  } satisfies GitSkill;
+
+  const execTrue = {
+    name: SANDBOX_EXEC_TOOL_NAME,
+    arguments: { intent: 'Run command', purpose: 'execute', command: 'true' },
+  };
+
+  it('copies the skills into a no-network sandbox and the downloader confirms them offline', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([
+        ['/alpha.tar', skillArchive({ root, name: 'alpha' })],
+        ['/beta.tar', skillArchive({ root, name: 'beta' })],
+      ]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({ root, skillsDir, execCalls });
+      const alpha = registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') });
+      const beta = registrySkill({ name: 'beta', presignedUrl: archives.urlFor('/beta.tar') });
+      const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [alpha, beta] }) });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
+      expect(readFileSync(join(skillsDir, 'beta', 'SKILL.md'), 'utf-8')).toBe('# beta\n');
+      const skillInit = execCalls.filter(call => call.env?.['TFY_SKILLS_DIR'] !== undefined);
+      expect(skillInit).toHaveLength(1);
+      expect(skillInit[0]?.env).toEqual({ TFY_SKILLS_DIR: skillsDir });
+      expect(execCalls.some(call => call.command === 'true')).toBe(true);
+      const builder = new InstructionBuilder('prompt');
+      sandbox.buildInstruction(builder);
+      expect(builder.build()).not.toContain('unavailable');
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves out a skill that cannot be downloaded, names it as unavailable, and still copies the rest', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(new Map([['/alpha.tar', skillArchive({ root, name: 'alpha' })]]));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const broken = registrySkill({ name: 'gamma', presignedUrl: archives.urlFor('/missing.tar') });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') }), broken],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'alpha', 'SKILL.md'), 'utf-8')).toBe('# alpha\n');
+      const builder = new InstructionBuilder('prompt');
+      sandbox.buildInstruction(builder);
+      const prompt = builder.build();
+      expect(prompt).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
+      expect(prompt).not.toContain('alpha: unavailable');
+      if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+        ],
+      });
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(BROKEN_SHAPES)(
+    'an archive that is %s leaves only its own skill out; the other skill and an exec still work',
+    async shape => {
+      const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+      const archives = await serveArchives(
+        new Map([
+          ['/bad.tar', brokenArchive(shape)],
+          ['/good.tar', skillArchive({ root, name: 'good' })],
+        ]),
+      );
+      try {
+        const skillsDir = join(root, 'skills');
+        const execCalls: SandboxExecParams[] = [];
+        const provider = slotLikeProvider({ root, skillsDir, execCalls });
+        const sandbox = makeSandbox(provider, {
+          skillMounter: new SkillMounter({
+            skills: [
+              registrySkill({ name: 'bad', presignedUrl: archives.urlFor('/bad.tar') }),
+              registrySkill({ name: 'good', presignedUrl: archives.urlFor('/good.tar') }),
+            ],
+          }),
+        });
+
+        const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+        expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+        expect(execCalls.some(call => call.command === 'true')).toBe(true);
+        expect(readFileSync(join(skillsDir, 'good', 'SKILL.md'), 'utf-8')).toBe('# good\n');
+        expect(existsSync(join(skillsDir, 'bad'))).toBe(false);
+        if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+          throw new Error('Expected a text result');
+        }
+        expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+          notices: [
+            "The skill bad couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills.",
+          ],
+        });
+      } finally {
+        await archives.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('delivers a skill notice on the next tool result of any kind, not only an exec', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'gamma', presignedUrl: 'http://127.0.0.1:9/gamma.tar' })],
+        }),
+      });
+
+      const response = await sandbox.callTool(
+        {
+          name: SANDBOX_WRITE_FILE_TOOL_NAME,
+          arguments: { intent: 'Write a note', path: 'note.txt', content: 'hi' },
+        },
+        { status: 'allow', scope: 'once' },
+      );
+
+      if (!isCallToolResponseResult(response)) {
+        throw new Error('Expected a result');
+      }
+      if (response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a skill whose upload is refused leaves only itself out; the other skill still works', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([
+        ['/refused.tar', skillArchive({ root, name: 'refused' })],
+        ['/good.tar', skillArchive({ root, name: 'good' })],
+      ]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({
+        root,
+        skillsDir,
+        execCalls,
+        refuseUpload: remotePath => remotePath.endsWith('.tfy-skill-refused.tar'),
+      });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [
+            registrySkill({ name: 'refused', presignedUrl: archives.urlFor('/refused.tar') }),
+            registrySkill({ name: 'good', presignedUrl: archives.urlFor('/good.tar') }),
+          ],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'good', 'SKILL.md'), 'utf-8')).toBe('# good\n');
+      expect(existsSync(join(skillsDir, 'refused'))).toBe(false);
+      expect(existsSync(join(skillsDir, '.tfy-staging'))).toBe(false);
+      if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill refused couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills.",
+        ],
+      });
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a no-network sandbox with a 30 MB skill, carried through the transfer folder', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([['/big.tar', bigSkillArchive({ root, name: 'big', bytes: 30 * 1024 * 1024 })]]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'big', presignedUrl: archives.urlFor('/big.tar') })],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'big', 'big.bin')).byteLength).toBe(30 * 1024 * 1024);
+      expect(existsSync(join(skillsDir, '.tfy-staging'))).toBe(false);
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('starts a no-network sandbox for an assistant with no skills and sends no skill env', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    // Sessions always build a mounter, even with no skills; its init must not reach a no-network sandbox.
+    const provider = makeProvider({
+      network: 'none',
+      exec: (params): Promise<ExecResult> => {
+        execCalls.push(params);
+        const envNames = Object.keys(params.env ?? {});
+        if (envNames.length > 0) {
+          return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
+        }
+        return readyExec();
+      },
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+    expect(execCalls.some(call => call.command === 'true')).toBe(true);
+    expect(execCalls.some(call => call.env?.['TFY_SKILLS_DIR'] !== undefined)).toBe(false);
+    expect(execCalls.some(call => call.command.includes('skill_downloader.py'))).toBe(false);
+  });
+
+  it('shows the person a plain sentence when the sandbox will not start, not the provider error', async () => {
+    const provider = makeProvider({
+      exec: (params): Promise<ExecResult> =>
+        params.env?.['TFY_SKILLS_DIR'] === undefined
+          ? readyExec()
+          : Promise.resolve({ success: false, error: 'env names are not allowed: TFY_SKILLS_DIR' }),
+    });
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gitSkill] }) });
+
+    const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+    if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+      expect(response).toBe('a text refusal');
+      return;
+    }
+    expect(response.result.isError).toBe(true);
+    expect(JSON.parse(response.result.content[0].text)).toMatchObject({ error: SANDBOX_START_FAILED_MESSAGE });
+    expect(response.result.content[0].text).not.toContain('env names');
+  });
+});
+
+describe('Sandbox host bookkeeping', () => {
+  it('runs every host-authored command on the trusted PATH and only the model command on the sandbox PATH', async () => {
+    const commands: string[] = [];
+    const transport: CodeModeTransport = {
+      getClientInstall: () => ({ content: 'print("mock")\n', remotePath: 'mcp-client/mcp_client.py' }),
+      start: () =>
+        Promise.resolve({
+          env: { TFY_NATS_URL: 'ws://localhost:4223', TFY_NATS_SUBJECT_PREFIX: 'sandbox.bridge.test' },
+        }),
+      stop: () => Promise.resolve(),
+    };
+    const provider: SandboxProvider = {
+      ...makeProvider({ createCodeModeTransport: () => transport }),
+      exec: (params): Promise<ExecResult> => {
+        commands.push(params.command);
+        return readyExec();
+      },
+    };
+    const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter([]) });
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+    await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Run command', purpose: 'execute', command: 'true' } },
+      { status: 'allow', scope: 'once' },
+    );
+    const trustedPrefix = withTrustedPath('');
+    expect(commands).toContain('true');
+    expect(commands.some(command => command.includes('skill_downloader.py'))).toBe(true);
+    expect(commands.some(command => command.includes('mcp_client.py'))).toBe(true);
+    expect(commands.filter(command => command !== 'true' && !command.startsWith(trustedPrefix))).toEqual([]);
+  });
+
+  it('runs setup scripts in isolated mode so the workspace stays off the import path', () => {
+    expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
+      / && python3 -I -S 'skill_downloader\.py'$/u,
+    );
   });
 });

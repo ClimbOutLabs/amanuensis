@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -73,6 +74,45 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.parsed_command).toBeNull();
     expect(first?.card.outbound_text).toBeNull();
     expect(first?.card.destination_host).toBeNull();
+  });
+
+  describe('held search cards saved before the hold reason had its own place', () => {
+    const legacy = (card: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ tool_call_id: 'call-7', tier: 3, tier3_card: { plain_what: 'x', ...card } }],
+      })[0]?.card;
+
+    it('does not show a saved key, and says what was caught', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: debug synthetic-key-000111',
+        outbound_text: 'query: debug synthetic-key-000111',
+        why_asked_again: 'Held for approval: it contains a secret this server holds.',
+      });
+      expect(card?.plain_what).toBe(`Search the web through finder${heldBecause(SERVER_SECRET_REASON)}`);
+      expect(card?.outbound_text).toBeNull();
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('moves another hold reason out of "seen before" and keeps the query', () => {
+      const card = legacy({
+        plain_what: 'Search the web through finder for: oslo weather',
+        outbound_text: 'query: oslo weather',
+        why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
+      });
+      // A card saved before the wording changed keeps its own sentence and gets the reason after it.
+      expect(card?.plain_what).toBe(
+        `Search the web through finder for: oslo weather${heldBecause('this turn already ran 8 searches without asking')}`,
+      );
+      expect(card?.outbound_text).toBe('query: oslo weather');
+      expect(card?.why_asked_again).toBeNull();
+    });
+
+    it('leaves a real "seen before" reason alone', () => {
+      expect(legacy({ why_asked_again: 'the earlier approval expired' })?.why_asked_again).toBe(
+        'the earlier approval expired',
+      );
+    });
   });
 
   it('parses outbound_text and destination_host from the card', () => {
@@ -185,12 +225,13 @@ describe('extractSentinelFromEvent', () => {
               outbound_truncated: false,
               email: {
                 action: 'change',
-                to: ['grace@example.com'],
+                to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
                 cc: [],
-                bcc: ['audit@example.com'],
+                bcc: [{ name: '', address: 'audit@example.com' }],
                 subject: 'Lease',
                 body: 'Thursday works.\n\nAda',
-                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+                replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
+                reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
               },
             },
           },
@@ -200,12 +241,13 @@ describe('extractSentinelFromEvent', () => {
     );
     expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
       action: 'change',
-      to: ['grace@example.com'],
+      to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
       cc: [],
-      bcc: ['audit@example.com'],
+      bcc: [{ name: '', address: 'audit@example.com' }],
       subject: 'Lease',
       body: 'Thursday works.\n\nAda',
-      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+      replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
+      reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
     });
   });
 
@@ -219,6 +261,83 @@ describe('extractSentinelFromEvent', () => {
     expect(card(null)).toBeNull();
     expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
     expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
+    // A card stored before names were kept holds bare address strings; each is read as a recipient with no name.
+    expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toEqual({
+      action: 'send',
+      to: [{ name: '', address: 'grace@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 's',
+      body: 'b',
+      replaces: null,
+      reply_in_thread: null,
+    });
+  });
+
+  const CALENDAR_EVENT = {
+    action: 'change',
+    calendar: 'ada@example.com',
+    title: 'Team sync',
+    when: 'Tuesday, October 20, 2026, 2:00 pm to 2:30 pm',
+    time_zone: 'America/New_York',
+    duration: '30 minutes',
+    location: 'Room 4',
+    description: '',
+    attendees: ['lin@example.com'],
+    guests_emailed: true,
+    one_of_repeating: false,
+    before: {
+      title: 'Team sync',
+      when: 'Monday, October 19, 2026, 8:00 am to 8:30 am',
+      duration: '30 minutes',
+      location: 'Room 4',
+    },
+  };
+
+  it('reads the whole event of a calendar card after the SDK deserializes it', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-3',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-14',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Change "Team sync" in your Google Calendar.',
+              plain_why: null,
+              cannot_be_undone: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+              calendar_event: CALENDAR_EVENT,
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    expect(extractSentinelFromEvent(parsed)[0]?.card.calendar_event).toEqual(CALENDAR_EVENT);
+  });
+
+  it('shows no event for a calendar card missing a field, so a partial event is never approved', () => {
+    const event = (calendar_event: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-15', tier: 3, tier3_card: { plain_what: 'Do it', calendar_event } }],
+      })[0]?.card.calendar_event;
+    expect(event(undefined)).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, attendees: undefined })).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, guests_emailed: 'yes' })).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, action: 'delete' })).toBeNull();
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
@@ -486,7 +605,12 @@ describe('parseAuditEntries', () => {
 
 describe('parseUserSettings', () => {
   it('defaults to offline off, nothing relaxed and searches running without asking', () => {
-    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+    const defaults = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
     expect(parseUserSettings({ data: null })).toEqual(defaults);
@@ -500,7 +624,12 @@ describe('parseUserSettings', () => {
       parseUserSettings({
         data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
       }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+    ).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+    });
   });
 
   it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
@@ -508,11 +637,29 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
+  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
     });
+  });
+});
+
+describe('chat scope offer', () => {
+  const ref = { id: 'call-1', tier: 3, tier3_card: { plain_what: 'Read a note.' } };
+
+  it('reads the server flag in either spelling and leaves it absent when not sent', () => {
+    const read = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [{ ...ref, ...extra }] })[0];
+    expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
+    expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
+    expect(read({})).not.toHaveProperty('chatAllowOffered');
   });
 });

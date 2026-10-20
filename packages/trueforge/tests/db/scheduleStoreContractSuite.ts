@@ -28,6 +28,7 @@ export function runScheduleStoreContractSuite(deps: {
 }): void {
   async function seedAgent(): Promise<{ id: string; name: string }> {
     const agent = await deps.getAgentStore().createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: USER_SUBJECT,
       name: `agent-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,
@@ -51,6 +52,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'daily',
       manifest: m,
       created_by_subject: USER_SUBJECT,
@@ -72,6 +74,32 @@ export function runScheduleStoreContractSuite(deps: {
     expect(await store.getRunById({ id: pendingRun.id })).toEqual(pendingRun);
   });
 
+  it('keeps the persona a schedule runs as through create, read and list', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const { schedule } = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: 'persona-1',
+      name: 'with-persona',
+      manifest: manifest({ status: 'paused' }),
+      created_by_subject: USER_SUBJECT,
+      runFrom: new Date('2026-08-27T10:00:00.000Z'),
+    });
+
+    expect(schedule.persona_id).toBe('persona-1');
+    expect((await store.getSchedule({ tenant_id: TENANT, id: schedule.id }))?.persona_id).toBe('persona-1');
+    const listed = await store.listSchedules({
+      tenant_id: TENANT,
+      limit: 100,
+      page_token: undefined,
+      agent_names: [agent.name],
+      created_by_or_agent_ids: undefined,
+    });
+    expect(listed.data.map(row => row.persona_id)).toEqual(['persona-1']);
+  });
+
   it('create paused leaves no pending run', async () => {
     const store = deps.getScheduleStore();
     const agent = await seedAgent();
@@ -79,6 +107,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'paused-at-create',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -89,6 +118,25 @@ export function runScheduleStoreContractSuite(deps: {
     expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
   });
 
+  it('create with a caller-supplied id keeps that id', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const { schedule } = await store.createScheduleAndRun({
+      id: 'schedule-imported-1',
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'imported',
+      manifest: manifest({ status: 'paused' }),
+      created_by_subject: USER_SUBJECT,
+      runFrom: new Date(),
+    });
+
+    expect(schedule.id).toBe('schedule-imported-1');
+    expect(await store.getSchedule({ tenant_id: TENANT, id: 'schedule-imported-1' })).toEqual(schedule);
+  });
+
   it('pause drops the pending run; resume re adds a pending run from the new now', async () => {
     const store = deps.getScheduleStore();
     const agent = await seedAgent();
@@ -96,6 +144,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'toggle',
       manifest: manifest({ cron: '0 * * * *', timezone: 'UTC' }),
       created_by_subject: USER_SUBJECT,
@@ -135,6 +184,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'reclock',
       manifest: manifest({ cron: '0 9 * * *', timezone: 'UTC' }),
       created_by_subject: USER_SUBJECT,
@@ -168,6 +218,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'label-only',
       manifest: manifest({ cron: '0 9 * * *', timezone: 'UTC', task: 'old task' }),
       created_by_subject: USER_SUBJECT,
@@ -198,6 +249,7 @@ export function runScheduleStoreContractSuite(deps: {
         tenant_id: TENANT,
         agent_id: agent.id,
         agent_name: agent.name,
+        persona_id: null,
         name,
         manifest: manifest({ status: 'paused' }),
         created_by_subject: USER_SUBJECT,
@@ -216,6 +268,7 @@ export function runScheduleStoreContractSuite(deps: {
         tenant_id: TENANT,
         agent_id: agent.id,
         agent_name: agent.name,
+        persona_id: null,
         name: 'daily-report',
         manifest: manifest({ status: 'paused' }),
         created_by_subject: USER_SUBJECT,
@@ -233,6 +286,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'taken',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -242,6 +296,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'free',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -266,6 +321,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'paused-edit',
       manifest: manifest({ status: 'paused', cron: '0 9 * * *' }),
       created_by_subject: USER_SUBJECT,
@@ -294,6 +350,7 @@ export function runScheduleStoreContractSuite(deps: {
         tenant_id: TENANT,
         agent_id: agent.id,
         agent_name: agent.name,
+        persona_id: null,
         name,
         manifest: manifest({ status: 'paused' }),
         created_by_subject: USER_SUBJECT,
@@ -356,6 +413,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'to-delete',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -400,6 +458,7 @@ export function runScheduleStoreContractSuite(deps: {
         tenant_id: TENANT,
         agent_id: 'no-such-id',
         agent_name: 'no-such-agent',
+        persona_id: null,
         name: 'orphan',
         manifest: manifest(),
         created_by_subject: USER_SUBJECT,
@@ -415,6 +474,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'bound-to-agent',
       manifest: manifest({ cron: '0 * * * *', timezone: 'UTC' }),
       created_by_subject: USER_SUBJECT,
@@ -439,6 +499,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'name-unique',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -475,6 +536,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'one-pending',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -513,6 +575,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agentA.id,
       agent_name: agentA.name,
+      persona_id: null,
       name: 'list-older',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -524,6 +587,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agentA.id,
       agent_name: agentA.name,
+      persona_id: null,
       name: 'list-newer',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -534,6 +598,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agentB.id,
       agent_name: agentB.name,
+      persona_id: null,
       name: 'list-other-agent',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -623,6 +688,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: ownedAgent.id,
       agent_name: ownedAgent.name,
+      persona_id: null,
       name: 'owned',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -632,6 +698,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: managedAgent.id,
       agent_name: managedAgent.name,
+      persona_id: null,
       name: 'managed',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: otherSubject,
@@ -641,6 +708,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: ownedAgent.id,
       agent_name: ownedAgent.name,
+      persona_id: null,
       name: 'unmanaged',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: otherSubject,
@@ -696,6 +764,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agentA.id,
       agent_name: agentA.name,
+      persona_id: null,
       name: 'runs-a',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -722,6 +791,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agentB.id,
       agent_name: agentB.name,
+      persona_id: null,
       name: 'runs-b',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,
@@ -792,6 +862,7 @@ export function runScheduleStoreContractSuite(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'run-status',
       manifest: manifest({ status: 'paused' }),
       created_by_subject: USER_SUBJECT,

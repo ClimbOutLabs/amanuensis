@@ -13,6 +13,8 @@ export interface PatchSentinelSettingsInput extends SentinelSettingsOwner {
   tier2_auto_allow: SentinelUserSettings['tier2_auto_allow'] | undefined;
   /** Undefined keeps the stored value. */
   search_without_asking: boolean | undefined;
+  /** Undefined keeps the stored value. */
+  maps_without_asking: boolean | undefined;
 }
 
 /**
@@ -29,6 +31,7 @@ export const DEFAULT_SENTINEL_USER_SETTINGS: SentinelUserSettings = {
   offline_mode: false,
   tier2_auto_allow: [],
   search_without_asking: true,
+  maps_without_asking: false,
 };
 
 /** Deduplicated kinds in the canonical kind order, so equal sets always store and read identically. */

@@ -10,7 +10,7 @@ describe("SchedulesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : [ { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "task" : "task" } , "name" : "name" , "updated_at" : "2024-01-15T09:30:00Z" } ] , "pagination" : { "limit" : 1 , "next_page_token" : "next_page_token" , "previous_page_token" : "previous_page_token" } };
+        const rawResponseBody = { "data" : [ { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "task" : "task" } , "name" : "name" , "runs_as" : "runs_as" , "updated_at" : "2024-01-15T09:30:00Z" } ] , "pagination" : { "limit" : 1 , "next_page_token" : "next_page_token" , "previous_page_token" : "previous_page_token" } };
         
         server
             .mockEndpoint({ once: false })
@@ -35,6 +35,7 @@ describe("SchedulesClient", () => {
                 task: "task"
             },
             name: "name",
+            runsAs: "runs_as",
             updatedAt: new Date("2024-01-15T09:30:00.000Z")
         }],
     pagination: {
@@ -94,7 +95,7 @@ describe("SchedulesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { "agent_name" : "agent_name" , "manifest" : { "cron" : "cron" , "task" : "task" } , "name" : "name" };
-        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "updated_at" : "2024-01-15T09:30:00Z" } };
+        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "runs_as" : "runs_as" , "updated_at" : "2024-01-15T09:30:00Z" } };
         
         server
             .mockEndpoint()
@@ -130,6 +131,7 @@ describe("SchedulesClient", () => {
             timezone: "timezone"
         },
         name: "name",
+        runsAs: "runs_as",
         updatedAt: new Date("2024-01-15T09:30:00.000Z")
     }
 });
@@ -364,7 +366,7 @@ describe("SchedulesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "updated_at" : "2024-01-15T09:30:00Z" } };
+        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "runs_as" : "runs_as" , "updated_at" : "2024-01-15T09:30:00Z" } };
         
         server
             .mockEndpoint()
@@ -392,6 +394,7 @@ describe("SchedulesClient", () => {
             timezone: "timezone"
         },
         name: "name",
+        runsAs: "runs_as",
         updatedAt: new Date("2024-01-15T09:30:00.000Z")
     }
 });
@@ -439,7 +442,7 @@ describe("SchedulesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { "manifest" : { "cron" : "cron" , "task" : "task" } , "name" : "name" };
-        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "updated_at" : "2024-01-15T09:30:00Z" } };
+        const rawResponseBody = { "data" : { "agent_name" : "agent_name" , "created_at" : "2024-01-15T09:30:00Z" , "created_by_subject" : { "subject_display_name" : "subject_display_name" , "subject_id" : "subject_id" , "subject_type" : "subject_type" } , "id" : "id" , "manifest" : { "cron" : "cron" , "status" : "active" , "task" : "task" , "timezone" : "timezone" } , "name" : "name" , "runs_as" : "runs_as" , "updated_at" : "2024-01-15T09:30:00Z" } };
         
         server
             .mockEndpoint()
@@ -474,6 +477,7 @@ describe("SchedulesClient", () => {
             timezone: "timezone"
         },
         name: "name",
+        runsAs: "runs_as",
         updatedAt: new Date("2024-01-15T09:30:00.000Z")
     }
 });

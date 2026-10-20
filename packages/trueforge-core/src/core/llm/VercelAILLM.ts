@@ -46,6 +46,7 @@ import {
   type ThinkingBlock,
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
+import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -1444,6 +1445,9 @@ export async function* mapStreamToChunks({
   const toolCallStates = new Map<string, ToolCallState>();
   let nextToolIndex = 0;
   let accumulatedText = '';
+  // Leaked tool-call markup in the answer text is held back and never streamed; at the end of the
+  // reply it is either rebuilt into real tool calls or reported through tool_markup as broken.
+  const markupGuard = new ToolMarkupGuard();
   const textRepetition = new StreamingRepetitionGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
   const accumulatedThinking: ThinkingBlock[] = [];
@@ -1486,19 +1490,23 @@ export async function* mapStreamToChunks({
   for await (const part of stream) {
     switch (part.type) {
       case 'text-delta': {
-        if (textRepetition.push(part.text)) {
+        const released = markupGuard.push(part.text);
+        if (released === '') {
+          break;
+        }
+        if (textRepetition.push(released)) {
           throw new ModelOutputRepetitionError('answer');
         }
         // Answer text is real output: the reasoning guard must not mistake
         // long methodical work for a stuck loop while the turn is producing.
         reasoningRepetition.markProgress();
-        accumulatedText += part.text;
+        accumulatedText += released;
         yield {
           ...makeBase(),
           choices: [
             {
               index: 0,
-              delta: { content: part.text, role: 'assistant' },
+              delta: { content: released, role: 'assistant' },
               finish_reason: null,
               logprobs: null,
             },
@@ -1700,8 +1708,28 @@ export async function* mapStreamToChunks({
   // connection mid-response, rather than terminating it cleanly, can end an async iterable this
   // way with no explicit error at all. Treated the same as the explicit-error cases above: a
   // model/provider stream fault, not a host fault.
-  if (!sawFinishStep && accumulatedText === '' && toolCallStates.size === 0) {
+  if (!sawFinishStep && accumulatedText === '' && toolCallStates.size === 0 && !markupGuard.inMarkup) {
     throw new ModelStreamFault('The model stream ended without any text, tool call, or finish signal.');
+  }
+
+  // Settle the markup guard: a clean reply releases its held tail so the final text matches what
+  // was streamed; recovered markup joins the reply's tool calls; broken markup is flagged so the
+  // runtime stops the answer instead of trusting anything in it.
+  const markupOutcome = markupGuard.finish();
+  if (markupOutcome.status === 'clean' && markupGuard.heldText !== '') {
+    const tail = markupGuard.heldText;
+    accumulatedText += tail;
+    yield {
+      ...makeBase(),
+      choices: [
+        {
+          index: 0,
+          delta: { content: tail, role: 'assistant' },
+          finish_reason: null,
+          logprobs: null,
+        },
+      ],
+    };
   }
 
   const toolCalls = [...toolCallStates.values()]
@@ -1714,6 +1742,15 @@ export async function* mapStreamToChunks({
         ? { provider_specific_fields: { thought_signature: tc.thoughtSignature } }
         : {}),
     }));
+  if (markupOutcome.status === 'recovered') {
+    markupOutcome.calls.forEach((call, position) => {
+      toolCalls.push({
+        id: `markup-recovered-${String(position)}`,
+        type: 'function' as const,
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      });
+    });
+  }
 
   const output: RawAssistantMessage = {
     role: 'assistant',
@@ -1722,7 +1759,12 @@ export async function* mapStreamToChunks({
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
   };
 
-  return { usage: finalUsage, output, finish_reason: finalFinishReason };
+  return {
+    usage: finalUsage,
+    output,
+    finish_reason: finalFinishReason,
+    ...(markupOutcome.status === 'clean' ? {} : { tool_markup: markupOutcome.status }),
+  };
 }
 
 // ---------------------------------------------------------------------------

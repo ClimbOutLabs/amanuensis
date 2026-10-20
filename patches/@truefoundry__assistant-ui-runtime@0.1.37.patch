@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540ef8d99b4 100644
+index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..95372efd452ad9399f7cb3634a8869ff1a0a7e14 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -78,6 +78,8 @@ type PendingResponseRef = {
@@ -11,11 +11,12 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
      reason?: string;
  };
  type ThreadBucket = {
-@@ -86,9 +88,11 @@ type ThreadBucket = {
+@@ -86,9 +88,12 @@ type ThreadBucket = {
      toolResults: Map<string, string>;
      pendingApprovals: Map<string, {
          id: string;
 +        sourceEventId: string;
++        canChatAllow?: boolean;
      }>;
      approvalDecisions: Map<string, ApprovalDecisionRef>;
      pendingResponses: Map<string, PendingResponseRef>;
@@ -23,7 +24,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
      done: boolean;
      title?: string;
      agentInfo?: AgentInfo;
-@@ -138,9 +142,14 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
+@@ -138,9 +143,14 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
      role: "assistant";
  }>, response: RespondToToolApprovalOptions, defaultThreadId?: string): UserToolApprovalEvent[];
  
@@ -38,7 +39,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
      runningTurn?: Turn;
      unstable_resume?: boolean;
  };
-@@ -247,6 +256,7 @@ type TrueFoundryRuntimeExtras = {
+@@ -247,6 +257,7 @@ type TrueFoundryRuntimeExtras = {
          mcpServers: McpAuthRequiredEvent["mcpServers"];
      } | null;
      resumeUnavailable: boolean;
@@ -46,7 +47,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
      sandboxId: string | undefined;
      respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
      respondToToolResponse: (response: RespondToToolResponseOptions) => void;
-@@ -333,6 +343,7 @@ declare const useTrueFoundryHistoryPagination: () => {
+@@ -333,6 +344,7 @@ declare const useTrueFoundryHistoryPagination: () => {
   * arrive in this client. Falls back to `false` on runtimes that predate the flag.
   */
  declare const useTrueFoundryResumeUnavailable: () => boolean;
@@ -54,7 +55,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
  /** Returns a function to reset (re-submit) a user turn from any render context. */
  declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
  /** Current draft agent spec and sync state (draft mode only). */
-@@ -381,4 +392,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+@@ -381,4 +393,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
   */
  declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
  
@@ -64,7 +65,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740e4543ace 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..2f7423c5f8b753515f01a492248692f436f5a56a 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -178,7 +179,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      };
    } else if (pendingApproval != null) {
 -    approval = { id: pendingApproval.id };
-+    const allowChat = toolCall.toolInfo?.effect === "inspect" || toolCall.function.name === "submit_implementation_plan";
++    const allowChat = pendingApproval.canChatAllow ?? (toolCall.toolInfo?.effect === "inspect" || toolCall.function.name === "submit_implementation_plan");
 +    approval = {
 +      id: pendingApproval.id,
 +      options: [
@@ -239,7 +240,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      }
      return;
    }
-@@ -567,28 +629,44 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -567,28 +629,45 @@ function ingestEventIntoBucket(bucket, message) {
      if (!bucket.modelMessageIds.includes(message.id)) {
        bucket.modelMessageIds.push(message.id);
      }
@@ -267,7 +268,8 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
 +        toolInvocationKey({ sourceEventId: ref.sourceEventId, toolCallId: ref.id }),
 +        {
 +          id: ref.id,
-+          sourceEventId: ref.sourceEventId
++          sourceEventId: ref.sourceEventId,
++          ...ref.canChatAllow === void 0 ? {} : { canChatAllow: ref.canChatAllow }
 +        }
 +      );
      }
@@ -294,7 +296,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      }
      return;
    }
-@@ -600,7 +678,7 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -600,7 +679,7 @@ function ingestEventIntoBucket(bucket, message) {
    }
  }
  function isContentAffectingEvent(message) {
@@ -303,7 +305,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  }
  function ingestStreamEvent(state, message) {
    if (message.type === "mcp.auth_required" || isTurnScopedEvent(message)) {
-@@ -689,7 +767,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
+@@ -689,7 +768,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
    return ids;
  }
  function bucketHasUnresolvedPendingResponses(bucket) {
@@ -312,7 +314,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      if (!bucket.toolResults.has(id)) {
        return true;
      }
-@@ -724,11 +802,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
+@@ -724,11 +803,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
      if (part.type !== "tool-call" || parentBucket == null) {
        return part;
      }
@@ -327,7 +329,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      if (childIds.length === 0) {
        return part;
      }
-@@ -775,17 +854,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
+@@ -775,17 +855,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
        toolResults: bucket.toolResults,
        pendingApprovals: bucket.pendingApprovals,
        approvalDecisions: bucket.approvalDecisions,
@@ -353,7 +355,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      }
    }
    return attachSubAgentMessages(state, threadId, parts);
-@@ -847,40 +928,83 @@ function recordToolApprovalInFold(fold, decision) {
+@@ -847,40 +929,83 @@ function recordToolApprovalInFold(fold, decision) {
    const record = {
      id: decision.toolCallId,
      approved: decision.approved,
@@ -453,7 +455,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  
  // src/toolResponse.ts
  var TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY = "toolResponseThreadId";
-@@ -966,7 +1090,7 @@ function collectResponseInputs(message, threadId) {
+@@ -966,7 +1091,7 @@ function collectResponseInputs(message, threadId) {
        events.push({
          type: "user.tool_response",
          threadId: scopedThreadId,
@@ -462,7 +464,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          content: String(part.result)
        });
      }
-@@ -983,7 +1107,7 @@ function applyStagedResponsesToContentMap(content, staged) {
+@@ -983,7 +1108,7 @@ function applyStagedResponsesToContentMap(content, staged) {
      if (part.type !== "tool-call") {
        return part;
      }
@@ -471,7 +473,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      let nextPart = part;
      if (contentValue != null && hasPendingToolResponse(part)) {
        nextPart = applyToolResponseToToolCall(part, contentValue);
-@@ -1019,12 +1143,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
+@@ -1019,12 +1144,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
      if (item.type === "user.tool_response") {
        recordToolResponseInFold(fold, {
          toolCallId: item.toolCallId,
@@ -488,7 +490,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          ...item.approval.status === "deny" && item.approval.reason != null ? { reason: item.approval.reason } : {}
        });
      }
-@@ -1282,6 +1409,13 @@ function appendMcpAuthToTurnContent(content, turn) {
+@@ -1282,6 +1410,13 @@ function appendMcpAuthToTurnContent(content, turn) {
  }
  
  // src/sessionSnapshot.ts
@@ -502,7 +504,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  function emptyRequiredActionsOverlay() {
    return {
      approvals: /* @__PURE__ */ new Map(),
-@@ -1351,7 +1485,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
+@@ -1351,7 +1486,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
    if (!hasDone) {
      return "incomplete";
    }
@@ -511,7 +513,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  }
  async function fetchSessionEventsPage(server, sessionId, options) {
    const page = await server.listEvents({
-@@ -1422,6 +1556,12 @@ function cloneThreadBucket(bucket) {
+@@ -1422,6 +1557,12 @@ function cloneThreadBucket(bucket) {
      pendingApprovals: new Map(bucket.pendingApprovals),
      approvalDecisions: new Map(bucket.approvalDecisions),
      pendingResponses: new Map(bucket.pendingResponses),
@@ -524,7 +526,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      done: bucket.done,
      ...bucket.title != null ? { title: bucket.title } : {},
      ...bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}
-@@ -1466,6 +1606,17 @@ function prependFoldState(older, newer) {
+@@ -1466,6 +1607,17 @@ function prependFoldState(older, newer) {
          ...olderBucket.pendingResponses,
          ...newerBucket.pendingResponses
        ]),
@@ -542,7 +544,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        done: newerBucket.done || olderBucket.done,
        ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
        ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
-@@ -1491,6 +1642,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1491,6 +1643,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        currentCreatedEvent = event;
        currentContentEvents = [];
        beforeCount = snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
@@ -550,7 +552,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      } else if (event.type === "turn.done") {
        if (currentTurnId == null || currentCreatedEvent == null) {
          continue;
-@@ -1502,10 +1654,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1502,10 +1655,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        const sandboxEvent = currentContentEvents.find(
          (ev) => ev.type === "sandbox.created"
        );
@@ -561,7 +563,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        snapshot.turns.push(
          sessionEventsToSessionRecord(
            currentTurnId,
-@@ -2066,6 +2214,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -2066,6 +2215,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -574,7 +576,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2250,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2251,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -584,7 +586,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2320,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2321,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -592,7 +594,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2491,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2492,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -605,7 +607,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        }
        break;
      }
-@@ -3039,19 +3198,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3199,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -625,7 +627,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3230,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3231,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -648,7 +650,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3255,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3256,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -657,7 +659,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    }
  }
  
-@@ -3176,20 +3314,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3315,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -710,7 +712,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3273,6 +3440,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3441,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -721,7 +723,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3473,7 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3474,7 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -729,7 +731,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3482,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3483,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -741,7 +743,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3521,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3522,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -749,7 +751,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3541,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3542,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -801,7 +803,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          }
        })();
        activeRunRef.current = run;
-@@ -3447,6 +3637,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3638,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -809,7 +811,35 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3662,12 +3853,13 @@ function useTrueFoundryAgentMessages({
+@@ -3587,7 +3779,12 @@ function useTrueFoundryAgentMessages({
+                 snapshotRef.current.fold,
+                 { inputs: options.inputs, ...streamHeaders },
+                 signal,
+-                groupRootBaseline
++                groupRootBaseline,
++                // A continuation runs as a new gateway turn: adopt its id so downloads and
++                // edits address the turn the server actually holds.
++                (gatewayTurnId) => {
++                  turnIdRef.current = gatewayTurnId;
++                }
+               );
+             }
+             if ("resumeMcpAuth" in options) {
+@@ -3597,7 +3794,12 @@ function useTrueFoundryAgentMessages({
+                 snapshotRef.current.fold,
+                 { resumeMcpAuth: true, ...streamHeaders },
+                 signal,
+-                groupRootBaseline
++                groupRootBaseline,
++                // A continuation runs as a new gateway turn: adopt its id so downloads and
++                // edits address the turn the server actually holds.
++                (gatewayTurnId) => {
++                  turnIdRef.current = gatewayTurnId;
++                }
+               );
+             }
+             return streamTurnContent(
+@@ -3662,12 +3864,13 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -825,7 +855,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        resolveConversationSessionIdRef.current
      );
      await server.cancelSession({ sessionId: conversationSessionId }).catch(() => void 0);
-@@ -3677,11 +3869,26 @@ function useTrueFoundryAgentMessages({
+@@ -3677,11 +3880,26 @@ function useTrueFoundryAgentMessages({
        setIsRunning(false);
      }
    }, [server, sessionId, markResumeUnavailable]);
@@ -855,7 +885,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3897,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3908,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -887,7 +917,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3928,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3939,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -895,7 +925,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +3945,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +3956,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -903,7 +933,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4100,7 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4111,7 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -911,7 +941,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4179,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4190,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -919,7 +949,17 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4047,6 +4269,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4243,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+           "This session has not been saved yet, so its files cannot be downloaded."
+         );
+       }
+-      if (sandboxId == null) {
+-        throw new Error("No sandbox is available yet for this session.");
+-      }
+       return await server.downloadSandboxFile({
+         sessionId,
+         turnId,
+@@ -4047,6 +4277,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -927,7 +967,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4472,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4480,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -943,7 +983,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4526,7 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4534,7 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -951,7 +991,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4637,7 @@ export {
+@@ -4408,6 +4645,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -959,7 +999,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4657,7 @@ export {
+@@ -4427,6 +4665,7 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -968,7 +1008,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a2ff25525 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb52c311d6 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -994,7 +1034,16 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  interface ToolCall {
      id: string;
      type: "function";
-@@ -115,6 +120,24 @@ interface ToolResponseEvent {
+@@ -33,6 +38,8 @@ interface ToolCall {
+ interface ToolCallRef {
+     id: string;
+     sourceEventId: string;
++    /** Server verdict on chat-scoped approval for this call; absent from servers that do not say. */
++    canChatAllow?: boolean;
+ }
+ interface ChunkDeltaToolCall {
+     index: number;
+@@ -115,6 +122,24 @@ interface ToolResponseEvent {
      content: string;
      createdAt: string;
  }
@@ -1019,7 +1068,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  interface ToolApprovalRequiredEvent {
      type: "tool.approval_required";
      id: string;
-@@ -204,7 +227,7 @@ interface TurnDoneEvent {
+@@ -204,7 +229,7 @@ interface TurnDoneEvent {
      threadId?: string | null;
  }
  /** Events stored in fold buckets (non-delta, non-turn-lifecycle). */
@@ -1028,7 +1077,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  /** Full streaming event union (includes deltas + turn lifecycle). */
  type TurnStreamingEvent = TurnEvent | ModelMessageDeltaEvent | TurnCreatedEvent | TurnDoneEvent;
  type ActionRequiredEvent = ToolApprovalRequiredEvent | ToolResponseRequiredEvent | McpAuthRequiredEvent;
-@@ -327,6 +350,9 @@ interface AgentContextManagementConfig {
+@@ -327,6 +352,9 @@ interface AgentContextManagementConfig {
      compaction?: AgentCompactionConfig;
      largeToolResponse?: AgentCapabilityConfig;
  }
@@ -1038,7 +1087,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  interface AgentRuntimeConfig {
      iterationLimit?: number;
      sandbox?: AgentSandboxConfig;
-@@ -334,6 +360,7 @@ interface AgentRuntimeConfig {
+@@ -334,6 +362,7 @@ interface AgentRuntimeConfig {
      generativeUi?: AgentCapabilityConfig;
      dynamicSubAgents?: AgentCapabilityConfig;
      askUserQuestions?: AgentCapabilityConfig;
@@ -1046,7 +1095,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  }
  /**
   * SDK-owned agent definition — fields the FE reads/writes.
-@@ -345,6 +372,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
+@@ -345,6 +374,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
      skills?: TSkill[];
      mcpServers?: TMcp[];
      config?: TConfig;
@@ -1058,7 +1107,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
      instructions?: string;
      variables?: Record<string, string>;
  }
-@@ -406,6 +438,7 @@ interface UserMessage {
+@@ -406,6 +440,7 @@ interface UserMessage {
  }
  type ApprovalDecision = {
      status: "allow";
@@ -1066,7 +1115,23 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  } | {
      status: "deny";
      reason?: string;
-@@ -671,7 +704,7 @@ interface ToolBase {
+@@ -525,12 +560,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
+     /**
+      * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
+      * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
+-     * directly use `sandboxId`.
++     * directly use `sandboxId`. It is undefined when the conversation has not announced a sandbox,
++     * which must not block a download the host can resolve from the turn.
+      */
+     downloadSandboxFile?(req: {
+         sessionId: string;
+         turnId: string;
+-        sandboxId: string;
++        sandboxId: string | undefined;
+         path: string;
+     }): Promise<Blob>;
+ }
+@@ -671,7 +707,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1075,7 +1140,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +717,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +720,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1090,7 +1155,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +735,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +738,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -1104,6 +1169,15 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
+@@ -994,6 +1041,8 @@ interface Schedule {
+     agentId: string;
+     /** Display name; omit when the host only has `agentId`. */
+     agentName?: string;
++    /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++    runsAs?: string;
+     task: string;
+     cron: string;
+     timezone: string;
 diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
 index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbeaf0547d7 100644
 --- a/src/convertTurnMessages.test.ts
@@ -1417,7 +1491,7 @@ index 9002dd54c7e8dc88b56f46c9b145105a4f23963b..1f88591c1a7ee6e9db76ba4aff4f2617
          const state = seedPendingApproval();
  
 diff --git a/src/foldPeerThreads.ts b/src/foldPeerThreads.ts
-index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c885373016d 100644
+index da98ad2a961107a173b4206b159b736136496a01..454ef0307bb81501b5aa63358132b3c36a82150f 100644
 --- a/src/foldPeerThreads.ts
 +++ b/src/foldPeerThreads.ts
 @@ -1,6 +1,7 @@
@@ -1451,7 +1525,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
      modelMessageIds: string[];
      toolResults: Map<string, string>;
 -    pendingApprovals: Map<string, { id: string }>;
-+    pendingApprovals: Map<string, { id: string; sourceEventId: string }>;
++    pendingApprovals: Map<string, { id: string; sourceEventId: string; canChatAllow?: boolean }>;
      approvalDecisions: Map<string, ApprovalDecisionRef>;
      pendingResponses: Map<string, PendingResponseRef>;
 +    toolCallInvocations: Map<string, string[]>;
@@ -1496,7 +1570,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          }
          return;
      }
-@@ -146,18 +169,31 @@ function ingestEventIntoBucket(
+@@ -146,18 +169,34 @@ function ingestEventIntoBucket(
          if (!bucket.modelMessageIds.includes(message.id)) {
              bucket.modelMessageIds.push(message.id);
          }
@@ -1527,12 +1601,15 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
 +                {
 +                    id: ref.id,
 +                    sourceEventId: ref.sourceEventId,
++                    ...(ref.canChatAllow === undefined
++                        ? {}
++                        : { canChatAllow: ref.canChatAllow }),
 +                },
 +            );
          }
          return;
      }
-@@ -165,12 +201,15 @@ function ingestEventIntoBucket(
+@@ -165,12 +204,15 @@ function ingestEventIntoBucket(
      if (message.type === "tool.response_required") {
          for (const ref of message.toolCalls) {
              const resolved = resolveAskUserQuestionFromBucket(bucket, ref);
@@ -1554,7 +1631,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          }
          return;
      }
-@@ -190,6 +229,7 @@ function isContentAffectingEvent(message: TurnStreamingEvent): boolean {
+@@ -190,6 +232,7 @@ function isContentAffectingEvent(message: TurnStreamingEvent): boolean {
          message.type === "model.message" ||
          message.type === "model.message.delta" ||
          message.type === "tool.response" ||
@@ -1562,7 +1639,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          message.type === "tool.approval_required" ||
          message.type === "tool.response_required"
      );
-@@ -315,7 +355,7 @@ function childSubThreadIds(
+@@ -315,7 +358,7 @@ function childSubThreadIds(
  }
  
  function bucketHasUnresolvedPendingResponses(bucket: ThreadBucket): boolean {
@@ -1571,7 +1648,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          if (!bucket.toolResults.has(id)) {
              return true;
          }
-@@ -362,12 +402,13 @@ function attachSubAgentMessages(
+@@ -362,12 +405,13 @@ function attachSubAgentMessages(
              return part;
          }
  
@@ -1587,7 +1664,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          if (childIds.length === 0) {
              return part;
          }
-@@ -437,16 +478,18 @@ function buildThreadAssistantParts(
+@@ -437,16 +481,18 @@ function buildThreadAssistantParts(
              pendingApprovals: bucket.pendingApprovals,
              approvalDecisions: bucket.approvalDecisions,
              pendingResponses: bucket.pendingResponses,
@@ -1611,7 +1688,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          }
      }
  
-@@ -548,23 +591,40 @@ export function isRootThreadId(threadId: string | undefined): boolean {
+@@ -548,23 +594,40 @@ export function isRootThreadId(threadId: string | undefined): boolean {
  
  export function recordToolApprovalInFold(
      fold: PeerThreadFoldState,
@@ -1661,7 +1738,7 @@ index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c88
          return;
      }
      const rootBucket = fold.getOrCreateBucket(ROOT_THREAD_ID);
-@@ -574,21 +634,74 @@ export function recordToolApprovalInFold(
+@@ -574,21 +637,74 @@ export function recordToolApprovalInFold(
  /** Persist a user.tool_response answer into fold state (clears pending ask-user). */
  export function recordToolResponseInFold(
      fold: PeerThreadFoldState,
@@ -1797,10 +1874,10 @@ index b5873bc07df150d1d74d240acd50a4a1681523d9..bc9bb32562213be287c70e9d069bcb7d
      messageHasPendingResponses,
 diff --git a/src/modelMessageContent.test.ts b/src/modelMessageContent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..2d552fc7cdbd97c5c6538d8f94359edb55d04936
+index 0000000000000000000000000000000000000000..afa7b1169f523d7bd450731ce546d13717a8a7ba
 --- /dev/null
 +++ b/src/modelMessageContent.test.ts
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,201 @@
 +import { describe, expect, it } from "vitest";
 +
 +import { buildAssistantContent } from "./modelMessageContent.js";
@@ -1835,6 +1912,40 @@ index 0000000000000000000000000000000000000000..2d552fc7cdbd97c5c6538d8f94359edb
 +        );
 +
 +        expect(parts[0]).toMatchObject({
++            type: "tool-call",
++            approval: {
++                options: [
++                    { id: "allow-once" },
++                    { id: "allow-chat" },
++                    { id: "deny" },
++                ],
++            },
++        });
++    });
++
++    it("follows the server verdict on chat scope over the declared effect", () => {
++        const inspect = approvalMessage({
++            type: "mcp",
++            serverId: "mail",
++            serverName: "Mail",
++            name: "send_note",
++            effect: "inspect",
++        });
++        const refused = buildAssistantContent(inspect, {
++            pendingApprovals: new Map([
++                ["call-1", { id: "approval-1", canChatAllow: false }],
++            ]),
++        });
++        expect(refused[0]).toMatchObject({
++            type: "tool-call",
++            approval: { options: [{ id: "allow-once" }, { id: "deny" }] },
++        });
++        const offered = buildAssistantContent(inspect, {
++            pendingApprovals: new Map([
++                ["call-1", { id: "approval-1", canChatAllow: true }],
++            ]),
++        });
++        expect(offered[0]).toMatchObject({
 +            type: "tool-call",
 +            approval: {
 +                options: [
@@ -1969,11 +2080,18 @@ index 0000000000000000000000000000000000000000..2d552fc7cdbd97c5c6538d8f94359edb
 +    });
 +});
 diff --git a/src/modelMessageContent.ts b/src/modelMessageContent.ts
-index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01e614d0d2 100644
+index 300935acab3bc155897c9705e3c441e773f2c1c2..2e5f131e2583d57f81d0c4684c42ea8e545af18d 100644
 --- a/src/modelMessageContent.ts
 +++ b/src/modelMessageContent.ts
-@@ -10,11 +10,27 @@ export type ToolCallContext = {
-     pendingApprovals?: ReadonlyMap<string, { id: string }>;
+@@ -7,14 +7,33 @@ export type AssistantContentPart = ThreadAssistantMessagePart;
+ 
+ export type ToolCallContext = {
+     toolResults?: ReadonlyMap<string, string>;
+-    pendingApprovals?: ReadonlyMap<string, { id: string }>;
++    pendingApprovals?: ReadonlyMap<
++        string,
++        { id: string; canChatAllow?: boolean }
++    >;
      approvalDecisions?: ReadonlyMap<
          string,
 -        { id: string; approved: boolean; reason?: string }
@@ -2001,7 +2119,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01
  export type SdkToolCall = NonNullable<ModelMessageEvent["toolCalls"]>[number];
  
  function parseToolArgs(argsText: string): Record<string, string | number | boolean | null> {
-@@ -34,15 +50,65 @@ function parseToolArgs(argsText: string): Record<string, string | number | boole
+@@ -34,15 +53,65 @@ function parseToolArgs(argsText: string): Record<string, string | number | boole
  
  type ToolCallPart = Extract<AssistantContentPart, { type: "tool-call" }>;
  
@@ -2071,7 +2189,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01
  
      let interrupt: ToolCallPart["interrupt"];
      if (pendingResponse != null && toolResult === undefined) {
-@@ -64,12 +130,25 @@ function toolCallToPart(
+@@ -64,12 +133,27 @@ function toolCallToPart(
          approval = {
              id: approvalDecision.id,
              approved: approvalDecision.approved,
@@ -2084,9 +2202,11 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01
          };
      } else if (pendingApproval != null) {
 -        approval = { id: pendingApproval.id };
++        // The server's verdict wins; the effect fallback serves servers that do not send one.
 +        const allowChat =
-+            toolCall.toolInfo?.effect === "inspect" ||
-+            toolCall.function.name === "submit_implementation_plan";
++            pendingApproval.canChatAllow ??
++            (toolCall.toolInfo?.effect === "inspect" ||
++                toolCall.function.name === "submit_implementation_plan");
 +        approval = {
 +            id: pendingApproval.id,
 +            options: [
@@ -2098,7 +2218,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01
      }
  
      let result: ToolCallPart["result"];
-@@ -81,12 +160,14 @@ function toolCallToPart(
+@@ -81,12 +165,14 @@ function toolCallToPart(
          isError = true;
      }
  
@@ -2114,7 +2234,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01
          ...(isError ? { isError: true } : {}),
          ...(approval != null ? { approval } : {}),
 diff --git a/src/server/events.ts b/src/server/events.ts
-index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..376c1f6420a3d400ce7b8f1597a8e7a65e191ed6 100644
+index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad8274a93c66 100644
 --- a/src/server/events.ts
 +++ b/src/server/events.ts
 @@ -16,10 +16,17 @@ export interface ToolCallFunction {
@@ -2137,7 +2257,16 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..376c1f6420a3d400ce7b8f1597a8e7a6
  
  export interface ToolCall {
      id: string;
-@@ -102,6 +109,38 @@ export interface ToolResponseEvent {
+@@ -33,6 +40,8 @@ export interface ToolCall {
+ export interface ToolCallRef {
+     id: string;
+     sourceEventId: string;
++    /** Server verdict on chat-scoped approval for this call; absent from servers that do not say. */
++    canChatAllow?: boolean;
+ }
+ 
+ export interface ChunkDeltaToolCall {
+@@ -102,6 +111,38 @@ export interface ToolResponseEvent {
      createdAt: string;
  }
  
@@ -2176,7 +2305,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..376c1f6420a3d400ce7b8f1597a8e7a6
  export interface ToolApprovalRequiredEvent {
      type: "tool.approval_required";
      id: string;
-@@ -210,6 +249,7 @@ export interface TurnDoneEvent {
+@@ -210,6 +251,7 @@ export interface TurnDoneEvent {
  export type TurnEvent =
      | ModelMessageEvent
      | ToolResponseEvent
@@ -2185,7 +2314,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..376c1f6420a3d400ce7b8f1597a8e7a6
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..99874d6f2101f5d4d72be429a000b90f6a674885 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb635675b362 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2209,6 +2338,31 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..99874d6f2101f5d4d72be429a000b90f
    | { status: "deny"; reason?: string };
  
  export interface UserToolApprovalEvent {
+@@ -390,12 +395,13 @@ export interface AgentChatServer<
+   /**
+    * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
+    * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
+-   * directly use `sandboxId`.
++   * directly use `sandboxId`. It is undefined when the conversation has not announced a sandbox,
++   * which must not block a download the host can resolve from the turn.
+    */
+   downloadSandboxFile?(req: {
+     sessionId: string;
+     turnId: string;
+-    sandboxId: string;
++    sandboxId: string | undefined;
+     path: string;
+   }): Promise<Blob>;
+ }
+@@ -970,6 +976,8 @@ export interface Schedule {
+   agentId: string;
+   /** Display name; omit when the host only has `agentId`. */
+   agentName?: string;
++  /** Who runs it, in plain words (a persona or the assistant); shown instead of the agent name when present. */
++  runsAs?: string;
+   task: string;
+   cron: string;
+   timezone: string;
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
 index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..e4b5770819d0a2beaec8069383b6704ac508bc5e 100644
 --- a/src/sessionSnapshot.ts
@@ -2991,7 +3145,7 @@ index 979a49f6b7d89068628ff53fb93ef268b032dc58..62e899b8c614b1d4b00026a3f60dc06c
          it("reports and restores a user message when initializeSession fails", async () => {
              const onError = vi.fn();
 diff --git a/src/useTrueFoundryAgentMessages.ts b/src/useTrueFoundryAgentMessages.ts
-index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea00334c1bfe91 100644
+index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..d00efecf1e9df5d73d7c39fe9d505385277f9091 100644
 --- a/src/useTrueFoundryAgentMessages.ts
 +++ b/src/useTrueFoundryAgentMessages.ts
 @@ -38,8 +38,10 @@ import {
@@ -3207,7 +3361,31 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  void runStream(
                      (signal) =>
                          resumeTurnStream(
-@@ -838,12 +919,13 @@ export function useTrueFoundryAgentMessages({
+@@ -749,6 +830,11 @@ export function useTrueFoundryAgentMessages({
+                                 { inputs: options.inputs, ...streamHeaders },
+                                 signal,
+                                 groupRootBaseline,
++                                // A continuation runs as a new gateway turn: adopt its id so
++                                // downloads and edits address the turn the server holds.
++                                (gatewayTurnId) => {
++                                    turnIdRef.current = gatewayTurnId;
++                                },
+                             );
+                         }
+                         if ("resumeMcpAuth" in options) {
+@@ -759,6 +845,11 @@ export function useTrueFoundryAgentMessages({
+                                 { resumeMcpAuth: true, ...streamHeaders },
+                                 signal,
+                                 groupRootBaseline,
++                                // A continuation runs as a new gateway turn: adopt its id so
++                                // downloads and edits address the turn the server holds.
++                                (gatewayTurnId) => {
++                                    turnIdRef.current = gatewayTurnId;
++                                },
+                             );
+                         }
+                         return streamTurnContent(
+@@ -838,12 +929,13 @@ export function useTrueFoundryAgentMessages({
      );
  
      const cancel = useCallback(async () => {
@@ -3223,7 +3401,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              resolveConversationSessionIdRef.current,
          );
          // Request cancellation but keep consuming the stream. After cancel(),
-@@ -863,12 +945,26 @@ export function useTrueFoundryAgentMessages({
+@@ -863,12 +955,26 @@ export function useTrueFoundryAgentMessages({
          }
      }, [server, sessionId, markResumeUnavailable]);
  
@@ -3254,7 +3432,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  return;
              }
              const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -877,13 +973,24 @@ export function useTrueFoundryAgentMessages({
+@@ -877,13 +983,24 @@ export function useTrueFoundryAgentMessages({
                  return;
              }
              const inputs = collectRequiredActionInputs(paused);
@@ -3282,7 +3460,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
  
      const respondToToolApproval = useCallback(
          (response: RespondToToolApprovalOptions) => {
-@@ -891,6 +998,9 @@ export function useTrueFoundryAgentMessages({
+@@ -891,6 +1008,9 @@ export function useTrueFoundryAgentMessages({
              const approvals = new Map(prev.requiredActions.approvals);
              approvals.set(response.approvalId, {
                  approved: response.approved,
@@ -3292,7 +3470,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
                  ...(response.reason != null ? { reason: response.reason } : {}),
              });
              const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -899,6 +1009,7 @@ export function useTrueFoundryAgentMessages({
+@@ -899,6 +1019,7 @@ export function useTrueFoundryAgentMessages({
                      approvals,
                  },
              });
@@ -3300,7 +3478,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -916,6 +1027,7 @@ export function useTrueFoundryAgentMessages({
+@@ -916,6 +1037,7 @@ export function useTrueFoundryAgentMessages({
                      toolResponses,
                  },
              });
@@ -3308,7 +3486,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -1094,6 +1206,7 @@ export function useTrueFoundryAgentMessages({
+@@ -1094,6 +1216,7 @@ export function useTrueFoundryAgentMessages({
  
      return {
          messages,
@@ -3317,7 +3495,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea0033
          resumeUnavailable,
          isLoading,
 diff --git a/src/useTrueFoundryAgentRuntime.ts b/src/useTrueFoundryAgentRuntime.ts
-index c052c5ebca99422738d44fa380ca28743c2e592a..cd953d2fbcbad2a29a8fc3a009f62f46c8c85086 100644
+index c052c5ebca99422738d44fa380ca28743c2e592a..19ffe06522b9d9d17fcf689c6fd2870e2a07dfdf 100644
 --- a/src/useTrueFoundryAgentRuntime.ts
 +++ b/src/useTrueFoundryAgentRuntime.ts
 @@ -130,6 +130,7 @@ function useTrueFoundryAgentRuntimeImpl(
@@ -3328,7 +3506,17 @@ index c052c5ebca99422738d44fa380ca28743c2e592a..cd953d2fbcbad2a29a8fc3a009f62f46
          isRunning,
          resumeUnavailable,
          isLoading,
-@@ -225,6 +226,7 @@ function useTrueFoundryAgentRuntimeImpl(
+@@ -186,9 +187,6 @@ function useTrueFoundryAgentRuntimeImpl(
+                     "This session has not been saved yet, so its files cannot be downloaded.",
+                 );
+             }
+-            if (sandboxId == null) {
+-                throw new Error("No sandbox is available yet for this session.");
+-            }
+             return await server.downloadSandboxFile({
+                 sessionId,
+                 turnId,
+@@ -225,6 +223,7 @@ function useTrueFoundryAgentRuntimeImpl(
              pendingToolResponses,
              pendingMcpAuth,
              resumeUnavailable,

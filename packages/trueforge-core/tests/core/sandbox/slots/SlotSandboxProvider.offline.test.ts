@@ -16,9 +16,11 @@ describe('SlotSandboxProvider network declaration', () => {
     expect(provider.network).toBe('none');
   });
 
-  it('tells the model there is no network and not to try another tool', () => {
-    expect(provider.getAdditionalInstructions()).toContain(
-      'No network from code or the shell, by design. If a task needs the internet, say it cannot be done here and do not try another tool.',
+  it('tells the model there is no general network and not to try another tool', () => {
+    const instructions = provider.getAdditionalInstructions();
+    expect(instructions).toContain('No general network from code or the shell, by design.');
+    expect(instructions).toContain(
+      'When downloads are not allowed for the repo, packages cannot be downloaded; say that plainly instead of retrying, and do not try another tool to get around it.',
     );
   });
 });

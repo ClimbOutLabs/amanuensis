@@ -111,7 +111,11 @@ describe('grounding check on a final answer to a freshness question', () => {
     const create = jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
       if (requests.length === 1) {
-        return unknownToolStream({ toolName: 'web_search', callId: 'search-1' });
+        return unknownToolStream({
+          toolName: 'web_search',
+          callId: 'search-1',
+          args: JSON.stringify({ query: 'latest Node.js version' }),
+        });
       }
       return finalStream('Node.js 22 is the latest LTS, per the search results.');
     });

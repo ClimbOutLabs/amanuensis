@@ -7,6 +7,7 @@
  */
 import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
+import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
 import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
 import type { Tier3Card } from './tier';
 
@@ -31,6 +32,23 @@ const NOT_SAVED_MESSAGES: Record<NotSavedReason, string> = {
 
 /** The line the chat shows when the owner turns a held action down. */
 export const HELD_DENIED_NOTE = 'Denied. Nothing was done.';
+
+/**
+ * The last words of a run that ends with actions waiting for its owner. `waiting` holds each action's
+ * card sentence, so the owner learns what was held without opening the card.
+ */
+export function heldActionsNote(waiting: readonly string[]): string {
+  const lines = waiting.map(sentence => sentence.trim().replace(/\.$/, ''));
+  const [first = '', ...rest] = lines;
+  if (rest.length === 0) {
+    return `I need your OK for one thing: ${first}. Approve it on your Needs your OK list and I'll add it here.`;
+  }
+  return [
+    `I need your OK for ${String(lines.length)} things:`,
+    ...lines.map(line => `- ${line}`),
+    "Approve them on your Needs your OK list and I'll add them here.",
+  ].join('\n');
+}
 
 /** Why answering a held action was refused. The code travels to the client; the text is for logs and API users. */
 export const HELD_REFUSAL_REASONS = ['expired', 'changed', 'not_allowed', 'tool_gone', 'sign_in'] as const;
@@ -126,6 +144,15 @@ export function holdApprovalCalls(input: {
 
 export type HeldReplayCheck = { ok: true; approval_token_id: string | null } | { ok: false; reason: HeldRefusalReason };
 
+/** A held git command runs against the remotes its owner was shown, so the ones seen again must be those. */
+function heldRemotesUnchanged(input: { held: InternalToolCallInfo; fresh: InternalToolCallInfo }): boolean {
+  const approved = input.held.git_remote_precondition;
+  const current = input.fresh.git_remote_precondition;
+  return approved === undefined || current === undefined
+    ? approved === current
+    : gitRemotesMatch({ approved, current });
+}
+
 /** The card fields a person reads before approving; free text such as the reason is not compared. */
 function sameCardTargets(held: Tier3Card, fresh: Tier3Card): boolean {
   return (
@@ -167,6 +194,9 @@ export async function checkHeldReplay(input: {
     if (freshToken?.action_id !== heldToken.action_id) {
       return { ok: false, reason: 'changed' };
     }
+  }
+  if (!heldRemotesUnchanged({ held, fresh })) {
+    return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;

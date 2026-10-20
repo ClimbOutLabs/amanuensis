@@ -104,7 +104,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Personalization</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Shape your assistant's identity, voice, and the context it should remember about you.
+        Tell Aman who you are and how it should speak with you. Start with your name.
       </p>
 
       {loadError ? (
@@ -123,93 +123,71 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
           </p>
         ) : (
           <form className="space-y-4" onSubmit={save}>
-            <section
-              className="rounded-xl border border-border bg-card-bg p-4"
-              aria-labelledby="assistant-profile-heading"
-            >
-              <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
-                Assistant profile
-              </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                Choose how your assistant understands itself and speaks with you.
-              </p>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="personalization-assistant-name"
-                    className="mb-1.5 block text-sm font-medium text-text-primary"
-                  >
-                    Assistant name
-                  </label>
-                  <input
-                    id="personalization-assistant-name"
-                    className={inputClassName}
-                    value={draft.assistant_name ?? ''}
-                    onChange={event => updateDraft('assistant_name', event.target.value)}
-                    placeholder="A name for your assistant"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="personalization-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
-                    Voice guidance
-                  </label>
-                  <input
-                    id="personalization-voice"
-                    className={inputClassName}
-                    value={draft.voice_guidance ?? ''}
-                    onChange={event => updateDraft('voice_guidance', event.target.value)}
-                    placeholder="Warm, direct, concise…"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <label
-                  htmlFor="personalization-identity"
-                  className="mb-1.5 block text-sm font-medium text-text-primary"
-                >
-                  Identity
-                </label>
-                <textarea
-                  id="personalization-identity"
-                  className={`${inputClassName} min-h-24 resize-y`}
-                  value={draft.assistant_identity ?? ''}
-                  onChange={event => updateDraft('assistant_identity', event.target.value)}
-                  placeholder="How should it understand its role?"
-                />
-              </div>
-            </section>
-
             <section className="rounded-xl border border-border bg-card-bg p-4" aria-labelledby="user-context-heading">
               <h4 id="user-context-heading" className="text-sm font-semibold text-text-primary">
                 About you
               </h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Add durable context that helps the assistant work with you naturally.
+                Aman greets you by name and addresses you the way you ask. Everything here stays on this computer.
               </p>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="personalization-user-name"
+                    className="mb-1.5 block text-sm font-medium text-text-primary"
+                  >
+                    Your name
+                  </label>
+                  <input
+                    id="personalization-user-name"
+                    className={inputClassName}
+                    autoComplete="name"
+                    value={draft.user_name ?? ''}
+                    onChange={event => updateDraft('user_name', event.target.value)}
+                    placeholder="For example, Sam Rivera"
+                  />
+                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">The name Aman knows you by.</p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="personalization-address-as"
+                    className="mb-1.5 block text-sm font-medium text-text-primary"
+                  >
+                    How Aman should address you
+                  </label>
+                  <input
+                    id="personalization-address-as"
+                    className={inputClassName}
+                    value={draft.address_as ?? ''}
+                    onChange={event => updateDraft('address_as', event.target.value)}
+                    placeholder="For example, Sam, or Dr. Rivera"
+                  />
+                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">
+                    A first name, a title, or your pronouns. Leave it empty to be called by your name.
+                  </p>
+                </div>
+              </div>
 
               <div className="mt-4">
                 <label
                   htmlFor="personalization-user-profile"
                   className="mb-1.5 block text-sm font-medium text-text-primary"
                 >
-                  Your profile
+                  More about you
                 </label>
                 <textarea
                   id="personalization-user-profile"
                   className={`${inputClassName} min-h-24 resize-y`}
                   value={draft.user_profile ?? ''}
                   onChange={event => updateDraft('user_profile', event.target.value)}
-                  placeholder="Useful context about you"
+                  placeholder="Where you live, what you work on, what you care about"
                 />
               </div>
 
               <fieldset className="mt-4 min-w-0 border-0 p-0">
                 <legend className="text-sm font-medium text-text-primary">Pinned preferences</legend>
-                <p className="mt-1 text-sm text-text-secondary">
-                  Specific preferences that should remain easy to inspect and edit.
-                </p>
+                <p className="mt-1 text-sm text-text-secondary">Key preferences, kept visible and easy to edit.</p>
                 <div className="mt-3 space-y-2">
                   {draft.pinned_preferences.map((preference, index) => (
                     <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
@@ -265,23 +243,77 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
 
             <section
               className="rounded-xl border border-border bg-card-bg p-4"
+              aria-labelledby="assistant-profile-heading"
+            >
+              <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
+                Assistant profile
+              </h4>
+              <p className="mt-1 text-sm text-text-secondary">Choose how Aman sees itself and speaks with you.</p>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="personalization-assistant-name"
+                    className="mb-1.5 block text-sm font-medium text-text-primary"
+                  >
+                    Name
+                  </label>
+                  <input
+                    id="personalization-assistant-name"
+                    className={inputClassName}
+                    value={draft.assistant_name ?? ''}
+                    onChange={event => updateDraft('assistant_name', event.target.value)}
+                    placeholder="Aman"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="personalization-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
+                    Voice guidance
+                  </label>
+                  <input
+                    id="personalization-voice"
+                    className={inputClassName}
+                    value={draft.voice_guidance ?? ''}
+                    onChange={event => updateDraft('voice_guidance', event.target.value)}
+                    placeholder="Warm, direct, concise…"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <label
+                  htmlFor="personalization-identity"
+                  className="mb-1.5 block text-sm font-medium text-text-primary"
+                >
+                  Identity
+                </label>
+                <textarea
+                  id="personalization-identity"
+                  className={`${inputClassName} min-h-24 resize-y`}
+                  value={draft.assistant_identity ?? ''}
+                  onChange={event => updateDraft('assistant_identity', event.target.value)}
+                  placeholder="How should it understand its role?"
+                />
+              </div>
+            </section>
+
+            <section
+              className="rounded-xl border border-border bg-card-bg p-4"
               aria-labelledby="learned-profile-heading"
             >
               <h4 id="learned-profile-heading" className="text-sm font-semibold text-text-primary">
                 Learned profile
               </h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Your assistant keeps this document up to date from your conversations. Edit or clear it here; saving
-                persists your changes.
+                Aman updates this from your conversations. Edit or clear it any time.
               </p>
 
               <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-secondary-bg px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
                   <p className="mt-0.5 text-xs leading-snug text-text-secondary">
-                    After a completed turn, the host asks a local model to rewrite this document from the conversation,
-                    at most once an hour. The document is yours to edit or clear at any time, and every change is
-                    recorded in the turn's event stream.
+                    After a conversation, a local model updates this document from it, at most once an hour. You can
+                    edit or clear it any time.
                   </p>
                 </div>
                 <Switch

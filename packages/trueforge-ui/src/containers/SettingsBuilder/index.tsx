@@ -7,6 +7,8 @@ import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { AmanFirstRunGuide } from '@/components/AmanFirstRunGuide.js';
+import { useOptionalAmanSetup } from '@/components/AmanSetupContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import { Icon } from '@/icons/Icon.js';
@@ -20,10 +22,7 @@ const ModelSettings = lazy(() => import('./ModelSettings.js'));
 // model role — see docs/model-roles.mdx), not as a section of their own here.
 const ModelRoleSettings = lazy(() => import('./ModelRoleSettings.js'));
 const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
-const MemorySettings = lazy(() => import('./MemorySettings.js'));
-const MemoryVaultSettings = lazy(() =>
-  import('@/atoms/memory/MemoryVaultPage.js').then(module => ({ default: module.MemoryVaultPage })),
-);
+const MemorySection = lazy(() => import('./MemorySection.js'));
 const SkillSettings = lazy(() => import('./SkillSettings.js'));
 const SandboxSettings = lazy(() => import('./SandboxSettings.js'));
 const ThemeSettings = lazy(() => import('./ThemeSettings.js'));
@@ -33,6 +32,25 @@ const PersonalizationSettings = lazy(() =>
 const SentinelSettings = lazy(() =>
   import('@/sentinel/SentinelSettings.js').then(module => ({ default: module.SentinelSettings })),
 );
+const AuditLogSettings = lazy(() =>
+  import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
+);
+
+type SettingsNavItem = {
+  id: SettingsSection;
+  label: string;
+  icon:
+    | 'cpu'
+    | 'brain'
+    | 'plug'
+    | 'box-archive'
+    | 'lightbulb'
+    | 'cube'
+    | 'robot'
+    | 'palette'
+    | 'lock'
+    | 'clock-rotate-left';
+};
 
 function SettingsSectionFallback() {
   return (
@@ -54,6 +72,8 @@ const TruefoundrySettingsBuilder = () => {
   const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
+  // A new owner lands on Models first, so the first-run checklist shows there until put away.
+  const showFirstRunGuide = useOptionalAmanSetup() !== null && section === 'models';
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -78,7 +98,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasSentinel && section === 'permissions') {
+    if (!hasSentinel && (section === 'permissions' || section === 'audit')) {
       setSettingsOpen(settingsOpen, 'models');
     }
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
@@ -95,18 +115,8 @@ const TruefoundrySettingsBuilder = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [closeSettings, settingsOpen]);
 
-  const sections = useMemo<
-    Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
-    }>
-  >(() => {
-    const baseSections: Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
-    }> = [
+  const sections = useMemo<SettingsNavItem[]>(() => {
+    const baseSections: SettingsNavItem[] = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
       { id: 'connectors', label: 'Connectors', icon: 'plug' },
@@ -114,7 +124,6 @@ const TruefoundrySettingsBuilder = () => {
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
       { id: 'themes', label: 'Themes', icon: 'palette' },
-      { id: 'memory-vault', label: 'Memory vault', icon: 'save' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
@@ -127,6 +136,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
+      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
     return baseSections;
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
@@ -183,17 +193,18 @@ const TruefoundrySettingsBuilder = () => {
 
         <section className="flex flex-col h-full flex-1 overflow-y-hidden px-6 py-4">
           <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto">
+            {showFirstRunGuide ? <AmanFirstRunGuide placement="settings" className="mb-4 max-w-none shrink-0" /> : null}
             <Suspense fallback={<SettingsSectionFallback />}>
               {section === 'models' ? <ModelSettings /> : null}
               {section === 'model-roles' ? <ModelRoleSettings /> : null}
               {section === 'connectors' ? <ConnectorSettings /> : null}
-              {section === 'memory' ? <MemorySettings /> : null}
+              {section === 'memory' ? <MemorySection /> : null}
               {section === 'themes' ? <ThemeSettings /> : null}
-              {section === 'memory-vault' ? <MemoryVaultSettings /> : null}
               {section === 'skills' && hasSkills ? <SkillSettings /> : null}
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
               {section === 'permissions' && hasSentinel ? <SentinelSettings /> : null}
+              {section === 'audit' && hasSentinel ? <AuditLogSettings /> : null}
             </Suspense>
           </div>
         </section>

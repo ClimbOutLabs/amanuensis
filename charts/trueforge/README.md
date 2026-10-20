@@ -234,7 +234,7 @@ For passworded Redis, prefer an external instance and load `REDIS_URL` via
 
 ## OIDC
 
-Configure IdP login under `configs.oidc`. When `enabled` is false (the default),
+Configure login under `configs.oidc`; the issuer must be Aman's own sign-in service (path `/dex`). When `enabled` is false (the default),
 no `OIDC_*` env is set and the server uses a **fixed local admin** identity —
 anyone who can reach the API/UI has full admin access. Enable OIDC for any
 shared or public deployment. When enabled, set string `issuerUrl` and
@@ -242,7 +242,7 @@ shared or public deployment. When enabled, set string `issuerUrl` and
 (prefer valueFrom in production).
 
 Also set `server.publicBaseUrl` to the public application URL (origin plus
-optional pathname) and register `{publicBaseUrl}/api/v1/auth/callback` at your IdP.
+optional pathname) and give the sign-in service `{publicBaseUrl}/api/v1/auth/callback` as its redirect address.
 A pathname such as `https://host/custom/proxy/path` is the UI/API public prefix when a reverse
 proxy strips it.
 
@@ -252,7 +252,7 @@ server:
 configs:
   oidc:
     enabled: true
-    issuerUrl: https://idp.example.com/oauth2/default
+    issuerUrl: https://login.example.com/dex
     clientId: trueforge
     clientSecret:
       valueFrom:
@@ -328,7 +328,7 @@ extraObjects:
 | `image.repository`    | `tfy.jfrog.io/tfy-images/trueforge` | Image repository.                     |
 | `image.tag`           | chart `appVersion`                  | Image tag; stamped on release.        |
 | `server.publicBaseUrl`| `""`                                | Public application URL for OAuth/OIDC callbacks (required for MCP OAuth / OIDC). A pathname is the UI/API public prefix. |
-| `configs.oidc.enabled`| `false`                             | Inject `OIDC_*` env for IdP login.    |
+| `configs.oidc.enabled`| `false`                             | Inject `OIDC_*` env for login.    |
 | `postgresql.enabled`  | `true`                              | Bundle the Bitnami Postgres subchart. |
 | `redis.enabled`       | `true`                              | Bundle the Bitnami Redis subchart.    |
 | `redis.nameOverride`  | `trueforge-redis`                   | Bitnami name prefix for bundled Redis objects. |

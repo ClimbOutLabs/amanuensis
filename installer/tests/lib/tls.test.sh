@@ -79,7 +79,7 @@ test_the_authority_and_the_certificate() {
   assert_contains "$info" '"leaf_names":["127.0.0.1","192.168.1.20","localhost","spark","spark.local"]'
   assert_contains "$info" '"root_days_left":3'
   local days
-  days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\([0-9]*\).*/\1/p')
+  days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\([[:digit:]]*\).*/\1/p')
   if [ "$days" -ge 396 ] && [ "$days" -le 397 ]; then t_pass; else t_fail "the certificate lasts $days days"; fi
   local key_before
   key_before=$(cat "$AMAN_HOME/tls/ca/root.key")
@@ -132,7 +132,7 @@ test_the_trust_page_and_files() {
   assert_contains "$page" "Always Trust"
   assert_contains "$page" "Trusted Root Certification Authorities"
   assert_contains "$page" "Firefox keeps its own list"
-  assert_contains "$page" "If you still see a warning, trust isn't finished. Don't tap through it; finish the steps."
+  assert_contains "$page" "If you still see a warning, trust isn't finished. Don't tap through it; finish the steps above."
   assert_contains "$page" 'href="https://192.168.1.20:8443"'
   assert_not_contains "$page" "@@"
   local profile_again
@@ -143,27 +143,28 @@ test_the_trust_page_and_files() {
 }
 
 test_the_plan_and_the_summary() {
-  t_begin "the plan names the https front end and the authority; the ending lists https addresses, the trust link and a code, and drops the encryption warning"
+  t_begin "the plan names the https service and the root certificate; the ending lists https addresses, the trust link and a code, and drops the encryption warning"
   sandbox_new
   lan
   run_install --dry-run --email owner@example.invalid
-  assert_flat_contains "$OUT" "Download the https front end"
-  assert_flat_contains "$OUT" "Make this computer's certificate authority"
+  assert_flat_contains "$OUT" "Download the https service"
+  assert_flat_contains "$OUT" "Make this computer's root certificate"
   assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, spark, spark.local"
   assert_flat_contains "$OUT" "Port 8791 only sends devices to https."
   assert_no_path "$AMAN_HOME"
   RUN_ENV_EXTRA=(CLICOLOR_FORCE=1 LANG=C.UTF-8 TERM=xterm)
   install_machine
   assert_flat_contains "$OUT" "Open https://192.168.1.20:8443"
-  assert_flat_contains "$OUT" "Trust this computer on each device: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "browser will first warn that the page is not private. Do not click past the warning."
   assert_flat_contains "$OUT" "install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
   assert_not_contains "$OUT" "not encrypted"
   assert_contains "$OUT" "▀" "a code a phone can scan"
   assert_log_lacks "sudo "
   RUN_ENV_EXTRA=()
   run_install --yes
-  assert_flat_contains "$OUT" "done The https front end is downloaded"
-  assert_flat_contains "$OUT" "done This computer's certificate authority exists"
+  assert_flat_contains "$OUT" "done The https service is downloaded"
+  assert_flat_contains "$OUT" "done This computer's root certificate exists"
   sandbox_drop
 }
 
@@ -173,7 +174,7 @@ test_no_code_without_colors() {
   lan
   RUN_ENV_EXTRA=(LANG=C)
   install_machine
-  assert_flat_contains "$OUT" "Trust this computer on each device: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
   assert_not_contains "$OUT" "▀"
   assert_no_path "$STUB_STATE/qr_runs"
   sandbox_drop
@@ -194,7 +195,7 @@ test_tls_off_keeps_plain_http() {
   assert_no_path "$AMAN_HOME/tls"
   assert_no_path "$STUB_STATE/pki_runs"
   assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted."
-  assert_not_contains "$OUT" "Trust this computer"
+  assert_not_contains "$OUT" "follow its steps"
   sandbox_drop
 }
 
@@ -271,7 +272,7 @@ test_an_existing_instance_moves_to_https_and_back() {
   assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "Trust this computer on each device"
+  assert_flat_contains "$OUT" "open this page once on that device"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
   run_install --yes --tls off
@@ -306,8 +307,8 @@ test_a_new_address_gets_a_new_certificate() {
   sandbox_drop
 }
 
-test_backups_carry_the_authority() {
-  t_begin "every backup holds the authority's certificate and private key, so a restore keeps the one devices trust"
+test_backups_carry_the_certificate_but_not_the_key() {
+  t_begin "a backup holds the authority's certificate and never its private key, and says what a restore does"
   sandbox_new
   lan
   install_machine
@@ -315,9 +316,10 @@ test_backups_carry_the_authority() {
   assert_rc 0
   local dir
   dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
-  assert_mode "$dir/tls/root.key" 600
-  assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.key" "$dir/tls/root.key" && echo same)" same
   assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.crt" "$dir/tls/root.crt" && echo same)" same
+  assert_eq "$(find "$dir" -name 'root.key' | wc -l | tr -d ' ')" 0 "no private key anywhere in the backup"
+  assert_eq "$(grep -rl 'PRIVATE KEY' "$dir" 2>/dev/null | grep -c 'tls' || true)" 0 "and no key under another name"
+  assert_flat_contains "$OUT" "After a restore, each device needs to trust this computer again."
   sandbox_drop
 }
 
@@ -398,18 +400,20 @@ test_the_front_end_is_locked_down() {
 }
 
 test_the_fingerprint_is_shown_where_trust_is_given() {
-  t_begin "the fingerprint of the authority is in the ending, on the trust page and in the doctor, with the words to compare it"
+  t_begin "the fingerprint of the authority is in the ending and in the doctor, and the trust page sends people to compare it there"
   sandbox_new
   lan
   install_machine
   local fingerprint
   fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_contains "$fingerprint" ":"
-  assert_flat_contains "$OUT" "Before you trust it, check that the fingerprint your device shows is $fingerprint. If it differs, stop."
+  assert_flat_contains "$OUT" "Your device will show a long code called a fingerprint. It must be $fingerprint. If it differs, stop."
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
-  assert_contains "$page" "<code>$fingerprint</code>"
-  assert_contains "$page" "If it does not match, stop and do not trust it."
+  assert_not_contains "$page" "$fingerprint" "the plain-http page does not show a value it cannot vouch for"
+  assert_not_contains "$page" "<code>$fingerprint"
+  assert_contains "$page" "compare the fingerprint your device shows with the one in the terminal"
+  assert_contains "$page" "If they do not match, stop and do not trust it."
   assert_eq "$(pki_info | sed -n 's/.*"root_fingerprint":"\([^"]*\)".*/\1/p')" "$fingerprint"
   sandbox_drop
 }
@@ -424,6 +428,7 @@ test_the_authority_is_limited() {
   assert_contains "$info" '"root_constrained":true'
   assert_contains "$info" '"root_covers_leaf":true'
   assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"spark"'
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"version":2'
   sandbox_drop
 }
 
@@ -439,16 +444,33 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   assert_rc 0
   assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"nas"'
   assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint" | grep -c "$before")" 0 "a new authority"
-  assert_flat_contains "$OUT" "certificate authority was made again"
+  assert_flat_contains "$OUT" "root certificate was made again"
   assert_flat_contains "$OUT" "each device must trust it again"
   assert_contains "$(pki_info)" '"root_covers_leaf":true'
-  assert_contains "$(cat "$AMAN_HOME/tls/trust/main/index.html")" "<code>$(cat "$AMAN_HOME/tls/ca/root.fingerprint")</code>" "the page shows the new fingerprint"
+  assert_not_contains "$(cat "$AMAN_HOME/tls/trust/main/index.html")" "$(cat "$AMAN_HOME/tls/ca/root.fingerprint")" "the page never carries the fingerprint"
   assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.crt" "$AMAN_HOME/tls/trust/main/ca.crt" && echo same)" same "and offers the new certificate"
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install tls
   assert_rc 0
-  assert_flat_contains "$OUT" "Trust this computer on each device"
-  assert_flat_contains "$OUT" "certificate authority was made again"
+  assert_flat_contains "$OUT" "open this page once on that device"
+  assert_flat_contains "$OUT" "root certificate was made again"
+  sandbox_drop
+}
+
+test_an_authority_made_under_older_limits_is_replaced_once() {
+  t_begin "an authority whose limits were the public-suffix kind is replaced on the next re-run, and then kept"
+  sandbox_new
+  lan
+  install_machine
+  printf '["spark"]\n' >"$AMAN_HOME/tls/ca/root.names"
+  run_install --dry-run
+  assert_flat_contains "$OUT" "Make this computer's root certificate again"
+  assert_flat_contains "$OUT" "is valid for more names than it should be"
+  run_install --yes
+  assert_rc 0
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"version":2'
+  run_install instance refresh main
+  assert_not_contains "$OUT" "made again"
   sandbox_drop
 }
 
@@ -459,10 +481,10 @@ test_an_authority_from_before_it_had_limits_is_replaced_once() {
   install_machine
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install --dry-run
-  assert_flat_contains "$OUT" "Make this computer's certificate authority again"
+  assert_flat_contains "$OUT" "Make this computer's root certificate again"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "certificate authority was made again"
+  assert_flat_contains "$OUT" "root certificate was made again"
   assert_file "$AMAN_HOME/tls/ca/root.names"
   run_install instance refresh main
   assert_not_contains "$OUT" "made again"
@@ -476,6 +498,7 @@ test_the_fingerprint_is_shown_where_trust_is_given
 test_the_authority_is_limited
 test_a_new_name_makes_the_authority_again_and_says_so
 test_an_authority_from_before_it_had_limits_is_replaced_once
+test_an_authority_made_under_older_limits_is_replaced_once
 test_the_authority_and_the_certificate
 test_a_second_instance_shares_the_authority
 test_the_trust_page_and_files
@@ -487,7 +510,7 @@ test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
 test_an_existing_instance_moves_to_https_and_back
 test_a_new_address_gets_a_new_certificate
-test_backups_carry_the_authority
+test_backups_carry_the_certificate_but_not_the_key
 test_renewal_issues_what_is_due
 test_the_daily_backup_renews
 test_a_failed_certificate_is_said_with_the_one_fix

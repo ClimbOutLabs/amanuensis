@@ -1,11 +1,19 @@
 'use client';
 
+import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalEmailAction } from './types.js';
+import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
+import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
+import type {
+  SentinelApprovalCard,
+  SentinelApprovalEmail,
+  SentinelApprovalEmailAction,
+  SentinelApprovalMailbox,
+} from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
@@ -79,11 +87,16 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** What a change replaces; the recipients are in the box below, which is the one place they are listed. */
+function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+  return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
+}
+
+/** What a change replaces, with the recipients of that saved draft. */
 function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
   return (
     <dl className="rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="Replaces" value={`${replaces.subject} (to ${replaces.to.join(', ')})`} />
+      <DetailRow label="Replaces" value={replaces.subject} />
+      <DetailRow label="Replaced draft to" value={mailboxListText(replaces.to)} />
     </dl>
   );
 }
@@ -93,10 +106,18 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
-      <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
-      {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
+      {email.reply_in_thread !== null && (
+        <dl className="mb-1">
+          <DetailRow label="Reply in the thread, subject" value={email.reply_in_thread.subject} />
+          <DetailRow label="Reply in the thread, from" value={email.reply_in_thread.from} />
+        </dl>
+      )}
+      <p className="break-words text-sm text-text-primary">To: {mailboxListText(email.to)}</p>
+      {email.cc.length > 0 && (
+        <p className="break-words text-sm text-text-primary">Copy: {mailboxListText(email.cc)}</p>
+      )}
       {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
+        <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -155,20 +176,28 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email } = card;
+  const { email, calendar_event: calendarEvent, schedule } = card;
+  const badge =
+    email !== null
+      ? EMAIL_BADGES[email.action]
+      : calendarEvent !== null
+        ? CALENDAR_BADGES[calendarEvent.action]
+        : schedule !== null
+          ? SCHEDULE_BADGES[schedule.action]
+          : null;
   return (
     <div className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
           <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
-          {email === null ? (
+          {badge === null ? (
             <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
               {toolName}
             </span>
           ) : (
             <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 text-xs text-text-secondary">
-              {EMAIL_BADGES[email.action]}
+              {badge}
             </span>
           )}
         </div>
@@ -205,6 +234,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         )}
 
         {email !== null && <EmailMessage email={email} />}
+
+        {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
+
+        {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 

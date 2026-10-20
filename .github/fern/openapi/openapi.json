@@ -395,6 +395,10 @@
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
           },
+          "can_chat_allow": {
+            "description": "Whether the user may approve this tool for the rest of the chat.",
+            "type": "boolean"
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"
@@ -1788,12 +1792,12 @@
           "tokens_after": {
             "description": "Estimated context tokens after this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "tokens_before": {
             "description": "Estimated context tokens before this attempt.",
             "minimum": 0,
-            "type": "integer"
+            "type": "number"
           },
           "type": {
             "description": "A context-compaction attempt completed.",
@@ -2421,6 +2425,15 @@
         ],
         "type": "object"
       },
+      "ExportDataRequest": {
+        "properties": {
+          "include_uploads": {
+            "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ExportMemoryVaultResponse": {
         "properties": {
           "data": {
@@ -2524,6 +2537,21 @@
         ],
         "type": "object"
       },
+      "FirstRunGuide": {
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True once the owner has dismissed the first-run checklist.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "type": "object"
+      },
       "GenerativeUIConfig": {
         "default": {
           "enabled": true
@@ -2585,6 +2613,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetFirstRunGuideResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FirstRunGuide"
           }
         },
         "required": [
@@ -3042,6 +3081,17 @@
         ],
         "type": "object"
       },
+      "GetTokenFactoryUsageResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TokenFactoryUsage"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetToolOutputScreenResponse": {
         "properties": {
           "data": {
@@ -3219,10 +3269,6 @@
               "null"
             ]
           },
-          "available": {
-            "description": "False on a demo instance, where Google cannot be connected.",
-            "type": "boolean"
-          },
           "features": {
             "items": {
               "$ref": "#/components/schemas/GoogleFeatureStatus"
@@ -3231,6 +3277,10 @@
           },
           "has_saved_client": {
             "description": "Whether a Google client is already saved, so adding a feature needs no retyping.",
+            "type": "boolean"
+          },
+          "locked": {
+            "description": "True on a demo instance when the connection cannot be changed from Settings right now.",
             "type": "boolean"
           },
           "setup": {
@@ -3251,7 +3301,7 @@
           "account_email",
           "features",
           "has_saved_client",
-          "available",
+          "locked",
           "setup"
         ],
         "type": "object"
@@ -3275,7 +3325,9 @@
       "GoogleFeature": {
         "enum": [
           "gmail_read",
-          "gmail_compose"
+          "gmail_compose",
+          "calendar_read",
+          "calendar_write"
         ],
         "type": "string"
       },
@@ -3593,6 +3645,82 @@
         },
         "required": [
           "results"
+        ],
+        "type": "object"
+      },
+      "ImportDataResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImportDataResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ImportDataResult": {
+        "properties": {
+          "agents": {
+            "description": "Agents imported with their original ids.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chats": {
+            "description": "Chats imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connectors": {
+            "description": "Connectors imported, without credentials.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "folders": {
+            "description": "Chat folders imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memories": {
+            "description": "Memories imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "personas": {
+            "description": "Personas imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules": {
+            "description": "Schedules imported; all arrive switched off.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules_off": {
+            "description": "True when schedules were imported; imported schedules are always off until turned on.",
+            "type": "boolean"
+          },
+          "spaces": {
+            "description": "Spaces imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "summary": {
+            "description": "Plain-words summary of what was imported and what was not.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chats",
+          "memories",
+          "personas",
+          "spaces",
+          "schedules",
+          "folders",
+          "agents",
+          "connectors",
+          "schedules_off",
+          "summary"
         ],
         "type": "object"
       },
@@ -4564,6 +4692,25 @@
         ],
         "type": "object"
       },
+      "ListUserAuditLogResponse": {
+        "properties": {
+          "data": {
+            "description": "Entries from every chat, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/UserAuditRecord"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TokenPagination"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "type": "object"
+      },
       "ListVerifyCommandProposalsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5025,7 +5172,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
@@ -6295,6 +6442,99 @@
         },
         "type": "object"
       },
+      "ModelUsagePersistedEvent": {
+        "properties": {
+          "calls": {
+            "description": "Model calls summed into this event.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Cost in USD over the reported calls, or null when no price is known or usage was not reported.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Readable model name.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "input_tokens": {
+            "description": "Input tokens over the reported calls.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "description": "Model id the provider was called with.",
+            "type": "string"
+          },
+          "model_name": {
+            "description": "Configured model name, as the model picker lists it.",
+            "type": "string"
+          },
+          "output_tokens": {
+            "description": "Output tokens over the reported calls.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "Provider type that served the calls, for example `tokenfactory`.",
+            "type": "string"
+          },
+          "reported_calls": {
+            "description": "Calls whose usage the provider reported. Zero means usage was not reported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ModelUsageRole"
+          },
+          "type": {
+            "enum": [
+              "aman.model.usage"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "role",
+          "model_name",
+          "model_id",
+          "display_name",
+          "provider",
+          "calls",
+          "reported_calls",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ModelUsageRole": {
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "enum": [
+          "chat",
+          "delegation",
+          "compaction",
+          "summarization",
+          "profile_learning",
+          "relevance_judge"
+        ],
+        "type": "string"
+      },
       "MoonshotModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -6703,6 +6943,17 @@
       "PersonalizationProfile": {
         "additionalProperties": false,
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -6774,6 +7025,17 @@
             "minLength": 1,
             "type": "string"
           },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
             "maxLength": 2000,
@@ -6815,6 +7077,7 @@
       "PersonalizationProfileContent": {
         "additionalProperties": false,
         "example": {
+          "address_as": "Sam",
           "assistant_identity": "A thoughtful local-first personal assistant.",
           "assistant_name": "Aman",
           "learned_profile": null,
@@ -6822,10 +7085,22 @@
           "pinned_preferences": [
             "Use short bullet points."
           ],
+          "user_name": "Sam Rivera",
           "user_profile": "Prefers local-first tools and plain English.",
           "voice_guidance": "Warm, direct, and concise."
         },
         "properties": {
+          "address_as": {
+            "default": null,
+            "description": "How the assistant should address the user.",
+            "example": "Sam",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "assistant_identity": {
             "example": "A thoughtful local-first personal assistant.",
             "maxLength": 2000,
@@ -6871,6 +7146,17 @@
             },
             "maxItems": 12,
             "type": "array"
+          },
+          "user_name": {
+            "default": null,
+            "description": "What the user is called.",
+            "example": "Sam Rivera",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "user_profile": {
             "example": "Prefers local-first tools and plain English.",
@@ -7665,6 +7951,10 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "runs_as": {
+            "description": "Who runs it, in plain words: a persona, the assistant, or a saved agent.",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -7673,6 +7963,7 @@
         "required": [
           "id",
           "agent_name",
+          "runs_as",
           "name",
           "manifest",
           "created_by_subject",
@@ -8217,6 +8508,9 @@
           },
           {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelUsagePersistedEvent"
           }
         ]
       },
@@ -8975,11 +9269,13 @@
             ]
           },
           "result": {
+            "description": "calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.",
             "enum": [
               "ok",
               "not_connected",
               "needs_reconnect",
-              "unreachable"
+              "unreachable",
+              "calendar_unavailable"
             ],
             "type": "string"
           }
@@ -9148,6 +9444,114 @@
         ],
         "type": "object"
       },
+      "Tier3CalendarEvent": {
+        "description": "The calendar event a write adds or changes, shown in full.",
+        "properties": {
+          "action": {
+            "description": "Whether a new event is added or an existing one changed.",
+            "enum": [
+              "create",
+              "change"
+            ],
+            "type": "string"
+          },
+          "attendees": {
+            "description": "Every guest on the event.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "before": {
+            "$ref": "#/components/schemas/Tier3CalendarEventBefore"
+          },
+          "calendar": {
+            "description": "The Google account whose main calendar is written.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Description the write sets; empty when none.",
+            "type": "string"
+          },
+          "duration": {
+            "description": "How long the event lasts, in plain words.",
+            "type": "string"
+          },
+          "guests_emailed": {
+            "description": "True when Google emails the guests about this.",
+            "type": "boolean"
+          },
+          "location": {
+            "description": "Place; empty when none.",
+            "type": "string"
+          },
+          "one_of_repeating": {
+            "description": "True when this changes one date of a repeating event.",
+            "type": "boolean"
+          },
+          "time_zone": {
+            "description": "IANA time zone the times are in.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Event title.",
+            "type": "string"
+          },
+          "when": {
+            "description": "Local date and time in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "title",
+          "when",
+          "time_zone",
+          "duration",
+          "location",
+          "description",
+          "attendees",
+          "guests_emailed",
+          "one_of_repeating",
+          "before"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "Tier3CalendarEventBefore": {
+        "description": "The event as it is now, before a change.",
+        "properties": {
+          "duration": {
+            "description": "How long the event lasted before the change.",
+            "type": "string"
+          },
+          "location": {
+            "description": "Place before the change; empty when none.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Title before the change.",
+            "type": "string"
+          },
+          "when": {
+            "description": "Local date and time before the change, in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "when",
+          "duration",
+          "location"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "Tier3Card": {
         "properties": {
           "amount": {
@@ -9156,6 +9560,9 @@
               "string",
               "null"
             ]
+          },
+          "calendar_event": {
+            "$ref": "#/components/schemas/Tier3CalendarEvent"
           },
           "cannot_be_undone": {
             "description": "A short note on what can't be reversed, or null.",
@@ -9217,6 +9624,9 @@
               "null"
             ]
           },
+          "schedule": {
+            "$ref": "#/components/schemas/Tier3Schedule"
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -9255,7 +9665,7 @@
           "bcc": {
             "description": "Hidden copy recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           },
@@ -9266,7 +9676,7 @@
           "cc": {
             "description": "Copied recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           },
@@ -9280,7 +9690,7 @@
               "to": {
                 "description": "Recipients of the draft being replaced.",
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/Tier3Mailbox"
                 },
                 "type": "array"
               }
@@ -9294,6 +9704,27 @@
               "null"
             ]
           },
+          "reply_in_thread": {
+            "description": "The message a reply answers in its thread, or null when the message is not a reply.",
+            "properties": {
+              "from": {
+                "description": "Sender of the message being answered.",
+                "type": "string"
+              },
+              "subject": {
+                "description": "Subject of the message being answered.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "subject",
+              "from"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "subject": {
             "description": "Subject line.",
             "type": "string"
@@ -9301,7 +9732,7 @@
           "to": {
             "description": "Recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           }
@@ -9313,7 +9744,79 @@
           "bcc",
           "subject",
           "body",
-          "replaces"
+          "replaces",
+          "reply_in_thread"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "Tier3Mailbox": {
+        "description": "One email recipient: its name and its address.",
+        "properties": {
+          "address": {
+            "description": "Email address the message is delivered to.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name of the recipient, or an empty string when it has none.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address"
+        ],
+        "type": "object"
+      },
+      "Tier3Schedule": {
+        "description": "The schedule a chat call creates or deletes, shown in full.",
+        "properties": {
+          "action": {
+            "description": "Whether the schedule is created or deleted.",
+            "enum": [
+              "create",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Schedule name in plain words.",
+            "type": "string"
+          },
+          "next_runs": {
+            "description": "The next three runs in plain words for a new schedule; empty for a delete.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runs_as": {
+            "description": "Who runs it: the assistant name, or the agent name.",
+            "type": "string"
+          },
+          "task": {
+            "description": "The whole instruction each run gets.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA time zone the times are in.",
+            "type": "string"
+          },
+          "when": {
+            "description": "When it runs, in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "name",
+          "when",
+          "time_zone",
+          "task",
+          "runs_as",
+          "next_runs"
         ],
         "type": [
           "object",
@@ -9397,6 +9900,103 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "TokenFactoryModelUsage": {
+        "properties": {
+          "calls": {
+            "description": "Model calls counted today.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Cost in USD at the configured price, or null when the model has no known price.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "display_name": {
+            "description": "Readable model name.",
+            "type": "string"
+          },
+          "input_tokens": {
+            "description": "Input tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "description": "Model id the provider was called with.",
+            "type": "string"
+          },
+          "output_tokens": {
+            "description": "Output tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id",
+          "display_name",
+          "input_tokens",
+          "output_tokens",
+          "calls",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "TokenFactoryUsage": {
+        "properties": {
+          "cap_tokens": {
+            "description": "Daily token cap, or null when there is none.",
+            "exclusiveMinimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cost_usd": {
+            "description": "Cost in USD of all models today, or null when any model has no known price.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "models": {
+            "description": "Per-model counters, most tokens first.",
+            "items": {
+              "$ref": "#/components/schemas/TokenFactoryModelUsage"
+            },
+            "type": "array"
+          },
+          "remaining_tokens": {
+            "description": "Tokens left under the cap today, or null when there is no cap.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "usage_date": {
+            "description": "UTC day these counters cover, as `YYYY-MM-DD`. They reset at midnight UTC.",
+            "type": "string"
+          },
+          "used_tokens": {
+            "description": "Input plus output tokens counted today.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "usage_date",
+          "cap_tokens",
+          "used_tokens",
+          "remaining_tokens",
+          "cost_usd",
+          "models"
         ],
         "type": "object"
       },
@@ -10247,7 +10847,7 @@
             "type": "string"
           },
           "host_observed_target_summary": {
-            "description": "Host-observed structured-edit target summary shown during approval.",
+            "description": "Host-observed target the call acts on, such as a file or git repository, shown during approval.",
             "type": "string"
           },
           "name": {
@@ -11051,6 +11651,7 @@
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
+            "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
@@ -11128,6 +11729,9 @@
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ContextCompactionEvent"
           },
           {
@@ -11149,6 +11753,22 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateFirstRunGuideRequest": {
+        "additionalProperties": false,
+        "example": {
+          "dismissed": true
+        },
+        "properties": {
+          "dismissed": {
+            "description": "True to put the checklist away; false to show it again.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
         ],
         "type": "object"
       },
@@ -11258,6 +11878,7 @@
         "additionalProperties": false,
         "example": {
           "profile": {
+            "address_as": "Sam",
             "assistant_identity": "A thoughtful local-first personal assistant.",
             "assistant_name": "Aman",
             "learned_profile": null,
@@ -11265,6 +11886,7 @@
             "pinned_preferences": [
               "Use short bullet points."
             ],
+            "user_name": "Sam Rivera",
             "user_profile": "Prefers local-first tools and plain English.",
             "voice_guidance": "Warm, direct, and concise."
           }
@@ -11454,6 +12076,62 @@
           "purpose",
           "command",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "UserAuditRecord": {
+        "properties": {
+          "auto_deny_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chat_exists": {
+            "description": "False once the chat the entry came from has been deleted.",
+            "type": "boolean"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "logged",
+              "ran",
+              "approved",
+              "denied",
+              "auto_denied"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "tier",
+          "tool_name",
+          "description",
+          "outcome",
+          "auto_deny_reason",
+          "created_at",
+          "chat_exists"
         ],
         "type": "object"
       },
@@ -13207,6 +13885,177 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/data/export": {
+      "post": {
+        "description": "Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The export archive (zip). A failed export drops the connection instead of ending the archive."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is missing or invalid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request body is not application/json."
+          }
+        },
+        "summary": "Export my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "export_data"
+      }
+    },
+    "/api/v1/data/import": {
+      "post": {
+        "description": "Admin only. Imports an export archive into a fresh instance. The archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.",
+        "requestBody": {
+          "content": {
+            "application/zip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDataResponse"
+                }
+              }
+            },
+            "description": "The import finished; the summary says what arrived and what did not."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is not a valid export, or was made by a newer version."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This instance already has data, or an import is already running; imports only run into a fresh instance."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is larger than the import limit."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not application/zip."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge index is still downloading; retry in a few minutes."
+          }
+        },
+        "summary": "Import my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "import_data"
       }
     },
     "/api/v1/mcp-servers": {
@@ -18748,6 +19597,116 @@
         }
       }
     },
+    "/api/v1/settings/first-run-guide": {
+      "get": {
+        "description": "Whether the owner has dismissed the first-run checklist. Not dismissed until the owner says so.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the first-run checklist state",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists whether the first-run checklist is dismissed. The response carries the stored state.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFirstRunGuideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetFirstRunGuideResponse"
+                }
+              }
+            },
+            "description": "The first-run checklist state after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Dismiss or restore the first-run checklist",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
     "/api/v1/settings/mcp-servers": {
       "get": {
         "description": "Configured MCP servers with auth_status. Header secrets are redacted.",
@@ -19901,6 +20860,52 @@
         "x-fern-sdk-method-name": "delete"
       }
     },
+    "/api/v1/settings/token-factory-usage": {
+      "get": {
+        "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTokenFactoryUsageResponse"
+                }
+              }
+            },
+            "description": "Today's Token Factory usage."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get today's Token Factory usage",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "tokenFactoryUsage"
+        ],
+        "x-fern-sdk-method-name": "get"
+      }
+    },
     "/api/v1/settings/tool-output-screens": {
       "get": {
         "description": "The persisted override for the live tool-output screen, or the `TOOL_OUTPUT_SCREEN_ENABLED` env default when none is stored.",
@@ -20574,6 +21579,97 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/user/audit-log": {
+      "get": {
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the newest entries.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the newest entries.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries with this outcome.",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "description": "Only entries with this outcome.",
+              "enum": [
+                "logged",
+                "ran",
+                "approved",
+                "denied",
+                "auto_denied"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUserAuditLogResponse"
+                }
+              }
+            },
+            "description": "One page of audit entries."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters or page token."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List the Sentinel audit log across all chats",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-pagination": {
+          "cursor": "$request.page_token",
+          "next_cursor": "$response.pagination.next_page_token",
+          "results": "$response.data"
+        },
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "auditLog"
+        ],
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

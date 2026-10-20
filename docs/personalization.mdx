@@ -7,6 +7,7 @@ description: 'A small, inspectable local profile for assistant identity, voice, 
 
 Personalization is a single profile owned by the authenticated user. It contains only:
 
+- Your name and how the assistant should address you
 - Assistant name and concise identity guidance
 - Voice guidance
 - A concise user profile
@@ -20,7 +21,7 @@ The profile records its owner, last updater, timestamps, a monotonic revision nu
 
 ## What the model sees
 
-On every root-agent turn, the server builds one bounded `<personalization-context>` section from the current profile. Dynamic subagents never receive it. Default-assistant turns receive the assistant name, identity, voice, user profile, pinned preferences, and learned profile. When a configured persona is active, that persona is the sole assistant identity: the server omits the default assistant's name, identity, and voice while retaining the user profile, pinned preferences, and learned profile.
+On every root-agent turn, the server builds one bounded `<personalization-context>` section from the current profile. Dynamic subagents never receive it. Default-assistant turns receive the assistant name, identity, voice, your name and form of address, user profile, pinned preferences, and learned profile. When a configured persona is active, that persona is the sole assistant identity: the server omits the default assistant's name, identity, and voice while retaining your name and form of address, the user profile, pinned preferences, and learned profile.
 
 The default-assistant profile projection is available through:
 

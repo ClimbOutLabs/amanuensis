@@ -22,9 +22,9 @@ volume_tar() {
   D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data -cf - .
 }
 
-# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses.
+# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses. Compose reads the last match.
 env_get() {
-  sed -n "s/^$2=//p" "$1" | head -n 1
+  sed -n "s/^$2=//p" "$1" | tail -n 1
 }
 
 BACKUP_SCRATCH_LABEL=com.amanuensis.scratch=backup
@@ -61,7 +61,7 @@ backup_data() {
   database_probe "$name" "$image" "$sqlite" || {
     case $? in
       1)
-        say "Instance $name has no database yet, so there is nothing to back up for it; its settings are saved."
+        say "Instance $name has no data yet, so only its settings are saved."
         return 0
         ;;
       *)
@@ -99,13 +99,18 @@ backup_instance() {
   chmod 600 "$dest/env" "$dest/dex.env"
 }
 
+# Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
+plain_backups() {
+  [ -d "$BACKUPS_DIR" ] || return 0
+  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | grep -E '/[[:digit:]]{8}T[[:digit:]]{6}Z(-[[:digit:]]+)?$' | sort || true
+}
+
 backup_prune() {
   local total drop dir
-  [ -d "$BACKUPS_DIR" ] || return 0
-  total=$(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+  total=$(plain_backups | grep -c . || true)
   drop=$((total - BACKUP_KEEP))
   [ "$drop" -gt 0 ] || return 0
-  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | sort | head -n "$drop" | while IFS= read -r dir; do
+  plain_backups | head -n "$drop" | while IFS= read -r dir; do
     rm -rf "$dir"
   done
 }
@@ -120,17 +125,18 @@ backup_targets() {
   done
 }
 
-# backup_run [NAME]: one timestamped directory; removed again if any part fails. Nothing to cover means no backup.
+# backup_run [NAME [LABEL]]: one timestamped directory, kept for good when it carries a label; removed again if any
+# part fails. Nothing to cover means no backup.
 backup_run() {
-  local only=${1:-} stamp dir name image n=0
+  local only=${1:-} label=${2:-} stamp dir name image n=0
   LAST_BACKUP_DIR=
   [ -n "$(backup_targets "$only")" ] || return 0
-  release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
+  release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   image=$CUR_APP_TAG
-  docker_image_exists "$image" || die "image $image is missing; run install.sh to rebuild it"
+  docker_image_exists "$image" || die "Part of Aman ($image) is missing. Run install.sh to build it again."
   ensure_private_dir "$BACKUPS_DIR"
   backup_scratch_prune
-  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)${label:+-$label}
   dir=$BACKUPS_DIR/$stamp
   while [ -e "$dir" ]; do
     n=$((n + 1))
@@ -141,16 +147,16 @@ backup_run() {
     say "Backing up instance $name"
     if ! backup_instance "$name" "$dir" "$image"; then
       rm -rf "$dir"
-      warn "the backup of $name failed; the partial backup was removed"
+      warn "The backup of $name failed, so the unfinished backup was removed."
       return 1
     fi
     n=$((n + 1))
   done
-  # The authority's key goes with every backup, so a restored computer keeps the one its devices already trust.
-  if [ -f "$(tls_ca_dir)/root.key" ]; then
+  # Only the authority's certificate goes into a backup, never its private key: a backup is not encrypted, and whoever
+  # holds that key can vouch for any name this computer is opened at. A restore makes a new key.
+  if [ -f "$(tls_ca_dir)/root.crt" ]; then
     ensure_private_dir "$dir/tls"
-    cp "$(tls_ca_dir)/root.crt" "$(tls_ca_dir)/root.key" "$dir/tls/"
-    chmod 600 "$dir/tls/root.key"
+    cp "$(tls_ca_dir)/root.crt" "$dir/tls/"
   fi
   cp "$RELEASE_DIR/release.json" "$dir/release.json"
   chmod 600 "$dir/release.json"
@@ -158,12 +164,20 @@ backup_run() {
   LAST_BACKUP_DIR=$dir
   backup_prune
   log_event "backup $dir"
-  say "Backup written to $dir (unencrypted; it holds secrets, keep it on this machine)"
+  if [ -n "$label" ]; then
+    say "Saved a backup to $dir, kept until you remove it."
+  else
+    say "Saved a backup to $dir."
+  fi
+  say "It holds your passwords and keys, so keep it on this computer."
+  if [ -f "$dir/tls/root.crt" ]; then
+    say "After a restore, each device needs to trust this computer again."
+  fi
 }
 
 cmd_backup() {
   if [ -n "${OPT_NAME:-}" ]; then
-    reg_exists "$OPT_NAME" || die "no instance named $OPT_NAME"
+    reg_exists "$OPT_NAME" || die "There is no instance named $OPT_NAME."
   fi
   if [ -z "$(reg_names)" ]; then
     say "No instances yet; nothing to back up."
@@ -182,7 +196,7 @@ cmd_backup() {
 restore_sqlite() {
   local name=$1 dir=$2 image=$3
   if [ ! -f "$dir/$name/db.sqlite" ]; then
-    warn "no database copy of $name in $dir; skipping its restore"
+    warn "The backup in $dir has no data for instance $name, so nothing was put back for it."
     return 0
   fi
   D run --rm -i --network none -v "aman_${name}_data:/data" "$image" sh -c \
@@ -197,7 +211,7 @@ cmd_backups() {
     *) usage_die "usage: install.sh backups daily|off" ;;
   esac
   if ! backups_apply "$OPT_BACKUPS_ARG"; then
-    die "This computer has no way to schedule a backup without admin rights (no user timer, launchd or crontab)."
+    die "This computer has no way to run a backup every day without admin rights."
   fi
   if [ "$OPT_BACKUPS_ARG" = daily ]; then
     ui_ok "A backup is made every day, keeping the last $BACKUP_KEEP"

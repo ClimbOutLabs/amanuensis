@@ -40,7 +40,9 @@ function makeResolver(searchProviders: Readonly<Record<string, readonly string[]
       sessionId: null,
       listTools: () => Promise.resolve({ tools: [searchTool, unannotatedTool] }),
       callTool: () =>
-        Promise.resolve({ content: [{ type: 'text', text: 'see https://results.example.org/oslo for details' }] }),
+        Promise.resolve({
+          content: [{ type: 'text', text: JSON.stringify({ results: [{ url: 'https://results.example.org/oslo' }] }) }],
+        }),
       close: () => Promise.resolve(),
     }),
   );
@@ -55,7 +57,8 @@ function makeResolver(searchProviders: Readonly<Record<string, readonly string[]
     mcp: name =>
       Promise.resolve({
         url: `https://${name}.example.com/mcp`,
-        search_provider: name in searchProviders ? { tools: searchProviders[name] ?? [] } : undefined,
+        search_provider:
+          name in searchProviders ? { tools: searchProviders[name] ?? [], plumbing_fields: [] } : undefined,
       }),
     mcpRequestTimeoutMs: 1_000,
     mcpConnectTimeoutMs: 1_000,

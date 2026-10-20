@@ -33,15 +33,40 @@ describe('assessDraft', () => {
     expect(result).toEqual({
       ok: true,
       draft: {
-        to: ['grace@example.com', 'lin@example.com'],
-        cc: ['sam@example.com'],
-        bcc: ['audit@example.com'],
+        to: [
+          { name: 'Grace', address: 'grace@example.com' },
+          { name: '', address: 'lin@example.com' },
+        ],
+        cc: [{ name: '', address: 'sam@example.com' }],
+        bcc: [{ name: '', address: 'audit@example.com' }],
         subject: 'Lease',
         body: 'Thursday works.',
         threadId: 't9',
         inReplyTo: '<a@mail.example.com>',
         references: '<a@mail.example.com>',
         fromName: 'Ada Lovelace',
+        nameLeftOff: false,
+      },
+    });
+  });
+
+  it('delivers a saved draft with each recipient name as Gmail holds it, even one that looks like an address', () => {
+    const result = forSend(
+      plainDraft({
+        id: 'd2',
+        to: '"boss@example.com" <other@example.org>, "Jane Doe (Acme)" <jane@example.org>',
+        subject: 'Lease',
+        body: 'Thursday works.',
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      draft: {
+        to: [
+          { name: 'boss@example.com', address: 'other@example.org' },
+          { name: 'Jane Doe (Acme)', address: 'jane@example.org' },
+        ],
+        nameLeftOff: false,
       },
     });
   });

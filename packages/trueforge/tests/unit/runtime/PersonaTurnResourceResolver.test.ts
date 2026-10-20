@@ -61,6 +61,8 @@ const PERSONALIZATION: PersonalizationProfile = {
   assistant_name: 'Testinatrix',
   assistant_identity: 'A pirate software tester.',
   voice_guidance: 'Use pirate language and QA metaphors.',
+  user_name: null,
+  address_as: null,
   user_profile: 'Prefers plain English.',
   pinned_preferences: ['Keep advice practical.'],
   learned_profile: 'The user values calm explanations.',

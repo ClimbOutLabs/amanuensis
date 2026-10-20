@@ -9,8 +9,10 @@ import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -76,6 +78,10 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
 
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
+  }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
   }
 }
 
@@ -168,6 +174,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
+        mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,
@@ -295,9 +302,9 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       expect(given).toBe(googleStore);
     });
 
-    it('never gives a demo instance a real mailbox, even with a stored Google login', async () => {
-      const { given } = await googleConnectionsOf({ demoMode: true });
-      expect(given).toBeUndefined();
+    it('keeps Google on a demo instance, where the sentinel holds sends to the demo list', async () => {
+      const { given, googleStore } = await googleConnectionsOf({ demoMode: true });
+      expect(given).toBe(googleStore);
     });
   });
 });

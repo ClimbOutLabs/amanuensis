@@ -33,6 +33,7 @@ function toRecord(row: Selectable<AgentTable>): AgentRecord {
     description: row.description,
     manifest: parseStoredAgentSpec(row.manifest),
     external_id: row.external_id,
+    host_managed: row.host_managed,
     created_by_subject: CreatedBySubjectSchema.parse(row.created_by_subject),
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
@@ -73,6 +74,10 @@ export class PostgresAgentStore implements IAgentStore<Transaction<Database>> {
     }
     const db = transaction ?? this.#db;
     let query = db.selectFrom('agent').selectAll().where('tenant_id', '=', input.tenant_id);
+    // Filtered in the query, not after it, so every page is full and its next token is honest.
+    if (!input.include_host_managed) {
+      query = query.where('host_managed', '=', false);
+    }
     if (input.external_ids !== undefined) {
       query = query.where('external_id', 'in', [...input.external_ids]);
     }
@@ -145,12 +150,13 @@ export class PostgresAgentStore implements IAgentStore<Transaction<Database>> {
       const row = await db
         .insertInto('agent')
         .values({
-          id: newId(),
+          id: input.id ?? newId(),
           tenant_id: input.tenant_id,
           name: input.name,
           description: input.description,
           manifest: json(input.manifest),
           external_id: input.external_id,
+          host_managed: input.host_managed,
           created_by_subject: json(input.created_by_subject),
           created_at: now(),
           updated_at: now(),

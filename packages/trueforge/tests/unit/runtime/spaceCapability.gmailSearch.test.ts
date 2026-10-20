@@ -17,6 +17,7 @@ import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability'
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../../../src/runtime/MemoryTurnResourceResolver';
 import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { INERT_WEB_SEARCH_TOOL, startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -127,7 +128,8 @@ describe('a web search after the chat read mail', () => {
             modelId: undefined,
             modelSupportsVision: false,
           }),
-        mcp: () => Promise.resolve({ url: inert.url, headers: {}, search_provider: { tools: [] } }),
+        mcp: () =>
+          Promise.resolve({ url: inert.url, headers: {}, search_provider: { tools: [], plumbing_fields: [] } }),
         mcpRequestTimeoutMs: 10_000,
         mcpConnectTimeoutMs: 10_000,
         logger: createLogger({ silent: true }),
@@ -144,6 +146,13 @@ describe('a web search after the chat read mail', () => {
         googleConnections: connections,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
         sessionId: 's1',
+        logger: createLogger({ silent: true }),
+      },
+      {
+        store: new FakeTurnArtifactStore(),
+        tenantId: OWNER.tenant_id,
+        sessionId: 's1',
+        turnId: 't1',
         logger: createLogger({ silent: true }),
       },
     );

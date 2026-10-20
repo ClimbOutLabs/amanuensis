@@ -70,7 +70,7 @@ export function buildStructuredEditObservationCommand(input: {
 }): string {
   const kind = input.kind;
   const paths = [...new Set(input.paths)].sort(comparePaths);
-  return `python3 -c ${shellEscape(STRUCTURED_EDIT_OBSERVATION_SCRIPT)} ${shellEscape(kind)} ${shellEscape(input.workspaceRoot)} ${shellEscape(JSON.stringify(paths))}`;
+  return `python3 -I -S -c ${shellEscape(STRUCTURED_EDIT_OBSERVATION_SCRIPT)} ${shellEscape(kind)} ${shellEscape(input.workspaceRoot)} ${shellEscape(JSON.stringify(paths))}`;
 }
 
 export function parseStructuredEditObservation(

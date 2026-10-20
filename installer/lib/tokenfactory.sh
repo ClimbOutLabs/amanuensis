@@ -5,20 +5,21 @@
 # Must equal DEFAULT_TOKEN_FACTORY_MODEL in packages/trueforge/src/runtime/tokenFactoryDefaults.ts (contract test).
 TF_DEFAULT_MODEL=nvidia/nemotron-3-super-120b-a12b
 
-valid_tf_key() { matches_whole "$1" '^[A-Za-z0-9._~+/=-]{16,512}$'; }
+# The length is counted here, not in the pattern: macOS regex refuses repeat counts above 255.
+valid_tf_key() { [ "${#1}" -ge 16 ] && [ "${#1}" -le 512 ] && matches_whole "$1" '^[A-Za-z0-9._~+/=-]+$'; }
 valid_tf_model() { matches_whole "$1" '^[A-Za-z0-9][A-Za-z0-9._/:-]{0,127}$'; }
-valid_tf_cap() { matches_whole "$1" '^[1-9][0-9]{0,11}$'; }
+valid_tf_cap() { matches_whole "$1" '^[1-9][[:digit:]]{0,11}$'; }
 
 # The key is never echoed in a message, only its problem.
 tf_key_problem() {
-  valid_tf_key "$1" || echo "the Token Factory key has a length or characters a key never has"
+  valid_tf_key "$1" || echo "The Token Factory key has a length or characters a key never has."
 }
 
 # --token-factory-key-stdin: one line of stdin, read before any prompt so it cannot be taken by one.
 read_token_factory_key_stdin() {
   local line=
   IFS= read -r line || true
-  [ -n "$line" ] || usage_die "--token-factory-key-stdin got an empty line"
+  [ -n "$line" ] || usage_die "The input line was empty, and --token-factory-key-stdin reads the Token Factory key from it."
   [ -z "$(tf_key_problem "$line")" ] || usage_die "$(tf_key_problem "$line")"
   AMAN_TF_KEY=$line
 }
@@ -56,7 +57,7 @@ tf_rotation_name() {
   elif reg_exists main; then
     printf '%s' main
   else
-    usage_die "--token-factory-key-stdin on an existing machine needs --name of the instance whose key changes"
+    usage_die "Aman is already set up, so --token-factory-key-stdin needs --name of the instance whose key changes"
   fi
 }
 
@@ -77,8 +78,8 @@ tf_rotation_collect() {
 tf_rotation_write_env() {
   local name=$1 env
   env="$(instance_dir "$name")/.env"
-  [ -f "$env" ] || die "instance $name has no .env, so its Token Factory key was not changed"
-  grep -q '^# >>> managed by the installer' "$env" || die "the managed block of $env is missing, so its Token Factory key was not changed"
+  [ -f "$env" ] || die "Instance $name has no settings file, so its Token Factory key was not changed."
+  grep -q '^# >>> managed by the installer' "$env" || die "The settings file $env is missing the part the installer manages, so the Token Factory key was not changed."
   env_managed_set "$env" NEBIUS_API_KEY "$AMAN_TF_KEY"
 }
 
@@ -93,13 +94,13 @@ tf_rotation_apply() {
     [ -n "$(reg_get "$name" tf_model)" ] || reg_set "$name" tf_model "$TF_DEFAULT_MODEL"
   fi
   log_event "token factory key replaced for instance $name"
-  say "Token Factory key updated; restarting the app"
+  say "Token Factory key updated. Restarting the app."
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app ||
-    die "The app of instance $name did not restart healthy with the new key. Run: aman doctor instance --fix"
+    die "The app of instance $name did not start again with the new key. Run: aman doctor instance --fix"
 }
 
 tf_plan_detail() {
-  local text="The key goes only into the instance .env."
+  local text="The key is saved only in the settings file of this instance."
   if [ -n "$I_TF_CAP" ]; then text="$text Capped at $I_TF_CAP tokens per day."; fi
   printf '%s' "$text"
 }

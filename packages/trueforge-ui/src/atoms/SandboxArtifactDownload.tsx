@@ -38,16 +38,8 @@ export function SandboxArtifactDownload({
   const ChatFileDownload = useSlot('ChatFileDownload');
   const artifacts = useMemo(() => parseSandboxArtifacts(code), [code]);
   if (artifacts.length === 0) {
-    // Nothing parsed: show the raw block instead of an empty reply, so the user
-    // at least sees what the model wrote.
-    return (
-      <pre
-        data-testid="aui-sandbox-artifacts-raw"
-        className="aui-sandbox-artifacts-raw my-2 overflow-x-auto rounded-lg border border-border bg-card-bg p-3 font-mono text-sm text-text-secondary"
-      >
-        {code}
-      </pre>
-    );
+    // A block naming no file shows nothing: its raw text means nothing to the person reading.
+    return null;
   }
 
   // Check if there are any HTML artifacts to preview
@@ -114,16 +106,11 @@ function HtmlArtifactPreviewWrapper({
 
     async function fetchAndPrepare() {
       try {
-        // First trigger the download (this logs the action)
-        await onDownloadArtifact(artifact.path, artifact.name);
-
-        // Then fetch the file blob
+        // Display only: saving to the user's device waits for an explicit download click.
+        const fileBlob = await onFetchFile(artifact.path);
         if (isMounted) {
-          const fileBlob = await onFetchFile(artifact.path);
-          if (isMounted) {
-            setBlob(fileBlob);
-            setError(null);
-          }
+          setBlob(fileBlob);
+          setError(null);
         }
       } catch (err) {
         if (isMounted) {
@@ -137,7 +124,7 @@ function HtmlArtifactPreviewWrapper({
     return () => {
       isMounted = false;
     };
-  }, [artifact, onDownloadArtifact, onFetchFile]);
+  }, [artifact, onFetchFile]);
 
   if (error) {
     return (
@@ -150,7 +137,17 @@ function HtmlArtifactPreviewWrapper({
   if (!blob) return null;
 
   return (
-    <HtmlArtifactPreview content={blob} filename={artifact.name} onFetchRelatedFile={onFetchFile} readOnly={readOnly} />
+    <HtmlArtifactPreview
+      content={blob}
+      filename={artifact.name}
+      onFetchRelatedFile={onFetchFile}
+      onDownload={() => {
+        onDownloadArtifact(artifact.path, artifact.name).catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Failed to download HTML artifact');
+        });
+      }}
+      readOnly={readOnly}
+    />
   );
 }
 

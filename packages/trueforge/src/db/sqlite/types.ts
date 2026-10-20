@@ -41,6 +41,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
 /**
@@ -194,6 +195,8 @@ export interface SentinelUserSettingsTable {
   tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
   /** SQLite's 0/1 integer boolean. */
   search_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  maps_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -227,6 +230,31 @@ export interface TurnArtifactTable {
   mime: string | null;
   skip_reason: string | null;
   created_at: string;
+}
+
+/** Re-encoded chat image. PRIMARY KEY (session_id, image_id); UNIQUE (session_id, source_key); session cascade. */
+export interface ChatImageTable {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  turn_id: string;
+  image_id: string;
+  source_key: string;
+  origin: ChatImageOrigin;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  data: Buffer;
+  created_at: string;
+}
+
+/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
+export interface ChatImageTurnAllowanceTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  silent_attempts: number;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -278,6 +306,16 @@ export interface GlobalSettingsTable {
 export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
+  updated_at: string;
+}
+
+/** One row per UTC day and upstream model id; not tenant-scoped. */
+export interface TokenFactoryModelUsageTable {
+  usage_date: string;
+  model_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
   updated_at: string;
 }
 
@@ -452,6 +490,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JsonbColumn<AgentSpec>;
   external_id: string | null;
+  /** 1 for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<number>;
   created_by_subject: JsonbColumn<CreatedBySubject>;
   created_at: string;
   updated_at: string;
@@ -472,6 +512,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JsonbColumn<ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */
@@ -510,6 +552,8 @@ export interface PersonalizationProfileTable {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JsonbColumn<string[]>;
   /** Host-maintained learned document; null until the learning pass writes one. */
@@ -627,6 +671,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<number>;
   revision: Generated<number>;
   created_at: string;
   updated_at: string;
@@ -735,6 +780,9 @@ export interface Database {
   repository_workspace_verification: RepositoryWorkspaceVerificationTable;
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
+  chat_image: ChatImageTable;
+  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
+  token_factory_model_usage: TokenFactoryModelUsageTable;
 }

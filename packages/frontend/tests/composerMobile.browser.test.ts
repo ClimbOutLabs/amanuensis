@@ -1,54 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { chromium, type Browser } from 'playwright-core';
-import { createServer } from 'vite';
+import { createServer, defaultClientConditions } from 'vite';
 
-function findChromiumExecutable(): string {
-  const candidates: string[] = [];
-  const add = (candidate: string | undefined) => {
-    if (candidate != null && candidate.length > 0) candidates.push(candidate);
-  };
-
-  add(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);
-  add(process.env.CHROME_PATH);
-  add(process.env.EDGE_PATH);
-  add(chromium.executablePath());
-
-  if (process.platform === 'win32') {
-    const programFiles = process.env.ProgramFiles;
-    const programFilesX86 = process.env['ProgramFiles(x86)'];
-    const localAppData = process.env.LOCALAPPDATA;
-    if (programFiles != null) add(join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-    if (programFilesX86 != null) {
-      add(join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-      add(join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-    }
-    if (localAppData != null) {
-      add(join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'));
-      add(join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-    }
-  } else if (process.platform === 'darwin') {
-    add('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-    add('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
-  } else {
-    add('/usr/bin/google-chrome');
-    add('/usr/bin/google-chrome-stable');
-    add('/usr/bin/chromium');
-    add('/usr/bin/chromium-browser');
-  }
-
-  const executable = candidates.find(candidate => existsSync(candidate));
-  if (executable == null) {
-    throw new Error(
-      'A Chromium browser is required. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, CHROME_PATH, or EDGE_PATH.',
-    );
-  }
-  return executable;
-}
+import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 
@@ -58,6 +15,8 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     configFile: false,
     root: frontendRoot,
     logLevel: 'silent',
+    // The published ui dist leaves core modules external, so resolve them from source like the app does.
+    resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
     server: { host: '127.0.0.1', port: 0 },
   });
   let browser: Browser | undefined;
@@ -67,7 +26,10 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     const address = server.httpServer?.address();
     if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
 
-    browser = await chromium.launch({ executablePath: findChromiumExecutable(), headless: true });
+    browser = await chromium.launch({
+      executablePath: findChromiumExecutable(chromium.executablePath()),
+      headless: true,
+    });
     const context = await browser.newContext({
       viewport: { width: 320, height: 844 },
       deviceScaleFactor: 1,

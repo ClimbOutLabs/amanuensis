@@ -1,8 +1,9 @@
 import { readMessage } from '../../../../src/core/email/gmail/message';
 import {
-  addressesOf,
+  addressListIsPlain,
   getDraftResult,
   listThreadsResult,
+  mailboxesOf,
   readEmailResult,
   threadResult,
   UNTRUSTED_NOTICE,
@@ -42,10 +43,19 @@ describe('message reading', () => {
     expect(read.body).toBe('Hello Ada');
   });
 
-  it('splits an address header on commas outside quotes', () => {
-    expect(addressesOf('"Lovelace, Ada" <ada@example.com>, grace@example.com')).toEqual([
-      'ada@example.com',
-      'grace@example.com',
+  it('splits an address header on commas outside quotes, keeping each name with its address', () => {
+    expect(mailboxesOf('"Lovelace, Ada" <ada@example.com>, grace@example.com')).toEqual([
+      { name: 'Lovelace, Ada', address: 'ada@example.com' },
+      { name: '', address: 'grace@example.com' },
+    ]);
+  });
+
+  it('decodes an encoded name, and takes the address from the brackets when a name looks like one', () => {
+    expect(
+      mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@example.org>'),
+    ).toEqual([
+      { name: 'Maya López', address: 'maya@example.com' },
+      { name: 'boss@example.com', address: 'other@example.org' },
     ]);
   });
 });
@@ -62,6 +72,20 @@ describe('result shapes', () => {
       expect(result.account).toBe('ada@example.com');
       expect(result.untrusted_content).toBe(UNTRUSTED_NOTICE);
     }
+  });
+
+  it('lists the web images an email links, even when it also has plain text', () => {
+    const withImages = readEmailResult({
+      context,
+      message: message({
+        id: 'm1',
+        body: 'Sale today',
+        html: '<p>Sale</p><img src="https://example.com/banner.png"><img src="cid:logo">',
+      }),
+    });
+    expect(withImages.linked_images).toEqual(['https://example.com/banner.png']);
+    const plain = readEmailResult({ context, message: message({ id: 'm2', body: 'hi' }) });
+    expect('linked_images' in plain).toBe(false);
   });
 
   it('lists threads with the fields the fetch semantics expect and states coverage', () => {
@@ -152,5 +176,37 @@ describe('result shapes', () => {
       in_reply_to: '<abc@mail.example.com>',
       attachments: [],
     });
+  });
+});
+
+describe('mailbox headers that could read two ways', () => {
+  it('keeps the name Gmail holds on a quoted display name that looks like an address', () => {
+    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(true);
+    expect(mailboxesOf('"boss@example.com" <other@example.org>')).toEqual([
+      { name: 'boss@example.com', address: 'other@example.org' },
+    ]);
+    expect(mailboxesOf('"Jane Doe (Acme)" <jane@example.org>')).toEqual([
+      { name: 'Jane Doe (Acme)', address: 'jane@example.org' },
+    ]);
+    expect(mailboxesOf('"Grace Lee" <grace@example.com>')).toEqual([
+      { name: 'Grace Lee', address: 'grace@example.com' },
+    ]);
+  });
+
+  it('shows a parenthesis around the address as the whole text, so nothing is hidden', () => {
+    expect(mailboxesOf('other@example.org (<boss@example.com>)')).toEqual([
+      { name: '', address: 'other@example.org (<boss@example.com>)' },
+    ]);
+  });
+
+  it('refuses an unquoted display name that looks like an address', () => {
+    expect(addressListIsPlain('boss@example.com <other@example.org>')).toBe(false);
+  });
+
+  it('shows a part with more than one angle bracket whole, as the address, and never splits it', () => {
+    expect(mailboxesOf('"Ada" <ada@example.com> <grace@example.org>')).toEqual([
+      { name: '', address: '"Ada" <ada@example.com> <grace@example.org>' },
+    ]);
+    expect(mailboxesOf('Ada <ada@example.com>')).toEqual([{ name: 'Ada', address: 'ada@example.com' }]);
   });
 });

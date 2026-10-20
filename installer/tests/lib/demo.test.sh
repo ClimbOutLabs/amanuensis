@@ -33,7 +33,7 @@ test_demo_install_turns_demo_mode_on_and_seeds_the_owner() {
   assert_contains "$(seed_runs)" "-T app aman demo-seed --user $OWNER"
   assert_contains "$(cat "$STUB_LOG")" "--project-name aman-main" "run through the instance project"
   assert_not_contains "$(seed_runs)" "--reset"
-  assert_flat_contains "$OUT" "Demo on. Reseed:"
+  assert_flat_contains "$OUT" "Demo on. Fill again:"
   assert_flat_contains "$OUT" "instance demo-seed --instance main"
   local up_line seed_line
   up_line=$(grep -n 'up -d --wait' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
@@ -54,13 +54,22 @@ test_install_without_demo_never_seeds() {
   sandbox_drop
 }
 
-test_demo_user_overrides_the_owner() {
-  t_begin "--demo-user seeds that email instead of the owner"
+test_demo_user_is_not_an_option() {
+  t_begin "--demo-user is gone: the demo world is always the owner's"
   sandbox_new
   install_demo --demo-user judge@demo.invalid
+  assert_rc 2
+  assert_flat_contains "$ERR" "unknown option --demo-user"
+  assert_eq "$(seed_count)" 0
+  install_demo
   assert_rc 0
-  assert_contains "$(seed_runs)" "--user judge@demo.invalid"
-  assert_not_contains "$(seed_runs)" "--user $OWNER"
+  run_install instance demo-seed --demo-user judge@demo.invalid
+  assert_rc 2
+  assert_flat_contains "$ERR" "unknown option --demo-user"
+  assert_eq "$(seed_count)" 1 "only the install seeded"
+  assert_not_contains "$(seed_runs)" "judge@demo.invalid"
+  run_install --help
+  assert_not_contains "$OUT" "--demo-user"
   sandbox_drop
 }
 
@@ -74,9 +83,6 @@ test_demo_seed_command_reseeds_and_resets() {
   run_install instance demo-seed --reset --instance main
   assert_rc 0
   assert_contains "$(seed_runs | tail -n 1)" "aman demo-seed --user $OWNER --reset"
-  run_install instance demo-seed --demo-user judge@demo.invalid
-  assert_rc 0
-  assert_contains "$(seed_runs | tail -n 1)" "--user judge@demo.invalid"
   sandbox_drop
 }
 
@@ -97,7 +103,7 @@ test_demo_seed_before_install_is_refused() {
   sandbox_new
   run_install instance demo-seed
   assert_rc 1
-  assert_flat_contains "$ERR" "not set up yet"
+  assert_flat_contains "$ERR" "not set up on this computer yet"
   sandbox_drop
 }
 
@@ -150,7 +156,7 @@ test_seed_failure_fails_the_run_and_names_the_command() {
   install_demo
   unset STUB_DEMO_FAIL
   assert_rc 1
-  assert_flat_contains "$ERR" "demo seed failed"
+  assert_flat_contains "$ERR" "Adding the example data failed"
   assert_flat_contains "$ERR" "instance demo-seed --instance main"
   assert_contains "$OUT" "Instance main"
   assert_eq "$(env_value main DEMO_MODE)" true
@@ -164,7 +170,7 @@ test_demo_dry_run_changes_nothing() {
   sandbox_new
   run_install --dry-run --demo --email "$OWNER"
   assert_rc 0
-  assert_flat_contains "$OUT" "Turn demo mode on for instance main and seed the synthetic demo world for $OWNER"
+  assert_flat_contains "$OUT" "Turn demo mode on for instance main and fill it with example data for $OWNER"
   assert_no_path "$AMAN_HOME/instances"
   assert_eq "$(seed_count)" 0
   sandbox_drop
@@ -198,12 +204,6 @@ test_option_validation() {
   assert_flat_contains "$ERR" "--demo applies to install and instance add"
   run_install instance demo-seed --demo
   assert_rc 2
-  run_install --demo --demo-user not-an-email
-  assert_rc 2
-  assert_flat_contains "$ERR" "--demo-user must be an email address"
-  run_install --demo-user judge@demo.invalid
-  assert_rc 2
-  assert_flat_contains "$ERR" "--demo-user applies with --demo"
   run_install instance demo-seed extra
   assert_rc 2
   assert_eq "$(seed_count)" 0
@@ -233,14 +233,14 @@ test_demo_install_summary_survives_a_rerun() {
   rm -f "$SB_STATE/up/aman-main"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "Demo on. Reseed:"
+  assert_flat_contains "$OUT" "Demo on. Fill again:"
   assert_eq "$(seed_count)" 1 "a plain re-run does not seed"
   sandbox_drop
 }
 
 test_demo_install_turns_demo_mode_on_and_seeds_the_owner
 test_install_without_demo_never_seeds
-test_demo_user_overrides_the_owner
+test_demo_user_is_not_an_option
 test_demo_seed_command_reseeds_and_resets
 test_demo_seed_refuses_a_non_demo_instance
 test_demo_seed_before_install_is_refused

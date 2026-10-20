@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 import type { AgentSpec } from '@/server/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
@@ -91,6 +93,32 @@ describe('AmanRuntimeRail', () => {
     expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('local-model')).toBeInTheDocument();
     expect(window.localStorage.getItem('aui-runtime-rail-collapsed')).toBe('false');
+  });
+
+  it('keeps offline mode visible when the rail is collapsed', async () => {
+    window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
+    const settings: SentinelUserSettings = {
+      offline_mode: true,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
+      getUserSettings: vi.fn(async () => settings),
+      updateUserSettings: vi.fn(async () => settings),
+      listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
+    };
+    render(
+      <SentinelApiProvider api={api}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail modelName="local-model" />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+
+    expect(await screen.findByRole('status', { name: 'Offline mode is on' })).toBeInTheDocument();
   });
 
   it('starts collapsed when the stored preference says so', () => {
@@ -312,6 +340,8 @@ describe('AmanRuntimeRail', () => {
               assistant_name: 'Mira',
               assistant_identity: null,
               voice_guidance: null,
+              user_name: null,
+              address_as: null,
               user_profile: null,
               pinned_preferences: [],
               learned_profile: null,

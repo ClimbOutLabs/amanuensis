@@ -156,13 +156,14 @@ describe('recipients on the card', () => {
   const send = (params: Record<string, unknown>) =>
     classifyTier(connectorCall({ tool_name: 'send_email', params }), makeCtx());
 
-  test('a bcc is on the Recipient row even when a huge body is cut', async () => {
+  test('a bcc is on the Recipient row and a long body is shown in full', async () => {
     const card = cardOf(
       await send({ to: 'a@x.example', bcc: 'evil@x.example', body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3) }),
     );
     expect(card.recipient).toBe('a@x.example, evil@x.example');
     expect(card.outbound_text).toContain('bcc: evil@x.example');
-    expect(card.outbound_truncated).toBe(true);
+    expect(card.outbound_text).toContain('x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3));
+    expect(card.outbound_truncated).toBe(false);
   });
 
   test.each(['attendees', 'invitees', 'share_with', 'members', 'emails', 'webhook_url'])(
@@ -189,18 +190,23 @@ describe('recipients on the card', () => {
     expect(card.recipient).toBe('a@x.example, deep@x.example');
   });
 
-  test('spoofing characters in a recipient or destination are escaped on the card', async () => {
+  test('spoofing characters in a destination are escaped on the card of a non-mail send', async () => {
     const card = cardOf(
       await classifyTier(
         connectorCall({
-          tool_name: 'send_email',
-          params: { to: 'a@x.example‮gnp.exe', url: 'https://x.example/​path' },
+          tool_name: 'post_message',
+          params: { to: 'a@x.example', url: 'https://x.example/\u200Bpath' },
         }),
         makeCtx(),
       ),
     );
-    expect(card.recipient).toBe('a@x.example\\u{202E}gnp.exe');
     expect(card.destination).toBe('https://x.example/\\u{200B}path');
+  });
+
+  test('a recipient with spoofing characters is refused instead of carded', async () => {
+    const decision = await send({ to: 'a@x.example\u202Egnp.exe' });
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('incomplete_send_card');
   });
 });
 
@@ -372,10 +378,9 @@ describe('connector card: fetch, repository writes and mail', () => {
   });
 
   test.each([
-    ['reply_all', 'Send a reply to carol@example.com with reply_all on gmail.'],
     ['forward_email', 'Forward an email to carol@example.com.'],
+    ['reply_to_thread', 'Send a reply to carol@example.com with reply_to_thread on gmail.'],
     ['draft_email', 'Save an email draft for carol@example.com.'],
-    ['send_draft', 'Send a saved draft to carol@example.com with send_draft on gmail.'],
   ])('%s is named in plain words with the recipient', async (toolName, expected) => {
     const decision = await classifyTier(
       connectorCall({
@@ -471,7 +476,7 @@ describe('connector card text comes from server-side params', () => {
 
 describe('connector card wording', () => {
   test('known connector sentences carry no markdown', async () => {
-    for (const toolName of ['web_search', 'web_fetch', 'push_files', 'create_gist', 'reply_all', 'search_notes']) {
+    for (const toolName of ['web_search', 'web_fetch', 'push_files', 'create_gist', 'search_notes']) {
       const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
       expect(cardOf(decision).plain_what).not.toContain('`');
     }
@@ -550,6 +555,9 @@ describe('card copy', () => {
       maps_hosts: {
         geocoder: 'https://nominatim.openstreetmap.org',
         router: 'https://router.project-osrm.org',
+        walking: 'https://routing.openstreetmap.de/routed-foot',
+        cycling: 'https://routing.openstreetmap.de/routed-bike',
+        transit: 'https://api.transitous.org/api/v6',
         tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       },
     });

@@ -76,12 +76,12 @@ export type SettingsSection =
   | 'model-roles'
   | 'connectors'
   | 'memory'
-  | 'memory-vault'
   | 'skills'
   | 'sandbox'
   | 'personalization'
   | 'themes'
-  | 'permissions';
+  | 'permissions'
+  | 'audit';
 
 export type HistoryAgentFilter = {
   agentId?: string;

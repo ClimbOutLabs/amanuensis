@@ -34,6 +34,37 @@ const MAIL_READ: SentinelAction = {
   mcp_hints: { read_only_hint: true, open_world_hint: true },
 };
 
+const CALENDAR_READ: SentinelAction = {
+  tool_name: 'list_events',
+  canonical_params: { time_min: '2026-10-19', time_max: '2026-10-26' },
+  tool_type: 'truefoundry-system',
+  mcp_server_name: 'google_calendar',
+  mcp_hints: { read_only_hint: true, open_world_hint: true },
+};
+
+describe('web search after the turn read the calendar', () => {
+  it('asks once the turn has read the calendar, saying why', async () => {
+    const ctx = makeCtx();
+    await classifyTier(CALENDAR_READ, ctx);
+    const decision = await classifyTier(SEARCH, ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('mcp_search_after_private_read');
+    expect(decision.card?.plain_what).toContain('calendar');
+    expect(decision.card?.why_asked_again).toBeNull();
+  });
+
+  it('is held for the owner in a scheduled run after a calendar read', async () => {
+    const ctx = makeCtx(true);
+    await classifyTier(CALENDAR_READ, ctx);
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
+  });
+
+  it('does not carry over to a turn that did not read the calendar', async () => {
+    await classifyTier(CALENDAR_READ, makeCtx());
+    expect((await classifyTier(SEARCH, makeCtx())).tier).toBe(1);
+  });
+});
+
 describe('web search after the turn read mail', () => {
   it('searches silently when no mail was read', async () => {
     const decision = await classifyTier(SEARCH, makeCtx());
@@ -47,7 +78,8 @@ describe('web search after the turn read mail', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('mcp_search_after_private_read');
     expect(isSearchAskReason(decision.reason)).toBe(true);
-    expect(decision.card?.why_asked_again).toContain('read your email');
+    expect(decision.card?.plain_what).toContain('read your email');
+    expect(decision.card?.why_asked_again).toBeNull();
   });
 
   it('does not carry over to a turn that did not read mail', async () => {

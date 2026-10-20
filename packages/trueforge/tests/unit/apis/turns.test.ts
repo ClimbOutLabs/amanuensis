@@ -15,6 +15,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter, deriveSessionTitle, extractUserMessageText, turnStreamId } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -181,6 +182,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -246,6 +248,7 @@ describe('turns', () => {
       const sessionStore = new SqliteSessionStore(db);
       const agentStore = new SqliteAgentStore(db);
       const agent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: 'default',
         name: 'managed-agent',
         description: 'Test agent.',
@@ -267,6 +270,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
@@ -451,7 +455,7 @@ describe('turns', () => {
               workspace_cwd: 'C:\\work\\bound-demo',
               agent: { type: 'inline', spec: agentSpec },
             },
-            answersOnlyHeldActions: () => Promise.resolve(false),
+            answersOnlyDeniedHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-non-stream',
@@ -485,6 +489,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -556,6 +561,8 @@ describe('turns', () => {
         assistant_name: null,
         assistant_identity: null,
         voice_guidance: null,
+        user_name: null,
+        address_as: null,
         user_profile: null,
         pinned_preferences: [],
         learned_profile: null,
@@ -565,6 +572,7 @@ describe('turns', () => {
       // A reference agent, so the pass has to ask the agent store for the turn's model.
       const agentStore = new SqliteAgentStore(db);
       const referencedAgent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: TENANT_ID,
         name: 'learning-agent',
         description: 'Test agent.',
@@ -619,6 +627,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -715,7 +724,7 @@ describe('turns', () => {
               workspace_cwd: null,
               agent: { type: 'inline', spec: agentSpec },
             },
-            answersOnlyHeldActions: () => Promise.resolve(false),
+            answersOnlyDeniedHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-gone',
@@ -731,6 +740,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
@@ -789,6 +799,7 @@ describe('turns', () => {
       const sessions = new Sessions({ sessionStore });
       const agentStore = new SqliteAgentStore(db);
       const agent = await agentStore.createAgent({
+        host_managed: false,
         tenant_id: 'default',
         created_by_subject: {
           subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -822,6 +833,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,

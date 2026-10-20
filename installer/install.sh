@@ -2,9 +2,11 @@
 # Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
-#        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
+#        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
+#        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
+#        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
 #        install.sh upgrade [--check] [--force]
@@ -59,10 +61,12 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
-# shellcheck source=lib/users.sh
-. "$INSTALLER_DIR/lib/users.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
+# shellcheck source=lib/import.sh
+. "$INSTALLER_DIR/lib/import.sh"
+# shellcheck source=lib/migrate.sh
+. "$INSTALLER_DIR/lib/migrate.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -89,13 +93,14 @@ OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
+OPT_HOME_NETWORK=0
+CLOUD_DEFAULT_LOCAL=0
 OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
 OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
-OPT_ROLE=
 OPT_EMAIL=
 OPT_PUBLIC_URL=
 OPT_LOGIN_URL=
@@ -106,7 +111,6 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
-OPT_DEMO_USER=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -118,65 +122,76 @@ usage() {
   cat <<'USAGE'
 Amanuensis installer
 
-  install.sh                      plan, build the images locally, start the shared speech service and a first instance
-  install.sh --dry-run            print the plan, change nothing
-  install.sh instance add <name>  add another person's instance
-  install.sh instance list
+  install.sh                      set up Aman on this computer: check it, show the plan, build, start a first instance
+  install.sh --dry-run            show the plan and change nothing
+  install.sh instance add [<name>]
+                                  add an instance for another person; asks the name when left out
+  install.sh instance list        show every instance
   install.sh instance remove <name> [--purge-data]
-  install.sh instance add-user <name> --email ADDRESS [--role member] [--instance NAME] [--password-stdin]
-  install.sh instance remove-user <name> [--instance NAME]
-  install.sh instance list-users [--instance NAME]
-  install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
+                                  remove an instance; --purge-data deletes its data too
+  install.sh instance demo-seed [--reset] [--instance NAME]
+                                  fill a demo instance with example data, or clear it with --reset
+  install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
+                                  put an exported file into an instance (it is backed up first; its app pauses meanwhile)
+  install.sh migrate --from-compose <folder> [--user ID]
+                                  export your data from an older Aman in that folder; the old Aman is only read
   install.sh instance refresh <name>
-  install.sh backup [<name>]
-  install.sh backups daily|off
+                                  start the instance again with its current settings
+  install.sh instance password [<name>]
+                                  set a new owner password and sign everyone out
+  install.sh backup [<name>]      make a backup now
+  install.sh backups daily|off    turn the daily backup on or off
   install.sh upgrade [--check] [--force]
-  install.sh docker               install or start Docker, or update its Compose plugin, asking before sudo
-  install.sh command              put the aman command and its files back
+                                  update Aman to this copy of its code; --check only shows what would change
+  install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
+  install.sh command              put the aman command back
   install.sh tls                  renew the https certificates that are due
 
 Options
-  --home DIR            state directory (default ~/.amanuensis)
-  --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses sudo)
-  --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
-  --add-docker-group    let the installer add your user to the docker group (needs sudo)
-  --sandbox-root        let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking
-  --tls-root            let the installer run the printed root steps for --tls caddy (install Caddy, apply its configuration) without asking
-  --no-sandbox          install without the gVisor sandbox (run code stays off)
-  --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
+  --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
+  --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses admin rights)
+  --install-docker      let the installer install Docker with admin rights (Linux systems that use apt)
+  --add-docker-group    let the installer give your user access to Docker (needs admin rights)
+  --sandbox-root        let the installer do the sandbox steps that need admin rights without asking
+  --tls-root            let the installer do the --tls caddy steps that need admin rights without asking
+  --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
+  --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
   --verbose             show technical details and the full list of downloads
-  --dry-run             stop after printing the plan
-  --name NAME           first instance name (default main)
-  --email ADDRESS       owner email (with add-user: the new user's email)
-  --instance NAME       the instance a user command applies to (default: the only one)
-  --role member         role of an added user; members chat but cannot change server settings (the only role)
-  --password-stdin      read the owner password (with add-user: the new user's password; otherwise one is generated and shown once) from the first line of stdin, before any prompt
-  --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
-  --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
-  --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
-  --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
-  --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
-  --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
-  --local-only          open Aman only at 127.0.0.1 on this computer (by default it answers at every address this computer has on a private network, and at its names)
-  --backups daily|off   back up every day (default) or not, without asking
-  --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
-  --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
-  --login-url URL       https address for the sign-in service behind the same proxy
-  --port N              port on this computer for the app
-  --login-port N        port on this computer for the sign-in service
-  --tls local|off|caddy  https on your network with a certificate from this computer (default), plain http, or
-                        --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
-  --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
+  --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
+                        (an instance that has never started is started once first, so the file can be checked)
+  --name NAME           name of the first instance (default main)
+  --email ADDRESS       the email you sign in with
+  --instance NAME       which instance demo-seed and password apply to (default: the only one)
+  --password-stdin      read the password from the first line of the input instead of asking for it
+  --token-factory-key-stdin  read the Token Factory key from the input (the line after the password with --password-stdin); never put the key on the command line
+  --token-factory-model ID   the Token Factory model to use (default nvidia/nemotron-3-super-120b-a12b)
+  --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
+  --demo                make the instance a demo and fill it with example data once it runs
+  --reset               with instance demo-seed, remove the example data instead of adding it
+  --local-only          open Aman on this computer only (by default it also opens for other devices on your private network)
+  --backups daily|off   back up every day (default) or never, without asking
+  --address HOST        also open Aman at this name or private address; repeat for more (for example --address spark.local)
+  --public-url URL      the https address of Aman behind your own reverse proxy; the ports then stay on this computer
+  --login-url URL       the https address of the sign-in service behind the same proxy
+  --home-network        on a cloud server, still open Aman at its private addresses (other customers share them, so the default there is this computer only)
+  --port N              the port for the app on this computer
+  --login-port N        the port for the sign-in service on this computer
+  --tls local|off|caddy  https on your network with a certificate made on this computer (default), plain http, or
+                        https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
+  --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
-  --print-root-steps    print the root steps for installing Docker and stop
-  --print-network       print every host the installer may contact and stop
-  --print-proxy-requirements  print what a reverse proxy in front of an instance must do and stop
+  --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
+  --from-compose DIR    with migrate, the folder the old Aman runs from
+  --user ID             with migrate, which person's chats to move when the old Aman has more than one
+  --print-root-steps    show the admin steps that install Docker, and stop
+  --print-network       show every site the installer may contact, and stop
+  --print-proxy-requirements  show what a reverse proxy in front of Aman must do, and stop
   --help                this text
 USAGE
 }
 
 set_paths() {
-  valid_home_path "$AMAN_HOME" || usage_die "The folder for Aman data must be an absolute path of letters, digits and . _ - + @ : = , or /. Pass --home with such a path."
+  valid_home_path "$AMAN_HOME" || usage_die "The folder for Aman's data must be a full path made of letters, digits and . _ - + @ : = , or /. Give --home such a path."
   STATE_DIR=$AMAN_HOME/state
   REG_DIR=$STATE_DIR/instances
   RELEASE_DIR=$AMAN_HOME/release
@@ -211,19 +226,20 @@ parse_args() {
       --print-proxy-requirements) PRINT_PROXY=1 ;;
       --tls-root) OPT_TLS_ROOT=1 ;;
       --token-factory-key-stdin) OPT_TF_KEY_STDIN=1 ;;
-      --token-factory-key | --token-factory-key=*) usage_die "the Token Factory key is never taken from the command line; use --token-factory-key-stdin" ;;
+      --token-factory-key | --token-factory-key=*) usage_die "The Token Factory key is never taken from the command line. Use --token-factory-key-stdin." ;;
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home-network) OPT_HOME_NETWORK=1 ;;
+      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -233,12 +249,13 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
+          4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
@@ -254,7 +271,6 @@ set_option() {
     --home) AMAN_HOME=$2 ;;
     --name) OPT_NAME=$2 ;;
     --instance) OPT_INSTANCE=$2 ;;
-    --role) OPT_ROLE=$2 ;;
     --email) OPT_EMAIL=$2 ;;
     --public-url) OPT_PUBLIC_URL=$2 ;;
     --login-url) OPT_LOGIN_URL=$2 ;;
@@ -273,7 +289,9 @@ set_option() {
       ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
-    --demo-user) OPT_DEMO_USER=$2 ;;
+    --display-name) OPT_DISPLAY_NAME=$2 ;;
+    --from-compose) OPT_FROM_COMPOSE=$2 ;;
+    --user) OPT_MIGRATE_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -281,16 +299,16 @@ set_option() {
 print_signout_note() {
   if [ "$NEEDS_SIGNOUT" = 1 ]; then
     ui_newline
-    ui_warn "Docker access: this run used your new docker group membership without a re-login." "Open a new terminal window once so Docker works in your other terminals."
+    ui_warn "This run was given Docker access that your other terminals do not have yet." "Open a new terminal window once. Docker works there from then on."
   fi
 }
 
-# --demo and --demo-user belong to install, instance add and instance demo-seed; --reset only to demo-seed.
+# --demo belongs to install and instance add; --reset only to instance demo-seed.
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
   if [ "$OPT_DEMO" = 1 ] && { [ "$seeding" = 1 ] || { [ "$COMMAND" != install ] && [ "$SUBCOMMAND" != add ]; }; }; then
-    usage_die "--demo applies to install and instance add (instance demo-seed reseeds a demo instance)"
+    usage_die "--demo applies to install and instance add. To fill a demo instance again, use instance demo-seed."
   fi
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
@@ -298,10 +316,25 @@ check_demo_options() {
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
   fi
-  if [ -n "$OPT_DEMO_USER" ]; then
-    [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
-    valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
+  if [ "$OPT_LOCAL_ONLY" = 1 ] && [ "$OPT_HOME_NETWORK" = 1 ]; then
+    usage_die "--local-only and --home-network are opposites; pick one."
   fi
+}
+
+# On a cloud server a private address is shared with other customers, so an instance whose reach is not recorded yet (a
+# new one, or one from before the address list) stays on this computer unless asked. A recorded reach is kept.
+cloud_guard() {
+  local name undecided=0
+  [ "$COMMAND" = install ] || { [ "$COMMAND" = instance ] && [ "$SUBCOMMAND" = add ]; } || return 0
+  [ "$OPT_LOCAL_ONLY" != 1 ] && [ "$OPT_HOME_NETWORK" != 1 ] && [ -z "$OPT_PUBLIC_URL" ] && [ -z "$OPT_ADDRESSES" ] || return 0
+  network_cloud_vm || return 0
+  if need_new_instance; then undecided=1; fi
+  if [ "$COMMAND" = install ]; then
+    for name in $(reg_names); do reach_recorded "$name" || undecided=1; done
+  fi
+  [ "$undecided" = 1 ] || return 0
+  warn "This looks like a cloud server. Its private addresses are shared with other customers, so Aman will open on this computer only. To open it at those addresses anyway, run this again with --home-network."
+  CLOUD_DEFAULT_LOCAL=1
 }
 
 on_exit() {
@@ -311,6 +344,9 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  import_on_exit
+  migrate_on_exit
+  if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
 }
@@ -322,8 +358,12 @@ main() {
   set_paths
   trap on_exit EXIT
   check_demo_options
+  check_import_options
+  check_migrate_options
+  cloud_guard
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
     if [ "$OPT_TLS" = caddy ]; then
@@ -342,8 +382,8 @@ main() {
   fi
   if [ "$DRY_RUN" = 1 ]; then
     case "$COMMAND:$SUBCOMMAND" in
-      install: | upgrade: | instance:add) ;;
-      *) usage_die "--dry-run applies to install, upgrade and instance add" ;;
+      install: | upgrade: | instance:add | instance:import) ;;
+      *) usage_die "--dry-run applies to install, upgrade, instance add and instance import" ;;
     esac
   fi
   case "$COMMAND" in
@@ -354,17 +394,17 @@ main() {
     command) cmd_command ;;
     tls) cmd_tls ;;
     upgrade) cmd_upgrade ;;
+    migrate) cmd_migrate ;;
     instance)
       case "$SUBCOMMAND" in
         add) cmd_instance_add ;;
         list) cmd_instance_list ;;
         remove) cmd_instance_remove ;;
-        add-user) cmd_instance_add_user ;;
-        remove-user) cmd_instance_remove_user ;;
-        list-users) cmd_instance_list_users ;;
         demo-seed) cmd_instance_demo_seed ;;
+        import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|refresh" ;;
+        password) cmd_instance_password ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password" ;;
       esac
       ;;
   esac

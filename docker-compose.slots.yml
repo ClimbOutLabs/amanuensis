@@ -54,21 +54,25 @@ services:
     volumes:
       - slot_ws_1:/workspace
       - slot_ctl_1:/run/aman
+      - slot_mirror_1:/run/aman/mirror
   sandbox-2:
     <<: *sandbox-slot
     volumes:
       - slot_ws_2:/workspace
       - slot_ctl_2:/run/aman
+      - slot_mirror_2:/run/aman/mirror
   sandbox-3:
     <<: *sandbox-slot
     volumes:
       - slot_ws_3:/workspace
       - slot_ctl_3:/run/aman
+      - slot_mirror_3:/run/aman/mirror
   sandbox-4:
     <<: *sandbox-slot
     volumes:
       - slot_ws_4:/workspace
       - slot_ctl_4:/run/aman
+      - slot_mirror_4:/run/aman/mirror
 
 volumes:
   slot_ws_1:
@@ -81,9 +85,17 @@ volumes:
     name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_4
   slot_ctl_1:
     name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1
+  slot_mirror_1:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_1
   slot_ctl_2:
     name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2
+  slot_mirror_2:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_2
   slot_ctl_3:
     name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3
+  slot_mirror_3:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_3
   slot_ctl_4:
     name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4
+  slot_mirror_4:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_4

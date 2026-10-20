@@ -13,6 +13,13 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { Writable } from 'stream';
 import { createLogger, format, transports, type Logger } from 'winston';
 import {
@@ -29,16 +36,7 @@ import {
   type SpaceRecord,
   type UpdateSpaceInput,
 } from '../../../src/db/spaceStore';
-import {
-  AUTO_BLOCK_ANCHOR,
-  CREATE_SPACE_TOOL_NAME,
-  GET_SPACE_TOOL_NAME,
-  LIST_BLOCKS_TOOL_NAME,
-  REVERT_SPACE_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
-  spaceCapability,
-  type SpaceToolStore,
-} from '../../../src/runtime/spaceCapability';
+import { AUTO_BLOCK_ANCHOR, spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),

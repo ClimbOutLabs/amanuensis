@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
 export const PersonalizationProfile: core.serialization.ObjectSchema<serializers.PersonalizationProfile.Raw, TrueForge.PersonalizationProfile> = core.serialization.object({
+        "addressAs": core.serialization.property("address_as", core.serialization.string().optionalNullable()),
         "assistantIdentity": core.serialization.property("assistant_identity", core.serialization.string().nullable()),
         "assistantName": core.serialization.property("assistant_name", core.serialization.string().nullable()),
         "createdAt": core.serialization.property("created_at", core.serialization.date()),
@@ -16,12 +17,14 @@ export const PersonalizationProfile: core.serialization.ObjectSchema<serializers
         "revision": core.serialization.number(),
         "updatedAt": core.serialization.property("updated_at", core.serialization.date()),
         "updatedBy": core.serialization.property("updated_by", core.serialization.string()),
+        "userName": core.serialization.property("user_name", core.serialization.string().optionalNullable()),
         "userProfile": core.serialization.property("user_profile", core.serialization.string().nullable()),
         "voiceGuidance": core.serialization.property("voice_guidance", core.serialization.string().nullable())
     });
 
 export declare namespace PersonalizationProfile {
     export interface Raw {
+        address_as?: (string | null | undefined) | null;
         assistant_identity?: string | null;
         assistant_name?: string | null;
         created_at: string;
@@ -33,6 +36,7 @@ export declare namespace PersonalizationProfile {
         revision: number;
         updated_at: string;
         updated_by: string;
+        user_name?: (string | null | undefined) | null;
         user_profile?: string | null;
         voice_guidance?: string | null;
     }

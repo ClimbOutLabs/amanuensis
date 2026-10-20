@@ -1,8 +1,12 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import {
+  DEFAULT_MAPS_TRAVEL_MODE,
+  MapsRouteResultSchema,
+} from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
-import type { MapCardData, MapPin } from '../components/MapCard.js';
+import type { MapCardData, MapPin, MapPlace } from '../components/MapCard.js';
 import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 
 export type ApprovalOptionView = {
@@ -95,6 +99,19 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
     return undefined;
   }
   return parsed;
+}
+
+/**
+ * The plain line the host wrote for the owner when it refused a call it could not show in full, or
+ * undefined for any other result. Only a policy block that asks to contact the user qualifies.
+ */
+export function parseToolRefusalNotice(content: unknown): string | undefined {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  if (!isUnknownRecord(outcome) || outcome.disposition !== 'policy_blocked' || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  const { suggested_action: action, message } = outcome.remediation;
+  return action === 'contact_user' && typeof message === 'string' ? message : undefined;
 }
 
 export function parseToolResultDisposition(content: unknown): ToolDispositionView | undefined {
@@ -454,6 +471,7 @@ export function parseSandboxResult(result: string | undefined): {
   exitCode?: number | null;
   resultText?: string;
   resultJson?: string;
+  notices?: string[];
 } {
   if (result === undefined) return {};
   const parsed = parseJsonIncrementally(result);
@@ -465,10 +483,14 @@ export function parseSandboxResult(result: string | undefined): {
   const response = isUnknownRecord(visibleResult.response) ? visibleResult.response : undefined;
   const exitCode = typeof response?.exitCode === 'number' ? response.exitCode : null;
   const resultText = typeof response?.result === 'string' ? response.result : undefined;
+  const notices = Array.isArray(visibleResult.notices)
+    ? visibleResult.notices.filter((notice): notice is string => typeof notice === 'string')
+    : [];
   return {
     exitCode,
     resultText,
     resultJson: parsed.isPartial ? result : JSON.stringify(visibleResult, null, 2),
+    ...(notices.length > 0 ? { notices } : {}),
   };
 }
 
@@ -588,20 +610,6 @@ export interface ParsedMapsResult {
   blockedMessage?: string;
 }
 
-interface MapsEndpoint {
-  name: string;
-  lat: number;
-  lng: number;
-}
-
-function parseMapsEndpoint(value: unknown): MapsEndpoint | undefined {
-  if (!isUnknownRecord(value)) return undefined;
-  const { resolved_name: name, lat, lng } = value;
-  return typeof name === 'string' && typeof lat === 'number' && typeof lng === 'number'
-    ? { name, lat, lng }
-    : undefined;
-}
-
 /**
  * The visible payload of a maps tool result: the `tool.response.v2` envelope's `result` when the
  * host wrapped it (always, on the real wire), else the parsed JSON itself.
@@ -624,8 +632,106 @@ function unwrapMapsPayload(resultString: string): unknown {
   }
 }
 
+/** Plain failure text for a route no service could find, by the mode that was asked for. */
+function noRouteMessage(mode: unknown): string {
+  switch (mode) {
+    case 'transit':
+      return 'No public transport route was found between the two places. Walking may still work.';
+    case 'walking':
+      return 'No walking route was found between the two places.';
+    case 'cycling':
+      return 'No cycling route was found between the two places.';
+    default:
+      return 'No driving route was found between the two places.';
+  }
+}
+
+function isWebLink(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** A found place as the card shows it; a place without a name, address or ordinary web link is dropped. */
+function parsePlace(value: unknown): MapPlace | undefined {
+  if (!isUnknownRecord(value)) return undefined;
+  const { name, address, source_url: sourceUrl, source_site: sourceSite, fetched_at: fetchedAt } = value;
+  if (
+    typeof name !== 'string' ||
+    typeof address !== 'string' ||
+    typeof sourceUrl !== 'string' ||
+    !isWebLink(sourceUrl) ||
+    typeof sourceSite !== 'string' ||
+    typeof fetchedAt !== 'string'
+  ) {
+    return undefined;
+  }
+  const { lat, lng } = value;
+  const placed = typeof lat === 'number' && typeof lng === 'number';
+  return {
+    name,
+    address,
+    languages: textOrNull(value.languages),
+    hours: textOrNull(value.hours),
+    price: textOrNull(value.price),
+    phone: textOrNull(value.phone),
+    source_url: sourceUrl,
+    source_site: sourceSite,
+    fetched_at: fetchedAt,
+    lat: placed ? lat : null,
+    lng: placed ? lng : null,
+    already_in_calendar: value.already_in_calendar === true,
+  };
+}
+
+/** The places a pin call refused, as written by the server: a name and a plain reason each. */
+function parseRefusedPlaces(body: Record<string, unknown>): { name: string; reason: string }[] {
+  if (!Array.isArray(body.refused)) {
+    return [];
+  }
+  return body.refused.flatMap(candidate => {
+    if (!isUnknownRecord(candidate)) {
+      return [];
+    }
+    const { name, reason } = candidate;
+    return typeof name === 'string' && typeof reason === 'string' ? [{ name, reason }] : [];
+  });
+}
+
+function parsePlacesResult(body: Record<string, unknown>, attribution: string): ParsedMapsResult {
+  const places = Array.isArray(body.places) ? body.places.flatMap(candidate => parsePlace(candidate) ?? []) : [];
+  if (places.length === 0) {
+    return { state: 'unavailable', data: null };
+  }
+  const pins: MapPin[] = places.flatMap(place =>
+    place.lat === null || place.lng === null ? [] : [{ name: place.name, lat: place.lat, lng: place.lng }],
+  );
+  const centre = pins.length === 0 ? { lat: 0, lng: 0 } : { lat: pins[0]?.lat ?? 0, lng: pins[0]?.lng ?? 0 };
+  return {
+    state: 'ready',
+    data: {
+      kind: 'places',
+      ...centre,
+      zoom: pins.length > 1 ? 13 : 15,
+      resolved_name: places.length === 1 ? '1 place found' : `${String(places.length)} places found`,
+      address: null,
+      pins,
+      places,
+      refused: parseRefusedPlaces(body),
+      attribution,
+    },
+  };
+}
+
 /**
- * Parse a render_map / render_route tool result into map card data.
+ * Parse a render_map / render_route / render_places tool result into map card data.
  * Error results map to blocked/unavailable states; no card renders raw errors.
  */
 export function parseMapsResult(resultString: string | undefined, toolName: string): ParsedMapsResult {
@@ -642,7 +748,22 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'The place could not be found.' };
     }
     if (code === 'no_route') {
-      return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
+      return { state: 'unavailable', data: null, blockedMessage: noRouteMessage(body.mode) };
+    }
+    if (code === 'invalid_time') {
+      return { state: 'unavailable', data: null, blockedMessage: 'The time for the trip could not be understood.' };
+    }
+    if (code === 'not_grounded') {
+      const refused = parseRefusedPlaces(body);
+      const names = refused.slice(0, 3).map(place => place.name);
+      return {
+        state: 'unavailable',
+        data: null,
+        blockedMessage:
+          names.length === 0
+            ? 'The details could not be checked against the pages Aman read, so no places were pinned.'
+            : `The details could not be checked against the pages Aman read, so no places were pinned. Left out: ${names.join(', ')}. Check each name and address against its page, then try again.`,
+      };
     }
     if (code === 'rate_limited') {
       return {
@@ -658,11 +779,12 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
   }
   const attribution = typeof body.attribution === 'string' ? body.attribution : '© OpenStreetMap contributors';
   if (toolName === 'render_route') {
-    const from = parseMapsEndpoint(body.from);
-    const to = parseMapsEndpoint(body.to);
-    if (from === undefined || to === undefined) {
+    // Results saved before travel modes existed carry no mode and were driving routes.
+    const route = MapsRouteResultSchema.safeParse({ mode: DEFAULT_MAPS_TRAVEL_MODE, ...body });
+    if (!route.success) {
       return { state: 'unavailable', data: null };
     }
+    const { from, to } = route.data;
     return {
       state: 'ready',
       data: {
@@ -670,21 +792,28 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
         lat: (from.lat + to.lat) / 2,
         lng: (from.lng + to.lng) / 2,
         zoom: 6,
-        resolved_name: `${from.name} to ${to.name}`,
+        resolved_name: `${from.resolved_name} to ${to.resolved_name}`,
         address: null,
         pins: [],
-        from_name: from.name,
-        to_name: to.name,
+        from_name: from.resolved_name,
+        to_name: to.resolved_name,
         from_lat: from.lat,
         from_lng: from.lng,
         to_lat: to.lat,
         to_lng: to.lng,
-        distance_km: typeof body.distance_km === 'number' ? body.distance_km : undefined,
-        duration_min: typeof body.duration_min === 'number' ? body.duration_min : undefined,
-        route_geometry: typeof body.route_geometry === 'string' ? body.route_geometry : undefined,
-        attribution,
+        distance_km: route.data.distance_km,
+        duration_min: route.data.duration_min,
+        route_geometry: route.data.route_geometry,
+        mode: route.data.mode,
+        ...(route.data.mode === 'transit'
+          ? { departs: route.data.departs, arrives: route.data.arrives, steps: route.data.steps }
+          : {}),
+        attribution: route.data.attribution,
       },
     };
+  }
+  if (toolName === 'render_places') {
+    return parsePlacesResult(body, attribution);
   }
   const pins: MapPin[] = [];
   if (Array.isArray(body.pins)) {

@@ -3,10 +3,13 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
+import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
 import { Tier3Email } from "./Tier3Email.js";
+import { Tier3Schedule } from "./Tier3Schedule.js";
 
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> = core.serialization.object({
         "amount": core.serialization.string().nullable(),
+        "calendarEvent": core.serialization.property("calendar_event", Tier3CalendarEvent.optionalNullable()),
         "cannotBeUndone": core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
         "destination": core.serialization.string().nullable(),
         "destinationHost": core.serialization.property("destination_host", core.serialization.string().nullable()),
@@ -17,12 +20,14 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         "plainWhat": core.serialization.property("plain_what", core.serialization.string()),
         "plainWhy": core.serialization.property("plain_why", core.serialization.string().nullable()),
         "recipient": core.serialization.string().nullable(),
+        "schedule": Tier3Schedule.optionalNullable(),
         "whyAskedAgain": core.serialization.property("why_asked_again", core.serialization.string().nullable())
     });
 
 export declare namespace Tier3Card {
     export interface Raw {
         amount?: string | null;
+        calendar_event?: (Tier3CalendarEvent.Raw | null | undefined) | null;
         cannot_be_undone?: string | null;
         destination?: string | null;
         destination_host?: string | null;
@@ -33,6 +38,7 @@ export declare namespace Tier3Card {
         plain_what: string;
         plain_why?: string | null;
         recipient?: string | null;
+        schedule?: (Tier3Schedule.Raw | null | undefined) | null;
         why_asked_again?: string | null;
     }
 }

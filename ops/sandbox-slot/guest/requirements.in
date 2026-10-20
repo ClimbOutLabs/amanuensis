@@ -6,3 +6,6 @@ openpyxl
 pandas
 matplotlib
 Pillow
+pytest
+ruff
+mypy

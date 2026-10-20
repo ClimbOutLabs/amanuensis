@@ -75,6 +75,7 @@ import { SkillCatalog } from './catalog/SkillCatalog';
 import { type DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
@@ -105,14 +106,20 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
+import { createChatImageService } from './runtime/chatImages/chatImageService';
+import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
+import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
+import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { slotsBackendEnabled, startPackageMirrorGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -162,6 +169,7 @@ interface ServerPersistence<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  chatImageStore: IChatImageStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Not tenant-scoped: one counter row per UTC day for this instance. */
@@ -333,6 +341,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/space-store/SqliteSpaceStore'),
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
+      import('./db/sqlite/chat-image-store/SqliteChatImageStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
       import('./db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
@@ -356,6 +365,7 @@ async function createStandalonePersistence(options: {
     { SqliteSpaceStore },
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
+    { SqliteChatImageStore },
     { SqliteGlobalSettingsStore },
     { SqliteTokenFactoryUsageStore },
     { SqliteSentinelSettingsStore },
@@ -394,6 +404,7 @@ async function createStandalonePersistence(options: {
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImageStore: new SqliteChatImageStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
@@ -448,6 +459,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/space-store/PostgresSpaceStore'),
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
+      import('./db/postgres/chat-image-store/PostgresChatImageStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
       import('./db/postgres/token-factory-usage-store/PostgresTokenFactoryUsageStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
@@ -471,6 +483,7 @@ async function createDistributedPersistence(options: {
     { PostgresSpaceStore },
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
+    { PostgresChatImageStore },
     { PostgresGlobalSettingsStore },
     { PostgresTokenFactoryUsageStore },
     { PostgresSentinelSettingsStore },
@@ -560,6 +573,7 @@ async function createDistributedPersistence(options: {
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
+    chatImageStore: new PostgresChatImageStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
@@ -599,6 +613,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatImageStore,
     globalSettingsStore,
     tokenFactoryUsageStore,
     mcpToolGrantStore,
@@ -633,6 +648,16 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
+  const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
+  // Offered once so the first search needs no setup.
+  await seedDefaultSearchProviderAtBoot({
+    trueFoundryMode: isTrueFoundryModeEnabled(configuration),
+    globalSettingsStore,
+    mcpServerStore: mcpOAuthStore,
+    catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -656,21 +681,34 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => getConfiguredSecretValues(configuration),
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpOAuthStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
+    demoMode: configuration.DEMO_MODE,
+    demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => getConfiguredSecretValues(configuration),
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpOAuthStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
+  const chatImages = createChatImageService({
+    store: chatImageStore,
+    sessionStore,
+    turnArtifactStore,
+    reencode: createImageReencoder({
+      resolveSandbox: () => (slotsBackendEnabled() ? getSharedRunCodeService(logger) : null),
+    }),
+    sentinel: sentinelServices,
+    fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+  });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
   if (oidc) {
@@ -729,7 +767,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     resolveModelProviderStore,
@@ -758,6 +796,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     sentinelSettingsStore,
     sessions,
+    chatImages,
     activeTurns,
     turnDrains,
     redis,
@@ -767,6 +806,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     oidcDiscovery,
     authenticator,
     authorizer,
+    outboundSecrets,
   });
 
   return {
@@ -780,6 +820,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     requestReplyRouter,
     sessionStore,
     turnArtifactStore,
+    chatImageStore,
     turnDrains,
   };
 }
@@ -856,6 +897,7 @@ try {
     requestReplyRouter,
     sessionStore,
     turnArtifactStore,
+    chatImageStore,
     turnDrains,
   } = configuration.STANDALONE
     ? await createServerRuntime(
@@ -867,7 +909,8 @@ try {
   // Turn artifact retention: persisted run_code/sandbox result files are
   // downloads, not a permanent archive. One startup-anchored sweep a day
   // deletes index rows older than TURN_ARTIFACT_RETENTION_DAYS plus blobs no
-  // surviving row references. Best effort: failures are logged, never fatal.
+  // surviving row references, and chat images past their retention.
+  // Best effort: failures are logged, never fatal.
   let artifactRetentionInFlight = false;
   const sweepExpiredTurnArtifacts = async (): Promise<void> => {
     if (artifactRetentionInFlight) {
@@ -880,6 +923,12 @@ try {
       });
       if (deleted > 0) {
         logger.info('Deleted expired turn artifact rows', { count: deleted });
+      }
+      const deletedImages = await chatImageStore.deleteImagesOlderThan({
+        older_than: new Date(Date.now() - CHAT_IMAGE_RETENTION_DAYS * 86_400_000).toISOString(),
+      });
+      if (deletedImages > 0) {
+        logger.info('Deleted expired chat images', { count: deletedImages });
       }
     } catch (error) {
       logger.warn('Turn artifact retention sweep failed', extractErrorLogFields(error));
@@ -1038,6 +1087,10 @@ try {
   // the sidecar is warm and recovers without a backend restart. The check is
   // advisory only; the backend boots regardless of STT state.
   startSttAvailabilityWatcher({ logger });
+
+  // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
+  // start, sandbox package downloads stay off and everything else keeps working.
+  await startPackageMirrorGateway({ logger });
 
   const server = serve(
     {

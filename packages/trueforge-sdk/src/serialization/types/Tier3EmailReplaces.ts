@@ -3,15 +3,16 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
+import { Tier3Mailbox } from "./Tier3Mailbox.js";
 
 export const Tier3EmailReplaces: core.serialization.ObjectSchema<serializers.Tier3EmailReplaces.Raw, TrueForge.Tier3EmailReplaces> = core.serialization.object({
         "subject": core.serialization.string(),
-        "to": core.serialization.list(core.serialization.string())
+        "to": core.serialization.list(Tier3Mailbox)
     });
 
 export declare namespace Tier3EmailReplaces {
     export interface Raw {
         subject: string;
-        to: string[];
+        to: Tier3Mailbox.Raw[];
     }
 }

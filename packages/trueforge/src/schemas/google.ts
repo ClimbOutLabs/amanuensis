@@ -28,7 +28,9 @@ const GoogleConnectionStatusSchema = z
     has_saved_client: z
       .boolean()
       .describe('Whether a Google client is already saved, so adding a feature needs no retyping.'),
-    available: z.boolean().describe('False on a demo instance, where Google cannot be connected.'),
+    locked: z
+      .boolean()
+      .describe('True on a demo instance when the connection cannot be changed from Settings right now.'),
     setup: GoogleSetupInfoSchema,
   })
   .openapi('GoogleConnectionStatus');

@@ -16,6 +16,12 @@ import type {
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
 import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
+import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
@@ -29,14 +35,7 @@ import {
   type SpaceRecord,
   type UpdateSpaceInput,
 } from '../../../src/db/spaceStore';
-import {
-  CREATE_SPACE_TOOL_NAME,
-  GET_SPACE_TOOL_NAME,
-  REVERT_SPACE_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
-  spaceCapability,
-  type SpaceToolStore,
-} from '../../../src/runtime/spaceCapability';
+import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),

@@ -62,14 +62,37 @@ test('audit entries list parses the envelope and pages by limit', async () => {
   assert.equal(seen[0]?.method, 'GET');
 });
 
+test('user audit log sends the page token and outcome and keeps deleted-chat rows', async () => {
+  const { api, seen } = recordingApi(() => ({
+    data: [
+      { ...auditEntry, chat_exists: false },
+      { ...auditEntry, id: 'entry-2', chat_exists: 'unknown' },
+    ],
+    pagination: { limit: 10, next_page_token: 'next' },
+  }));
+  const page = await api.listUserAuditEntries({ limit: 10, pageToken: 'tok en', outcome: 'denied' });
+  assert.deepEqual(
+    page.entries.map(entry => [entry.id, entry.chat_exists]),
+    [['entry-1', false]],
+  );
+  assert.equal(page.nextPageToken, 'next');
+  assert.equal(seen[0]?.url, '/api/v1/user/audit-log?limit=10&page_token=tok+en&outcome=denied');
+});
+
 test('user settings read and patch the server envelope', async () => {
   const { api, seen } = recordingApi(() => ({
-    data: { offline_mode: false, tier2_auto_allow: ['file_write'], search_without_asking: false },
+    data: {
+      offline_mode: false,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: false,
+      maps_without_asking: true,
+    },
   }));
   assert.deepEqual(await api.getUserSettings(), {
     offline_mode: false,
     tier2_auto_allow: ['file_write'],
     search_without_asking: false,
+    maps_without_asking: true,
   });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');

@@ -16,8 +16,8 @@ import {
 } from '../../../../src/core/email/gmail/mimeText';
 import { buildRawMessage, replySubject } from '../../../../src/core/email/gmail/rawMessage';
 import {
-  addressesOf,
   addressListIsPlain,
+  mailboxesOf,
   neutralizeDeep,
   neutralizeInternalTags,
 } from '../../../../src/core/email/gmail/results';
@@ -78,7 +78,7 @@ describe.each(HOSTILE)('1 MB of %s', (_name, text) => {
   it.each([
     ['neutralizeInternalTags', () => neutralizeInternalTags(text)],
     ['neutralizeDeep', () => neutralizeDeep({ a: [text] })],
-    ['addressesOf', () => addressesOf(text)],
+    ['mailboxesOf', () => mailboxesOf(text)],
     ['addressListIsPlain', () => addressListIsPlain(text)],
     ['decodeEncodedWords', () => decodeEncodedWords(text)],
     ['contentTypeCharset', () => contentTypeCharset(text)],

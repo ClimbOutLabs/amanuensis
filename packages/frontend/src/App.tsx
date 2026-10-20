@@ -8,6 +8,7 @@ import {
   getErrorMessage,
   ImplementationPlanGrantProvider,
   MemoryRecallProvider,
+  ModelUsageProvider,
   PersonalizationProvider,
   PersonaProvider,
   RunCodeStatusProvider,
@@ -21,6 +22,7 @@ import {
   type AmanAvatarActivity,
   type AmanAvatarMotionSources,
   type CurrentUser,
+  type FirstRunGuideState,
   type MemoryBankStatus,
   type RoutesConfig,
   type SlotOverrides,
@@ -43,10 +45,12 @@ import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
 import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
+import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
 import { LogoutButton } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
+import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
@@ -64,6 +68,13 @@ const routerBasename = uiRouterBasename();
 const chatFolders = createChatFolderStore(authAwareFetch);
 const spaces = createSpaceStore(authAwareFetch);
 const SERVER_CONFIG: TrueForgeServerConfig = { type: 'trueforge', baseUrl: API_BASE_URL, fetch: authAwareFetch };
+const firstRunGuideApi = createFirstRunGuideApi(authAwareFetch);
+
+/** Whether this owner has at least one chat; one page of one is enough to know. */
+async function hasAnyChat(): Promise<boolean> {
+  const page = await bootClient.sessions.list({ limit: 1 });
+  return page.data.length > 0;
+}
 const ROUTES: RoutesConfig | undefined = routerBasename ? { basename: routerBasename } : undefined;
 
 /**
@@ -81,6 +92,7 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 
 const AMAN_THEME: ThemeConfig = {
   defaultMode: 'light',
+  webFonts: false,
   brand: {
     mode: 'icon-title',
     name: 'Amanuensis',
@@ -90,6 +102,8 @@ const AMAN_THEME: ThemeConfig = {
 /** Host brand: primary CTA fill is a gradient (see `index.css`); keep solid token for accents. */
 const appTheme: ThemeConfig = {
   className: 'harness-primary-gradient',
+  // The shell CSP keeps stylesheets and fonts on the app origin.
+  webFonts: false,
   tokens: {
     primaryButtonBg: '#6366F1',
     primaryButtonHover: '#3d2dd4',
@@ -124,6 +138,10 @@ type BootState =
       build: BuildIdentity | undefined;
       /** Memory bank, null when off, undefined when the boot read failed. */
       memoryBank: MemoryBankStatus | null | undefined;
+      /** Whether a chat exists yet; undefined when the boot read failed. */
+      hasChatted: boolean | undefined;
+      /** Whether the owner has put the first-run checklist away; a failed read shows it. */
+      firstRunGuideDismissed: boolean;
     };
 
 /**
@@ -278,11 +296,14 @@ export function App() {
     const state = { cancelled: false };
     void (async () => {
       try {
-        const [models, capabilities, memoryBank] = await Promise.all([
+        const [models, capabilities, memoryBank, hasChatted, firstRunGuideDismissed] = await Promise.all([
           listModels(bootClient),
           getCapabilities(bootClient),
           // Informational only: a failed read leaves memory unknown rather than failing boot.
           getMemoryBankStatus(bootClient).catch((): undefined => undefined),
+          hasAnyChat().catch((): undefined => undefined),
+          // A failed read shows the checklist: one extra look at it is the harmless side.
+          firstRunGuideApi.getDismissed().catch((): boolean => false),
         ]);
         if (state.cancelled) {
           return;
@@ -296,6 +317,8 @@ export function App() {
             openSettings: true,
             build,
             memoryBank,
+            hasChatted,
+            firstRunGuideDismissed,
             defaultAgentSpec: {
               model: { name: '' },
               config: sandboxConfig,
@@ -312,6 +335,8 @@ export function App() {
           openSettings: false,
           build,
           memoryBank,
+          hasChatted,
+          firstRunGuideDismissed,
           defaultAgentSpec: {
             model: {
               name: first.name,
@@ -349,7 +374,11 @@ export function App() {
   const setup: SetupSnapshot | null =
     setupRead ??
     (boot.status === 'ready'
-      ? { modelName: boot.defaultAgentSpec.model.name || null, memoryBank: boot.memoryBank }
+      ? {
+          modelName: boot.defaultAgentSpec.model.name || null,
+          memoryBank: boot.memoryBank,
+          hasChatted: boot.hasChatted,
+        }
       : null);
   const setupComplete = setup !== null && isSetupComplete(setup);
   useEffect(() => {
@@ -360,12 +389,14 @@ export function App() {
     const bootSnapshot: SetupSnapshot = {
       modelName: boot.defaultAgentSpec.model.name || null,
       memoryBank: boot.memoryBank,
+      hasChatted: boot.hasChatted,
     };
     const state = { cancelled: false };
     const refresh = async () => {
-      const [models, memoryBank] = await Promise.all([
+      const [models, memoryBank, hasChatted] = await Promise.all([
         listModels(bootClient).catch((): undefined => undefined),
         getMemoryBankStatus(bootClient).catch((): undefined => undefined),
+        hasAnyChat().catch((): undefined => undefined),
       ]);
       if (state.cancelled) {
         return;
@@ -374,6 +405,7 @@ export function App() {
         mergeSetupRead(previous ?? bootSnapshot, {
           modelName: models === undefined ? undefined : (models[0]?.name ?? null),
           memoryBank,
+          hasChatted,
         }),
       );
     };
@@ -394,6 +426,21 @@ export function App() {
       }
     };
   }, [boot, setupComplete]);
+  // The checklist's dismissal lives on the server so it follows the owner to every browser. The
+  // card hides at once; a failed write brings it back, since nothing was remembered.
+  const [guideDismissedLocally, setGuideDismissedLocally] = useState<boolean | undefined>(undefined);
+  const firstRunGuide = useMemo(
+    (): FirstRunGuideState => ({
+      dismissed: guideDismissedLocally ?? (boot.status === 'ready' && boot.firstRunGuideDismissed),
+      dismiss: () => {
+        setGuideDismissedLocally(true);
+        void firstRunGuideApi.setDismissed(true).catch(() => {
+          setGuideDismissedLocally(false);
+        });
+      },
+    }),
+    [guideDismissedLocally, boot],
+  );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
@@ -401,6 +448,7 @@ export function App() {
   const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
+  const modelUsageApi = useMemo(() => createModelUsageApi(bootClient), []);
   // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
   // notices rebuilt after a reload). Paginates the whole event history; the parser in
   // trueforge-ui drops everything that is not a Sentinel event.
@@ -470,28 +518,31 @@ export function App() {
                 <VoiceInputProvider api={voiceInputApi}>
                   <RunCodeStatusProvider api={runCodeStatusApi}>
                     <MemoryRecallProvider api={memoryRecallApi}>
-                      <PersonaProvider api={personaApi}>
-                        <AmanSetupProvider
-                          value={{
-                            modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                            memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
-                            settingsHref: '/settings',
-                          }}
-                        >
-                          <ComposerDraftScopeProvider scope={draftScope}>
-                            <AmanShell
-                              defaultAgentSpec={boot.defaultAgentSpec}
-                              openSettings={boot.openSettings}
-                              displayName={session.displayName}
-                              overrides={overrides}
-                              modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                              memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                              version={boot.build?.version}
-                              buildRef={boot.build?.ref}
-                            />
-                          </ComposerDraftScopeProvider>
-                        </AmanSetupProvider>
-                      </PersonaProvider>
+                      <ModelUsageProvider api={modelUsageApi}>
+                        <PersonaProvider api={personaApi}>
+                          <AmanSetupProvider
+                            value={{
+                              modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                              hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                              firstRunGuide,
+                              settingsHref: '/settings',
+                            }}
+                          >
+                            <ComposerDraftScopeProvider scope={draftScope}>
+                              <AmanShell
+                                defaultAgentSpec={boot.defaultAgentSpec}
+                                openSettings={boot.openSettings}
+                                displayName={session.displayName}
+                                overrides={overrides}
+                                modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                                memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                                version={boot.build?.version}
+                                buildRef={boot.build?.ref}
+                              />
+                            </ComposerDraftScopeProvider>
+                          </AmanSetupProvider>
+                        </PersonaProvider>
+                      </ModelUsageProvider>
                     </MemoryRecallProvider>
                   </RunCodeStatusProvider>
                 </VoiceInputProvider>

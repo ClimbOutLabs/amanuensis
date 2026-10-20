@@ -221,4 +221,31 @@ describe('AgentSessionTimelineContainer', () => {
     expect(within(turn3).getByText('Cancelled: client-cancelled')).toBeInTheDocument();
     expect(within(turn4).getByText('model failed')).toBeInTheDocument();
   });
+
+  it('does not render a model data: image in a timeline turn', async () => {
+    const dataPng = 'data:image/png;base64,iVBORw0KGgo=';
+    const withImage: SessionEventItem[] = [
+      ...events.slice(0, 1),
+      {
+        turnId: 'turn-1',
+        event: {
+          type: 'model.message',
+          id: 'm1',
+          threadId: 'main',
+          content: `Here: ![model pixel](${dataPng})`,
+          createdAt: '2026-01-01T00:00:01.000Z',
+        },
+      },
+      ...events.slice(1),
+    ];
+    const { container } = render(
+      <SlotsProvider overrides={{ AgentSessionEventTimeline: () => null }}>
+        <ServerProvider server={createMockAgentUIServer()}>
+          <AgentSessionTimelineContainer sessionId="sess-1" events={withImage} />
+        </ServerProvider>
+      </SlotsProvider>,
+    );
+    expect(await screen.findByTestId('aui-chat-image-not-shown')).toBeInTheDocument();
+    expect(container.querySelector(`img[src="${dataPng}"]`)).toBeNull();
+  });
 });

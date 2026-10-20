@@ -1,4 +1,5 @@
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
@@ -311,6 +312,42 @@ describe('getMcpConnection', () => {
       expect((await connectionFor('finder-mcp')).search_provider).toEqual({ tools: ['find_pages'] });
       expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({ tools: [] });
       expect((await connectionFor('other-search-mcp')).search_provider).toBeUndefined();
+    });
+
+    it('completes a Parallel connector added before the plumbing fields existed from the catalog, without re-adding it', async () => {
+      const base = { type: 'remote' as const, description: 'Free web search and page fetch.', search_provider: true };
+      // As the catalog saved it: with its search tools, and a key in the query string on one.
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'parallel-web',
+        manifest: {
+          ...base,
+          name: 'parallel-web',
+          url: 'https://search.parallel.ai/mcp',
+          search_tools: ['web_search', 'web_fetch'],
+        },
+        first_party: false,
+      });
+      // As an earlier build saved it: designated, but with no search tools recorded.
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'parallel-renamed',
+        manifest: { ...base, name: 'parallel-renamed', url: 'https://search.parallel.ai/mcp/?key=invented' },
+        first_party: false,
+      });
+      const catalog = McpCatalog.loadShipped();
+      for (const name of ['parallel-web', 'parallel-renamed']) {
+        const connection = await connectionFor(name);
+        if (connection.search_provider === undefined) {
+          throw new Error(`expected ${name} to be the search provider`);
+        }
+        expect(
+          catalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+        ).toEqual({
+          tools: ['web_search', 'web_fetch'],
+          plumbing_fields: ['session_id', 'model_name'],
+        });
+      }
     });
   });
 

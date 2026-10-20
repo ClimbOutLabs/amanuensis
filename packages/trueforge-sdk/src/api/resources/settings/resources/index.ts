@@ -1,3 +1,5 @@
+export * as firstRunGuide from "./firstRunGuide/index.js";
+export * from "./firstRunGuide/client/requests/index.js";
 export * as google from "./google/index.js";
 export * from "./google/client/requests/index.js";
 export * as mcpServers from "./mcpServers/index.js";
@@ -13,5 +15,6 @@ export * as sandboxProviders from "./sandboxProviders/index.js";
 export * from "./sandboxProviders/client/requests/index.js";
 export * as skills from "./skills/index.js";
 export * from "./skills/client/requests/index.js";
+export * as tokenFactoryUsage from "./tokenFactoryUsage/index.js";
 export * as toolOutputScreens from "./toolOutputScreens/index.js";
 export * from "./toolOutputScreens/client/requests/index.js";

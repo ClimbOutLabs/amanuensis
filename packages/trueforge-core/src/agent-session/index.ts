@@ -3,6 +3,7 @@
  * Zod product contracts and session/turn runtime.
  */
 
+export { threadCapabilities } from './builtinsFromSpec';
 export { AgentSpecSchema, DEFAULT_AGENT_CONFIG_ITERATION_LIMIT, RuntimeConfigSchema } from './schemas/agentSpec';
 export type { AgentSpec, Skill } from './schemas/agentSpec';
 
@@ -23,6 +24,7 @@ export type { TerminalTurnState, Turn, TurnInputItem, TurnMetrics, TurnState } f
 
 export {
   SessionAgentInlineSchema,
+  SessionAgentSchema,
   SessionMetadataSchema,
   SessionMetricsSchema,
   SessionSchema,
@@ -119,6 +121,7 @@ export type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
@@ -145,7 +148,7 @@ export {
 
 export type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 export { TurnResourceResolver } from './TurnResourceResolver';
-export type { TurnSandboxFactory } from './TurnResourceResolver';
+export type { TurnModelRole, TurnSandboxFactory } from './TurnResourceResolver';
 
 export { SessionHandle, abnormalHandoffCauseForCancellation } from './SessionHandle';
 export type { ApprovalResubmission } from './SessionHandle';

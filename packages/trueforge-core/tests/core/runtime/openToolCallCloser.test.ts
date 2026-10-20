@@ -1,10 +1,14 @@
-import { EventType } from '../../../src/core/events/schema';
+import { EventType, type AgentApprovalDecisionMessage, type ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall } from '../../../src/core/llm/LLMTypes';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
+import { approvalDecisionBinding } from '../../../src/core/runtime/contextUtils';
 import { getClosableOpenToolCalls } from '../../../src/core/runtime/OpenToolCallCloser';
 import '../harnessMocks';
 
-const NOT_EXECUTED = JSON.stringify({ error: 'Tool call was not executed. Please retry this tool call.' });
+const NOT_EXECUTED = JSON.stringify({
+  error:
+    'Tool call was not executed. Only make this call again if the person asks for it again, or it is still needed for what they just asked.',
+});
 const UNKNOWN_OUTCOME = JSON.stringify({
   error:
     'Tool call outcome unknown: it may have run without its result being recorded. Do not repeat it blindly. Establish whether it already took effect, then continue.',
@@ -27,6 +31,16 @@ function makeToolCall(
       is_client_side: false,
       ...toolInfo,
     },
+  };
+}
+
+/** A decision as the host records it: bound to the call makeToolCall builds for this id. */
+function decisionFor(id: string, approval: ApprovalDecision): AgentApprovalDecisionMessage {
+  return {
+    type: EventType.USER_TOOL_APPROVAL,
+    tool_call_id: id,
+    approval,
+    ...approvalDecisionBinding(makeToolCall(id)),
   };
 }
 
@@ -69,7 +83,7 @@ describe('getClosableOpenToolCalls', () => {
   it('does not tell the model an allowed side-effecting call went unexecuted', () => {
     const context: ContextMessage[] = [
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true, effect: 'edit' })]),
-      { type: EventType.USER_TOOL_APPROVAL, tool_call_id: 'tc-approval', approval: { status: 'allow' } },
+      decisionFor('tc-approval', { status: 'allow' }),
     ];
     expect(getClosableOpenToolCalls(context)).toEqual(new Map([['tc-approval', UNKNOWN_OUTCOME]]));
   });
@@ -119,11 +133,7 @@ describe('getClosableOpenToolCalls', () => {
   it('closes a denied approval call with the denial the user gave', () => {
     const context: ContextMessage[] = [
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
-      {
-        type: EventType.USER_TOOL_APPROVAL,
-        tool_call_id: 'tc-approval',
-        approval: { status: 'deny', reason: 'not this repo' },
-      },
+      decisionFor('tc-approval', { status: 'deny', reason: 'not this repo' }),
     ];
     expect(getClosableOpenToolCalls(context)).toEqual(
       new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: not this repo' })]]),
@@ -133,7 +143,7 @@ describe('getClosableOpenToolCalls', () => {
   it('closes a denied approval call with no reason using the shared fallback wording', () => {
     const context: ContextMessage[] = [
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
-      { type: EventType.USER_TOOL_APPROVAL, tool_call_id: 'tc-approval', approval: { status: 'deny' } },
+      decisionFor('tc-approval', { status: 'deny' }),
     ];
     expect(getClosableOpenToolCalls(context)).toEqual(
       new Map([['tc-approval', JSON.stringify({ error: 'User denied tool call: no reason provided' })]]),
@@ -143,7 +153,7 @@ describe('getClosableOpenToolCalls', () => {
   it('keeps a decided call closed out once its tool response exists', () => {
     const context: ContextMessage[] = [
       ...assistantWithToolCalls([makeToolCall('tc-approval', { is_approval_required: true })]),
-      { type: EventType.USER_TOOL_APPROVAL, tool_call_id: 'tc-approval', approval: { status: 'allow' } },
+      decisionFor('tc-approval', { status: 'allow' }),
       { role: 'tool', tool_call_id: 'tc-approval', content: 'executed' },
     ];
     expect(getClosableOpenToolCalls(context)).toEqual(new Map());
@@ -155,7 +165,7 @@ describe('getClosableOpenToolCalls', () => {
         makeToolCall('tc-decided', { is_approval_required: true }),
         makeToolCall('tc-pending', { is_approval_required: true }),
       ]),
-      { type: EventType.USER_TOOL_APPROVAL, tool_call_id: 'tc-decided', approval: { status: 'allow' } },
+      decisionFor('tc-decided', { status: 'allow' }),
     ];
     expect(getClosableOpenToolCalls(context)).toEqual(new Map());
   });

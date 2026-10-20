@@ -7,6 +7,7 @@ import { createSessionsRouter } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
@@ -76,6 +77,7 @@ describe('public CRUD after session deletion', () => {
     app.route(
       '/',
       createTurnsRouter({
+        mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessions,

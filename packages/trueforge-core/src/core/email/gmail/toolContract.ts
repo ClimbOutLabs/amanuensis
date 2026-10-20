@@ -81,7 +81,7 @@ const VISIBLE_ONLY = {
 };
 
 /** Text that is shown to the user must be text they can see: a send is refused if part of it would be hidden. */
-const visible = <T extends z.ZodType<string>>(schema: T) =>
+export const visible = <T extends z.ZodType<string>>(schema: T) =>
   schema.refine(text => !hasHiddenCharacters(text), VISIBLE_ONLY);
 
 const DraftContentShape = {
@@ -94,16 +94,20 @@ const DraftContentShape = {
   in_reply_to: id.optional(),
 };
 
-/** A draft may carry only a few ideographic variation selectors, so it stays one Aman can send. */
-const fewSelectors = (draft: { subject: string; body: string }) =>
-  countIdeographicSelectors(draft.subject) + countIdeographicSelectors(draft.body) <= MAX_IDEOGRAPHIC_SELECTORS;
-const TOO_MANY_SELECTORS = { message: 'The text has more variation selectors than a name or word needs. Remove them.' };
+/** Text shown on a card may carry only a few ideographic variation selectors in all, since they do not show. */
+export function fewSelectors(texts: readonly (string | undefined)[]): boolean {
+  return texts.reduce((sum, text) => sum + countIdeographicSelectors(text ?? ''), 0) <= MAX_IDEOGRAPHIC_SELECTORS;
+}
+export const TOO_MANY_SELECTORS = {
+  message: 'The text has more variation selectors than a name or word needs. Remove them.',
+};
+const draftSelectors = (draft: { subject: string; body: string }) => fewSelectors([draft.subject, draft.body]);
 
-export const DraftEmailSchema = z.object(DraftContentShape).strict().refine(fewSelectors, TOO_MANY_SELECTORS);
+export const DraftEmailSchema = z.object(DraftContentShape).strict().refine(draftSelectors, TOO_MANY_SELECTORS);
 export const UpdateDraftSchema = z
   .object({ draft_id: id, ...DraftContentShape })
   .strict()
-  .refine(fewSelectors, TOO_MANY_SELECTORS);
+  .refine(draftSelectors, TOO_MANY_SELECTORS);
 
 export type DraftContent = z.infer<typeof DraftEmailSchema>;
 

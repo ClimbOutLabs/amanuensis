@@ -53,25 +53,43 @@ consent_root() {
   ui_confirm "$1" n
 }
 
-# One plain sentence when the password cannot be used, empty when it can. bcrypt ignores everything past
-# 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
+# The rules shown above the password question, the way a sign-up form lists them under the field.
+password_rules() {
+  UI_FD=2 ui_line "Your password needs:"
+  UI_FD=2 ui_line "  - At least 8 characters"
+  UI_FD=2 ui_line "  - At least one number (0-9)"
+  UI_FD=2 ui_line "  - At least one symbol, like @ # \$ % ! -"
+  UI_FD=2 ui_line "You can use letters (a-z, A-Z), numbers, symbols and spaces."
+}
+
+# One plain sentence naming what the password still lacks, empty when it can be used. bcrypt ignores everything
+# past 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
 password_problem() {
-  local LC_ALL=C
-  if [ "${#1}" -lt 8 ]; then
-    echo "The password needs at least 8 characters."
-  elif [ "${#1}" -gt 72 ]; then
-    echo "The password can have at most 72 characters; accented or non-Latin letters take more room."
+  local LC_ALL=C missing=()
+  if [ "${#1}" -gt 72 ]; then
+    echo "The password can have at most 72 characters. Accented or non-Latin letters count as more than one."
+    return 0
   fi
+  if [ "${#1}" -lt 8 ]; then missing+=("at least 8 characters"); fi
+  if [[ $1 != *[[:digit:]]* ]]; then missing+=("a number"); fi
+  if [[ $1 != *[[:punct:]]* ]]; then missing+=("a symbol, like @ # \$ %"); fi
+  case ${#missing[@]} in
+    0) ;;
+    1) echo "That password still needs ${missing[0]}." ;;
+    2) echo "That password still needs ${missing[0]} and ${missing[1]}." ;;
+    *) echo "That password still needs ${missing[0]}, ${missing[1]} and ${missing[2]}." ;;
+  esac
 }
 
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
 # memory: it is never put in argv, a file or the environment of a child process. Ending the input
-# (Ctrl-D) stops the run.
+# (Ctrl-D) stops the run. The optional labels replace the two prompts.
 ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
+  local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Enter password again"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
-    [ -n "$__first" ] || usage_die "--password-stdin got an empty line"
+    [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
     __problem=$(password_problem "$__first")
     [ -z "$__problem" ] || usage_die "$__problem"
     printf -v "$__var" '%s' "$__first"
@@ -79,11 +97,12 @@ ask_password() {
   fi
   while [ "$__tries" -lt "$UI_MAX_TRIES" ]; do
     if [ -t 0 ]; then
-      ui_password __first "Password for ${I_EMAIL:-the owner account}, 8 to 72 characters" || die "No password was entered, so nothing more was changed."
-      ui_password __second "Repeat the password" || die "No password was entered, so nothing more was changed."
+      password_rules
+      ui_password __first "$__label_first" || die "No password was entered, so nothing more was changed."
+      ui_password __second "$__label_second" || die "No password was entered, so nothing more was changed."
     else
-      IFS= read -r __first || die "No password was provided on stdin."
-      IFS= read -r __second || die "The password was not repeated on stdin."
+      IFS= read -r __first || die "No password was given on the input."
+      IFS= read -r __second || die "The password was not repeated on the input."
     fi
     __problem=$(password_problem "$__first")
     if [ -n "$__problem" ]; then
@@ -95,11 +114,11 @@ ask_password() {
       return 0
     fi
     if [ ! -t 0 ]; then
-      die "No valid password could be read from stdin."
+      die "No valid password came from the input, so nothing was changed."
     fi
     __tries=$((__tries + 1))
   done
-  die "No valid password after $UI_MAX_TRIES tries, so nothing was changed. Run install.sh again."
+  die "No valid password after $UI_MAX_TRIES tries, so nothing was changed. Run the command again."
 }
 
 # ---- long steps: a spinner line on screen, the tool's own output in a log file ---------------------
@@ -135,6 +154,27 @@ step_fail() {
   UI_FD=2 ui_step_end fail "$1" "${2:-}" "${3:-}"
   step_log_tail
   exit 1
+}
+
+# ---- the app's own reason when one of its commands fails -------------------------------------------
+
+# cli_log NAME: an emptied private file to send a CLI run's error output to; prints its path.
+cli_log() {
+  ensure_private_dir "$STATE_DIR/logs"
+  : >"$STATE_DIR/logs/$1.log"
+  printf '%s' "$STATE_DIR/logs/$1.log"
+}
+
+# cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
+# or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump instead, so it is named here.
+cli_reason() {
+  local line
+  if grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
+    printf '%s' "Aman ran out of memory. Give Docker more memory, then run this again."
+    return 0
+  fi
+  line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)
+  printf '%s' "${line:-$2}"
 }
 
 sha256_stdin() {
@@ -173,10 +213,10 @@ lock_acquire() {
   if ! mkdir "$lock" 2>/dev/null; then
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      die "another installer run (pid $pid) is active; wait for it to finish"
+      die "Another install is running right now (process $pid). Wait for it to finish, then run this again."
     fi
     rm -rf "$lock"
-    mkdir "$lock" || die "could not take the installer lock at $lock"
+    mkdir "$lock" || die "Could not mark this run as active at $lock. If no other install is running, remove that folder and try again."
   fi
   printf '%s\n' "$$" >"$lock/pid"
   LOCK_HELD=1
@@ -196,8 +236,11 @@ has_control_chars() {
   [[ $1 == *[[:cntrl:]]* ]]
 }
 
-# Whole-string match of $1 against the extended regex $2, never accepting control characters.
+# Whole-string match of $1 against the extended regex $2, never accepting control characters. Bracket ranges
+# follow the locale's collation on macOS (bash 3.2 under a UTF-8 locale: [A-Z] also matches lowercase), so the
+# match runs as plain ASCII.
 matches_whole() {
+  local LC_ALL=C
   has_control_chars "$1" && return 1
   [[ $1 =~ $2 ]]
 }
@@ -210,32 +253,41 @@ valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
 
-# The reason a value is refused, as one sentence, or nothing when it is fine. The prompts show it and ask again.
+# The name checks below read ranges such as [A-Z] as plain ASCII, whatever the locale's collation says.
+name_has_capitals() { local LC_ALL=C; [[ $1 == *[A-Z]* ]]; }
+name_starts_with_letter() { local LC_ALL=C; [[ $1 == [a-z]* ]]; }
+# What is left of $1 once the allowed characters are removed, so the caller can show the first one.
+name_other_chars() { local LC_ALL=C; printf '%s' "${1//[a-z0-9-]/}"; }
+
+# The reason a value is refused, or nothing when it is fine. The prompts show it and ask again.
+NAME_RULE="Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
 name_problem() {
   local v=$1 rest
   if [ -z "$v" ]; then
-    echo "A name is needed."
+    echo "A name is needed. $NAME_RULE"
   elif [ "$v" = machine ]; then
-    echo "\"machine\" is reserved; pick another name."
+    echo "\"machine\" is kept for Aman's own use. Pick another name."
   elif has_control_chars "$v"; then
-    echo "The name has a control character; use lowercase letters, digits or hyphens."
+    echo "The name has a control character. $NAME_RULE"
   elif [[ $v == *_* ]]; then
-    echo "\"$v\" has an underscore; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has an underscore. $NAME_RULE"
   elif [[ $v == *[[:space:]]* ]]; then
-    echo "\"$v\" has a space; use lowercase letters, digits or hyphens."
-  elif [[ $v == *[A-Z]* ]]; then
-    echo "\"$v\" has capital letters; use lowercase letters, digits or hyphens."
-  elif [[ $v == [!a-z]* ]]; then
-    echo "\"$v\" must start with a letter."
-  elif [[ $v == *[!a-z0-9-]* ]]; then
-    rest=${v//[a-z0-9-]/}
-    echo "\"$v\" has the character ${rest:0:1}; use lowercase letters, digits or hyphens."
+    echo "\"$v\" has a space. $NAME_RULE"
+  elif name_has_capitals "$v"; then
+    echo "\"$v\" has capital letters. $NAME_RULE"
+  elif ! name_starts_with_letter "$v"; then
+    echo "\"$v\" does not start with a letter. $NAME_RULE"
+  elif rest=$(name_other_chars "$v") && [ -n "$rest" ]; then
+    echo "\"$v\" has the character ${rest:0:1}. $NAME_RULE"
   elif [ "${#v}" -gt 24 ]; then
-    echo "\"$v\" is longer than 24 characters."
+    echo "\"$v\" is longer than 24 characters. $NAME_RULE"
   elif [[ $v == *- ]]; then
-    echo "\"$v\" must not end with a hyphen."
+    echo "\"$v\" ends with a hyphen. End it with a letter or a number."
+  # Instance "x-slots" runs as project aman-x-slots, which is the sandbox project of instance "aman-x".
+  elif [[ $v == *-slots ]]; then
+    echo "\"$v\" must not end with -slots; that ending is used for the run-code sandbox of another instance."
   elif ! valid_name "$v"; then
-    echo "\"$v\" is not a usable name; use lowercase letters, digits or hyphens, starting with a letter."
+    echo "\"$v\" cannot be used as a name. $NAME_RULE"
   fi
 }
 
@@ -249,11 +301,11 @@ email_problem() {
 
 # A bare origin: scheme, host and optional port; no path, query or userinfo.
 valid_origin() {
-  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[[:digit:]]{1,5})?$'
 }
 
 valid_port() {
-  matches_whole "$1" '^[0-9]{1,5}$' || return 1
+  matches_whole "$1" '^[[:digit:]]{1,5}$' || return 1
   [ "$((10#$1))" -ge 1024 ] && [ "$((10#$1))" -le 65535 ]
 }
 
@@ -263,5 +315,5 @@ valid_home_path() {
 }
 
 is_loopback_origin() {
-  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
+  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[[:digit:]]+)?$'
 }

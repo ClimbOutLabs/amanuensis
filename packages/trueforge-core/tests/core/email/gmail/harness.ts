@@ -5,6 +5,7 @@ import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/
 import type { GmailThread } from '../../../../src/core/email/gmail/gmailWire';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { GOOGLE_TOKEN_URL } from '../../../../src/core/google/oauth';
+import type { ToolInvocationContext } from '../../../../src/core/mcp/IMCPServer';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -29,7 +30,10 @@ export function scriptedGoogle(routes: Route[]) {
   const fetchImpl: typeof fetch = (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     urls.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
-    if (typeof init?.body === 'string' && url.hostname === 'gmail.googleapis.com') {
+    if (
+      typeof init?.body === 'string' &&
+      (url.hostname === 'gmail.googleapis.com' || url.hostname === 'www.googleapis.com')
+    ) {
       bodies.push(JSON.parse(init.body));
     }
     if (url.href.startsWith(GOOGLE_TOKEN_URL)) {
@@ -54,6 +58,7 @@ export async function build(input: {
   features?: ('gmail_read' | 'gmail_compose')[];
   stager?: AttachmentStager | undefined;
   unattended?: boolean;
+  demoSendAllowlist?: string[] | null;
   listDeadlineMs?: number;
 }) {
   const connections = new FakeConnections();
@@ -68,7 +73,10 @@ export async function build(input: {
       return Promise.resolve();
     },
   });
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    demoSendAllowlist: input.demoSendAllowlist ?? null,
+  };
   const sentinel = createSentinelHostContext({
     ...OWNER,
     conversation_id: 'c1',
@@ -98,6 +106,12 @@ export const route =
   (path: string, body: unknown, status = 200): Route =>
   url =>
     url.pathname === `/gmail/v1/users/me${path}` ? json(body, status) : undefined;
+
+/** Gmail's answer for one thread, filtered by the headers a request names, as the real API does. */
+export const threadRoute =
+  (thread: GmailThread): Route =>
+  url =>
+    url.pathname === `/gmail/v1/users/me/threads/${thread.id}` ? json(gmailThreadResponse({ thread, url })) : undefined;
 
 const escapeSnippet = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -190,4 +204,12 @@ export async function approvalProblem(input: {
     },
     ctx: { ...input.sentinel, repository_id: null, agent_intent: null, offline: false },
   });
+}
+
+/** What the host hands a tool with an approved call: the params the approval was minted over. */
+export function approvedContext(info: Awaited<ReturnType<GmailToolSet['toolCallInfo']>>): ToolInvocationContext {
+  return {
+    admission_provenance: { source: 'user_approval', decision: 'allow' },
+    approved_params: info.mint_canonical_params,
+  };
 }

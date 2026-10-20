@@ -33,7 +33,12 @@ import { mergeCurrentContextUsage } from './contextUsage';
 import { estimateTokensForContextMessages, isLLMContextMessage, scanApprovalDecisions } from './contextUtils';
 
 const DUMMY_TOOL_MESSAGE_CONTENT = JSON.stringify({
-  error: 'Tool call was not executed. Please retry this tool call.',
+  // No standing invitation to retry: an unfinished call from an earlier turn stays unfinished
+  // unless the person asks again. A model told to "please retry" would revive old requests
+  // unasked in later turns, which is how a dropped calendar add once resurfaced inside an
+  // unrelated email check.
+  error:
+    'Tool call was not executed. Only make this call again if the person asks for it again, or it is still needed for what they just asked.',
 });
 
 /**

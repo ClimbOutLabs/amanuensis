@@ -9,15 +9,17 @@ export interface Tier3Email {
     /** What happens to the message: sent, saved as a draft, or a saved draft changed. */
     action: TrueForge.Tier3EmailAction;
     /** Hidden copy recipients. */
-    bcc: string[];
+    bcc: TrueForge.Tier3Mailbox[];
     /** The whole message text, exactly as it will be sent. */
     body: string;
     /** Copied recipients. */
-    cc: string[];
+    cc: TrueForge.Tier3Mailbox[];
     /** The saved draft a change replaces, or null. */
     replaces: TrueForge.Tier3EmailReplaces | null;
+    /** The message a reply answers in its thread, or null when the message is not a reply. */
+    replyInThread: TrueForge.Tier3EmailReplyInThread | null;
     /** Subject line. */
     subject: string;
     /** Recipients. */
-    to: string[];
+    to: TrueForge.Tier3Mailbox[];
 }

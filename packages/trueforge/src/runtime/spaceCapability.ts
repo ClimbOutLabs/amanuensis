@@ -20,6 +20,15 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -39,17 +48,11 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
-import { gmailCapability, sandboxAttachmentStager } from './gmailCapability';
+import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
+import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
-
-export const SPACE_SERVER_ID = 'space';
-export const LIST_SPACES_TOOL_NAME = 'list_spaces';
-export const GET_SPACE_TOOL_NAME = 'get_space';
-export const CREATE_SPACE_TOOL_NAME = 'create_space';
-export const UPDATE_SPACE_TOOL_NAME = 'update_space';
-export const REVERT_SPACE_TOOL_NAME = 'revert_space';
-export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
+import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no
@@ -1247,6 +1250,8 @@ export interface SpaceTurnContext {
   sessionId: string;
   /** Operational log for delta-edit failures. */
   logger: Logger;
+  /** Present only where schedules run (standalone); absent, no schedule tools mount. */
+  schedules?: ScheduleTurnContext | undefined;
 }
 
 /**
@@ -1255,7 +1260,13 @@ export interface SpaceTurnContext {
  * Spaces view to see, so it gets no space tools of its own.
  */
 export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
-  constructor(...args: [...ConstructorParameters<typeof MemoryTurnResourceResolver>, space: SpaceTurnContext]) {
+  constructor(
+    ...args: [
+      ...ConstructorParameters<typeof MemoryTurnResourceResolver>,
+      space: SpaceTurnContext,
+      toolImages: ToolImagesOptions,
+    ]
+  ) {
     const [
       deps,
       profile,
@@ -1266,12 +1277,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       personaKnowledgeHits,
       switchNotice,
       space,
+      toolImages,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
+    this.#toolImages = toolImages;
   }
 
   readonly #space: SpaceTurnContext;
+  readonly #toolImages: ToolImagesOptions;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -1286,43 +1300,68 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     if (isSubAgent) {
       return resolved;
     }
-    const gmail = await this.#gmail(input);
+    const google = await this.#google(input);
+    const sentinel = this.#sentinel(input);
+    const schedules = this.#space.schedules;
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
-        ...(gmail === undefined ? [] : [gmail]),
+        mapsCapability({
+          tracing: input.tracing,
+          logger: this.#space.logger,
+          pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
+          timezone: this.clientTimezone,
+        }),
+        toolImagesCapability(this.#toolImages),
+        ...(google === undefined ? [] : [google]),
+        ...(schedules === undefined
+          ? []
+          : [
+              scheduleCapability({
+                ...schedules,
+                tracing: input.tracing,
+                timeZone: this.clientTimezone,
+                sentinel,
+                now: () => new Date(),
+              }),
+            ]),
       ],
     };
   }
 
-  /** A store that cannot be read costs the chat its mail tools, never the chat itself. */
-  async #gmail(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+  #sentinel(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    return createSentinelHostContext({
+      services: input.sentinel_services,
+      tenant_id: input.tenant_id,
+      created_by: input.created_by,
+      conversation_id: input.session_id,
+      workspace_cwd: input.workspace_cwd ?? null,
+      web_search: this.webSearchTurn,
+    });
+  }
+
+  /** A store that cannot be read costs the chat its Google tools, never the chat itself. */
+  async #google(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const connections = this.#space.googleConnections;
     if (connections === undefined) {
       return undefined;
     }
     try {
-      return await gmailCapability({
+      return await googleCapability({
         fetchImpl: undefined,
         connections,
         owner: { tenant_id: input.tenant_id, created_by: input.created_by },
         tracing: input.tracing,
-        sentinel: createSentinelHostContext({
-          services: input.sentinel_services,
-          tenant_id: input.tenant_id,
-          created_by: input.created_by,
-          conversation_id: input.session_id,
-          workspace_cwd: input.workspace_cwd ?? null,
-          web_search: this.webSearchTurn,
-        }),
+        timeZone: this.clientTimezone,
+        sentinel: this.#sentinel(input),
         attachmentStager: sandboxAttachmentStager(this.runSandbox),
+        logger: this.#space.logger,
       });
     } catch (error) {
       this.#space.logger.warn(
-        'Gmail tools not mounted: the Google login could not be read',
+        'Google tools not mounted: the Google login could not be read',
         extractErrorLogFields(error),
       );
       return undefined;

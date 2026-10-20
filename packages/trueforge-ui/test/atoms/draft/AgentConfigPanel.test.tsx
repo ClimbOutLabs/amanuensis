@@ -90,7 +90,7 @@ describe('AgentConfigPanel', () => {
     expect(screen.getByText('generative UI:')).toBeInTheDocument();
     expect(screen.getByText('ask user questions:')).toBeInTheDocument();
     expect(screen.getByText('1 tools')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit Runtime Config' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Run settings' })).toBeInTheDocument();
     expect(screen.queryByText('Structured Output')).not.toBeInTheDocument();
     expect(screen.queryByText('Metadata')).not.toBeInTheDocument();
     expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
@@ -126,7 +126,7 @@ describe('AgentConfigPanel', () => {
     expect(screen.getByRole('heading', { name: 'Parameters' })).toBeInTheDocument();
     expect(onOpenEditor).not.toHaveBeenCalledWith('model-settings');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Runtime Config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Run settings' }));
     expect(onOpenEditor).toHaveBeenCalledWith('runtime');
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Instructions' }));

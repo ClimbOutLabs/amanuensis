@@ -5,12 +5,29 @@
  */
 import { z } from '@hono/zod-openapi';
 
-import type { ShellApprovalBinding } from './approvalTokens';
+import type { ShellApprovalBinding } from './approvalTokens.js';
+import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export type Tier = 1 | 2 | 3;
 
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
+
+/**
+ * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
+ * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
+ * hosting server declares about the tool.
+ */
+export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
+  'external_service',
+  'destructive_action',
+  'install_action',
+  'mcp_destructive_hint',
+  'mcp_open_world_hint',
+  'connector_send',
+  'calendar_write',
+  'schedule_write',
+]);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
@@ -19,6 +36,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
 export const AUTO_DENY_REASONS = [
   'destination_unverifiable',
+  'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
   'unattended_run',
@@ -30,21 +48,72 @@ export const Tier3EmailSchema = z
     action: z
       .enum(['send', 'save', 'change'])
       .describe('What happens to the message: sent, saved as a draft, or a saved draft changed.'),
-    to: z.array(z.string()).describe('Recipients.'),
-    cc: z.array(z.string()).describe('Copied recipients.'),
-    bcc: z.array(z.string()).describe('Hidden copy recipients.'),
+    to: z.array(Tier3MailboxSchema).describe('Recipients.'),
+    cc: z.array(Tier3MailboxSchema).describe('Copied recipients.'),
+    bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
     subject: z.string().describe('Subject line.'),
     body: z.string().describe('The whole message text, exactly as it will be sent.'),
     replaces: z
       .object({
         subject: z.string().describe('Subject of the draft being replaced.'),
-        to: z.array(z.string()).describe('Recipients of the draft being replaced.'),
+        to: z.array(Tier3MailboxSchema).describe('Recipients of the draft being replaced.'),
       })
       .nullable()
       .describe('The saved draft a change replaces, or null.'),
+    reply_in_thread: z
+      .object({
+        subject: z.string().describe('Subject of the message being answered.'),
+        from: z.string().describe('Sender of the message being answered.'),
+      })
+      .nullable()
+      .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
+
+const Tier3CalendarEventBeforeSchema = z
+  .object({
+    title: z.string().describe('Title before the change.'),
+    when: z.string().describe('Local date and time before the change, in plain words.'),
+    duration: z.string().describe('How long the event lasted before the change.'),
+    location: z.string().describe('Place before the change; empty when none.'),
+  })
+  .describe('The event as it is now, before a change.')
+  .openapi('Tier3CalendarEventBefore');
+
+export const Tier3CalendarEventSchema = z
+  .object({
+    action: z.enum(['create', 'change']).describe('Whether a new event is added or an existing one changed.'),
+    calendar: z.string().describe('The Google account whose main calendar is written.'),
+    title: z.string().describe('Event title.'),
+    when: z.string().describe('Local date and time in plain words.'),
+    time_zone: z.string().describe('IANA time zone the times are in.'),
+    duration: z.string().describe('How long the event lasts, in plain words.'),
+    location: z.string().describe('Place; empty when none.'),
+    description: z.string().describe('Description the write sets; empty when none.'),
+    attendees: z.array(z.string()).describe('Every guest on the event.'),
+    guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
+    one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
+    before: Tier3CalendarEventBeforeSchema.nullable(),
+  })
+  .describe('The calendar event a write adds or changes, shown in full.')
+  .openapi('Tier3CalendarEvent');
+
+/** A schedule that a chat call creates or deletes, shown in full. */
+export const Tier3ScheduleSchema = z
+  .object({
+    action: z.enum(['create', 'delete']).describe('Whether the schedule is created or deleted.'),
+    name: z.string().describe('Schedule name in plain words.'),
+    when: z.string().describe('When it runs, in plain words.'),
+    time_zone: z.string().describe('IANA time zone the times are in.'),
+    task: z.string().describe('The whole instruction each run gets.'),
+    runs_as: z.string().describe('Who runs it: the assistant name, or the agent name.'),
+    next_runs: z
+      .array(z.string())
+      .describe('The next three runs in plain words for a new schedule; empty for a delete.'),
+  })
+  .describe('The schedule a chat call creates or deletes, shown in full.')
+  .openapi('Tier3Schedule');
 
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
@@ -74,10 +143,13 @@ export const Tier3CardSchema = z
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
     outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
     email: Tier3EmailSchema.nullable().optional(),
+    calendar_event: Tier3CalendarEventSchema.nullable().optional(),
+    schedule: Tier3ScheduleSchema.nullable().optional(),
   })
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
+export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {
@@ -92,6 +164,8 @@ export interface TierDecision {
   escalated: boolean;
   /** Set when the action is auto-denied without a card. */
   auto_deny: AutoDenyReason | null;
+  /** One plain line for the owner when an auto-denied call needs more than the generic message, or null. */
+  owner_message: string | null;
   /** Populated for Tier 3 carded actions and for every Tier 2 action. */
   card: Tier3Card | null;
   /** Tier 2 member kind, for the per-kind relaxation lookup. */
@@ -106,6 +180,8 @@ export interface TierDecision {
   approval_token_id: string | null;
   /** Text of a web search that runs without asking, for the chat chip and the audit row; null otherwise. */
   silent_search_query: string | null;
+  /** Audit-row text that stands in for the card sentence when that sentence quotes caught text. */
+  audit_description: string | null;
   /**
    * Full parsed shell binding for shell actions that need approval (or null).
    * Re-verified byte-for-byte immediately before invocation.
@@ -137,11 +213,13 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }
@@ -151,11 +229,13 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     sensitive_read: false,
     escalated: false,
     auto_deny: null,
+    owner_message: null,
     card: null,
     tier2_kind: null,
     approval_binding: null,
     approval_token_id: null,
     silent_search_query: null,
+    audit_description: null,
     shell_binding: null,
   };
 }
@@ -232,12 +312,14 @@ export function tier3Decision(input: {
 export function autoDenyDecision(input: {
   reason: AutoDenyReason;
   reason_detail: string | null;
+  owner_message?: string | null | undefined;
   sensitive_read: boolean;
 }): TierDecision {
   return {
     ...baseDecision(),
     tier: 3,
     reason: 'auto_denied',
+    owner_message: input.owner_message ?? null,
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
     auto_deny: input.reason,

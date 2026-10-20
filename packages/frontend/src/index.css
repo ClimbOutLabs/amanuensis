@@ -66,8 +66,7 @@ body {
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__avatar-card,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__status,
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__details,
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__footer,
-  .aman-shell > .aman-runtime-rail .aman-runtime-rail__identity > p {
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__footer {
     display: none;
   }
 

@@ -24,7 +24,7 @@ pins_validate() {
 # The Node.js runtime for the sandbox setup is pinned by version and by the published SHA-256 of each tarball.
 node_pins_validate() {
   local key
-  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[0-9]+\.[0-9]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
+  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[[:digit:]]+\.[[:digit:]]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
   for key in node_sha256_linux_x64 node_sha256_linux_arm64 node_sha256_darwin_x64 node_sha256_darwin_arm64; do
     matches_whole "$(json_get "$PINS_FILE" "$key")" '^[a-f0-9]{64}$' || die "$key in $PINS_FILE must be a sha256 digest"
   done
@@ -59,11 +59,13 @@ source_id() {
   printf '%s-d%s\n' "$base" "$dirty"
 }
 
+checkout_app_tag() { printf 'aman-app:%s\n' "$(source_id .)"; }
+
 # Resolves tags for the current checkout into REL_* globals (read-only).
 release_resolve() {
   pins_validate
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
-  REL_APP_TAG=aman-app:$(source_id .)
+  REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
 }
@@ -104,24 +106,24 @@ release_load() {
 }
 
 build_app_image() {
-  [ -f "$REPO_ROOT/Dockerfile.dev" ] || die "Dockerfile.dev not found in $REPO_ROOT; run the installer from a checkout of the repository"
+  [ -f "$REPO_ROOT/Dockerfile.dev" ] || die "The file Dockerfile.dev is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
   local rc=0
   step_begin build-app "Building the Aman app (this might take a while)"
   D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     # The log tells an out-of-memory kill (exit 137) from other failures.
     if [ "$rc" = 137 ] || grep -Eq 'exit code: 137|signal: killed' "$STEP_LOG"; then
-      step_fail "Building the Aman app ran out of memory" "Docker needs at least 6 GB: raise it in Docker Desktop under Settings, Resources, Memory (on Linux, free up memory or add swap), then run install.sh again. Nothing was changed on the running stack."
+      step_fail "Building the Aman app ran out of memory" "Docker needs at least 6 GB of memory. Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap. Then run install.sh again. Anything already running was not touched."
     fi
-    step_fail "Building the Aman app failed" "Run install.sh again once the cause in the log is fixed. Nothing was changed on the running stack."
+    step_fail "Building the Aman app failed" "Fix what the log says, then run install.sh again. Anything already running was not touched."
   fi
   step_ok "Built the Aman app"
 }
 
 build_stt_image() {
-  [ -f "$REPO_ROOT/ops/aman-stt/Dockerfile" ] || die "ops/aman-stt/Dockerfile not found in $REPO_ROOT"
+  [ -f "$REPO_ROOT/ops/aman-stt/Dockerfile" ] || die "The file ops/aman-stt/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
   step_begin build-stt "Building the speech-to-text service"
-  D build -t "$REL_STT_TAG" "$REPO_ROOT/ops/aman-stt" >"$STEP_LOG" 2>&1 || step_fail "Building the speech-to-text service failed" "Run install.sh again once the cause in the log is fixed."
+  D build -t "$REL_STT_TAG" "$REPO_ROOT/ops/aman-stt" >"$STEP_LOG" 2>&1 || step_fail "Building the speech-to-text service failed" "Fix what the log says, then run install.sh again."
   step_ok "Built the speech-to-text service"
 }
 
@@ -141,7 +143,7 @@ images_ensure() {
     ui_skip "The sign-in service is already downloaded"
   else
     step_begin pull-login "Downloading the sign-in service"
-    D pull "$REL_DEX_IMAGE" >"$STEP_LOG" 2>&1 || step_fail "The sign-in service could not be downloaded" "Check this computer's network access to ghcr.io (install.sh --print-network lists every host), then run install.sh again."
+    D pull "$REL_DEX_IMAGE" >"$STEP_LOG" 2>&1 || step_fail "The sign-in service could not be downloaded" "Check that this computer can reach ghcr.io, then run install.sh again."
     step_ok "Downloaded the sign-in service"
   fi
   sandbox_images_ensure

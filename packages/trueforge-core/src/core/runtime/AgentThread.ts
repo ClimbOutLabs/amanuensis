@@ -67,6 +67,7 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
+import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -119,6 +120,7 @@ import {
   HELD_DENIED_NOTE,
   HELD_REASON_CODE,
   HeldActionRefusedError,
+  heldActionsNote,
   holdApprovalCalls,
   type NotSavedReason,
 } from '../permissions/heldActions';
@@ -154,6 +156,7 @@ import {
 } from './contextUsage';
 import {
   ABILITY_BOUNDARIES_PROMPT,
+  approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
   createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
@@ -187,10 +190,17 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
+import {
+  collectKnownEventIds,
+  guardModelReply,
+  MAX_TOOL_CALLS_PER_REPLY,
+  TOO_MANY_TOOL_CALLS_MESSAGE,
+} from './modelReplyGuard';
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
@@ -1423,6 +1433,8 @@ export class AgentThread {
   private heldReplayOutput: ModelMessageEvent | undefined;
   // Calls an unattended turn could not save for the owner, so the app can say so. Lives for one turn.
   private readonly notSavedCalls = new Map<string, NotSavedReason>();
+  // Card sentences of the actions an unattended turn held, named in its last message. Lives for one turn.
+  private readonly heldSentences: string[] = [];
   // Set when send() ran init() early to re-check held actions; execute() reports it with its own init.
   private earlyInit: { initializationInfo: MCPServerInitInfo[]; authRequirementInfo: MCPAuthRequired[] } | undefined;
   // Staged documents awaiting extraction in the turn loop. Set by send() when processAgentUserInput
@@ -1785,11 +1797,16 @@ export class AgentThread {
             this.toolCallMemo.clarificationAnswered = true;
           }
         }
-        const approvalContext: AgentApprovalDecisionMessage[] = approvals.map(a => ({
-          type: EventType.USER_TOOL_APPROVAL,
-          tool_call_id: a.tool_call_id,
-          approval: a.approval,
-        }));
+        const approvalContext: AgentApprovalDecisionMessage[] = approvals.map(a => {
+          const call = pendingById.get(a.tool_call_id) ?? heldById.get(a.tool_call_id);
+          return {
+            type: EventType.USER_TOOL_APPROVAL,
+            tool_call_id: a.tool_call_id,
+            approval: a.approval,
+            // A decision for a call that is not pending binds to nothing and is never honoured.
+            ...(call === undefined ? { approval_token_id: null, arguments_hash: null } : approvalDecisionBinding(call)),
+          };
+        });
         const clientToolResults = clientSideToolResponses.map(m =>
           createToolResponseV2({
             id: newEventId(),
@@ -1979,6 +1996,7 @@ export class AgentThread {
       type: EventType.USER_TOOL_APPROVAL,
       tool_call_id: call.id,
       approval: { status: 'allow', scope: 'once' },
+      ...approvalDecisionBinding(call),
     }));
     return {
       context: [copy, ...decisions],
@@ -3125,6 +3143,37 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
+    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
+    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
+    if (result.value.tool_markup === 'broken') {
+      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+    }
+
+    // The reply guard: arguments checked against each tool's schema (with safe repairs),
+    // exact duplicate calls merged, calls that must not run flagged, and a reply over the
+    // per-reply call cap stops the turn before anything in it is classified or run. An
+    // unattended run is recounted after classification instead (below): the guard counts
+    // every call, but calls that will be held for the owner's approval do not count toward
+    // the cap there, and which ones those are is only known once each call is classified.
+    const unattended = this.sentinel?.services.unattended === true;
+    const replyGuard = guardModelReply({
+      message: {
+        ...result.value.output,
+        ...(result.value.output.tool_calls === undefined
+          ? {}
+          : {
+              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
+            }),
+      },
+      tools,
+      knownEventIds: collectKnownEventIds(this.context),
+    });
+    if (replyGuard.tooManyCalls && !unattended) {
+      yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+    }
+
     // should be computed by this point but in case provider never gives out any delta with usage, compute it now.
     modelMessageUsage ??= this.computeAssistantMessageUsage({
       requestBody,
@@ -3132,7 +3181,7 @@ export class AgentThread {
       toolMapping,
     });
     const enrichedMessage: InternalEnrichedAssistantMessage = await enrichAssistantMessage({
-      assistantMessage: result.value.output,
+      assistantMessage: replyGuard.message,
       toolMapping,
       // During context persistence, we have the complete message and hence the tool arguments are available.
       // Hence, we resolve the underlying tool to get the tool information.
@@ -3141,11 +3190,48 @@ export class AgentThread {
       toolCallPolicy: this.toolCallPolicy,
       logger: this.logger,
     });
-    // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
+    // Calls the reply guard flagged (arguments that could not be repaired, a read of something
+    // not yet created) never run and never ask for approval: they resolve as never ran, with the
+    // plain reason as their result, so the model can fix the call and try once more.
     let assistantMessage = enrichedMessage;
-    if (this.sentinel?.services.unattended === true) {
+    if (replyGuard.invalidCalls.size > 0 && assistantMessage.tool_calls !== undefined) {
+      assistantMessage = {
+        ...assistantMessage,
+        tool_calls: assistantMessage.tool_calls.map(call => {
+          const problem = replyGuard.invalidCalls.get(call.id);
+          // A call the policy already blocked keeps its policy failure: it feeds the
+          // policy-block budget, and its message is the plainer one for the person.
+          if (problem === undefined || call.tool_info.pre_dispatch_failure?.kind === 'policy_blocked') {
+            return call;
+          }
+          return {
+            ...call,
+            tool_info: {
+              ...call.tool_info,
+              is_approval_required: false,
+              pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: problem },
+            },
+          };
+        }),
+      };
+    }
+    // The unattended recount, now that classification has stamped every call: calls that
+    // will be held for the owner's approval do not count toward the per-reply cap (the hold
+    // machinery has its own per-chat limit), but calls that run at once still do. The turn
+    // stops here, before anything is held or run, when those alone are over the cap.
+    if (unattended && replyGuard.tooManyCalls) {
+      const immediateCalls = (assistantMessage.tool_calls ?? []).filter(
+        call => call.tool_info.is_approval_required !== true,
+      ).length;
+      if (immediateCalls > MAX_TOOL_CALLS_PER_REPLY) {
+        yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      }
+    }
+    // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
+    if (unattended) {
       const held = holdApprovalCalls({
-        message: enrichedMessage,
+        message: assistantMessage,
         alreadyHeld: findHeldToolCalls(this.context).length,
         isSubAgent: this.parent !== undefined,
       });
@@ -3155,6 +3241,7 @@ export class AgentThread {
       }
       for (const call of assistantMessage.tool_calls ?? []) {
         if (call.tool_info.held_for_owner !== undefined && call.tool_info.held_for_owner.duplicate !== true) {
+          this.heldSentences.push(call.tool_info.tier3_card?.plain_what ?? 'an action');
           await this.auditHeld({ info: call.tool_info, outcome: 'logged', note: 'Held for the owner' });
         }
       }
@@ -3178,6 +3265,17 @@ export class AgentThread {
       emptyTerminalFallback !== undefined &&
       !hasToolCalls(assistantMessage) &&
       assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0;
+    // A run that ends with actions waiting for its owner says so in its own last message.
+    if (
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !emptyTerminalFailure &&
+      !shouldNudgeForEmptyReasoning &&
+      this.heldSentences.length > 0
+    ) {
+      const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
+      assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
+    }
     const agentAssistantMessage = buildModelMessageEvent({
       // The terminal model event is authoritative. By this point the complete tool
       // arguments are available, so publish the same resolved, server-classified
@@ -3601,6 +3699,7 @@ export class AgentThread {
         toolCallResults.push({
           message: { role: 'tool', tool_call_id: call.id, content: closeout.rawContent },
           rawContent: closeout.rawContent,
+          images: [],
           toolCallInfo: call.tool_info,
           screen: undefined,
           info: toolMapping.get(call.function.name),
@@ -4118,6 +4217,22 @@ export class AgentThread {
           'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
       });
     }
+    for (const name of unavailableToolNames) {
+      unavailableToolsSeen.add(name);
+    }
+
+    // A repeated unavailable tool is the more specific diagnosis, so it is checked before the
+    // generic identical-call budget below: both can trip on the same step (an unknown tool's
+    // results count toward the budget too), and the person should hear that the tool does not
+    // exist here, not just that a call repeated.
+    if (repeatedUnavailableToolNames.length > 0) {
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
+        errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
+      });
+    }
+
     if (repeatedSignature !== undefined) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
@@ -4163,18 +4278,6 @@ export class AgentThread {
         }),
       });
     }
-    for (const name of unavailableToolNames) {
-      unavailableToolsSeen.add(name);
-    }
-
-    if (repeatedUnavailableToolNames.length > 0) {
-      return yield* this.recoverFromLoopOrExit({
-        recoveryNote:
-          'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
-        errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
-      });
-    }
-
     if (authRequirementInfo.length > 0) {
       yield buildMCPAuthRequiredEvent(authRequirementInfo, this.threadId);
       return 'exit';
@@ -4241,6 +4344,7 @@ export class AgentThread {
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
+          can_chat_allow: allowsChatApproval(toolCall.tool_info),
         })),
       };
       yield event;

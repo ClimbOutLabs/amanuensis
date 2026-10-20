@@ -38,10 +38,13 @@ Ready. Instance main is running.
   + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
-  Trust this computer on each device: http://192.168.1.20:8791/trust
-  On an iPhone, open it in Safari, install the profile, then turn it on
+  On each device, the browser will first warn that the page is not
+  private. Do not click past the warning.
+  Instead, open this page once on that device and follow its steps:
+  http://192.168.1.20:8791/trust
+  On an iPhone: open it in Safari, install the profile, then turn it on
   in Settings, General, About, Certificate Trust Settings.
-  Before you trust it, check that the fingerprint your device shows is
+  Your device will show a long code called a fingerprint. It must be
   <fingerprint>.
   If it differs, stop.
   Bookmark spark.local: it keeps working when this computer's address

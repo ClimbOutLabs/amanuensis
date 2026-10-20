@@ -32,9 +32,9 @@ backup_scheduler() {
 # What the schedule is made of, in words for the plan.
 backup_scheduler_label() {
   case "$(backup_scheduler)" in
-    systemd) echo "a timer of your user" ;;
-    launchd) echo "a launchd agent of your user" ;;
-    cron) echo "a crontab line of your user" ;;
+    systemd) echo "a scheduled task of your user (systemd)" ;;
+    launchd) echo "a scheduled task of your user (launchd)" ;;
+    cron) echo "a scheduled task of your user (cron)" ;;
   esac
 }
 

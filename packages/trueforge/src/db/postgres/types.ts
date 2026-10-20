@@ -38,6 +38,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
 /**
@@ -205,6 +206,7 @@ export interface SentinelUserSettingsTable {
   offline_mode: boolean;
   tier2_auto_allow: JSONColumnType<Tier2ActionKind[], Tier2ActionKind[] | string, Tier2ActionKind[] | string>;
   search_without_asking: boolean;
+  maps_without_asking: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -238,6 +240,31 @@ export interface TurnArtifactTable {
   mime: string | null;
   skip_reason: string | null;
   created_at: Date;
+}
+
+/** Re-encoded chat image. PRIMARY KEY (session_id, image_id); UNIQUE (session_id, source_key); session cascade. */
+export interface ChatImageTable {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  turn_id: string;
+  image_id: string;
+  source_key: string;
+  origin: ChatImageOrigin;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  data: Buffer;
+  created_at: Date;
+}
+
+/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
+export interface ChatImageTurnAllowanceTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  silent_attempts: number;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -289,6 +316,16 @@ export interface GlobalSettingsTable {
 export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
+  updated_at: Date;
+}
+
+/** One row per UTC day and upstream model id; not tenant-scoped. */
+export interface TokenFactoryModelUsageTable {
+  usage_date: string;
+  model_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
   updated_at: Date;
 }
 
@@ -607,6 +644,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JSONColumnType<AgentSpec, AgentSpec, AgentSpec>;
   external_id: string | null;
+  /** True for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<boolean>;
   created_by_subject: JSONColumnType<CreatedBySubject, CreatedBySubject, CreatedBySubject>;
   created_at: Date;
   updated_at: Date;
@@ -629,6 +668,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JSONColumnType<ScheduleManifest, ScheduleManifest, ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */
@@ -667,6 +708,8 @@ export interface PersonalizationProfileTable {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JSONColumnType<string[], string[] | string, string[] | string>;
   /** Host-maintained learned document; null until the learning pass writes one. */
@@ -793,6 +836,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<boolean>;
   revision: Generated<number>;
   created_at: Date;
   updated_at: Date;
@@ -914,6 +958,9 @@ export interface Database {
   repository_workspace_verification: RepositoryWorkspaceVerificationTable;
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
+  chat_image: ChatImageTable;
+  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
+  token_factory_model_usage: TokenFactoryModelUsageTable;
 }

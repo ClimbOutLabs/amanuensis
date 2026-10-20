@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
+import type { GitRemotePrecondition } from '../gitRemoteObservation';
 
 /** Command executed in sandbox — exitCode may be non-zero but the infra call succeeded. */
 export interface ExecSuccessResult {
@@ -51,6 +52,14 @@ export interface SandboxExecParams {
   timeoutSeconds?: number | undefined;
   /** Shared Git-metadata boundary for workspace commands on a persisted sandbox. */
   workspaceLock?: WorkspaceExecutionLock | undefined;
+  /** The repositories the user approved for this network git command; host-carried git offers its token to no other. */
+  approvedGitRemotes?: GitRemotePrecondition | undefined;
+  /**
+   * Package mirror grant for this call, issued for the workspace repo the person allowed downloads
+   * for. Providers that serve mirrors (sandbox slots) pass it to the agent; others ignore it and the
+   * call stays offline.
+   */
+  packageMirrorToken?: string | undefined;
 }
 
 export interface WorkspaceExecutionLock {
@@ -90,6 +99,21 @@ export type VerifiedWorkspaceCommitResult =
   | { status: 'blocked'; reason: string }
   | { status: 'indeterminate'; result: ExecResult };
 
+/**
+ * The sandbox PATH leads with workspace directories the model can write to, so the wrapper's own helpers
+ * (flock, sh, mkdir, git, ...) run on this fixed system PATH. The caller's PATH is restored only for the command.
+ */
+const WRAPPER_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+
+const WRAPPER_PATH_SETUP = ['tf_user_path="$PATH"', `PATH=${shellEscape(WRAPPER_PATH)}`, 'export tf_user_path PATH'];
+
+/** Host-authored commands run on the fixed system PATH, never the workspace-led sandbox PATH. */
+export function withTrustedPath(command: string): string {
+  return `PATH=${shellEscape(WRAPPER_PATH)}; export PATH; ${command}`;
+}
+
+const RESTORE_USER_PATH = 'PATH="$tf_user_path"; export PATH; ';
+
 function gitPathCommand(workspaceRoot: string, path: string): string {
   return `git -C ${shellEscape(workspaceRoot)} rev-parse --path-format=absolute --git-path ${shellEscape(path)}`;
 }
@@ -125,8 +149,10 @@ function buildWorkspaceLockCommand(input: { workspaceRoot: string; command: stri
     'state_after="$(cat "$state_file" 2>/dev/null || true)"; ' +
     'case "$state_after" in \'\'|*:idle) ;; *) exit 125 ;; esac; ' +
     'if test "$state_before" != "$state_after" || test -e "$barrier"; then exit 125; fi; ' +
+    RESTORE_USER_PATH +
     input.command;
   return [
+    ...WRAPPER_PATH_SETUP,
     `lock_path="${lockPath}"`,
     `control_dir="${controlPath}"`,
     'barrier="$control_dir/trueforge-workspace-termination"',
@@ -167,12 +193,13 @@ function buildTimedEvidenceCaptureCommand(input: {
     'if test -e "$cancellation"; then rm -f "$marker"; exit 125; fi',
     // Keep the provider command in a child shell so it cannot replace the
     // marker-owning process-group leader's signal disposition with a trap.
-    `sh -c ${shellEscape(input.command)}`,
+    `sh -c ${shellEscape(RESTORE_USER_PATH + input.command)}`,
     'status=$?',
     'rm -f "$marker"',
     'exit "$status"',
   ].join('; ');
   return [
+    ...WRAPPER_PATH_SETUP,
     `lock_path="${lockPath}"`,
     `control_dir="${controlPath}"`,
     'barrier="$control_dir/trueforge-workspace-termination"',
@@ -236,6 +263,7 @@ export function workspaceTerminationCommand(input: { workspaceRoot: string; oper
     `flock -x "$lock_path" sh -c ${shellEscape(finalizeCommand)}`,
   ].join(' && ');
   return [
+    ...WRAPPER_PATH_SETUP,
     `control_dir="${controlPath}"`,
     `lock_path="${lockPath}"`,
     'mkdir -p "$control_dir" "$(dirname "$lock_path")"',
@@ -254,12 +282,18 @@ export function workspaceTerminationCommand(input: { workspaceRoot: string; oper
 }
 
 const VERIFIED_WORKSPACE_COMMIT_SCRIPT = String.raw`
-import hashlib, json, os, re, subprocess, sys
+import hashlib, json, os, re, shutil, subprocess, sys
 
 request = json.loads(sys.argv[1])
+# Resolved once on the trusted PATH this script starts with; the command alone gets the caller's PATH back.
+GIT = shutil.which("git")
+COMMAND_ENV = {key: value for key, value in os.environ.items() if key != "tf_command_path"}
+COMMAND_ENV["PATH"] = os.environ.get("tf_command_path", "")
 
 def git(*args):
-    return subprocess.run(["git", *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+    if GIT is None:
+        raise RuntimeError("git is not installed")
+    return subprocess.run([GIT, *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -299,23 +333,25 @@ expected = request["receipt"]
 if actual is None or any(actual[key] != expected[key] for key in expected):
     print(json.dumps({"status": "blocked", "reason": "The workspace changed after its last successful verification. Re-run verification before committing."}))
 else:
-    completed = subprocess.run(request["command"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    completed = subprocess.run(request["command"], shell=True, env=COMMAND_ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print(json.dumps({"status": "completed", "exit_code": completed.returncode, "result": completed.stdout.decode(errors="replace")}))
 `;
 
 /**
  * A single provider command for the verification-to-commit critical section.
  * The caller applies the normal workspace lock, so every Git read and the
- * commit dispatch share the same remote `flock` lease.
+ * commit dispatch share the same remote `flock` lease. Python and git run on
+ * the trusted PATH; only the commit command sees the caller's PATH.
  */
 export function verifiedWorkspaceCommitCommand(input: {
   command: string;
   workspaceRoot: string;
   receipt: WorkspaceVerificationReceipt;
 }): string {
-  return `python3 -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
+  const check = `python3 -I -S -c ${shellEscape(VERIFIED_WORKSPACE_COMMIT_SCRIPT)} ${shellEscape(
     JSON.stringify({ command: input.command, workspace_root: input.workspaceRoot, receipt: input.receipt }),
   )}`;
+  return `tf_command_path="$PATH"; export tf_command_path; ${withTrustedPath(check)}`;
 }
 
 function isVerifiedWorkspaceCommitPayload(

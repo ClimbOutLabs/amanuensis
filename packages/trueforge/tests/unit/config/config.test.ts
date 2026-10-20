@@ -8,6 +8,8 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseDemoGoogleAccount,
+  parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
@@ -259,7 +261,9 @@ describe('assertNetworkAuthRequirement', () => {
           host,
           requireAuth: true,
         }),
-      ).toThrow(/Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET/);
+      ).toThrow(
+        /Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS/,
+      );
     });
 
     it('no longer honors REQUIRE_AUTH=false', () => {
@@ -500,4 +504,37 @@ describe('parseTrustedProxyAddresses', () => {
       expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
     },
   );
+});
+
+describe('parseDemoSendAllowlist', () => {
+  it('is empty when unset or blank, which allows no send', () => {
+    expect(parseDemoSendAllowlist(undefined)).toEqual([]);
+    expect(parseDemoSendAllowlist('  , ')).toEqual([]);
+  });
+
+  it('lower-cases, trims and drops repeats', () => {
+    expect(parseDemoSendAllowlist(' Maya@Demo.Example, friend@demo.example ,maya@demo.example')).toEqual([
+      'maya@demo.example',
+      'friend@demo.example',
+    ]);
+  });
+
+  it.each(['maya', '*@demo.example', 'Maya <maya@demo.example>', 'a@b'])('refuses %s at load', value => {
+    expect(() => parseDemoSendAllowlist(value)).toThrow(/DEMO_SEND_ALLOWLIST/);
+  });
+});
+
+describe('parseDemoGoogleAccount', () => {
+  it('is empty when unset or blank, which lets no account connect', () => {
+    expect(parseDemoGoogleAccount(undefined)).toBe('');
+    expect(parseDemoGoogleAccount('  ')).toBe('');
+  });
+
+  it('lower-cases and trims', () => {
+    expect(parseDemoGoogleAccount(' Maya@Demo.Example ')).toBe('maya@demo.example');
+  });
+
+  it.each(['maya', 'a@b', 'maya@demo.example, other@demo.example'])('refuses %s at load', value => {
+    expect(() => parseDemoGoogleAccount(value)).toThrow(/DEMO_GOOGLE_ACCOUNT/);
+  });
 });

@@ -10,6 +10,7 @@
  */
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
+import { InMemoryPrivateDataReadStore, type PrivateDataReadStore } from './privateDataReads';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
 import type { Tier2ActionKind } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
@@ -22,15 +23,21 @@ export interface SentinelServices {
   audit: AuditLogWriter | null;
   shell_allowlist: ShellAllowlistConfig;
   tool_grants: ToolGrantStore;
+  /** Chats that have read something private, for the search provider's silent runs. */
+  private_reads: PrivateDataReadStore;
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Tier 2 kinds the user relaxed to run without asking. */
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
   /** Whether the user lets the designated search provider run without asking. Default on. */
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Whether the user lets embedded maps run without asking, once the silent-run rules hold. Default off. */
+  mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
+  /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
+  demoSendAllowlist: readonly string[] | null;
 }
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
@@ -57,11 +64,14 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     audit: null,
     shell_allowlist: seedShellAllowlist(input.pinned_path),
     tool_grants: new InMemoryToolGrantStore(),
+    private_reads: new InMemoryPrivateDataReadStore(),
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
+    mapsWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
+    demoSendAllowlist: null,
   };
 }
 

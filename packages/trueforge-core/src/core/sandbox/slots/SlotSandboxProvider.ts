@@ -176,6 +176,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       env: params.env ?? {},
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: this.treeDiskMb,
+      ...(params.packageMirrorToken === undefined ? {} : { package_mirror_token: params.packageMirrorToken }),
     };
     const deadline = Date.now() + timeoutMs + QUEUE_GRACE_MS;
     for (;;) {
@@ -271,8 +272,8 @@ export class SlotSandboxProvider implements SandboxProvider {
     return [
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
-      '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed. Packages cannot be downloaded.',
-      '- No network from code or the shell, by design. If a task needs the internet, say it cannot be done here and do not try another tool.',
+      '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed.',
+      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; say that plainly instead of retrying, and do not try another tool to get around it.',
     ].join('\n');
   }
 
@@ -316,6 +317,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       command: params.command,
       plan,
       token: this.gitToken,
+      approvedRemotes: params.approvedGitRemotes,
       guest: this.guestFor(params.sandboxId),
       sandboxId: params.sandboxId,
       cwd: params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd),
@@ -339,6 +341,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           command: input.command,
           plan,
           token: this.gitToken,
+          approvedRemotes: undefined,
           guest: this.guestFor(input.sandboxId),
           sandboxId: input.sandboxId,
           cwd: input.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, input.cwd),
@@ -357,6 +360,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           sandboxId,
           command: input.command,
           cwd: input.cwd,
+          ...(input.env === undefined ? {} : { env: input.env }),
           ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
           signal: input.signal,
         }),

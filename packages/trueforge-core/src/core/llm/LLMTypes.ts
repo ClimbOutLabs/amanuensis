@@ -14,6 +14,7 @@ import {
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
 import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
   ChatCompletionAssistantMessageParamSchema,
@@ -84,6 +85,9 @@ export const MapsHostsSchema = z
   .object({
     geocoder: z.string(),
     router: z.string(),
+    walking: z.string(),
+    cycling: z.string(),
+    transit: z.string(),
     tile: z.string(),
   })
   .describe('Configured maps upstream URLs for the approval card destination.');
@@ -120,6 +124,10 @@ export const InternalToolCallInfoSchema = z.object({
     .object({
       kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
       message: z.string(),
+      owner_message: z
+        .string()
+        .optional()
+        .describe('One plain line shown to the owner instead of the generic message.'),
     })
     .optional()
     .describe('Host-only failure captured while preparing the call, before provider dispatch.'),
@@ -138,12 +146,19 @@ export const InternalToolCallInfoSchema = z.object({
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
   ),
+  git_remote_precondition: GitRemotePreconditionSchema.optional().describe(
+    'Host-observed git remotes captured before approval. Never model-authored or client supplied.',
+  ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
+  tier_reason: z
+    .string()
+    .optional()
+    .describe('Server-owned classifier reason code behind the tier. Never model-authored.'),
   tier3_card: Tier3CardSchema.nullable()
     .optional()
     .describe('Server-rendered approval card for Tier 2 and Tier 3 actions, or null.'),
@@ -161,6 +176,10 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  audit_description: z
+    .string()
+    .optional()
+    .describe('Audit-row text used instead of the approval card sentence. Never model-authored, never wire-visible.'),
   held_for_owner: z
     .object({ expires_at: z.string(), duplicate: z.literal(true).optional() })
     .optional()
@@ -187,7 +206,7 @@ export const TrueFoundrySystemToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('TrueFoundrySystemToolInfo');
@@ -201,7 +220,7 @@ export const MCPToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     silent_search_query: z
       .string()
       .optional()
@@ -317,6 +336,7 @@ export type MCPToolInfo = z.infer<typeof MCPToolInfoSchema>;
 export type ToolInfo = z.infer<typeof ToolInfoSchema>;
 export type InternalEnrichedToolCall = z.infer<typeof InternalEnrichedToolCallSchema>;
 export type EnrichedToolCall = z.infer<typeof EnrichedToolCallSchema>;
+export type RawToolCall = z.infer<typeof RawToolCallSchema>;
 export type RawAssistantMessage = z.infer<typeof RawAssistantMessageSchema>;
 export type InternalEnrichedAssistantMessage = z.infer<typeof InternalEnrichedAssistantMessageSchema>;
 export type EnrichedAssistantMessage = z.infer<typeof EnrichedAssistantMessageSchema>;
@@ -359,6 +379,13 @@ export interface RawAssistantMessageWithUsage {
   usage: CompletionUsage;
   /** null when the stream ended without a finish_reason chunk (e.g. provider omitted it). */
   finish_reason: FinishReason | null;
+  /**
+   * Set when the reply's answer text carried leaked tool-call markup. 'recovered' means the
+   * markup was rebuilt into output.tool_calls and the markup itself is not in the content;
+   * 'broken' means the markup could not be rebuilt and the runtime must stop the answer without
+   * running or trusting anything in it. Absent when the reply had no markup.
+   */
+  tool_markup?: 'recovered' | 'broken';
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

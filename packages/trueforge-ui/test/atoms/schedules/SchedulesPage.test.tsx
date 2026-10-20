@@ -115,6 +115,27 @@ describe('SchedulesPage', () => {
     expect(searchAgents).not.toHaveBeenCalled();
   });
 
+  it('shows who each schedule runs as in plain words, never a stored agent name', async () => {
+    renderPage([
+      {
+        id: 's2',
+        name: 'lobster-joke',
+        agentId: 'agent-chat',
+        agentName: 'assistant-0123456789abcdef',
+        runsAs: 'Bender',
+        task: 'Tell me a lobster joke.',
+        cron: '0 8 * * *',
+        timezone: 'UTC',
+        status: 'active',
+        lastRunAt: null,
+      },
+    ]);
+    expect(await screen.findByRole('columnheader', { name: 'Runs as' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Agent' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: 'Bender' })).toBeInTheDocument();
+    expect(screen.queryByText('assistant-0123456789abcdef')).not.toBeInTheDocument();
+  });
+
   it('disables schedule mutations without MANAGE or DELETE', async () => {
     const { scheduleServer } = renderPage(sampleSchedules, {}, undefined, undefined, {
       agentId: 'demo-agent',
@@ -123,7 +144,7 @@ describe('SchedulesPage', () => {
       },
     });
 
-    expect(await screen.findByRole('button', { name: 'Create Schedule' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'New schedule' })).toBeDisabled();
     expect(await screen.findByRole('button', { name: 'Run now daily-digest' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Actions for daily-digest' }));
     await waitFor(() => {
@@ -146,7 +167,7 @@ describe('SchedulesPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Create Schedule' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'New schedule' })).toBeEnabled();
     });
     expect(screen.getByRole('button', { name: 'Run now daily-digest' })).toBeDisabled();
   });
@@ -159,7 +180,7 @@ describe('SchedulesPage', () => {
       permissions: { listPermissions },
     });
 
-    expect(await screen.findByRole('button', { name: 'Create Schedule' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'New schedule' })).toBeEnabled();
     expect(listPermissions).not.toHaveBeenCalledWith(
       expect.objectContaining({ resourceType: 'agent', resourceIds: expect.arrayContaining(['demo-agent']) }),
     );
@@ -173,7 +194,7 @@ describe('SchedulesPage', () => {
         resourceType: 'agent',
         resourceIds: ['demo-agent'],
       });
-      expect(screen.getByRole('button', { name: 'Create Schedule' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'New schedule' })).toBeDisabled();
     });
   });
   it('locks embedded schedules to the supplied agent', async () => {
@@ -479,7 +500,7 @@ describe('SchedulesPage', () => {
     window.history.replaceState(null, '', '/schedules?agent=demo-agent&isNew=true');
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'New Schedule' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'New schedule' })).toBeInTheDocument();
     await waitFor(() => {
       expect(new URL(window.location.href).searchParams.get('isNew')).toBeNull();
     });

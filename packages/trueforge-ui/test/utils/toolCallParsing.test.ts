@@ -93,6 +93,17 @@ describe('toolCallParsing', () => {
       resultJson: '{"response":{"exitCode":0,"result":"streamed output"',
     });
     expect(parseSandboxResult('plain')).toEqual({ resultText: 'plain' });
+    expect(
+      parseSandboxResult(
+        JSON.stringify({
+          response: { exitCode: 0, result: 'ok' },
+          notices: ["The skill echo couldn't be loaded, so Aman is working without it."],
+        }),
+      ),
+    ).toMatchObject({
+      exitCode: 0,
+      notices: ["The skill echo couldn't be loaded, so Aman is working without it."],
+    });
   });
 
   it('buffers structured edit arguments until complete and summarizes the patch', () => {

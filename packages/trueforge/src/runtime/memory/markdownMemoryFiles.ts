@@ -16,6 +16,7 @@ import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
+import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
 
 /** Longest namespace directory name; longer names are cut. */
 const NAMESPACE_MAX_LENGTH = 64;
@@ -48,6 +49,19 @@ export function splitEntries(content: string): string[] {
   return entries;
 }
 
+/** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
+export function dailyLogEntries(input: { safeNamespace: string; file: string; content: string }): ScannedMemoryEntry[] {
+  const entries: ScannedMemoryEntry[] = [];
+  const parts = splitEntries(input.content);
+  for (let index = 0; index < parts.length; index++) {
+    const text = parts[index];
+    if (text !== undefined) {
+      entries.push({ id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text });
+    }
+  }
+  return entries;
+}
+
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
  * `${formatRetainEntry(item)}\n` per item with blank-line separators, so this must
@@ -57,8 +71,44 @@ export function splitEntries(content: string): string[] {
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
-  const body = `## ${item.timestamp}\n\n${item.content}`;
-  return context !== undefined && context.length > 0 ? `${body}\n\n> ${context}` : body;
+  const text = context !== undefined && context.length > 0 ? `${item.content}\n\n> ${context}` : item.content;
+  const entry = `## ${item.timestamp}\n\n${escapeEntryStructure(text)}`;
+  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
+  return origin === undefined || origin === USER_STATED_ORIGIN ? entry : `${entry}\n\n${READ_CONTENT_SOURCE_LINE}`;
+}
+
+/** Closing line marking an entry written after Aman read an email, document, or web page. */
+const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+
+/**
+ * Backslash-escapes body lines `splitEntries` or `entryMetadata` would read as structure (an
+ * entry heading or the source marker), so retained text can neither split its entry, which drops
+ * the marker from the earlier fragments, nor forge the marker. The escape stays readable Markdown.
+ */
+function escapeEntryStructure(text: string): string {
+  return text
+    .split('\n')
+    .map(line => (line.startsWith('## ') || line.trimEnd() === READ_CONTENT_SOURCE_LINE ? `\\${line}` : line))
+    .join('\n');
+}
+
+/** Metadata recall hands back for an entry, read from the marker line `formatRetainEntry` wrote. */
+export function entryMetadata(text: string): Record<string, string> | undefined {
+  const lastLine = text.slice(text.lastIndexOf('\n') + 1);
+  return lastLine === READ_CONTENT_SOURCE_LINE ? { [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN } : undefined;
+}
+
+/** Curated long-term memory file inside a namespace directory. */
+export const CURATED_MEMORY_FILE = 'MEMORY.md';
+
+/** Daily logs live in the namespace's `memory/` directory, one file per day. */
+export const DAILY_LOG_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}\.md$/;
+
+/** The day file named by a vault-relative path such as `memory/2026-10-01.md`, or undefined for any other path. */
+export function dailyLogFileAt(relativePath: string): string | undefined {
+  const prefix = 'memory/';
+  const name = relativePath.startsWith(prefix) ? relativePath.slice(prefix.length) : '';
+  return DAILY_LOG_FILE_PATTERN.test(name) ? name : undefined;
 }
 
 export interface ScannedMemoryEntry {
@@ -101,7 +151,7 @@ export async function scanNamespaceEntries(options: {
 
   let curated: string | undefined;
   try {
-    const raw = await readFile(path.join(dir, 'MEMORY.md'), 'utf8');
+    const raw = await readFile(path.join(dir, CURATED_MEMORY_FILE), 'utf8');
     const text = raw.trim();
     if (text.length > 0) {
       curated = text;
@@ -114,7 +164,7 @@ export async function scanNamespaceEntries(options: {
   let files: string[] = [];
   try {
     files = (await readdir(path.join(dir, 'memory')))
-      .filter(name => /^\d{4}-\d{2}-\d{2}\.md$/.test(name))
+      .filter(name => DAILY_LOG_FILE_PATTERN.test(name))
       .sort()
       .reverse()
       .slice(0, options.maxDailyFiles);
@@ -128,14 +178,7 @@ export async function scanNamespaceEntries(options: {
     } catch {
       continue;
     }
-    const parts = splitEntries(content);
-    for (let index = 0; index < parts.length; index++) {
-      const text = parts[index];
-      if (text === undefined) {
-        continue;
-      }
-      entries.push({ id: `md:${safeNamespace}:${file}#${String(index)}`, file, index, text });
-    }
+    entries.push(...dailyLogEntries({ safeNamespace, file, content }));
   }
   if (options.resolveTombstones === true) {
     const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
@@ -165,7 +208,7 @@ export const VAULT_DEFAULT_NAMESPACE = 'default';
 const VAULT_PERSONA_PREFIX = 'persona:';
 
 /** Append-only vault marker file inside a namespace directory. */
-const VAULT_TOMBSTONES_FILE = '.vault-tombstones.md';
+export const VAULT_TOMBSTONES_FILE = '.vault-tombstones.md';
 
 /** Marker line inside a marker block: `> vault-entry <entryId> <updated|deleted>`. */
 const VAULT_MARKER_PREFIX = '> vault-entry ';
@@ -320,6 +363,11 @@ export async function readVaultTombstones(options: { baseDir: string; namespace:
   } catch {
     return [];
   }
+  return parseVaultTombstones(content);
+}
+
+/** Parses the text of a `.vault-tombstones.md` file, oldest marker first; malformed blocks are skipped. */
+export function parseVaultTombstones(content: string): VaultTombstone[] {
   const tombstones: VaultTombstone[] = [];
   let heading: string | undefined;
   let markerLine: string | undefined;

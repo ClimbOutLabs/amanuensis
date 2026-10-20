@@ -44,6 +44,8 @@ export interface ScheduleRecord {
   agent_name: string;
   /** Slug-shaped label, unique per agent (`schedule_name_uq`). */
   name: string;
+  /** The persona it runs as, kept from the chat it was made in; null runs the agent's own assistant. */
+  persona_id: string | null;
   manifest: ScheduleManifest;
   status: ScheduleStatus;
   created_by_subject: CreatedBySubject;
@@ -124,10 +126,17 @@ export interface GetOwnedIdsInput {
 }
 
 export interface CreateScheduleInput {
+  /**
+   * Caller-supplied schedule id, used by data import so an imported schedule
+   * keeps the id its sessions and links already reference. Omitted: the store
+   * mints a fresh id.
+   */
+  id?: string;
   tenant_id: string;
   agent_id: string;
   agent_name: string;
   name: string;
+  persona_id: string | null;
   manifest: ScheduleManifest;
   created_by_subject: CreatedBySubject;
   /** Instant used to compute the first pending run when status is active. */

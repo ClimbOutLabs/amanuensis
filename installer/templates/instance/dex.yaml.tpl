@@ -10,9 +10,10 @@ storage:
 
 # Plain http inside the instance network namespace; the owner's reverse proxy terminates TLS for a
 # public URL. The port equals the published port so the issuer name works from the browser
-# and from the app container.
+# and from the app container. Where the app passes the sign-in pages through, this stays on 127.0.0.1 so the
+# app is the only way in and its guess limit cannot be skipped.
 web:
-  http: 0.0.0.0:@@LOGIN_PORT@@
+  http: @@LOGIN_BIND@@:@@LOGIN_PORT@@
 
 # Never published: the container health check reads /healthz here.
 telemetry:
@@ -31,7 +32,6 @@ staticPasswords:
     hashFromEnv: DEX_USER_PASSWORD_HASH
     username: 'owner'
     userID: 'owner'
-@@IF_MEMBERS@@@@MEMBER_USERS@@
 
 staticClients:
   - id: @@CLIENT_ID@@

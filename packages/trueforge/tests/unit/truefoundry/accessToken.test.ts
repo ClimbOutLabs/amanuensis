@@ -27,6 +27,7 @@ const AGENT: AgentRecord = {
   description: 'Test agent.',
   manifest: AgentSpecSchema.parse({ model: { name: 'p/m' } }),
   external_id: 'ext-agent',
+  host_managed: false,
   created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'User' },
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',

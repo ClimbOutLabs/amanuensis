@@ -471,13 +471,6 @@
   line-height: 1.75rem;
 }
 
-.aman-runtime-rail__identity p:last-child {
-  margin: 0.35rem 0 0;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
-
 /* Grouped rail sections: small-caps label over one value line. The top border carries
  * the separation the old identity divider used to provide. */
 .aman-runtime-rail__section {
@@ -1246,6 +1239,17 @@
   color: var(--text-secondary);
 }
 
+.maps-card-steps {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.maps-card-steps li + li {
+  margin-top: 0.25rem;
+}
+
 .maps-card-attribution {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;
@@ -1256,6 +1260,95 @@
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 0.125rem;
+}
+
+.maps-place-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.maps-place-card {
+  padding: 0.75rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--secondary-bg);
+}
+
+.maps-place-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.maps-place-name {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.maps-place-badge {
+  padding: 0.125rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.maps-place-address {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.maps-place-fields {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.maps-place-field {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.maps-place-field dt {
+  flex: 0 0 5rem;
+  color: var(--text-secondary);
+}
+
+.maps-place-field dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maps-place-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-place-source {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-place-source a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.maps-card-replaced {
+  margin: 0.25rem 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 .maps-card-blocked {

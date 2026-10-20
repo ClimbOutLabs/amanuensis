@@ -1,6 +1,6 @@
 # Try Aman
 
-Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. The only thing that leaves it is what you send to the AI model you choose.
+Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. What leaves it is what you send to the AI model you choose, and the words of any web search, which go to the Parallel search service.
 
 Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer five questions at the start and type your password once near the end.
 
@@ -43,11 +43,11 @@ On Windows, keep the code inside Ubuntu (just run the lines as they are; do not 
 
 It first checks your computer, then asks:
 
-1. **Instance name [main]**: press Enter.
+1. **Name for this instance [main]:** press Enter to name it main, or type another name, such as `work`.
 2. **Your email, used to sign in**: type your email in lowercase. This is only your sign-in name; nothing is sent to it.
 3. **Back up automatically every day? [Y/n]**: press Enter.
 4. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.
-5. **Password**: choose a password of at least 8 characters and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
+5. **Password**: choose a password of at least 8 characters with a number and a symbol, such as @ or #, and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
 
 Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (this might take a while)" is the longest step; 15 minutes is normal.
 
@@ -103,6 +103,7 @@ A few common ones:
 - **"Docker has only 4.0 GB of memory"**: in Docker Desktop: Settings, Resources, Memory, set 8 GB, Apply.
 - **The page says the connection is not private**: you opened the https address on a device that does not trust your computer yet. Use http://localhost:8791 on the computer itself, or do the trust step above on the phone.
 - **Signing in says the email is not allowed**: use exactly the email you typed during the install, in lowercase.
+- **Forgot your password**: on the computer where Aman is installed, run `aman password`. It asks for a new password twice and signs you out everywhere.
 
 ## Updating
 
@@ -136,6 +137,6 @@ Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do n
 
 ## Good to know
 
-- Nothing is sent anywhere except to the model company you chose, and to the search service when you use it.
+- Nothing is sent anywhere except to the model company you chose, and to Parallel (the search service Aman uses by default) when Aman searches the web. Parallel sees the search words and your internet address. To stop it, remove the `parallel-web` connector in Settings, or turn on Offline mode.
 - Backups are made every night at 03:30 into `~/.amanuensis/backups` on your computer, keeping the last 7.
 - Each person gets a new instance.

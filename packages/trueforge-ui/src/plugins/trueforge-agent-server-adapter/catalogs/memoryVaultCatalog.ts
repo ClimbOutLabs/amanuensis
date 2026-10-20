@@ -50,7 +50,7 @@ const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
 function parseEntry(body: unknown): MemoryVaultEntry {
   const parsed = z.object({ data: MemoryVaultEntrySchema }).safeParse(body);
   if (!parsed.success) {
-    throw new Error('The server returned an unexpected memory vault payload');
+    throw new Error('The server returned an unexpected memory payload');
   }
   return parsed.data.data;
 }
@@ -58,7 +58,7 @@ function parseEntry(body: unknown): MemoryVaultEntry {
 function parseEntries(body: unknown): MemoryVaultEntry[] {
   const parsed = z.object({ data: z.array(MemoryVaultEntrySchema) }).safeParse(body);
   if (!parsed.success) {
-    throw new Error('The server returned an unexpected memory vault payload');
+    throw new Error('The server returned an unexpected memory payload');
   }
   return parsed.data.data;
 }
@@ -66,7 +66,7 @@ function parseEntries(body: unknown): MemoryVaultEntry[] {
 function parseSharing(body: unknown): MemoryVaultSharing {
   const parsed = z.object({ data: MemoryVaultSharingSchema }).safeParse(body);
   if (!parsed.success) {
-    throw new Error('The server returned an unexpected memory vault payload');
+    throw new Error('The server returned an unexpected memory payload');
   }
   return parsed.data.data;
 }
@@ -100,9 +100,7 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
     if (!response.ok) {
       const failure = ErrorSchema.safeParse(responseBody);
       throw new Error(
-        failure.success
-          ? failure.data.error.message
-          : `Memory vault request failed with HTTP ${String(response.status)}`,
+        failure.success ? failure.data.error.message : `Memory request failed with HTTP ${String(response.status)}`,
       );
     }
     return parse(responseBody);
@@ -133,7 +131,7 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
           await request('GET', `/api/v1/memory/vault/export${namespaceQuery(namespace)}`, undefined, value => value),
         );
       if (!parsed.success) {
-        throw new Error('The server returned an unexpected memory vault payload');
+        throw new Error('The server returned an unexpected memory payload');
       }
       return {
         namespace: parsed.data.data.namespace,
@@ -153,7 +151,7 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
           ),
         );
       if (!parsed.success) {
-        throw new Error('The server returned an unexpected memory vault payload');
+        throw new Error('The server returned an unexpected memory payload');
       }
       return parsed.data.data;
     },
@@ -164,5 +162,5 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
 
 /** Human-readable error for vault actions; callers render it inline. */
 export function memoryVaultErrorMessage(error: unknown): string {
-  return getErrorMessage(error, 'The memory vault request failed');
+  return getErrorMessage(error, 'The memory request failed');
 }

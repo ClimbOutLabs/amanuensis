@@ -10,6 +10,7 @@ import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../s
 import { startTurnInProcess } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import type { RequestContext } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { ScheduleAgentNotFoundError, startScheduleRun } from '../../../src/controller/scheduleDispatch';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -18,10 +19,12 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { CHAT_ASSISTANT_DESCRIPTION } from '../../../src/runtime/chatAssistant';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import {
   CreateScheduleRunResponseSchema,
+  GetScheduleResponseSchema,
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
@@ -78,9 +81,12 @@ function stubTurnExecutionDeps(
 ) {
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
+    mcpCatalog: McpCatalog.loadShipped(),
     scheduleStore,
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
+    personaStore: { getPersona: () => Promise.resolve(undefined) },
+    personalizationStore: { getProfile: () => Promise.resolve(undefined) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
@@ -105,6 +111,7 @@ async function setup(authorizer: Authorizer = new TrueForgeAuthorizer()) {
   const agentStore = new SqliteAgentStore(db);
   const scheduleStore = new SqliteScheduleStore(db);
   await agentStore.createAgent({
+    host_managed: false,
     tenant_id: 'default',
     created_by_subject: {
       subject_id: 'alice',
@@ -261,10 +268,46 @@ describe('schedule RBAC', () => {
   });
 });
 
+describe('who a schedule runs as', () => {
+  it('names a saved agent by its name and a chat-made schedule by its assistant, never the stored agent name', async () => {
+    const { app, asUser, postJson, agentStore, scheduleStore } = await setup();
+    asUser(ALICE);
+    const fromPage = await postJson('/', 'POST', scheduleBody);
+    expect(GetScheduleResponseSchema.parse(await fromPage.json()).data.runs_as).toBe('reporter');
+
+    const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+    const chatAgent = await agentStore.createAgent({
+      host_managed: true,
+      tenant_id: 'default',
+      created_by_subject: alice,
+      name: 'assistant-0123456789abcdef',
+      description: CHAT_ASSISTANT_DESCRIPTION,
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } }),
+      external_id: null,
+    });
+    await scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: chatAgent.id,
+      agent_name: chatAgent.name,
+      persona_id: null,
+      name: 'lobster-joke',
+      manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' },
+      created_by_subject: alice,
+      runFrom: new Date(),
+    });
+
+    const listed = ListSchedulesResponseSchema.parse(await (await app.request('/')).json()).data;
+    const chatMade = listed.find(schedule => schedule.name === 'lobster-joke');
+    expect(chatMade?.runs_as).toBe('Your assistant');
+    expect(listed.map(schedule => schedule.runs_as)).not.toContain(chatAgent.name);
+  });
+});
+
 describe('schedule list agent_names filter', () => {
   it('filters by a single agent_names value and by comma-separated agent_names', async () => {
     const { app, asUser, agentStore, postJson } = await setup();
     await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: 'alice',
@@ -447,7 +490,7 @@ describe('create schedule run', () => {
 });
 
 describe('internal schedule execution', () => {
-  async function seedRun() {
+  async function seedRun({ timezone = 'UTC' }: { timezone?: string } = {}) {
     mockedStartScheduleRun.mockReset();
     mockedStartScheduleRun.mockResolvedValue(undefined);
     const db = createSqliteDb(':memory:');
@@ -456,6 +499,7 @@ describe('internal schedule execution', () => {
     const scheduleStore = new SqliteScheduleStore(db);
     const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: alice,
       name: 'reporter',
@@ -467,8 +511,9 @@ describe('internal schedule execution', () => {
       tenant_id: 'default',
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC', status: 'active' },
+      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active' },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -520,6 +565,7 @@ describe('internal schedule execution', () => {
       previous_turn_id: 'none',
       userRef: 'alice',
       agent,
+      persona: undefined,
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -527,6 +573,81 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
+  });
+
+  it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {
+    const { agent, run, execute } = await seedRun({ timezone: 'Asia/Kolkata' });
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-tz',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+      persona: undefined,
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ deps: expect.objectContaining({ clientTimezone: 'Asia/Kolkata' }) }),
+    );
+  });
+
+  it('answers as the persona the schedule kept from its chat, like a chat turn would', async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-persona',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+      persona: {
+        tenant_id: 'default',
+        id: 'persona-1',
+        display_name: 'Zara',
+        aliases: [],
+        instructions: 'Be brief.',
+        model_name: 'openai/gpt-5.2',
+        created_by: 'alice',
+        created_at: '2026-08-31T00:00:00.000Z',
+        updated_at: '2026-08-31T00:00:00.000Z',
+        updated_by: 'alice',
+      },
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deps: expect.objectContaining({
+          personaContext: expect.objectContaining({ persona_id: 'persona-1', persona_name: 'Zara' }),
+        }),
+      }),
+    );
   });
 
   it('maps an unknown run to 404', async () => {

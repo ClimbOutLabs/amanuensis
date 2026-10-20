@@ -36,7 +36,7 @@ test_an_unsafe_folder_never_reaches_a_profile() {
     run_install --home "$bad" --yes --email owner@example.invalid
     assert_rc 2
     case "$(flat "$ERR")" in
-      *"character that is not allowed"* | *"must be an absolute path"*) t_pass ;;
+      *"character that is not allowed"* | *"must be a full path"*) t_pass ;;
       *) t_fail "no clear refusal for $bad: $ERR" ;;
     esac
   done

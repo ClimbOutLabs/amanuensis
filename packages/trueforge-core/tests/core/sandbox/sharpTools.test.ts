@@ -13,15 +13,19 @@ import {
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
+import { fakeTrackedState } from './fakeTrackedState';
+import { realCommandExec } from './realCommandExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result } });
 }
 
+const EMPTY_TRACKED_STATE = fakeTrackedState([]);
+
 function boundWorkspaceExec(params: SandboxExecParams): Promise<ExecResult> {
   return params.command.startsWith('realpath -e --') || params.command === 'git rev-parse --show-toplevel'
     ? readyExec('/repo\n')
-    : readyExec();
+    : readyExec(EMPTY_TRACKED_STATE[params.command]);
 }
 
 function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider {
@@ -31,7 +35,6 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
-    exec,
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
     executeVerifiedWorkspaceCommit: async params => ({
       status: 'completed',
@@ -55,6 +58,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
     uploadFile: jest.fn().mockResolvedValue(undefined),
     createCodeModeTransport: jest.fn(),
     ...overrides,
+    exec: realCommandExec(exec),
   };
 }
 

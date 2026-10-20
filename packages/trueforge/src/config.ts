@@ -33,10 +33,13 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
+import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
@@ -165,7 +168,8 @@ export function parseOidcScopes(raw: string): string[] {
 
 /**
  * Parses `OIDC_ALLOWED_EMAILS`: comma-separated exact addresses and/or globs
- * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in).
+ * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in);
+ * standalone refuses that at startup.
  */
 export function parseOidcAllowedEmails(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === '') {
@@ -449,6 +453,40 @@ export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
   return addresses;
 }
 
+const PLAIN_EMAIL_ADDRESS = /^[^\s@,<>*]+@[^\s@,<>*]+\.[^\s@,<>*]+$/;
+
+/**
+ * The addresses a demo instance may send mail to: comma-separated plain emails, lower-cased. Unset or
+ * blank is an empty list, which allows no send. A malformed entry fails the boot, since a dropped typo
+ * would quietly narrow the list.
+ */
+export function parseDemoSendAllowlist(raw: string | undefined): string[] {
+  const addresses = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim().toLowerCase();
+    if (text === '') {
+      continue;
+    }
+    if (!PLAIN_EMAIL_ADDRESS.test(text)) {
+      throw new Error(`DEMO_SEND_ALLOWLIST has an entry that is not an email address: ${entry.trim()}`);
+    }
+    addresses.add(text);
+  }
+  return [...addresses];
+}
+
+/**
+ * The one Google account a demo instance may connect, lower-cased, or empty when none is named (then no
+ * Google account can be connected). A malformed value fails the boot rather than silently pinning nothing.
+ */
+export function parseDemoGoogleAccount(raw: string | undefined): string {
+  const text = (raw ?? '').trim().toLowerCase();
+  if (text !== '' && !PLAIN_EMAIL_ADDRESS.test(text)) {
+    throw new Error(`DEMO_GOOGLE_ACCOUNT is not an email address: ${text}`);
+  }
+  return text;
+}
+
 /** The loopback address of the sign-in service, or empty. */
 export function parseLoginUpstreamUrl(raw: string | undefined): string {
   const text = (raw ?? '').trim();
@@ -527,7 +565,7 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
 }
 
 /**
- * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * Parse a maps upstream URL: must be https (http only for loopback), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
 function parseMapsUrl({
@@ -550,6 +588,9 @@ function parseMapsUrl({
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+    throw new Error(`${envKey} must use https: plain http is only allowed for localhost, 127.0.0.0/8 or [::1]`);
   }
   if (parsed.search !== '' || parsed.hash !== '') {
     throw new Error(`${envKey} must not include a query or hash`);
@@ -766,6 +807,19 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
 }
 
+/** Aman signs people in through its own sign-in service (Dex), which always serves its issuer at `/dex`. */
+export function assertOwnSignInIssuer(issuerUrl: string): void {
+  let path: string;
+  try {
+    path = new URL(issuerUrl).pathname.replace(/\/+$/, '');
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (path !== '/dex') {
+    throw new Error('Aman uses its own sign-in. Outside sign-in services are not supported.');
+  }
+}
+
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
 function parseAuthCookieSuffix(raw: string | undefined): string {
   const value = raw?.trim() ?? '';
@@ -775,7 +829,7 @@ function parseAuthCookieSuffix(raw: string | undefined): string {
   return value;
 }
 
-function resolveOIDCConfig(): OIDCConfig | undefined {
+function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
   const clientSecret = getEnv('OIDC_CLIENT_SECRET');
@@ -796,6 +850,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
     );
   }
   assertOidcIssuerTransportAllowed(issuerUrl);
+  assertOwnSignInIssuer(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -812,6 +867,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
       getEnv('OIDC_ADMIN_ROLE_VALUE', { defaultValue: DEFAULT_OIDC_ADMIN_ROLE_VALUE }) ?? DEFAULT_OIDC_ADMIN_ROLE_VALUE,
     OIDC_SCOPES: parseOidcScopes(getEnv('OIDC_SCOPES', { defaultValue: DEFAULT_OIDC_SCOPES }) ?? DEFAULT_OIDC_SCOPES),
     OIDC_ALLOWED_EMAILS: parseOidcAllowedEmails(getEnv('OIDC_ALLOWED_EMAILS')),
+    OIDC_REQUIRE_VERIFIED_EMAIL: standalone,
   };
 }
 
@@ -820,7 +876,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
 // ============================================================================
 
 export interface OIDCConfig {
-  /** e.g. an Okta custom authorization server, or an Azure AD tenant's v2.0 endpoint. Env: `OIDC_ISSUER_URL`. */
+  /** Address of Aman's own sign-in service. Env: `OIDC_ISSUER_URL`. */
   OIDC_ISSUER_URL: string;
   /** Client ID for the OIDC client;*/
   OIDC_CLIENT_ID: string;
@@ -845,15 +901,17 @@ export interface OIDCConfig {
   OIDC_ADMIN_ROLE_VALUE: string;
   /** Comma-separated OAuth scopes for the authorization request. Env: `OIDC_SCOPES`.
    * Optional; defaults to "openid,profile,email". Whitespace around entries is stripped.
-   * Okta `groups` claims require the `groups` scope; Azure AD app roles typically omit it.
    */
   OIDC_SCOPES: string[];
   /**
    * Optional allowlist of emails that may sign in. Env: `OIDC_ALLOWED_EMAILS`.
    * Comma-separated exact addresses and/or `*` globs (e.g. `alice@acme.com,*@partner.com`).
-   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted.
+   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted when distributed;
+   * standalone requires exactly one address.
    */
   OIDC_ALLOWED_EMAILS: string[];
+  /** Turn away tokens whose `email_verified` claim is not `true`. On for standalone, where the email is the only identity check. */
+  OIDC_REQUIRE_VERIFIED_EMAIL: boolean;
 }
 
 export interface SharedServerConfiguration {
@@ -996,6 +1054,16 @@ export interface SharedServerConfiguration {
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
+   * Directory holding the package mirror cache. Derived: `{app data dir}/package-mirror-cache`.
+   * The mirrors are the download-only package gateways the sandbox slots reach; their cache is the
+   * only thing that lives here.
+   */
+  SANDBOX_MIRROR_CACHE_DIR: string;
+  /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
+  /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -1084,6 +1152,19 @@ export interface SharedServerConfiguration {
    * Max bytes for an HTTP request body. Env: `MAX_REQUEST_BODY_BYTES`. Default 36 MiB.
    */
   MAX_REQUEST_BODY_BYTES: number;
+  /**
+   * Max total bytes of a data export archive. The export aborts (and the download fails) rather
+   * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
+   * Default 1 GiB, the same as `DATA_IMPORT_MAX_BYTES`, so a default export always fits a default
+   * import; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
+   */
+  DATA_EXPORT_MAX_BYTES: number;
+  /**
+   * Max total bytes of a data import archive, compressed and uncompressed.
+   * An upload past the cap is refused before anything is read or written.
+   * Env: `DATA_IMPORT_MAX_BYTES`. Default 1 GiB.
+   */
+  DATA_IMPORT_MAX_BYTES: number;
   /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
@@ -1280,12 +1361,27 @@ export interface SharedServerConfiguration {
    */
   MAPS_ROUTER_URL: string;
   /**
+   * Base URL of an OSRM-compatible server with a foot profile, used for walking routes.
+   * Env: `MAPS_WALKING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-foot`.
+   */
+  MAPS_WALKING_ROUTER_URL: string;
+  /**
+   * Base URL of an OSRM-compatible server with a bike profile, used for cycling routes.
+   * Env: `MAPS_CYCLING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-bike`.
+   */
+  MAPS_CYCLING_ROUTER_URL: string;
+  /**
+   * Base URL, including the API version, of a MOTIS-compatible public transport planner.
+   * Env: `MAPS_TRANSIT_URL`. Default `https://api.transitous.org/api/v6`.
+   */
+  MAPS_TRANSIT_URL: string;
+  /**
    * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
    * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
    */
   MAPS_TILE_URL: string;
   /**
-   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * User-Agent sent to the geocoder, router, transit planner, and tile upstreams.
    * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
    */
   MAPS_USER_AGENT: string;
@@ -1415,7 +1511,7 @@ export interface SharedServerConfiguration {
   /**
    * Optional cheaper Token Factory model registered next to the default on the env-managed
    * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
    */
   TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
@@ -1440,11 +1536,29 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
+   * Price overrides in USD per million tokens, as JSON keyed by upstream model id, for example
+   * `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`.
+   * Adds to, and wins over, the built-in Token Factory defaults; an entry also gives a model on any
+   * other provider a cost. Without a price a model shows tokens only.
+   * Env: `TOKEN_FACTORY_PRICES`. Unset means the built-in defaults only.
+   */
+  TOKEN_FACTORY_PRICES: ModelPrices;
+  /**
    * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
-   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
+   * instance. Google works, but the connection is locked once made and mail goes only to DEMO_SEND_ALLOWLIST.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
+  /**
+   * The only addresses a demo instance may send mail to (To, Cc and Bcc alike), comma-separated, lower-cased.
+   * Empty means no send at all. Ignored outside demo mode. Env: `DEMO_SEND_ALLOWLIST`. Default empty.
+   */
+  DEMO_SEND_ALLOWLIST: string[];
+  /**
+   * The only Google account a demo instance accepts, lower-cased. Empty means none can be connected.
+   * Ignored outside demo mode. Env: `DEMO_GOOGLE_ACCOUNT`. Default empty.
+   */
+  DEMO_GOOGLE_ACCOUNT: string;
   /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
@@ -1681,7 +1795,7 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
-  OIDC: resolveOIDCConfig(),
+  OIDC: resolveOIDCConfig({ standalone }),
   AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
@@ -1751,6 +1865,17 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
+  SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+  }),
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_CACHE_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
+    defaultValue: 10 * 1024 * 1024 * 1024,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -1811,6 +1936,17 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAX_REQUEST_BODY_BYTES',
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
+  }),
+  DATA_EXPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_EXPORT_MAX_BYTES',
+    raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
+    maxValue: ZIP_MAX_ARCHIVE_BYTES,
+  }),
+  DATA_IMPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_IMPORT_MAX_BYTES',
+    raw: getEnv('DATA_IMPORT_MAX_BYTES'),
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
@@ -1939,6 +2075,21 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MAPS_ROUTER_URL'),
     defaultValue: 'https://router.project-osrm.org',
   }),
+  MAPS_WALKING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_WALKING_ROUTER_URL',
+    raw: getEnv('MAPS_WALKING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-foot',
+  }),
+  MAPS_CYCLING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_CYCLING_ROUTER_URL',
+    raw: getEnv('MAPS_CYCLING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-bike',
+  }),
+  MAPS_TRANSIT_URL: parseMapsUrl({
+    envKey: 'MAPS_TRANSIT_URL',
+    raw: getEnv('MAPS_TRANSIT_URL'),
+    defaultValue: 'https://api.transitous.org/api/v6',
+  }),
   MAPS_TILE_URL: parseMapsUrl({
     envKey: 'MAPS_TILE_URL',
     raw: getEnv('MAPS_TILE_URL'),
@@ -2048,7 +2199,10 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
+  TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
+  DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
+  DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -2158,14 +2312,40 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
+/** Settings whose whole value is a credential. */
+export const SECRET_SETTING_NAMES = [
+  'TRUEFORGE_API_KEY',
+  'NEBIUS_API_KEY',
+  'MEMORY_SCREEN_AUTH_TOKEN',
+  'OIDC_CLIENT_SECRET',
+  'TRUEFOUNDRY_API_KEY',
+  'TRUEFOUNDRY_SANDBOX_API_KEY',
+  'POSTGRES_PASSWORD',
+] as const;
+
+/** Connection URL settings: secret as a whole, and for the password inside. */
+export const SECRET_URL_SETTING_NAMES = ['DATABASE_URL', 'REDIS_URL'] as const;
+
+type SecretSettingName = (typeof SECRET_SETTING_NAMES)[number] | (typeof SECRET_URL_SETTING_NAMES)[number];
+
 /** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-function urlPassword(raw: string): string | undefined {
+export function urlPassword(raw: string): string | undefined {
   try {
     const password = decodeURIComponent(new URL(raw).password);
     return password === '' ? undefined : password;
   } catch {
     return undefined;
   }
+}
+
+/** The secret values among settings: each credential setting, and each connection URL with its password. */
+export function secretSettingValues(settings: Partial<Record<SecretSettingName, string | undefined>>): string[] {
+  const values: (string | undefined)[] = SECRET_SETTING_NAMES.map(name => settings[name]);
+  for (const name of SECRET_URL_SETTING_NAMES) {
+    const url = settings[name];
+    values.push(url, url === undefined ? undefined : urlPassword(url));
+  }
+  return values.filter((value): value is string => value !== undefined && value !== '');
 }
 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
@@ -2183,27 +2363,25 @@ export type ConfiguredSecretSettings = Pick<
 
 /**
  * Secret values this process holds from its own configuration, for the outbound secret guard:
- * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
- * place to extend when a new secret setting is added.
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. A new secret
+ * setting is added to SECRET_SETTING_NAMES and read here.
  */
 export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
-  const candidates: (string | undefined)[] = [
-    config.TRUEFORGE_API_KEY,
-    config.NEBIUS_API_KEY,
-    config.MEMORY_SCREEN_AUTH_TOKEN,
-    config.OIDC?.OIDC_CLIENT_SECRET,
-  ];
-  if (!config.STANDALONE) {
-    candidates.push(
-      config.TRUEFOUNDRY_API_KEY,
-      config.TRUEFOUNDRY_SANDBOX_API_KEY,
-      config.DATABASE_URL,
-      urlPassword(config.DATABASE_URL),
-      config.REDIS_URL,
-      urlPassword(config.REDIS_URL),
-    );
-  }
-  return candidates.filter((value): value is string => value !== undefined && value !== '');
+  // POSTGRES_PASSWORD is left out: this process holds it inside DATABASE_URL.
+  return secretSettingValues({
+    TRUEFORGE_API_KEY: config.TRUEFORGE_API_KEY,
+    NEBIUS_API_KEY: config.NEBIUS_API_KEY,
+    MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
+    OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    ...(config.STANDALONE
+      ? {}
+      : {
+          TRUEFOUNDRY_API_KEY: config.TRUEFOUNDRY_API_KEY,
+          TRUEFOUNDRY_SANDBOX_API_KEY: config.TRUEFOUNDRY_SANDBOX_API_KEY,
+          DATABASE_URL: config.DATABASE_URL,
+          REDIS_URL: config.REDIS_URL,
+        }),
+  });
 }
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
@@ -2433,7 +2611,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   if (requirement.standalone) {
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
-        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -2451,6 +2629,39 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
       'or set REQUIRE_AUTH=false to explicitly accept this risk.',
   );
 }
+
+/** Mirrors `valid_email` in installer/lib/common.sh, the canonical owner of this pattern. */
+const OWNER_EMAIL_SHAPE = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+interface SingleOwnerSignIn {
+  /** True for `STANDALONE=true`. */
+  standalone: boolean;
+  oidc: Pick<OIDCConfig, 'OIDC_ALLOWED_EMAILS'> | undefined;
+}
+
+/** Standalone allows one literal address (distributed mode keeps its allowlist); runs at load, before the server starts. */
+export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn): void {
+  if (!standalone || oidc === undefined) {
+    return;
+  }
+  const allowed = oidc.OIDC_ALLOWED_EMAILS;
+  const owner = allowed[0];
+  if (allowed.length === 1 && owner !== undefined && OWNER_EMAIL_SHAPE.test(owner) && owner.length <= 254) {
+    return;
+  }
+  const fix = "Set OIDC_ALLOWED_EMAILS to the owner's email address only.";
+  if (allowed.length === 0) {
+    throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS is empty; it must hold one address. ${fix}`);
+  }
+  if (allowed.length > 1) {
+    throw new Error(
+      `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses; it must hold one. ${fix}`,
+    );
+  }
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address. ${fix}`);
+}
+
+assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
 
 if (isTrueFoundryModeEnabled(configuration)) {
   // TrueFoundry authenticates each caller with their own gateway token, so browser SSO must be off.

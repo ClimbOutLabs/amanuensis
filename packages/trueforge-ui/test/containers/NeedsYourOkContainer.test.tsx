@@ -47,6 +47,8 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     destination_host: null,
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
+    schedule: null,
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ import {
   ListVerifyCommandProposalsResponseSchema,
   ListVerifyCommandsResponseSchema,
   RepositoryParamsSchema,
+  SetPackageDownloadsRequestSchema,
   UpsertVerifyCommandRequestSchema,
   VerifyCommandParamsSchema,
   VerifyCommandProposalParamsSchema,
@@ -89,6 +90,27 @@ export const getRepositoryRoute = createRoute({
   responses: {
     200: { content: { 'application/json': { schema: GetRepositoryResponseSchema } }, description: 'Repository.' },
     ...notFoundResponse,
+    ...protectedResponses,
+  },
+});
+
+export const setPackageDownloadsRoute = createRoute({
+  method: 'post',
+  path: '/{repository_id}/package-downloads',
+  tags: [OpenApiTag.REPOSITORIES],
+  summary: 'Allow or stop package downloads for a repository',
+  description:
+    "When allowed, the sandbox may download this repo's packages from the public package sites through download-only mirrors. Nothing can be published back.",
+  'x-fern-sdk-group-name': ['repositories'],
+  'x-fern-sdk-method-name': 'set_package_downloads',
+  request: {
+    params: RepositoryParamsSchema,
+    body: { content: { 'application/json': { schema: SetPackageDownloadsRequestSchema } }, required: true },
+  },
+  responses: {
+    200: { content: { 'application/json': { schema: GetRepositoryResponseSchema } }, description: 'Repository.' },
+    ...notFoundResponse,
+    ...conflictResponse,
     ...protectedResponses,
   },
 });

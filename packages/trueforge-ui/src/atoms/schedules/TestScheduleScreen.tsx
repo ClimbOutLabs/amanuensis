@@ -83,7 +83,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
-        <DetailRow label="Agent">{agentName}</DetailRow>
+        <DetailRow label="Runs as">{agentName}</DetailRow>
         <DetailRow label="Name">{schedule.name}</DetailRow>
         <DetailRow label="Status">
           <ScheduleStatusBadge status={schedule.status} />
@@ -107,7 +107,9 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
 
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
         <div className="border-b border-border px-3 py-2">
-          <h3 className="text-text-secondary text-[10px] font-semibold tracking-wide uppercase">Tool Authorization</h3>
+          <h3 className="text-text-secondary text-[0.625rem] font-semibold tracking-wide uppercase">
+            Connector sign-in
+          </h3>
         </div>
         {mcpMounts.length === 0 ? (
           <p className="text-text-secondary px-3 py-3 text-sm">No MCP connectors configured for this agent.</p>
@@ -147,15 +149,15 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
 
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <h3 className="text-text-secondary text-[10px] font-semibold tracking-wide uppercase">Test Run</h3>
+          <h3 className="text-text-secondary text-[0.625rem] font-semibold tracking-wide uppercase">Test run</h3>
           <Button.Primary type="button" disabled={running} size="small" onClick={() => void handleRunTest()}>
             <Icon name={running ? 'loader' : 'play'} className={cn('size-3.5', running && 'animate-spin')} />
-            Run Test
+            Run test
           </Button.Primary>
         </div>
         {lastTestRun == null ? (
           <p className="text-text-secondary px-3 py-3 text-sm">
-            Run a one-off test using the schedule task. This does not change the cron pending run.
+            Run once now to test it. Your schedule does not change.
           </p>
         ) : (
           <div className="flex items-center gap-3 px-3 py-3">

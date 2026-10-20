@@ -5,7 +5,9 @@ import type { FC } from 'react';
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
+import { ScheduleDetails } from './ScheduleDetails.js';
 import type { SentinelApprovalCard } from './types.js';
 
 export type HeldActionStatus =
@@ -121,6 +123,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
           </dl>
         )}
+
+        {card.calendar_event !== null && <CalendarEventDetails event={card.calendar_event} />}
+
+        {card.schedule !== null && <ScheduleDetails schedule={card.schedule} />}
 
         {card.outbound_text !== null && (
           <div className="rounded border border-border bg-secondary-bg px-3 py-2">

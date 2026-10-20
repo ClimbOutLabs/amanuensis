@@ -18,6 +18,7 @@ import {
   resolveMemorySummarizeEnabled,
   resolveTurnSummarizeContext,
 } from '../../../src/runtime/memorySummarizeSettings';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const silentLogger = createLogger({ silent: true });
@@ -85,6 +86,7 @@ function agentRecord(): AgentRecord {
     description: 'Test agent',
     manifest: AgentSpecSchema.parse({ model: { name: 'openai/gpt-4o' } }),
     external_id: null,
+    host_managed: false,
     created_by_subject: {
       subject_id: 'user-1',
       subject_type: 'user',
@@ -110,6 +112,7 @@ function storeWith(values: Map<string, GlobalSettingRecord>): IGlobalSettingsSto
     deleteSetting: async input => {
       values.delete(input.key);
     },
+    compareAndSetSetting: async () => false,
   };
 }
 
@@ -173,6 +176,7 @@ describe('readMemorySummarizeSetting', () => {
         throw new Error('db down');
       },
       deleteSetting: async () => {},
+      compareAndSetSetting: async () => false,
     };
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: failing, logger: silentLogger });
     expect(setting.overridden).toBe(false);
@@ -248,6 +252,7 @@ describe('resolveTurnSummarizeContext', () => {
       tenantId: 'tenant-1',
       modelProviderStore: fakeModelProviderStore(),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
       agentStore: overrides.agentStore ?? fakeAgentStore(),
       personaModelName: undefined,
       sessionAgent: overrides.sessionAgent ?? inlineAgent(),
@@ -272,6 +277,7 @@ describe('resolveTurnSummarizeContext', () => {
       modelProviderStore,
       summarizationModelFqn: 'openai/gpt-4o',
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
     });
     expect(logged(lines, 'Turn summarization is active for this turn')).toBe(true);
   });

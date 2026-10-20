@@ -112,12 +112,12 @@ test_key_in_the_callers_environment_is_ignored() {
 test_no_model_prompts_on_a_terminal() {
   t_begin "no question about a key or a model server is asked, and the summary points to Settings"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_not_contains "$OUT" "Token Factory key"
   assert_not_contains "$OUT" "Model server address"
@@ -167,7 +167,7 @@ short key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 2
-  assert_flat_contains "$ERR" "--token-factory-key-stdin got an empty line"
+  assert_flat_contains "$ERR" "--token-factory-key-stdin reads the Token Factory key from it"
   install_with_key_stdin --token-factory-model 'bad model'
   assert_rc 2
   install_with_key_stdin --token-factory-model '-leading'
@@ -183,6 +183,37 @@ short key
   sandbox_drop
 }
 
+test_a_235_character_key_is_saved() {
+  t_begin "a real 235-character key is accepted and written to the instance .env"
+  sandbox_new
+  local key
+  key=$(printf 'v1.%0232d' 0)
+  with_input "$SENTINEL_PASSWORD
+$key
+"
+  run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 0
+  assert_eq "$(env_value main NEBIUS_API_KEY)" "$key"
+  sandbox_drop
+}
+
+test_key_length_limits_are_checked_by_count() {
+  t_begin "a key of 16 to 512 characters from the allowed set passes; 15 or 513 characters, or another character, is refused"
+  local key15 key16 key512 key513 check
+  key15=$(printf 'v1.%012d' 0)
+  key16=$(printf 'v1.%013d' 0)
+  key512=$(printf 'v1.%0509d' 0)
+  key513=$(printf 'v1.%0510d' 0)
+  check() { bash -c 'set -euo pipefail; . "$1/lib/common.sh"; . "$1/lib/tokenfactory.sh"; tf_key_problem "$2"' _ "$INSTALLER_DIR" "$1"; }
+  assert_eq "$(check "$key16")" "" "16 characters pass"
+  assert_eq "$(check "$key512")" "" "512 characters pass"
+  assert_contains "$(check "$key15")" "length or characters a key never has" "15 characters are refused"
+  assert_contains "$(check "$key513")" "length or characters a key never has" "513 characters are refused"
+  assert_contains "$(check "$key16!")" "length or characters a key never has" "a character outside the allowed set is refused"
+  assert_not_contains "$(check "$key513")" "$key513" "the refusal does not repeat the key"
+}
+
 test_dry_run_plans_without_reading_or_printing_the_key() {
   t_begin "a dry run states the plan, leaves stdin alone and never prints a key"
   sandbox_new
@@ -191,7 +222,7 @@ test_dry_run_plans_without_reading_or_printing_the_key() {
   run_install --dry-run --token-factory-key-stdin --token-factory-model vendor/m --token-factory-daily-cap 1000 --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key goes only into the instance .env. Capped at 1000 tokens per day."
+  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key is saved only in the settings file of this instance. Capped at 1000 tokens per day."
   assert_not_contains "$OUT$ERR" "$TF_KEY"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
@@ -277,7 +308,7 @@ test_a_key_on_a_rerun_replaces_the_old_one() {
   run_install --yes --token-factory-key-stdin
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_contains "$OUT" "Token Factory key updated. Restarting the app."
   assert_rotated main
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_eq "$(grep -vc '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" "$before_lines" "every other line is unchanged"
@@ -321,7 +352,7 @@ $TF_KEY
   run_install instance add second --yes --token-factory-key-stdin
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_contains "$OUT" "Token Factory key updated. Restarting the app."
   assert_eq "$(env_value second NEBIUS_API_KEY)" "$NEW_KEY"
   assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY" "the other instance is untouched"
   assert_not_contains "$OUT$ERR" "$NEW_KEY"
@@ -393,6 +424,8 @@ test_no_model_prompts_on_a_terminal
 test_yes_and_pipes_never_wait_for_the_key
 test_flags_without_a_key_are_refused
 test_bad_values_are_refused_without_echoing_the_key
+test_a_235_character_key_is_saved
+test_key_length_limits_are_checked_by_count
 test_dry_run_plans_without_reading_or_printing_the_key
 test_dry_run_with_only_model_flags_is_refused_like_a_real_run
 test_a_dry_run_without_tf_flags_has_no_tf_line

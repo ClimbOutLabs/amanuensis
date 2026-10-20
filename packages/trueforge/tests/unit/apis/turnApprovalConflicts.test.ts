@@ -11,11 +11,13 @@ import {
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
 import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
+import { createHash } from 'node:crypto';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT, type RequestContext } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -93,8 +95,15 @@ function contextAppend(context: ContextAppend['context']): ContextAppend {
   };
 }
 
+/** A decision as the host records it: bound to the call's approval token (none here) and arguments. */
 function decisionMessage(approval: RecordedApproval) {
-  return { type: EventType.USER_TOOL_APPROVAL, tool_call_id: TOOL_CALL_ID, approval };
+  return {
+    type: EventType.USER_TOOL_APPROVAL,
+    tool_call_id: TOOL_CALL_ID,
+    approval,
+    approval_token_id: null,
+    arguments_hash: createHash('sha256').update('{}').digest('hex'),
+  };
 }
 
 /** The decided tool call the tip turn already recorded, in the shape the store persists. */
@@ -218,6 +227,7 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
@@ -444,13 +454,22 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
       .mockRejectedValue(new PreviousTurnRunningError(TIP_TURN_ID));
   }
 
-  it('ends the turn after the tool step, so approving runs just that call and asks the model nothing', async () => {
+  it('ends the turn with no model call when the owner turns the held action down', async () => {
+    const app = await buildApp(undefined, { heldAction: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+  });
+
+  it('lets the model continue after the owner approves, so its answer uses the result', async () => {
     const app = await buildApp(undefined, { heldAction: true });
     const createTurn = captureCreateTurnOptions();
 
     await postTurn(app, approvalInput({ status: 'allow' }));
 
-    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: false }));
   });
 
   it('does not end the turn early for an approval that is not about a held action', async () => {

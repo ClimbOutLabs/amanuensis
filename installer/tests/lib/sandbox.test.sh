@@ -22,7 +22,7 @@ test_dry_run_plans_the_sandbox() {
   assert_flat_contains "$OUT" "--sandbox-root"
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
   run_install --dry-run --verbose --email owner@example.invalid
-  assert_flat_contains "$OUT" "The sandbox: base images, Ubuntu packages"
+  assert_flat_contains "$OUT" "The sandbox: base images, system packages"
   assert_log_lacks "aman-sandbox.mjs"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME"
@@ -128,7 +128,7 @@ test_download_needs_curl_or_wget() {
 }
 
 test_checksum_mismatch_is_refused() {
-  t_begin "a tarball that does not match the pinned SHA-256 is refused and nothing is kept"
+  t_begin "a tarball that does not match the expected checksum is refused and nothing is kept"
   sandbox_new
   STUB_CURL_CORRUPT=1
   with_input "$SENTINEL_PASSWORD
@@ -136,7 +136,7 @@ test_checksum_mismatch_is_refused() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "does not match the pinned SHA-256"
+  assert_flat_contains "$ERR" "does not match the expected checksum"
   assert_flat_contains "$ERR" "so it was not used"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   assert_log_lacks "aman-sandbox.mjs"
@@ -154,7 +154,7 @@ test_download_failure_is_explained() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
+  assert_flat_contains "$ERR" "Could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   sandbox_drop
 }
@@ -199,16 +199,16 @@ test_host_node_opt_in_needs_a_new_enough_node() {
 }
 
 test_cgroup_and_low_disk() {
-  t_begin "cgroup v1 only warns, an unknown cgroup setup blocks, and too little disk for the slot disks blocks"
+  t_begin "an older memory-limit setup only warns, an unknown memory-limit setup blocks, and too little disk for the slot disks blocks"
   sandbox_new
   STUB_CGROUP=1
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT$ERR" "cgroup v1"
+  assert_flat_contains "$OUT$ERR" "older memory-limit setup"
   STUB_CGROUP=3
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "unknown cgroup setup"
+  assert_flat_contains "$OUT$ERR" "unknown memory-limit setup"
   assert_flat_contains "$OUT$ERR" "--no-sandbox"
   STUB_CGROUP=2
   STUB_DF_KB=$((15 * 1024 * 1024))
@@ -259,11 +259,15 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
   assert_contains "$compose" "- slot_ctl_1:/run/aman-slots/1:ro"
   assert_contains "$compose" "- slot_ctl_4:/run/aman-slots/4:ro"
+  assert_contains "$compose" "- slot_mirror_1:/run/aman-slots/1/mirror"
+  assert_contains "$compose" "- slot_mirror_4:/run/aman-slots/4/mirror"
   assert_contains "$compose" "name: main_slot_ctl_3"
+  assert_contains "$compose" "name: main_slot_mirror_2"
   assert_not_contains "$compose" "docker.sock"
   assert_not_contains "$compose" "slot_ws_"
   assert_not_contains "$compose" "@@"
   assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_ctl_1" "the slots project created the volumes the app mounts"
+  assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_mirror_1" "the slots project created the mirror volumes the app writes"
   sandbox_drop
 }
 
@@ -325,16 +329,43 @@ test_root_steps_with_the_flag() {
   sandbox_drop
 }
 
+test_root_steps_stop_before_the_setup_when_the_password_is_refused() {
+  t_begin "a refused password for the sandbox root steps stops before the setup runs and before the instance exists"
+  sandbox_new
+  printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
+  STUB_SUDO_REFUSE=1
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --sandbox-root --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so instance main was not started. Run the same command again in a terminal window."
+  assert_log_lacks "sudo -v"
+  run_install_tty "Name for this instance=>
+Your email=>owner@example.invalid
+Back up automatically=>y
+Go ahead?=>y
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD" --sandbox-root
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so instance main was not started. Type the password you use to log in to this computer, then run the same command again."
+  assert_log_has "sudo -v"
+  assert_log_lacks "--fix --yes"
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
 test_root_steps_answered_yes_on_a_terminal() {
   t_begin "on a terminal the root steps are shown and run after a yes"
   sandbox_new
   printf 'needs_disk\n' >"$SB_STATE/slots_state"
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
@@ -348,12 +379,12 @@ test_root_steps_declined_on_a_terminal() {
   t_begin "on a terminal a no leaves the instance uncreated and the run stops with the options"
   sandbox_new
   printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>n"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT$ERR" "administrator rights that were not given"
@@ -367,10 +398,10 @@ test_healthy_slots_need_no_root() {
   sandbox_new
   mkdir -p "$SB_STATE/up"
   : >"$SB_STATE/up/main-slots"
-  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\n' >"$SB_STATE/volumes"
+  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\nmain_slot_mirror_1\nmain_slot_mirror_2\nmain_slot_mirror_3\nmain_slot_mirror_4\n' >"$SB_STATE/volumes"
   printf 'ready\n' >"$SB_STATE/slots_state"
   install_machine
-  assert_contains "$OUT" "The sandboxes of instance main are already healthy"
+  assert_contains "$OUT" "The sandboxes of instance main are already running"
   assert_log_lacks "--fix"
   sandbox_drop
 }
@@ -480,6 +511,81 @@ test_remove_stops_the_slots() {
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
   assert_log_has "aman-sandbox.mjs --down --purge --instance main"
+  sandbox_drop
+}
+
+test_remove_asks_for_the_password_before_any_change() {
+  t_begin "remove --purge-data asks for the password before it changes anything, and a refused one changes nothing"
+  sandbox_new
+  install_machine
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  : >"$STUB_LOG"
+  STUB_SUDO_REFUSE=1
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 1
+  assert_flat_contains "$ERR" "This needs your computer password, which can only be typed in a terminal window, so nothing was changed. Run the same command again in a terminal window."
+  run_install_tty "" instance remove main --purge-data --confirm-name main
+  unset STUB_SUDO_REFUSE
+  assert_eq "$RC" 1
+  assert_flat_contains "$OUT" "The password was not accepted, so nothing was changed. Type the password you use to log in to this computer, then run the same command again."
+  assert_log_has "sudo -v"
+  assert_log_lacks "--down"
+  assert_log_lacks "/instances/main/.env down"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  assert_file "$AMAN_HOME/instances/main/compose.yaml"
+  assert_file "$SB_STATE/up/main-slots"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data"
+  if [ -d "$SB/aman-slots/main" ]; then t_pass; else t_fail "the slot disks are kept"; fi
+  sandbox_drop
+}
+
+test_remove_that_stops_at_the_slot_disks_can_run_again() {
+  t_begin "a remove that cannot delete the slot disks does not report the instance removed, and the same command finishes it"
+  sandbox_new
+  install_machine
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  STUB_SLOT_DISK_FAIL=1
+  run_install instance remove main --purge-data --confirm-name main
+  unset STUB_SLOT_DISK_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "so the removal was not finished. Run the same command again: install.sh instance remove main --purge-data"
+  assert_log_has "/instances/main/.env down"
+  assert_not_contains "$OUT$ERR" "Removed instance"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Removed instance main and deleted its data:"
+  assert_no_path "$SB/aman-slots/main"
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_remove_deletes_slots_left_by_a_removed_instance() {
+  t_begin "remove --purge-data deletes the slot disks an earlier removal left behind"
+  sandbox_new
+  install_machine
+  # What an interrupted removal left: no instance, no volumes, no slot containers, only the slot disks.
+  rm -rf "$AMAN_HOME/instances/main" "$AMAN_HOME/state/instances/main.conf" "$SB_STATE/up/main-slots"
+  grep -Ev '^(aman_main_|main_slot_)' "$SB_STATE/volumes" >"$SB_STATE/volumes.new" || true
+  mv "$SB_STATE/volumes.new" "$SB_STATE/volumes"
+  mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
+  run_install instance remove main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main is already removed, but its sandboxes are still on this computer."
+  assert_flat_contains "$OUT" "To delete them: install.sh instance remove main --purge-data"
+  if [ -d "$SB/aman-slots/main" ]; then t_pass; else t_fail "without --purge-data the slot disks are kept"; fi
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_log_has "aman-sandbox.mjs --down --purge --instance main"
+  assert_log_has "sudo -n true"
+  assert_flat_contains "$OUT" "Removed instance main."
+  assert_no_path "$SB/aman-slots/main"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_no_path "$SB/aman-slots/main"
   sandbox_drop
 }
 
@@ -650,7 +756,7 @@ test_slots_come_back_after_a_restart() {
   install_machine
   local compose slots
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
-  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 3 "loopback, app and dex"
+  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 4 "loopback, speech relay, app and dex"
   slots=$(cat "$INSTALLER_DIR/../docker-compose.slots.yml")
   assert_contains "$slots" "restart: unless-stopped"
   sandbox_drop
@@ -673,6 +779,7 @@ test_rendered_compose_wires_the_app_to_the_slots
 test_install_without_sandbox
 test_root_steps_need_consent_yes_is_not_enough
 test_root_steps_with_the_flag
+test_root_steps_stop_before_the_setup_when_the_password_is_refused
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
 test_healthy_slots_need_no_root
@@ -683,6 +790,9 @@ test_failed_verification_fails_the_install_with_the_repair
 test_second_instance_gets_its_own_slots
 test_instance_add_without_the_sandbox
 test_remove_stops_the_slots
+test_remove_asks_for_the_password_before_any_change
+test_remove_that_stops_at_the_slot_disks_can_run_again
+test_remove_deletes_slots_left_by_a_removed_instance
 test_existing_instance_without_wiring_gets_it
 test_rerun_turns_the_sandbox_on_and_keeps_the_data
 test_plain_rerun_leaves_a_sandbox_off_instance_alone_and_says_how

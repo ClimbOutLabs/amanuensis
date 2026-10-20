@@ -64,6 +64,78 @@ describe('parseMapsResult', () => {
     expect(parsed.data?.distance_km).toBe(621.5);
   });
 
+  const roadResult = (mode?: string) => ({
+    status: 'ok',
+    ...(mode === undefined ? {} : { mode }),
+    from: { resolved_name: 'Rua da Emenda 45', lat: 38.7106, lng: -9.1426 },
+    to: { resolved_name: 'R. de Sao Bernardo 92', lat: 38.7142, lng: -9.1597 },
+    distance_km: 1.9,
+    duration_min: 24,
+    route_geometry: '_p~iF~ps|U',
+    attribution: '© OpenStreetMap contributors',
+  });
+
+  it('carries the mode of each road route, and treats a result without one as driving', () => {
+    for (const mode of ['walking', 'cycling', 'driving']) {
+      expect(parseMapsResult(JSON.stringify(roadResult(mode)), 'render_route').data?.mode).toBe(mode);
+    }
+    expect(parseMapsResult(JSON.stringify(roadResult()), 'render_route').data?.mode).toBe('driving');
+  });
+
+  it('parses a transit route with times and steps', () => {
+    const parsed = parseMapsResult(
+      JSON.stringify({
+        ...roadResult('transit'),
+        departs: '09:02',
+        arrives: '09:20',
+        transfers: 0,
+        steps: [
+          { kind: 'walk', duration_min: 4, to_name: 'Calhariz (Bica)' },
+          {
+            kind: 'ride',
+            vehicle: 'tram',
+            line_name: '28E',
+            headsign: 'Campo Ourique',
+            from_name: 'Calhariz (Bica)',
+            to_name: 'Estrela',
+            departs: '09:06',
+            arrives: '09:16',
+            stops_count: 6,
+          },
+        ],
+      }),
+      'render_route',
+    );
+    expect(parsed.state).toBe('ready');
+    expect(parsed.data?.mode).toBe('transit');
+    expect(parsed.data?.departs).toBe('09:02');
+    expect(parsed.data?.steps).toHaveLength(2);
+  });
+
+  it('refuses a transit result that has no steps rather than drawing half a card', () => {
+    const parsed = parseMapsResult(JSON.stringify(roadResult('transit')), 'render_route');
+    expect(parsed.state).toBe('unavailable');
+    expect(parsed.data).toBeNull();
+  });
+
+  it('says in plain words when no route was found, by mode', () => {
+    const message = (mode?: string) =>
+      parseMapsResult(JSON.stringify({ status: 'error', code: 'no_route', ...(mode ? { mode } : {}) }), 'render_route')
+        .blockedMessage;
+    expect(message('transit')).toBe(
+      'No public transport route was found between the two places. Walking may still work.',
+    );
+    expect(message('walking')).toBe('No walking route was found between the two places.');
+    expect(message('cycling')).toBe('No cycling route was found between the two places.');
+    expect(message()).toBe('No driving route was found between the two places.');
+  });
+
+  it('explains a time it could not read', () => {
+    const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'invalid_time' }), 'render_route');
+    expect(parsed.state).toBe('unavailable');
+    expect(parsed.blockedMessage).toBe('The time for the trip could not be understood.');
+  });
+
   it('maps not_found to unavailable', () => {
     const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'not_found' }), 'render_map');
     expect(parsed.state).toBe('unavailable');
@@ -85,5 +157,118 @@ describe('parseMapsResult', () => {
   it('handles missing or malformed results as unavailable', () => {
     expect(parseMapsResult(undefined, 'render_map').state).toBe('unavailable');
     expect(parseMapsResult('not json', 'render_map').state).toBe('unavailable');
+  });
+
+  describe('render_places', () => {
+    const okBody = {
+      status: 'ok',
+      places: [
+        {
+          name: 'Harbour Family Clinic',
+          address: '12 Example Street, Lisbon 1100-000',
+          languages: 'English, Portuguese',
+          hours: null,
+          price: null,
+          phone: '+351 210 000 111',
+          source_url: 'https://harbour-clinic.example/en',
+          source_site: 'harbour-clinic.example',
+          fetched_at: '2026-10-17T10:00:00.000Z',
+          lat: 38.7,
+          lng: -9.1,
+          already_in_calendar: true,
+        },
+        {
+          name: 'Garden Health Centre',
+          address: '4 Sample Avenue, Lisbon 1200-000',
+          languages: null,
+          hours: null,
+          price: null,
+          phone: null,
+          source_url: 'https://garden-health.example/doctors',
+          source_site: 'garden-health.example',
+          fetched_at: '2026-10-17T10:00:00.000Z',
+          lat: null,
+          lng: null,
+          already_in_calendar: false,
+        },
+      ],
+      refused: [],
+      attribution: '© OpenStreetMap contributors',
+    };
+
+    it('parses places with their found fields, sources and calendar mark', () => {
+      const parsed = parseMapsResult(JSON.stringify(okBody), 'render_places');
+      expect(parsed.state).toBe('ready');
+      expect(parsed.data?.kind).toBe('places');
+      expect(parsed.data?.places).toHaveLength(2);
+      expect(parsed.data?.places?.[0]).toMatchObject({
+        name: 'Harbour Family Clinic',
+        languages: 'English, Portuguese',
+        hours: null,
+        source_site: 'harbour-clinic.example',
+        already_in_calendar: true,
+      });
+      expect(parsed.data?.pins).toEqual([{ name: 'Harbour Family Clinic', lat: 38.7, lng: -9.1 }]);
+    });
+
+    it('centres the map on the pinned places', () => {
+      const parsed = parseMapsResult(JSON.stringify(okBody), 'render_places');
+      expect(parsed.data).toMatchObject({ lat: 38.7, lng: -9.1 });
+    });
+
+    it('drops a place whose link is not an ordinary web address', () => {
+      const hostile = {
+        ...okBody,
+        places: [{ ...okBody.places[0], source_url: 'javascript:alert(1)' }, okBody.places[1]],
+      };
+      const parsed = parseMapsResult(JSON.stringify(hostile), 'render_places');
+      expect(parsed.data?.places?.map(place => place.name)).toEqual(['Garden Health Centre']);
+    });
+
+    it('explains in plain words when nothing could be checked', () => {
+      const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'not_grounded' }), 'render_places');
+      expect(parsed.state).toBe('unavailable');
+      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
+    });
+
+    it('carries the refused places of a part-way result to the card', () => {
+      const parsed = parseMapsResult(
+        JSON.stringify({
+          ...okBody,
+          refused: [
+            {
+              name: 'Canal Practice',
+              reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+            },
+          ],
+        }),
+        'render_places',
+      );
+      expect(parsed.state).toBe('ready');
+      expect(parsed.data?.refused).toEqual([
+        {
+          name: 'Canal Practice',
+          reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+        },
+      ]);
+    });
+
+    it('names up to three refused places and one next step when nothing was pinned', () => {
+      const refused = ['Alpha House', 'Beta House', 'Gamma House', 'Delta House'].map(name => ({
+        name,
+        reason: 'The name is not on that page. Copy it word for word from the page and try again.',
+      }));
+      const parsed = parseMapsResult(
+        JSON.stringify({ status: 'error', code: 'not_grounded', refused }),
+        'render_places',
+      );
+      expect(parsed.state).toBe('unavailable');
+      expect(parsed.blockedMessage).toMatch(/could not be checked against the pages/);
+      expect(parsed.blockedMessage).toContain('Alpha House');
+      expect(parsed.blockedMessage).toContain('Beta House');
+      expect(parsed.blockedMessage).toContain('Gamma House');
+      expect(parsed.blockedMessage).not.toContain('Delta House');
+      expect(parsed.blockedMessage).toContain('then try again');
+    });
   });
 });

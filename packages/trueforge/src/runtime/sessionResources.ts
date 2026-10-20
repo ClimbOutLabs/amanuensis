@@ -53,7 +53,7 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
-  /** Set when the user designated this connector as their search provider: the tools it may run silently. */
+  /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
 }
 
@@ -711,6 +711,9 @@ export function buildTurnSandbox(input: {
   existingSandboxId?: string | undefined;
   boundRepository?: BoundRepository | undefined;
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
+  loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
+  allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
   workspaceVerificationCoordinator?: WorkspaceVerificationCoordinator | undefined;
   workspaceLeaseOwnerId?: string | undefined;
@@ -746,6 +749,9 @@ export function buildTurnSandbox(input: {
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,
     loadBoundRepository: input.loadBoundRepository,
+    loadPackageMirrorToken: input.loadPackageMirrorToken,
+    loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
+    allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,
     workspaceVerificationCoordinator: input.workspaceVerificationCoordinator,
     workspaceLeaseOwnerId: input.workspaceLeaseOwnerId,

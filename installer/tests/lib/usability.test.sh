@@ -63,8 +63,8 @@ test_password_length_is_checked_up_front() {
   t_begin "a password over 72 bytes is refused before anything is built"
   sandbox_new
   local long72 long73 wide
-  long72=$(printf 'a%.0s' $(seq 1 72))
-  long73=$(printf 'a%.0s' $(seq 1 73))
+  long72="a1-$(printf 'a%.0s' $(seq 1 69))"
+  long73="a1-$(printf 'a%.0s' $(seq 1 70))"
   wide=$(printf 'é%.0s' $(seq 1 40))
   with_input "$long73
 "
@@ -123,11 +123,11 @@ test_password_in_the_environment_is_ignored() {
 test_end_of_input_at_the_password_prompt_aborts() {
   t_begin "Ctrl-D at the password prompt stops the run cleanly"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=><EOF>"
+Enter a password for owner@example.invalid=><EOF>"
   assert_eq "$RC" 1
   assert_contains "$OUT" "No password was entered"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -139,16 +139,16 @@ Password for owner@example.invalid=><EOF>"
 test_prompts_and_summary_use_plain_words() {
   t_begin "prompts and the summary avoid jargon and say nothing about the sign-in service as a page"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter)"
+  assert_contains "$OUT" "Name for this instance [main]:"
   assert_contains "$OUT" "Your email, used to sign in"
-  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters"
+  assert_contains "$OUT" "Enter a password for owner@example.invalid"
   assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
   assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"
@@ -204,7 +204,7 @@ test_upgrade_says_what_it_does() {
   assert_rc 0
   assert_contains "$OUT" "Upgrading these parts of the installed version:"
   assert_not_contains "$OUT" "would change"
-  assert_contains "$OUT" "back up every instance, build the new images, restart the instances"
+  assert_contains "$OUT" "back up every instance, build the new version, restart the instances"
   sandbox_drop
 }
 

@@ -1,4 +1,4 @@
-import { mapsDestinationHosts } from '@truefoundry/trueforge-core/core';
+import { mapsDestinationHosts, type FetchedPageScope } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import {
@@ -6,16 +6,20 @@ import {
   MAPS_ORIGIN_COORDINATE_PRECISION,
   MAPS_SERVER_ID,
   MapsService,
-  MapsUpstreamError,
   UpstreamLimiter,
   createMapsRoutingProvider,
-  decodePolyline,
-  encodePolyline,
+  isInRequestedArea,
   mapsCapability,
   roundOriginCoordinate,
-  thinPolyline,
+  type MapsRoadMode,
+  type MapsRouteRequest,
+  type MapsRoutingProvider,
 } from '../../../src/runtime/mapsCapability';
+import { MapsUpstreamError } from '../../../src/runtime/mapsErrors';
 import { UPSTREAM_JSON_MAX_BODY_BYTES } from '../../../src/runtime/mapsUpstream';
+import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
+
+const PAGES_SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -24,51 +28,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function recordingProviders(received: MapsRouteRequest[]): Record<MapsRoadMode, MapsRoutingProvider> {
+  const recording: MapsRoutingProvider = {
+    provider_id: 'recording',
+    route: input => {
+      received.push(input);
+      return Promise.resolve({ distance_km: 1, duration_min: 1, geometry: '_p~iF~ps|U', traffic: false });
+    },
+  };
+  return { walking: recording, cycling: recording, driving: recording };
+}
+
 describe('roundOriginCoordinate', () => {
   it('rounds to MAPS_ORIGIN_COORDINATE_PRECISION decimal places', () => {
     expect(MAPS_ORIGIN_COORDINATE_PRECISION).toBe(3);
     expect(roundOriginCoordinate(48.858844)).toBe(48.859);
     expect(roundOriginCoordinate(-2.294481)).toBe(-2.294);
     expect(roundOriginCoordinate(40.0)).toBe(40.0);
-  });
-});
-
-describe('polyline helpers', () => {
-  it('round-trips through encode and decode', () => {
-    const points: Array<[number, number]> = [
-      [48.858844, 2.294481],
-      [48.86, 2.296],
-      [48.862, 2.3],
-    ];
-    const encoded = encodePolyline(points);
-    const decoded = decodePolyline(encoded);
-    expect(decoded).toHaveLength(3);
-    for (const [index, [lat, lng]] of decoded.entries()) {
-      expect(lat).toBeCloseTo(points[index]?.[0] ?? 0, 4);
-      expect(lng).toBeCloseTo(points[index]?.[1] ?? 0, 4);
-    }
-  });
-
-  it('thinPolyline keeps both endpoints and fits the bound', () => {
-    const points: Array<[number, number]> = [];
-    for (let i = 0; i < 500; i += 1) {
-      points.push([48.8 + i * 0.001, 2.29 + i * 0.001]);
-    }
-    const encoded = encodePolyline(points);
-    const thinned = thinPolyline(encoded, 200);
-    expect(thinned.length).toBeLessThanOrEqual(200);
-    const decoded = decodePolyline(thinned);
-    expect(decoded[0]).toEqual([expect.closeTo(48.8, 4), expect.closeTo(2.29, 4)]);
-    const last = decoded[decoded.length - 1];
-    expect(last?.[0]).toBeCloseTo(48.8 + 499 * 0.001, 4);
-  });
-
-  it('thinPolyline leaves short geometries alone', () => {
-    const encoded = encodePolyline([
-      [48.85, 2.29],
-      [48.86, 2.3],
-    ]);
-    expect(thinPolyline(encoded, 8000)).toBe(encoded);
   });
 });
 
@@ -208,11 +184,8 @@ describe('MapsService.geocode', () => {
     const seen: string[] = [];
     const service = new MapsService({
       geocoder_url: 'https://geocode.example',
-      router_provider: createMapsRoutingProvider({
-        provider_id: 'osrm',
-        router_url: 'https://router.example',
-        fetch_limited: () => Promise.reject(new Error('unused')),
-      }),
+      road_providers: unusedRoadProviders(),
+      transit_provider: unusedTransitProvider(),
       logger: createLogger({ silent: true }),
       fetch_limited: url => {
         seen.push(url);
@@ -283,13 +256,8 @@ describe('MapsService.route origin privacy', () => {
     const received: { from_lat: number; from_lng: number; to_lat: number; to_lng: number }[] = [];
     const service = new MapsService({
       geocoder_url: 'https://geocode.example',
-      router_provider: {
-        provider_id: 'recording',
-        route: input => {
-          received.push(input);
-          return Promise.resolve({ distance_km: 1, duration_min: 1, geometry: '_p~iF~ps|U', traffic: false });
-        },
-      },
+      road_providers: recordingProviders(received),
+      transit_provider: unusedTransitProvider(),
       logger: createLogger({ silent: true }),
       fetch_limited: () => Promise.reject(new Error('unused')),
     });
@@ -300,14 +268,22 @@ describe('MapsService.route origin privacy', () => {
       lng,
       bounding_box: null,
     });
-    await service.route(place(48.8588444, 2.2944811), place(48.8606111, 2.3376222));
+    await service.route({
+      from: place(48.8588444, 2.2944811),
+      to: place(48.8606111, 2.3376222),
+      mode: 'walking',
+    });
     expect(received).toEqual([{ from_lat: 48.859, from_lng: 2.294, to_lat: 48.8606111, to_lng: 2.3376222 }]);
   });
 });
 
 describe('maps connector binding', () => {
   it('binds approvals to the configured upstream hosts, matching what the approval card names', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
       throw new Error('maps capability has no tool sets');
@@ -318,5 +294,81 @@ describe('maps connector binding', () => {
       throw new Error('maps hosts were not stamped');
     }
     expect(binding).toEqual({ server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(info.maps_hosts) });
+  });
+
+  it('names the walking, cycling and public transport services in the approval destination', async () => {
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
+    const binding = capability.systemToolSets?.[0]?.resolveConnector?.({
+      name: 'render_route',
+      arguments: { from_place: 'A', to_place: 'B', mode: 'transit' },
+    });
+    expect(binding?.destination_host).toContain('routing.openstreetmap.de');
+    expect(binding?.destination_host).toContain('api.transitous.org');
+  });
+});
+
+describe('isInRequestedArea', () => {
+  it('accepts the right city when the geocoder abbreviates the state', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, MO, United States',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts the right city when the query abbreviates the state and the geocoder spells it out', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, MO',
+        displayName: '102 Main St, Springfield, Missouri, United States',
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses the same city name in a different state', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, Illinois, United States',
+      }),
+    ).toBe(false);
+  });
+
+  it('refuses a different state even when the query gives the state in full and the result only abbreviates its own', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, IL, United States',
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts a result matched by postcode alone when the city is spelled differently', () => {
+    expect(
+      isInRequestedArea({
+        query: '12 Example Street, Lisbon 1100-000',
+        displayName: '12 Example Street, Santa Maria Maior, 1100-000 Lisboa, Portugal',
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses a result in a different city when there is no postcode to save it', () => {
+    expect(
+      isInRequestedArea({ query: '12 Example Street, Lisbon', displayName: '12 Example Street, Porto, Portugal' }),
+    ).toBe(false);
+  });
+
+  it('accepts a result when the geocoder leaves out a district the query names before the city', () => {
+    expect(
+      isInRequestedArea({
+        query: '5 High Street, Camden, London',
+        displayName: '5 High Street, London, NW1 8AF, United Kingdom',
+      }),
+    ).toBe(true);
   });
 });

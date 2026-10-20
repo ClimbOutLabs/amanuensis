@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { MarkdownProps } from '@/atoms/Markdown.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { ToasterProvider } from '@/containers/ToasterContainer.js';
 import { LARGE_MARKDOWN_THROTTLE_MS, MARKDOWN_SMOOTH_BACKLOG_CHARS } from '@/hooks/useThrottledMarkdownText.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -270,47 +271,13 @@ describe('AssistantTextContainer', () => {
     const downloadSandboxFile = vi.fn(async () => new Blob(['hello harness']));
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
-    function ExtrasHarness() {
-      const runtime = useExternalStoreRuntime({
-        messages: [
-          {
-            role: 'assistant',
-            content: ['Files ready:', '', '```sandbox_artifacts', '[report.txt](/tmp/report.txt)', '```'].join('\n'),
-            metadata: { custom: { turnId: 'turn-42', sandboxId: 'sbx-1' } },
-          } satisfies ThreadMessageLike,
-        ],
-        isRunning: false,
-        convertMessage: (m: ThreadMessageLike) => m,
-        onNew: async () => {},
-        extras: trueFoundryExtras.provide({
-          pendingApprovals: [],
-          pendingToolResponses: [],
-          pendingMcpAuth: null,
-          resumeUnavailable: false,
-          sandboxId: 'sbx-1',
-          respondToToolApproval: () => {},
-          respondToToolResponse: () => {},
-          resumeMcpAuth: async () => {},
-          downloadSandboxFile,
-          cancel: async () => {},
-          resetFromTurn: async () => {},
-          reload: () => {},
-          hasOlderHistory: false,
-          isLoadingOlderHistory: false,
-          loadOlderHistory: async () => {},
-          draft: null,
-        }),
-      });
-
-      return (
-        <AssistantRuntimeProvider runtime={runtime}>
-          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </AssistantRuntimeProvider>
-      );
-    }
-
     try {
-      render(<ExtrasHarness />);
+      render(
+        <ArtifactHarness
+          content={['Files ready:', '', '```sandbox_artifacts', '[report.txt](/tmp/report.txt)', '```'].join('\n')}
+          downloadSandboxFile={downloadSandboxFile}
+        />,
+      );
 
       fireEvent.click(await screen.findByText('report.txt'));
 
@@ -321,4 +288,104 @@ describe('AssistantTextContainer', () => {
       anchorClick.mockRestore();
     }
   });
+
+  it('shows a reopened reply whose file block the model indented as a file card, and downloads it', async () => {
+    const downloadSandboxFile = vi.fn(async () => new Blob(['%PDF']));
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const content = [
+      'Your weekly budget chart is ready.',
+      '',
+      '    ```sandbox_artifacts',
+      '    [Weekly food budget chart](/egress/weekly_food_budget.pdf)',
+      '    ```',
+    ].join('\n');
+
+    try {
+      render(<ArtifactHarness content={content} downloadSandboxFile={downloadSandboxFile} />);
+
+      fireEvent.click(await screen.findByRole('link', { name: 'Download Weekly food budget chart' }));
+
+      await waitFor(() => {
+        expect(downloadSandboxFile).toHaveBeenCalledWith({ turnId: 'turn-42', path: '/egress/weekly_food_budget.pdf' });
+      });
+      expect(document.body).not.toHaveTextContent('sandbox_artifacts');
+      expect(document.body).not.toHaveTextContent('/egress/');
+    } finally {
+      anchorClick.mockRestore();
+    }
+  });
+
+  it('says in plain words that a file could not be downloaded, never a bare status code', async () => {
+    const failure = Object.assign(new Error('Request failed'), {
+      statusCode: 412,
+      body: {
+        error: { message: 'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.' },
+      },
+    });
+    const downloadSandboxFile = vi.fn(async () => Promise.reject(failure));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <ToasterProvider>
+        <ArtifactHarness
+          content={['```sandbox_artifacts', '[report.txt](/tmp/report.txt)', '```'].join('\n')}
+          downloadSandboxFile={downloadSandboxFile}
+        />
+      </ToasterProvider>,
+    );
+
+    fireEvent.click(await screen.findByText('report.txt'));
+
+    expect(await screen.findByText('The file could not be downloaded')).toBeInTheDocument();
+    expect(
+      screen.getByText('This file was in a temporary workspace that has been cleared. Ask Aman to make it again.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument();
+  });
 });
+
+/** One finished assistant reply from turn `turn-42`, with the runtime extras a download needs. */
+function ArtifactHarness({
+  content,
+  downloadSandboxFile,
+}: {
+  content: string;
+  downloadSandboxFile: (request: { turnId: string; path: string }) => Promise<Blob>;
+}) {
+  const runtime = useExternalStoreRuntime({
+    messages: [
+      {
+        role: 'assistant',
+        content,
+        metadata: { custom: { turnId: 'turn-42', sandboxId: 'sbx-1' } },
+      } satisfies ThreadMessageLike,
+    ],
+    isRunning: false,
+    convertMessage: (m: ThreadMessageLike) => m,
+    onNew: async () => {},
+    extras: trueFoundryExtras.provide({
+      pendingApprovals: [],
+      pendingToolResponses: [],
+      pendingMcpAuth: null,
+      resumeUnavailable: false,
+      sandboxId: 'sbx-1',
+      respondToToolApproval: () => {},
+      respondToToolResponse: () => {},
+      resumeMcpAuth: async () => {},
+      downloadSandboxFile,
+      cancel: async () => {},
+      resetFromTurn: async () => {},
+      reload: () => {},
+      hasOlderHistory: false,
+      isLoadingOlderHistory: false,
+      loadOlderHistory: async () => {},
+      draft: null,
+    }),
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+    </AssistantRuntimeProvider>
+  );
+}

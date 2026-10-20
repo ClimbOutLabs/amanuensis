@@ -1,3 +1,4 @@
+import { TokenPaginationSchema } from '@truefoundry/trueforge-core/agent-session';
 import { z } from 'zod';
 
 export const SentinelAuditRecordSchema = z
@@ -25,3 +26,25 @@ export const ListSessionAuditLogResponseSchema = z
     entries: z.array(SentinelAuditRecordSchema),
   })
   .openapi('ListSessionAuditLogResponse');
+
+export const ListUserAuditLogRequestQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+    page_token: z.string().optional().describe('Token from the previous page; omit for the newest entries.'),
+    outcome: SentinelAuditRecordSchema.shape.outcome.optional().describe('Only entries with this outcome.'),
+  })
+  .openapi('ListUserAuditLogRequestQuery');
+
+export const UserAuditRecordSchema = z
+  .object({
+    ...SentinelAuditRecordSchema.shape,
+    chat_exists: z.boolean().describe('False once the chat the entry came from has been deleted.'),
+  })
+  .openapi('UserAuditRecord');
+
+export const ListUserAuditLogResponseSchema = z
+  .object({
+    data: z.array(UserAuditRecordSchema).describe('Entries from every chat, newest first.'),
+    pagination: TokenPaginationSchema,
+  })
+  .openapi('ListUserAuditLogResponse');

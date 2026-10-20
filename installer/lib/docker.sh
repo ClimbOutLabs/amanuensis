@@ -107,6 +107,19 @@ run_root() {
   fi
 }
 
+# Asks for the password once, before the first root change, so a refused password stops the run with nothing half
+# done and later sudo calls of this run do not ask again. $1 says what was left as it was.
+root_ready() {
+  [ "$(id -u)" != 0 ] || return 0
+  command -v sudo >/dev/null 2>&1 || die "This needs administrator rights, and this computer has no way to ask for them, so $1. Run the same command again from an administrator account."
+  sudo -n true 2>/dev/null && return 0
+  # sudo reads the password from the terminal, so a run without one cannot be asked.
+  (: </dev/tty) 2>/dev/null ||
+    die "This needs your computer password, which can only be typed in a terminal window, so $1. Run the same command again in a terminal window."
+  sudo -v ||
+    die "The password was not accepted, so $1. Type the password you use to log in to this computer, then run the same command again."
+}
+
 # Shell function the root steps run on the downloaded key. The file must hold exactly one primary key
 # and its fingerprint must be the pinned one; subkey fingerprints belong to that primary key, so only
 # the fingerprint that follows each pub record is compared.
@@ -154,11 +167,11 @@ STEPS
 
 print_root_steps() {
   if docker_install_supported; then
-    say "Root steps to install Docker Engine (run as root, key fingerprint pinned to $DOCKER_APT_KEY_FPR):"
+    say "Root steps to install Docker Engine (run as root; the download key must be $DOCKER_APT_KEY_FPR):"
     docker_root_steps_script | sed 's/^/    /'
   else
-    say "This system is not Debian or Ubuntu with apt, so the installer cannot install Docker for you."
-    say "Follow the Docker Engine install guide for your distribution, or install Docker Desktop on macOS and Windows."
+    say "This computer does not use apt, so the installer cannot install Docker for you."
+    say "Install Docker Engine (Linux) or Docker Desktop (macOS, Windows) by hand, then run this again."
   fi
 }
 
@@ -171,29 +184,29 @@ docker_prepare() {
       ui_phase "Installing Docker"
       ui_line "Docker is not installed. Installing it needs administrator rights (sudo) and changes this computer."
       print_root_steps
-      ui_hint "Members of the docker group have root-equivalent access to this computer."
+      ui_hint "Being able to use Docker is as powerful as being an administrator of this computer."
       if ! consent_root "Install Docker Engine now?" "$OPT_INSTALL_DOCKER"; then
-        die "Docker is required and nothing was installed. Run this installer again and answer yes when asked, or pass --install-docker (--yes alone never installs software)."
+        die "Docker is needed, and nothing was installed. Run install.sh again and answer yes, or pass --install-docker. --yes alone never installs software."
       fi
-      run_root sh -c "$(docker_root_steps_script)" || die "the Docker install steps failed; nothing else was changed"
+      run_root sh -c "$(docker_root_steps_script)" || die "The Docker install steps failed. Nothing else was changed."
       NEEDS_SIGNOUT=1
       docker_plan_access
       ;;
   esac
   if [ "$DOCKER_ACCESS" = add-group ]; then
     ui_phase "Docker access"
-    ui_line "Your user cannot reach the Docker socket. Adding it to the docker group needs administrator rights (sudo)."
-    ui_hint "Members of the docker group have root-equivalent access to this computer."
+    ui_line "Your user cannot use Docker yet. Giving it access needs administrator rights (sudo)."
+    ui_hint "Being able to use Docker is as powerful as being an administrator of this computer."
     if ! consent_root "Add $(current_user) to the docker group?" "$OPT_ADD_DOCKER_GROUP"; then
-      die "Docker needs access you have not granted, so nothing was changed. Run this installer again and answer yes when asked, or pass --add-docker-group (--yes alone never changes groups)."
+      die "Docker access was not granted, so nothing was changed. Run install.sh again and answer yes, or pass --add-docker-group. --yes alone never changes groups."
     fi
-    run_root usermod -aG docker "$(current_user)" || die "usermod failed; add your user to the docker group and run this again"
+    run_root usermod -aG docker "$(current_user)" || die "Giving your user Docker access failed. Add your user to the docker group by hand, then run this again."
     NEEDS_SIGNOUT=1
     if docker_works_via_sg; then
       DOCKER_ACCESS=sg
     elif command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
       # Only reached after the yes above, for this run only.
-      warn "using sudo for Docker during this run only"
+      warn "Using sudo for Docker during this run only"
       DOCKER_ACCESS=sudo
     fi
   fi
@@ -222,11 +235,11 @@ docker_blocked_parts() {
       ;;
     denied)
       DB_HEAD="Your user cannot use Docker yet"
-      DB_NEXT="Run install.sh docker to give it access, asking before sudo, then run install.sh again."
+      DB_NEXT="Run install.sh docker to give it access (it asks before using admin rights), then run install.sh again."
       ;;
     *)
       DB_HEAD="Docker did not answer"
-      DB_NEXT="Check that Docker is running with: docker info"
+      DB_NEXT="Check that Docker is running, then run this again."
       ;;
   esac
 }
@@ -240,7 +253,7 @@ docker_fail_message() { die "$(docker_blocked_text)"; }
 
 docker_install_hint() {
   if docker_install_supported; then
-    echo "Run install.sh --print-root-steps to see the install steps, or let this installer run them."
+    echo "Run install.sh again and answer yes to install it, or see the steps with install.sh --print-root-steps."
   else
     echo "Install Docker Engine with Compose v2 or newer (Linux) or Docker Desktop (macOS, Windows), then run this again."
   fi
@@ -262,24 +275,28 @@ docker_runtime_problem() {
   fi
   secopts=$(D info --format '{{.SecurityOptions}}' 2>/dev/null || true)
   if printf '%s\n%s' "$secopts" "$info" | grep -Eqi 'name=rootless|^[[:space:]]*rootless[[:space:]]*$'; then
-    RUNTIME_PROBLEM="Rootless Docker is not supported. Install the standard rootful Docker Engine, then run this again."
+    RUNTIME_PROBLEM="Rootless Docker is not supported. Install the standard Docker Engine, then run this again."
     return 0
   fi
   engine=$(D version --format '{{.Server.Version}}' 2>/dev/null || true)
   major=${engine%%.*}
   case "$major" in
-    '' | *[!0-9]*)
+    '' | *[![:digit:]]*)
       RUNTIME_PROBLEM="Could not read the Docker Engine version."
       return 0
       ;;
   esac
   if [ "$major" -lt "$DOCKER_MIN_ENGINE_MAJOR" ]; then
-    RUNTIME_PROBLEM="Docker Engine $engine is too old; $DOCKER_MIN_ENGINE_MAJOR or newer is required."
+    RUNTIME_PROBLEM="Docker Engine $engine is too old. Update it to version $DOCKER_MIN_ENGINE_MAJOR or newer, then run this again."
+    return 0
+  fi
+  if docker_engine_leaks_loopback "$engine" "$(D info --format '{{.OperatingSystem}}' 2>/dev/null || true)"; then
+    RUNTIME_PROBLEM=$(docker_leaks_loopback_text "$engine")
     return 0
   fi
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
-  if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+  if [[ ! $compose =~ ^([[:digit:]]+)\.[[:digit:]]+ ]]; then
     RUNTIME_PROBLEM="Docker Compose is missing; version $DOCKER_MIN_COMPOSE_MAJOR is needed. Run install.sh docker to install it, then run this again."
     return 0
   fi
@@ -336,9 +353,9 @@ docker_install_compose() {
     die "Docker Compose 2 is needed. Docker Desktop includes it: update Docker Desktop, then run aman doctor."
   fi
   ui_line "Docker Compose 2 is missing or too old. Installing it needs administrator rights (sudo)."
-  consent_root "Install the Docker Compose plugin now?" 0 ||
+  consent_root "Install Docker Compose now?" 0 ||
     die "Docker Compose was not installed. Run aman doctor docker --fix again and answer yes."
-  run_root apt-get install -y docker-compose-plugin || die "Installing the Docker Compose plugin failed; nothing else was changed."
+  run_root apt-get install -y docker-compose-plugin || die "Installing Docker Compose failed. Nothing else was changed."
 }
 
 # Starts the Docker engine where it is a service of this computer.
@@ -348,7 +365,7 @@ docker_start_engine() {
   fi
   ui_line "Docker is installed but not running. Starting it needs administrator rights (sudo)."
   consent_root "Start Docker now?" 0 || die "Docker was not started. Run aman doctor docker --fix again and answer yes."
-  run_root systemctl start docker || die "Docker did not start; nothing else was changed."
+  run_root systemctl start docker || die "Docker did not start. Nothing else was changed."
 }
 
 # Installs or starts Docker, gives this user access, and brings Compose up to date, asking before each sudo.
@@ -366,7 +383,7 @@ docker_fix() {
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
   major=${compose%%.*}
-  if [[ ! $major =~ ^[0-9]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+  if [[ ! $major =~ ^[[:digit:]]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
     docker_install_compose
   fi
   docker_runtime_check

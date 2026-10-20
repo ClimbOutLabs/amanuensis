@@ -611,6 +611,7 @@ const ConnectorSettings = () => {
   const renderGoogle = () => {
     const connected = googleStatus?.state === 'connected';
     const needsReconnect = googleStatus?.state === 'needs_reconnect';
+    const locked = googleStatus?.locked === true;
     const label = googleStatusFailed
       ? "Couldn't check Google right now"
       : needsReconnect
@@ -629,8 +630,9 @@ const ConnectorSettings = () => {
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own
-            Google account.
+            {locked
+              ? "This demo uses a sample Google account. Aman can only send to the demo's own addresses."
+              : 'Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own Google account.'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -642,20 +644,22 @@ const ConnectorSettings = () => {
           >
             {label}
           </span>
-          <Button
-            variant="secondary"
-            size="small"
-            type="button"
-            onClick={() => {
-              if (googleStatusFailed) {
-                void refresh();
-              } else {
-                setGooglePanelOpen(true);
-              }
-            }}
-          >
-            {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
-          </Button>
+          {locked && !googleStatusFailed ? null : (
+            <Button
+              variant="secondary"
+              size="small"
+              type="button"
+              onClick={() => {
+                if (googleStatusFailed) {
+                  void refresh();
+                } else {
+                  setGooglePanelOpen(true);
+                }
+              }}
+            >
+              {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
+            </Button>
+          )}
         </div>
       </article>
     );
@@ -756,13 +760,11 @@ const ConnectorSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Connectors</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Connected tools are ready to use. Choose the ones a chat uses from the composer. Test connection dials a
-        connector and reports the tools it answered with.
+        Connected tools are ready to use. Choose which ones a chat uses from the message box. Test connection shows
+        which tools the connector offers.
       </p>
       {isPlainDraft ? (
-        <p className="mt-1 text-xs text-text-secondary">
-          Selections in a new draft are remembered for future new chats.
-        </p>
+        <p className="mt-1 text-xs text-text-secondary">Choices in a new chat are remembered for future new chats.</p>
       ) : null}
 
       {!loading && matchingConnected.length === 0 ? (
@@ -774,12 +776,12 @@ const ConnectorSettings = () => {
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect — most need an API key or token from that service.
+              Connect. Most need an API key or token from that service.
             </li>
-            <li>Choose it in the composer so Aman can use its tools in that chat.</li>
+            <li>Choose it in the message box so Aman can use its tools in that chat.</li>
             <li>
-              Use <span className="font-medium text-text-primary">Test connection</span> to dial the connector and see
-              which tools answered.
+              Use <span className="font-medium text-text-primary">Test connection</span> to see which tools the
+              connector offers.
             </li>
           </ol>
         </section>
@@ -814,7 +816,7 @@ const ConnectorSettings = () => {
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
             {!loading &&
-            (googleStatus?.available === true || googleStatusFailed) &&
+            (googleStatus !== null || googleStatusFailed) &&
             googleMatchesQuery &&
             hasGoogleSetup(connectorCatalog) ? (
               <section aria-labelledby="google-connector-heading">
@@ -959,7 +961,7 @@ const ConnectorSettings = () => {
           >
             <div className="px-5 py-5">
               <p className="text-sm text-text-secondary">
-                Chats that still reference it will show it as unavailable until it is removed from them.
+                Chats using it will show it as unavailable until you remove it there.
               </p>
             </div>
             <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">

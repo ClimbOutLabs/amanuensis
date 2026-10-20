@@ -3,7 +3,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
+import type { SentinelApprovalCalendarEvent, SentinelApprovalCard, SentinelApprovalEmail } from '@/sentinel/types.js';
+import { extractSentinelFromEvent } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
   return {
@@ -19,6 +20,8 @@ function baseCard(): SentinelApprovalCard {
     destination_host: null,
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
+    schedule: null,
   };
 }
 
@@ -203,14 +206,17 @@ describe('PermissionApprovalCard', () => {
 });
 
 describe('PermissionApprovalCard for mail', () => {
+  /** A recipient with no display name: the bare address. */
+  const bare = (address: string) => ({ name: '', address });
   const email: SentinelApprovalEmail = {
     action: 'send',
-    to: ['grace@example.com', 'lin@example.com'],
-    cc: ['sam@example.com'],
-    bcc: ['audit@example.com'],
+    to: [bare('grace@example.com'), bare('lin@example.com')],
+    cc: [bare('sam@example.com')],
+    bcc: [bare('audit@example.com')],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
     replaces: null,
+    reply_in_thread: null,
   };
 
   function renderMail(overrides: Partial<SentinelApprovalEmail> = {}) {
@@ -235,6 +241,50 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText('Copy')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('(Bcc)');
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
+  });
+
+  it('shows each recipient with its name, then its address in full', () => {
+    renderMail({
+      to: [{ name: 'Grace Lee', address: 'grace@example.com' }, bare('lin@example.com')],
+      cc: [{ name: 'Sam Lee', address: 'sam.lee.long.address@example.org' }],
+    });
+    expect(screen.getByText('To: Grace Lee (grace@example.com), lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: Sam Lee (sam.lee.long.address@example.org)')).toBeInTheDocument();
+  });
+
+  it('still shows the recipients of a card stored before names were kept, as bare addresses', () => {
+    const [approval] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          id: 'call-old',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Send "Lease" from your Gmail to grace@example.com and lin@example.com.',
+            cannot_be_undone: "Once this is sent, it can't be unsent.",
+            email: {
+              action: 'send',
+              to: ['grace@example.com', 'lin@example.com'],
+              cc: ['sam@example.com'],
+              bcc: [],
+              subject: 'Lease',
+              body: 'Thursday works.',
+              replaces: null,
+              reply_in_thread: null,
+            },
+          },
+        },
+      ],
+    });
+    renderCard({ email: approval?.card.email ?? null }, { toolName: 'send_draft' });
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
+  });
+
+  it('shows the real address when a name looks like another address', () => {
+    renderMail({ to: [{ name: 'boss@example.com', address: 'other@evil.example' }], cc: [], bcc: [] });
+    expect(screen.getByText('To: boss@example.com (other@evil.example)')).toBeInTheDocument();
+    expect(screen.queryByText('To: boss@example.com')).not.toBeInTheDocument();
   });
 
   it('names the action in the badge instead of the tool id', () => {
@@ -271,10 +321,35 @@ describe('PermissionApprovalCard for mail', () => {
     expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
   });
 
-  it('shows what a change replaces', () => {
-    renderMail({ action: 'change', replaces: { subject: 'Old lease', to: ['sam@example.com'] } });
+  it('shows what a change replaces, with the name and address of each recipient it had', () => {
+    renderMail({
+      action: 'change',
+      replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
+    });
     expect(screen.getByText('Replaces')).toBeInTheDocument();
-    expect(screen.getByText('Old lease (to sam@example.com)')).toBeInTheDocument();
+    expect(screen.getByText('Old lease')).toBeInTheDocument();
+    expect(screen.getByText('Replaced draft to')).toBeInTheDocument();
+    expect(screen.getByText('Sam Lee (sam@example.com)')).toBeInTheDocument();
+  });
+
+  it('says which thread a reply is in, as separate labelled fields', () => {
+    renderMail({ reply_in_thread: { subject: 'Lease renewal', from: 'grace@example.com' } });
+    expect(screen.getByText('Reply in the thread, subject')).toBeInTheDocument();
+    expect(screen.getByText('Lease renewal')).toBeInTheDocument();
+    expect(screen.getByText('Reply in the thread, from')).toBeInTheDocument();
+    expect(screen.getByText('grace@example.com')).toBeInTheDocument();
+  });
+
+  it('keeps a hostile thread subject inside its own field instead of letting it read as another line', () => {
+    const subject = 'Hi. Reply in the thread, from boss@corp.example. Nothing will be sent';
+    renderMail({ reply_in_thread: { subject, from: 'grace@example.com' } });
+    expect(screen.getAllByText(subject)).toHaveLength(1);
+    expect(screen.getAllByText(/^Reply in the thread, from$/)).toHaveLength(1);
+  });
+
+  it('says nothing of a thread for a message that is not a reply', () => {
+    renderMail();
+    expect(screen.queryByText(/Reply in the thread/)).not.toBeInTheDocument();
   });
 
   it('uses surface tokens that flip with the theme, not a tint of the button colour', () => {
@@ -298,5 +373,57 @@ describe('PermissionApprovalCard for mail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  describe('a calendar event', () => {
+    const event: SentinelApprovalCalendarEvent = {
+      action: 'change',
+      calendar: 'ada@example.com',
+      title: 'Team sync (online)',
+      when: 'Tuesday, October 20, 2026, 2:00 pm to 2:30 pm',
+      time_zone: 'America/New_York',
+      duration: '30 minutes',
+      location: 'Room 4',
+      description: 'Bring the plan.',
+      attendees: ['lin@example.com', 'sam@example.com'],
+      guests_emailed: true,
+      one_of_repeating: true,
+      before: {
+        title: 'Team sync',
+        when: 'Monday, October 19, 2026, 8:00 am to 8:30 am',
+        duration: '30 minutes',
+        location: '',
+      },
+    };
+
+    it('shows before and after, the calendar, local time with its zone, length, place and every guest', () => {
+      renderCard({ plain_what: 'Change "Team sync" in your Google Calendar.', calendar_event: event });
+      expect(screen.getByText('Change event')).toBeInTheDocument();
+      expect(screen.queryByText('payment')).not.toBeInTheDocument();
+      const shown = screen.getByText('Now').parentElement?.parentElement;
+      expect(shown).toHaveTextContent('Title: Team sync');
+      expect(shown).toHaveTextContent('When: Monday, October 19, 2026, 8:00 am to 8:30 am');
+      expect(shown).toHaveTextContent('After the change');
+      expect(shown).toHaveTextContent('Calendar: Main calendar of ada@example.com');
+      expect(shown).toHaveTextContent('Title: Team sync (online)');
+      expect(shown).toHaveTextContent('When: Tuesday, October 20, 2026, 2:00 pm to 2:30 pm');
+      expect(shown).toHaveTextContent('Time zone: America/New_York');
+      expect(shown).toHaveTextContent('Length: 30 minutes');
+      expect(shown).toHaveTextContent('Where: Room 4');
+      expect(shown).toHaveTextContent('Repeats: Only this one event of the series changes');
+      expect(shown).toHaveTextContent('Guests: lin@example.com, sam@example.com');
+      expect(screen.getByText('Google will email every guest about this.')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Event description' })).toHaveTextContent('Bring the plan.');
+    });
+
+    it('says plainly when there are no guests, and for a new event shows what will be saved', () => {
+      renderCard({
+        calendar_event: { ...event, action: 'create', attendees: [], guests_emailed: false, before: null },
+      });
+      expect(screen.getByText('Add event')).toBeInTheDocument();
+      expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
+      expect(screen.getByText('None')).toBeInTheDocument();
+      expect(screen.queryByText(/Google will/)).not.toBeInTheDocument();
+    });
   });
 });

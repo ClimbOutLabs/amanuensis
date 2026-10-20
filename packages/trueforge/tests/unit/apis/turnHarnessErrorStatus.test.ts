@@ -5,6 +5,7 @@ import { createLogger } from 'winston';
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -68,7 +69,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
           repository_id: null,
           workspace_cwd: null,
         },
-        answersOnlyHeldActions: () => Promise.resolve(false),
+        answersOnlyDeniedHeldActions: () => Promise.resolve(false),
         createTurn: () => Promise.reject(error),
         classifyApprovalResubmission: () => Promise.resolve({ outcome: 'unrecorded' }),
       }),
@@ -79,6 +80,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
   app.route(
     '/',
     createTurnsRouter({
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,

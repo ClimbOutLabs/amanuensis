@@ -14,11 +14,13 @@ import type {
   GoogleConsentStart,
   GoogleFeature,
   GoogleSetupPort,
+  GoogleTestResult,
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
 const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
 const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
+const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 const GOOGLE_AUDIENCE_URL = 'https://console.cloud.google.com/auth/audience';
@@ -98,20 +100,26 @@ function CopyField({ label, value, href }: { label: string; value: string; href?
   );
 }
 
+const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
+const CALENDAR_WRITE_FEATURE = 'calendar_write' satisfies GoogleFeature;
+const CALENDAR_FEATURES: GoogleFeature[] = [CALENDAR_FEATURE, CALENDAR_WRITE_FEATURE];
+
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
 }
 
-function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unreachable', account: string | null) {
+function describeTest(result: GoogleTestResult['result'], account: string | null) {
   switch (result) {
     case 'ok':
       return `Working. Connected as ${account ?? 'your Google account'}.`;
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Reconnect needed. Google sign-in expired and mail is paused. Select Reconnect to sign in again.';
+      return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
     case 'unreachable':
       return "Aman couldn't reach Google just now. Try again in a minute.";
+    case 'calendar_unavailable':
+      return 'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.';
   }
 }
 
@@ -317,9 +325,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google sign-in expired. Mail is paused, and other parts of Aman keep working. Select Reconnect to sign
-                in again. If this keeps happening about once a week, your Google project is in Testing: either reconnect
-                each week, or in Google Cloud open Audience and choose Publish app, then reconnect once.
+                Google sign-in expired. Mail and calendar are paused, and other parts of Aman keep working. Select
+                Reconnect to sign in again. If this keeps happening about once a week, your Google project is in
+                Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish app, then
+                reconnect once.
               </p>
             ) : (
               <>
@@ -337,12 +346,93 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
               </>
             )}
             <ul className="space-y-1 text-text-secondary">
-              {status.features.map(item => (
-                <li key={item.feature}>
-                  {item.label}: {item.granted ? 'allowed' : 'not allowed'}
-                </li>
-              ))}
+              {status.features
+                .filter(item => !CALENDAR_FEATURES.includes(item.feature))
+                .map(item => (
+                  <li key={item.feature}>
+                    {item.label}: {item.granted ? 'allowed' : 'not allowed'}
+                  </li>
+                ))}
             </ul>
+            {status.state === 'connected' ? (
+              <div aria-label="Calendar" className="space-y-2 rounded-md border border-border bg-primary-bg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <span className="font-medium">Calendar</span>:{' '}
+                    {grantedFeatures(status).includes(CALENDAR_FEATURE) ? 'connected' : 'not connected'}
+                  </p>
+                  {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={busy || offline}
+                      onClick={() => void beginConsent({ useSavedClient: true, features: [CALENDAR_FEATURE] })}
+                    >
+                      Connect Calendar
+                    </Button>
+                  )}
+                </div>
+                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? (
+                  <>
+                    {grantedFeatures(status).includes(CALENDAR_WRITE_FEATURE) ? (
+                      <p className="text-text-secondary">
+                        Aman can read events on your calendar, and add or change events after you approve each one. It
+                        cannot delete events.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-text-secondary">
+                          Aman can read events on your calendar. To let Aman add events it finds in your mail or chats,
+                          select Allow Aman to add events. You still approve each event before it is saved.
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          type="button"
+                          disabled={busy || offline}
+                          onClick={() => void beginConsent({ useSavedClient: true, features: CALENDAR_FEATURES })}
+                        >
+                          Allow Aman to add events
+                        </Button>
+                      </>
+                    )}
+                    <p className="text-text-secondary">
+                      If Calendar stops answering, check that its API is still on: open this page and click Enable.
+                    </p>
+                    <CopyField
+                      label="Calendar API link"
+                      value={GOOGLE_CALENDAR_API_URL}
+                      href={GOOGLE_CALENDAR_API_URL}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-text-secondary">
+                      Lets Aman read events on your calendar, such as a birthday coming up. Letting Aman add events is a
+                      separate step once Calendar is connected.
+                    </p>
+                    <ol className="list-decimal space-y-3 pl-5">
+                      <li>
+                        <p className="font-medium">Turn on the Google Calendar API</p>
+                        <p className="text-text-secondary">On the page, click Enable.</p>
+                        <CopyField
+                          label="Calendar API link"
+                          value={GOOGLE_CALENDAR_API_URL}
+                          href={GOOGLE_CALENDAR_API_URL}
+                        />
+                      </li>
+                      <li>
+                        <p className="font-medium">Select Connect Calendar</p>
+                        <p className="text-text-secondary">
+                          On Google&apos;s screen, leave the calendar box ticked and continue.
+                        </p>
+                      </li>
+                    </ol>
+                  </>
+                )}
+              </div>
+            ) : null}
             {testMessage ? (
               <p role="status" className="text-text-secondary">
                 {testMessage}
@@ -397,8 +487,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 className="rounded-md border border-border bg-primary-bg p-3"
               >
                 <p>
-                  This removes Aman&apos;s access to your Google account everywhere it is used and deletes the saved
-                  login. Emails already sent stay in Gmail. You can connect again later.
+                  Disconnecting turns off both mail and calendar. It removes Aman&apos;s access to your Google account
+                  everywhere it is used and deletes the saved login. Emails already sent stay in Gmail. You can connect
+                  again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button

@@ -41,6 +41,8 @@ export async function listAccessibleAgents<TTransaction>(input: {
     return input.store.listAgents({
       tenant_id: input.context.tenant_id,
       agent_name: input.agent_name,
+      // People pick from this list, so the agents the host made for chat schedules stay out.
+      include_host_managed: false,
       limit: input.limit,
       page_token: input.page_token,
     });
@@ -49,6 +51,7 @@ export async function listAccessibleAgents<TTransaction>(input: {
     tenant_id: input.context.tenant_id,
     external_ids: access.agent_external_ids,
     agent_name: input.agent_name,
+    include_host_managed: false,
     limit: input.limit,
     page_token: input.page_token,
   });
@@ -72,10 +75,46 @@ export async function resolveManagedAgentIds<TTransaction>(input: {
     tenant_id: context.tenant_id,
     external_ids: access.agent_external_ids,
     agent_name: undefined,
+    include_host_managed: true,
     limit: undefined,
     page_token: undefined,
   });
   return data.map(agent => agent.id);
+}
+
+/**
+ * Every agent the caller may manage. Unlike {@link resolveManagedAgentIds}, an `all` list scope is
+ * resolved per agent (standalone and OIDC allow managing only agents the caller created), so the
+ * result is the caller's agents on those instances too.
+ */
+export async function listManageableAgents<TTransaction>(input: {
+  store: IAgentStore<TTransaction>;
+  context: RequestContext;
+  authorizer: Authorizer;
+}): Promise<AgentRecord[]> {
+  const { store, context, authorizer } = input;
+  const access = await authorizer.listAgentAccess({ context, action: 'manage' });
+  const agents: AgentRecord[] = [];
+  let pageToken: string | undefined;
+  for (;;) {
+    const page = await store.listAgents({
+      tenant_id: context.tenant_id,
+      ...(access.kind === 'agent_external_ids' ? { external_ids: access.agent_external_ids } : {}),
+      agent_name: undefined,
+      include_host_managed: true,
+      limit: 200,
+      page_token: pageToken,
+    });
+    for (const agent of page.data) {
+      if (await authorizer.canAccessAgent({ context, action: 'manage', agent })) {
+        agents.push(agent);
+      }
+    }
+    if (page.pagination.next_page_token === undefined) {
+      return agents;
+    }
+    pageToken = page.pagination.next_page_token;
+  }
 }
 
 /** Related rows are readable by their creator or a manager of the bound named agent. */

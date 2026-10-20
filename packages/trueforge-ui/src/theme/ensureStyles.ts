@@ -18,13 +18,13 @@ function ensureGoogleSans(): void {
 
 /**
  * Injects the published SDK stylesheet once into `document.head`, and loads
- * Google Sans for the default `trueforge` preset.
+ * Google Sans for the default `trueforge` preset unless `webFonts` is false.
  * No-ops when a host already loaded styles (same id) or when CSS was not
  * embedded (dev without a prior CSS build).
  */
-export function ensureStyles(css: string = EMBEDDED_STYLES): void {
+export function ensureStyles(css: string = EMBEDDED_STYLES, options: { webFonts?: boolean } = {}): void {
   if (typeof document === 'undefined') return;
-  ensureGoogleSans();
+  if (options.webFonts !== false) ensureGoogleSans();
   if (document.getElementById(TRUEFORGE_UI_STYLE_ID) != null) return;
   if (css.length === 0) return;
 

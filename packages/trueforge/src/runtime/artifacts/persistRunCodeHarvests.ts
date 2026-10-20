@@ -30,6 +30,19 @@ import { PERSISTED_ARTIFACT_MIME } from './persistTurnArtifacts';
  */
 export const RUN_CODE_ARTIFACT_PATH_PREFIX = 'run_code/';
 
+/** run_code's own result folders, as the model sees them inside the run. */
+const RUN_CODE_RESULT_DIR_RE = /^\/?(?:egress|scratch)\/([^/]+)$/;
+
+/**
+ * The stored `run_code/<name>` path for a file the reply names by its in-run location
+ * (`/egress/<name>` or `/scratch/<name>`), or undefined for any other path. Models often name
+ * the folder they wrote to instead of the `run_code/` path the tool description asks for.
+ */
+export function runCodeArtifactPathFor(path: string): string | undefined {
+  const name = RUN_CODE_RESULT_DIR_RE.exec(path)?.[1];
+  return name === undefined ? undefined : `${RUN_CODE_ARTIFACT_PATH_PREFIX}${name}`;
+}
+
 export interface PersistRunCodeHarvestsParams {
   store: ITurnArtifactStore;
   tenantId: string;

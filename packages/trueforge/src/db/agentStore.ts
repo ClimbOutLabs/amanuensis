@@ -19,6 +19,8 @@ export interface AgentRecord {
   description: string;
   manifest: AgentSpec;
   external_id: string | null;
+  /** The host made it to run a chat's schedules. People never pick it, so agent lists leave it out. */
+  host_managed: boolean;
   created_by_subject: CreatedBySubject;
   /** ISO-8601 UTC instant. */
   created_at: string;
@@ -43,6 +45,8 @@ export interface ListAgentsInput {
   external_ids?: readonly string[];
   /** Case-insensitive substring match on `name`. */
   agent_name: string | undefined;
+  /** False for lists a person sees; true where every agent counts (export, access scoping). */
+  include_host_managed: boolean;
   /** When undefined, return the full matching set (no SQL LIMIT). */
   limit: number | undefined;
   page_token: string | undefined;
@@ -65,11 +69,15 @@ export interface AgentExternalIdRow {
 }
 
 export interface CreateAgentInput {
+  /** Data import keeps an exported agent's id so its chats and schedules still point at it; omitted, a fresh ULID is minted. */
+  id?: string;
   tenant_id: string;
   name: ResourceName;
   description: string;
   manifest: AgentSpec;
   external_id: string | null;
+  /** Set only when the host makes a chat's schedule assistant; never from the public API. */
+  host_managed: boolean;
   created_by_subject: CreatedBySubject;
   custom?: Record<string, unknown>;
 }
@@ -130,7 +138,7 @@ export interface IAgentStore<TTransaction = never> {
     transaction?: TTransaction,
   ): Promise<readonly AgentExternalIdRow[]>;
   getAgent(input: GetAgentInput, transaction?: TTransaction): Promise<AgentRecord | undefined>;
-  /** Inserts a new agent with a generated ULID. Throws AgentNameConflictError or AgentExternalIdConflictError on unique clash. */
+  /** Inserts a new agent with the supplied id, or a generated ULID. Throws AgentNameConflictError or AgentExternalIdConflictError on unique clash. */
   createAgent(input: CreateAgentInput, transaction?: TTransaction): Promise<AgentRecord>;
   /** Patches `manifest`, `description`, and/or `external_id`. Throws AgentExternalIdConflictError on unique clash. Returns undefined if missing. */
   updateAgent(input: UpdateAgentInput, transaction?: TTransaction): Promise<AgentRecord | undefined>;

@@ -30,9 +30,11 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { heldCallAuditText } from '../permissions/audit';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
-import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
+import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -46,6 +48,12 @@ import {
   toolResultResponse,
 } from './IMCPServer';
 import { deniedToolCallText } from './ToolSet';
+
+/** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
+export interface ToolResultImage {
+  mime: string;
+  data: Buffer;
+}
 
 export interface ToolCallResult {
   message: LLMToolMessage;
@@ -75,6 +83,32 @@ export interface ToolCallResult {
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
   outputTransform?: ToolOutputTransform | undefined;
   admissionProvenance: ToolAdmissionProvenance;
+  /** Image blocks of the provider result, set aside for the host. */
+  images: readonly ToolResultImage[];
+}
+
+/** The base64 image blocks of an MCP result's content, decoded. Anything malformed is skipped. */
+function toolResultImages(content: unknown): ToolResultImage[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const blocks: unknown[] = content;
+  const images: ToolResultImage[] = [];
+  for (const block of blocks) {
+    if (
+      typeof block === 'object' &&
+      block !== null &&
+      'type' in block &&
+      block.type === 'image' &&
+      'data' in block &&
+      typeof block.data === 'string' &&
+      'mimeType' in block &&
+      typeof block.mimeType === 'string'
+    ) {
+      images.push({ mime: block.mimeType, data: Buffer.from(block.data, 'base64') });
+    }
+  }
+  return images;
 }
 
 export function shouldStopAfterMemoizedReplay(
@@ -520,27 +554,48 @@ async function verifySentinelPreDispatch(input: {
   // minted) against the underlying tool's name and inner input, not the wrapper
   // (see DeferredTool.toolCallInfo). When mint unwrapped, the verifier must hash
   // the same inner input, or every approved deferred call fails as "action
-  // identity changed". Wrapper-classified fallbacks keep
-  // original_tool_name === 'call_tool' and are verified against the wrapper.
+  // identity changed". The token covers neither the tool name nor the server, so
+  // the wire wrapper must still name exactly what was classified. Wrapper-classified
+  // fallbacks keep original_tool_name === 'call_tool' and are verified against the wrapper.
   if (info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME) {
-    canonicalParams = tryUnwrapCallToolInput(canonicalParams) ?? canonicalParams;
+    const wrapper = tryParseCallToolWrapper(canonicalParams);
+    if (wrapper !== undefined) {
+      if (wrapper.tool_name !== info.original_tool_name || wrapper.mcp_server !== info.mcp_server_name) {
+        return 'The deferred tool call no longer names the tool that was approved; request approval again.';
+      }
+      canonicalParams = wrapper.input;
+    }
   }
-  // When the mint site recorded its exact identity (sandbox: invoked name and
-  // normalized args, while original_tool_name is remapped for display), verify
-  // against the recorded values instead of reconstructing.
-  if (info.mint_canonical_params !== undefined) {
-    canonicalParams = info.mint_canonical_params;
-  }
+  // Host-observed state an approval also binds (a Gmail draft as shown on the card) cannot be re-derived
+  // from the wire alone, so the tool set re-reads it here from the wire arguments; the token check below
+  // then compares that whole re-derivation with what was approved.
+  let live: Record<string, unknown> | undefined;
   try {
-    const live = await input.toolInfo.toolSet.liveMintParams?.({
+    live = await input.toolInfo.toolSet.liveMintParams?.({
       name: input.toolInfo.originalToolName,
       arguments: wireArguments,
     });
-    if (live !== undefined) {
-      canonicalParams = live;
-    }
   } catch {
     return 'The approved action could not be re-checked; request approval again.';
+  }
+  if (live !== undefined) {
+    canonicalParams = live;
+  } else if (info.mint_canonical_params !== undefined) {
+    // Where mint recorded its exact identity (sandbox: invoked name and
+    // normalized args, while original_tool_name is remapped for display), the
+    // wire arguments are re-derived the way mint derived them and must equal what
+    // was approved. Verifying the recorded values alone would let arguments edited
+    // after classification run under the earlier decision.
+    const rederived = toJsonSafeParams(
+      input.toolInfo.toolSet.mintCanonicalParams?.({
+        name: input.toolInfo.originalToolName,
+        arguments: canonicalParams,
+      }) ?? canonicalParams,
+    );
+    if (JSON.stringify(canonicalValue(rederived)) !== JSON.stringify(canonicalValue(info.mint_canonical_params))) {
+      return 'Tool arguments changed since approval; request approval again.';
+    }
+    canonicalParams = rederived;
   }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
@@ -1127,8 +1182,8 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: 'Use a tool that is allowed in this conversation or change strategy.',
-              suggested_action: 'change_strategy',
+              message: preparationFailure.owner_message ?? 'Use a tool that is allowed in this conversation or change strategy.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
           : {
               reason_code: 'tool_pre_dispatch_failed',
@@ -1502,9 +1557,15 @@ export async function executeToolCalls({
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
+            ...(toolCall.tool_info.mint_canonical_params === undefined
+              ? {}
+              : { approved_params: toolCall.tool_info.mint_canonical_params }),
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
+            ...(toolCall.tool_info.git_remote_precondition === undefined
+              ? {}
+              : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
           },
         );
       };
@@ -1826,7 +1887,7 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        description: heldCallAuditText(info),
         outcome,
         auto_deny_reason: null,
       });
@@ -1867,6 +1928,7 @@ export async function executeToolCalls({
           content: 'Waiting for user to authenticate. Please try again 1 time.',
         },
         rawContent: 'Waiting for user to authenticate. Please try again 1 time.',
+        images: [],
         toolCallInfo: toolCall.tool_info,
         screen: undefined,
         failure: true,
@@ -1929,7 +1991,13 @@ export async function executeToolCalls({
         .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
         .map(c => c.text)
         .join('\n');
-      content = textContent || JSON.stringify(result.content);
+      // Image bytes go to the host, not into the model's text.
+      const otherBlocks = result.content.filter(c => c.type !== 'image');
+      content =
+        textContent ||
+        (otherBlocks.length === 0 && result.content.length > 0
+          ? `Returned ${String(result.content.length)} image(s).`
+          : JSON.stringify(otherBlocks));
     } else {
       content = JSON.stringify(result.content);
     }
@@ -1937,6 +2005,7 @@ export async function executeToolCalls({
     toolMessages.push({
       message: { role: 'tool', tool_call_id: toolCall.id, content },
       rawContent: content,
+      images: result.isError ? [] : toolResultImages(result.content),
       toolCallInfo: toolCall.tool_info,
       screen: undefined,
       failure: failure || result.isError === true,
