@@ -219,8 +219,16 @@ export function packageDownloadCardWhat(command: string): string | undefined {
  * cannot serve. Registry specs (names, versions, paths inside the project) never match.
  */
 const GIT_SPEC_PATTERNS: readonly RegExp[] = [
-  // pip, pyproject and Poetry style: git+https://, git+ssh://, git+git:// in a spec.
-  /git\+(?:https?|ssh|git):\/\//,
+  // pip, pyproject and Poetry style VCS specs: git+https://, hg+ssh://, svn+https:// in a spec.
+  // Schemes are matched in any case: pip reads GIT+HTTPS the same as git+https.
+  /(?:git|hg|svn|bzr)\+(?:https?|ssh|git|svn|hg):\/\//i,
+  // A bare git or ssh address written as the whole spec: git://github.com/org/repo.
+  /(?:^|\s)(?:git|ssh):\/\//i,
+  // An scp-style git address: git@github.com:org/repo.
+  /(?:^|\s)[^\s/@]+@[^\s/:]+:/,
+  // A PEP 508 direct reference to a web address (name @ https://...): pip fetches that address
+  // itself instead of asking the package index, so the mirrors would never see the download.
+  /@\s*[A-Za-z][A-Za-z0-9+.-]*:\/\//,
   // Cargo and Poetry: a dependency written with a git key.
   /\bgit\s*=\s*["'][^"']+["']/,
 ];
@@ -228,18 +236,42 @@ const GIT_SPEC_PATTERNS: readonly RegExp[] = [
 /** Whether one npm dependency spec names a git address rather than the registry. */
 function isGitSpec(spec: string): boolean {
   const value = spec.trim();
+  const lower = value.toLowerCase();
   return (
-    value.startsWith('git+') ||
-    value.startsWith('git://') ||
-    value.startsWith('github:') ||
-    value.startsWith('gitlab:') ||
-    value.startsWith('bitbucket:') ||
-    value.startsWith('gist:') ||
+    lower.startsWith('git+') ||
+    lower.startsWith('git://') ||
+    lower.startsWith('ssh://') ||
+    lower.startsWith('github:') ||
+    lower.startsWith('gitlab:') ||
+    lower.startsWith('bitbucket:') ||
+    lower.startsWith('gist:') ||
+    // An scp-style git address: git@github.com:org/repo.
+    /^[^\s/@]+@[^\s/:]+:/.test(value) ||
     // In dependency position, a URL on a git host is a clone address, never a registry download.
-    /^https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org)\//.test(value) ||
+    /^https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org)\//i.test(value) ||
     // user/repo shorthand.
     /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?$/.test(value)
   );
+}
+
+/**
+ * Git-address specs inside an overrides object, whose values may nest one package's spec under
+ * another package's entry. Returns the same "name: spec" shape as a plain dependency hit.
+ */
+function findGitSpecInOverrides(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  for (const [name, spec] of Object.entries(value)) {
+    if (typeof spec === 'string' && isGitSpec(spec)) {
+      return `${name}: ${spec}`;
+    }
+    const nested = findGitSpecInOverrides(spec);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
 }
 
 /** Git-address dependencies in package.json, read structurally so homepage and repository links never match. */
@@ -263,6 +295,20 @@ function findPackageJsonGitDependency(content: string): string | undefined {
       if (typeof spec === 'string' && isGitSpec(spec)) {
         return `${name}: ${spec}`;
       }
+    }
+  }
+  // npm overrides, yarn resolutions and pnpm overrides carry dependency specs too, and a git
+  // address hidden there would be fetched exactly like one in the plain dependency lists.
+  const overrideSources: unknown[] = [record['overrides'], record['resolutions']];
+  const pnpm = record['pnpm'];
+  if (typeof pnpm === 'object' && pnpm !== null) {
+    const pnpmRecord: Record<string, unknown> = { ...pnpm };
+    overrideSources.push(pnpmRecord['overrides']);
+  }
+  for (const source of overrideSources) {
+    const hit = findGitSpecInOverrides(source);
+    if (hit !== undefined) {
+      return hit;
     }
   }
   return undefined;

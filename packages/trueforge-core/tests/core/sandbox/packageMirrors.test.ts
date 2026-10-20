@@ -121,6 +121,64 @@ describe('findGitDependency', () => {
   it('survives a broken package.json', () => {
     expect(findGitDependency([{ name: 'package.json', content: '{not json' }])).toBeUndefined();
   });
+
+  it.each([
+    ['a bare ssh url', 'ssh://git@github.com/org/repo.git'],
+    ['an scp-style address', 'git@github.com:org/repo.git'],
+    ['a bare git protocol url', 'git://github.com/org/repo'],
+  ])('finds %s in package.json dependencies', (_name, spec) => {
+    const content = JSON.stringify({ dependencies: { a: spec } });
+    expect(findGitDependency([{ name: 'package.json', content }])?.file).toBe('package.json');
+  });
+
+  it('finds a git spec in package.json overrides', () => {
+    const content = JSON.stringify({
+      dependencies: { a: '1.0.0' },
+      overrides: { b: 'git+https://github.com/org/repo' },
+    });
+    expect(findGitDependency([{ name: 'package.json', content }])?.file).toBe('package.json');
+  });
+
+  it('finds a git spec nested inside package.json overrides', () => {
+    const content = JSON.stringify({
+      overrides: { a: { b: 'git@github.com:org/repo.git' } },
+    });
+    expect(findGitDependency([{ name: 'package.json', content }])?.file).toBe('package.json');
+  });
+
+  it('finds a git spec in pnpm overrides and in resolutions', () => {
+    const pnpmContent = JSON.stringify({ pnpm: { overrides: { b: 'ssh://git@github.com/org/repo.git' } } });
+    expect(findGitDependency([{ name: 'package.json', content: pnpmContent }])?.file).toBe('package.json');
+    const resolutionsContent = JSON.stringify({ resolutions: { b: 'git+ssh://git@github.com/org/repo.git' } });
+    expect(findGitDependency([{ name: 'package.json', content: resolutionsContent }])?.file).toBe('package.json');
+  });
+
+  it('ignores registry specs in package.json overrides', () => {
+    const content = JSON.stringify({
+      overrides: { b: '^2.0.0', c: { d: 'npm:other@1.0.0' } },
+      pnpm: { overrides: { e: '3.0.0' } },
+      resolutions: { f: '1.0.0' },
+    });
+    expect(findGitDependency([{ name: 'package.json', content }])).toBeUndefined();
+  });
+
+  it.each([
+    ['an uppercase scheme', 'GIT+HTTPS://github.com/org/repo'],
+    ['an hg vcs line', 'hg+https://bitbucket.org/org/repo'],
+    ['an svn vcs line', 'svn+https://example.net/org/repo'],
+    ['a bzr vcs line', 'bzr+https://example.net/org/repo'],
+    ['a bare git protocol line', 'git://github.com/org/repo'],
+    ['a direct reference to a github archive', 'pkg @ https://github.com/org/repo/archive/main.zip'],
+    ['a direct reference to a wheel on the package site', 'pkg @ https://files.pythonhosted.org/x.whl'],
+  ])('finds %s in requirements.txt', (_name, line) => {
+    expect(findGitDependency([{ name: 'requirements.txt', content: line }])?.file).toBe('requirements.txt');
+  });
+
+  it('ignores a direct reference to a file inside the project', () => {
+    expect(
+      findGitDependency([{ name: 'requirements.txt', content: 'pkg @ file:./wheels/pkg-1.0-py3-none-any.whl' }]),
+    ).toBeUndefined();
+  });
 });
 
 describe('PACKAGE_GIT_DEPENDENCY_MESSAGE', () => {
