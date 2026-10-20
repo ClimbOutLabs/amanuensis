@@ -24,6 +24,8 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 export type PersonalInstanceName = 'personal' | 'personal-with-google';
 
 const MODEL_NAME = 'personal/model';
+/** Never sent anywhere: stands in for a credential field the report does not read. */
+const STAND_IN = 'stand-in';
 const WEB_SEARCH_SERVER = 'web-search';
 const WEB_SEARCH_URL = 'https://mcp.tavily.com/mcp/';
 const TENANT_ID = 'prompt-report';
@@ -92,9 +94,9 @@ function connectedGoogleStore(): GoogleConnectionStore {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     client_id: 'prompt-report-client',
-    client_secret: 'prompt-report-secret',
+    client_secret: STAND_IN,
     client_type: 'web',
-    refresh_token: 'prompt-report-refresh',
+    refresh_token: STAND_IN,
     granted_scopes: GOOGLE_SCOPES,
     account_email: null,
     status: 'connected',
