@@ -116,6 +116,7 @@ import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import {
   SKILL_COPY_FAILED_REASON,
   skillCopyFailedNotice,
+  type SkillCopyCause,
   type SkillCopyFailure,
   type StagedSkill,
 } from './skills/slotSkillCopy';
@@ -291,6 +292,23 @@ export interface SandboxOptions {
    * is preserved.
    */
   sentinel?: SentinelHostContext | undefined;
+}
+
+/**
+ * Adds setup notices to a tool result's structured `notices` field. A JSON object keeps its own fields;
+ * other text is kept as the response's result.
+ */
+function withNoticesField(input: { text: string; notices: readonly string[] }): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(input.text);
+  } catch {
+    value = undefined;
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return JSON.stringify({ ...value, notices: input.notices });
+  }
+  return JSON.stringify({ response: { result: input.text }, notices: input.notices });
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
@@ -2913,10 +2931,15 @@ export class Sandbox extends LocalToolMCP {
     if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
       return response;
     }
-    const notices: TextContentPart[] = this.takeSkillNotices().map(text => ({ type: 'text', text }));
+    const notices = this.takeSkillNotices();
+    const [first, ...rest] = response.result.content;
+    const head: TextContentPart =
+      first?.type === 'text'
+        ? { type: 'text', text: withNoticesField({ text: first.text, notices }) }
+        : { type: 'text', text: JSON.stringify({ notices }) };
     return {
       ...response,
-      result: { ...response.result, content: [...response.result.content, ...notices] },
+      result: { ...response.result, content: [head, ...(first?.type === 'text' ? rest : response.result.content)] },
     };
   }
 
@@ -3611,42 +3634,49 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH.
-   * Every host-authored exec goes through here; only sandboxPathExec may reach the sandbox PATH.
+   * Uploads one staged skill and runs its move step. Returns the cause when the skill does not land;
+   * only an abort is rethrown.
    */
-  /** Uploads one skill's files and runs its move step. False when that step fails; only a provider failure throws. */
   private async stageOfflineSkill(input: {
     sandboxId: string;
     staged: StagedSkill;
     signal: AbortSignal | undefined;
-  }): Promise<boolean> {
+  }): Promise<SkillCopyCause | undefined> {
     const { sandboxId, staged, signal } = input;
-    for (const upload of staged.uploads) {
+    try {
       await this.provider.uploadFile({
         sandboxId,
-        remotePath: upload.remotePath,
-        content: upload.content,
+        remotePath: staged.archive.remotePath,
+        content: staged.archive.content,
         ...(signal === undefined ? {} : { signal }),
       });
+      const result = await awaitWithAbort({
+        operation: this.hostExec({
+          sandboxId,
+          command: staged.command,
+          ...(signal === undefined ? {} : { signal }),
+        }),
+        signal,
+      });
+      if (!result.success || result.response.exitCode !== 0) {
+        this.logger.warn('Skill could not be put in place in the sandbox', { skill: staged.name });
+        return 'damaged';
+      }
+      return undefined;
+    } catch (error) {
+      throwIfSignalAborted(signal);
+      this.logger.warn('Skill could not be copied into the sandbox', {
+        skill: staged.name,
+        ...extractErrorLogFields(error),
+      });
+      return 'damaged';
     }
-    const result = await awaitWithAbort({
-      operation: this.hostExec({
-        sandboxId,
-        command: staged.command,
-        ...(signal === undefined ? {} : { signal }),
-      }),
-      signal,
-    });
-    if (!result.success) {
-      throw new Error(result.error);
-    }
-    if (result.response.exitCode !== 0) {
-      this.logger.warn('Skill could not be put in place in the sandbox', { skill: staged.name });
-      return false;
-    }
-    return true;
   }
 
+  /**
+   * Runs a command the host wrote, on the trusted PATH rather than the workspace-led sandbox PATH.
+   * Every host-authored exec goes through here; only sandboxPathExec may reach the sandbox PATH.
+   */
   private hostExec(params: SandboxExecParams): Promise<ExecResult> {
     return this.provider.exec({ ...params, command: withTrustedPath(params.command) });
   }
@@ -6369,14 +6399,17 @@ export class Sandbox extends LocalToolMCP {
     } else {
       // Each skill is staged and moved into place by its own step; only the ones that land are handed
       // to the downloader, so a bad skill cannot fail the start for the others.
-      const plan = await this.skillMounter?.planOfflineSkills({ skillsDir }, { signal });
+      const archiveDir =
+        this.provider.getDocumentSnapshotDir?.(sandboxId) ?? this.provider.getFileUploadsDir(sandboxId);
+      const plan = await this.skillMounter?.planOfflineSkills({ skillsDir, archiveDir }, { signal });
       const failed = new Map<string, SkillCopyFailure>(plan?.failed ?? []);
       const accepted: StagedSkill[] = [];
       for (const staged of plan?.staged ?? []) {
-        if (await this.stageOfflineSkill({ sandboxId, staged, signal })) {
+        const cause = await this.stageOfflineSkill({ sandboxId, staged, signal });
+        if (cause === undefined) {
           accepted.push(staged);
         } else {
-          failed.set(staged.name, { cause: 'damaged' });
+          failed.set(staged.name, { cause });
         }
       }
       skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);

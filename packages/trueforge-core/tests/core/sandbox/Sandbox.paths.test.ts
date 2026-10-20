@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
@@ -4106,8 +4106,14 @@ function runGuestCommand(input: { command: string; cwd: string; env: Record<stri
  * A slot-like provider: its commands and files are real, under `root`. Like the slot agent, it refuses
  * every env name except TFY_SKILLS_DIR at the skills directory.
  */
-function slotLikeProvider(input: { root: string; skillsDir: string; execCalls: SandboxExecParams[] }): SandboxProvider {
-  const { root, skillsDir, execCalls } = input;
+function slotLikeProvider(input: {
+  root: string;
+  skillsDir: string;
+  execCalls: SandboxExecParams[];
+  refuseUpload?: ((remotePath: string) => boolean) | undefined;
+}): SandboxProvider {
+  const { root, skillsDir, execCalls, refuseUpload } = input;
+  const transferDir = join(root, 'transfer');
   return makeProvider({
     network: 'none',
     exec: (params): Promise<ExecResult> => {
@@ -4120,16 +4126,36 @@ function slotLikeProvider(input: { root: string; skillsDir: string; execCalls: S
       return runGuestCommand({ command: params.command, cwd: root, env });
     },
     getWorkspaceDir: () => join(root, 'workspace'),
+    getDocumentSnapshotDir: () => transferDir,
     getToolResultDumpDir: () => join(root, 'tool-results'),
     getFileUploadsDir: () => join(root, 'uploads'),
     getGitCredentialsPath: () => join(root, '.git-credentials'),
     getSkillsDir: () => skillsDir,
     getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
     uploadFile: async ({ remotePath, content }) => {
+      if (refuseUpload?.(remotePath) === true) {
+        throw new Error('upload refused');
+      }
+      // Like the slot agent: one write is capped at 25 MB, except in the transfer folder (128 MB).
+      const limit = remotePath.startsWith(`${transferDir}/`) ? 128 * 1024 * 1024 : 25 * 1024 * 1024;
+      if (content.byteLength > limit) {
+        throw new Error('file is too large');
+      }
       await mkdir(dirname(remotePath), { recursive: true });
       await writeFile(remotePath, content);
     },
   });
+}
+
+/** A registry skill tarball holding one SKILL.md and a file of `bytes` bytes, built with the host's tar. */
+function bigSkillArchive(input: { root: string; name: string; bytes: number }): Buffer {
+  const { root, name, bytes } = input;
+  const source = mkdtempSync(join(root, `${name}-src-`));
+  writeFileSync(join(source, 'SKILL.md'), `# ${name}\n`);
+  writeFileSync(join(source, 'big.bin'), randomBytes(bytes));
+  const archive = join(root, `${name}.tar`);
+  execFileSync('/usr/bin/tar', ['-cf', archive, '-C', source, '.']);
+  return readFileSync(archive);
 }
 
 /** A registry skill tarball holding one SKILL.md, built with the host's tar. */
@@ -4290,7 +4316,7 @@ describe('Sandbox skills without a network', () => {
       }
       expect(JSON.parse(response.result.content[0].text)).toMatchObject({
         notices: [
-          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.",
+          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
         ],
       });
     } finally {
@@ -4333,7 +4359,7 @@ describe('Sandbox skills without a network', () => {
         }
         expect(JSON.parse(response.result.content[0].text)).toMatchObject({
           notices: [
-            "The skill bad couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.",
+            "The skill bad couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills.",
           ],
         });
       } finally {
@@ -4365,13 +4391,89 @@ describe('Sandbox skills without a network', () => {
       if (!isCallToolResponseResult(response)) {
         throw new Error('Expected a result');
       }
-      expect(response.result.content.map(part => (part.type === 'text' ? part.text : ''))).toContain(
-        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.",
-      );
+      if (response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+        ],
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('a skill whose upload is refused leaves only itself out; the other skill still works', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([
+        ['/refused.tar', skillArchive({ root, name: 'refused' })],
+        ['/good.tar', skillArchive({ root, name: 'good' })],
+      ]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({
+        root,
+        skillsDir,
+        execCalls,
+        refuseUpload: remotePath => remotePath.endsWith('.tfy-skill-refused.tar'),
+      });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [
+            registrySkill({ name: 'refused', presignedUrl: archives.urlFor('/refused.tar') }),
+            registrySkill({ name: 'good', presignedUrl: archives.urlFor('/good.tar') }),
+          ],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'good', 'SKILL.md'), 'utf-8')).toBe('# good\n');
+      expect(existsSync(join(skillsDir, 'refused'))).toBe(false);
+      expect(existsSync(join(skillsDir, '.tfy-staging'))).toBe(false);
+      if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+        throw new Error('Expected a text result');
+      }
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        notices: [
+          "The skill refused couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills.",
+        ],
+      });
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a no-network sandbox with a 30 MB skill, carried through the transfer folder', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(
+      new Map([['/big.tar', bigSkillArchive({ root, name: 'big', bytes: 30 * 1024 * 1024 })]]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({
+          skills: [registrySkill({ name: 'big', presignedUrl: archives.urlFor('/big.tar') })],
+        }),
+      });
+
+      const response = await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBeFalsy();
+      expect(readFileSync(join(skillsDir, 'big', 'big.bin')).byteLength).toBe(30 * 1024 * 1024);
+      expect(existsSync(join(skillsDir, '.tfy-staging'))).toBe(false);
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('starts a no-network sandbox for an assistant with no skills and sends no skill env', async () => {
     const execCalls: SandboxExecParams[] = [];

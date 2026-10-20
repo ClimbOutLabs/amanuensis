@@ -6,14 +6,14 @@ import { shellEscape } from '../provider/Provider';
 import { execFileRunner, type HostCommandRunner } from '../slots/git/hostCommand';
 import type { GitSkill, Skill } from './SkillMounter';
 
-// A sandbox with no network cannot fetch skills, so the host fetches and checks them, then copies
-// each one into the sandbox on its own. Each skill is staged in its own folder and moved into place
-// by its own step, so a skill that fails leaves only itself out.
+// A sandbox with no network cannot fetch skills, so the host fetches and checks them. Each skill
+// becomes one tar archive, uploaded to the sandbox's transfer folder and unpacked by its own step.
+// A skill that fails leaves only itself out.
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const GIT_TIMEOUT_MS = 300_000;
 const ARCHIVE_LIST_TIMEOUT_MS = 60_000;
-// Same caps the in-sandbox downloader applies, so a skill cannot be bigger here than there.
+// Same cap the in-sandbox downloader applies. It also fits the sandbox's transfer folder (128 MB).
 const MAX_SKILL_BYTES = 100 * 1024 * 1024;
 const MAX_SKILL_FILES = 2_000;
 const MAX_TOOL_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -36,7 +36,10 @@ export class SkillMissingVersionError extends Error {}
 /** The skill is bigger than the size cap. */
 export class SkillTooLargeError extends Error {}
 
-export type SkillCopyCause = 'download' | 'missing_version' | 'too_large' | 'damaged';
+/** The skill has no files to load: an empty archive, an empty folder, or a missing folder. */
+export class SkillNoFilesError extends Error {}
+
+export type SkillCopyCause = 'download' | 'missing_version' | 'too_large' | 'damaged' | 'no_files';
 
 export interface SkillCopyFailure {
   cause: SkillCopyCause;
@@ -46,13 +49,15 @@ export interface SkillCopyFailure {
 export function skillCopyFailedNotice(input: { name: string; cause: SkillCopyCause }): string {
   switch (input.cause) {
     case 'download':
-      return `The skill ${input.name} couldn't be downloaded, so Aman is working without it. Check your internet connection, then start a new chat.`;
+      return `The skill ${input.name} couldn't be downloaded, so Aman is working without it. Check your internet connection.`;
     case 'missing_version':
-      return `The skill ${input.name} couldn't be loaded because the version you picked wasn't found, so Aman is working without it. Pick another version of the skill, then start a new chat.`;
+      return `The skill ${input.name} couldn't be loaded because the version you picked wasn't found, so Aman is working without it. Pick another version.`;
     case 'too_large':
-      return `The skill ${input.name} is larger than 100 MB, so Aman is working without it. Remove some files from it, then start a new chat.`;
+      return `The skill ${input.name} is larger than 100 MB, so Aman is working without it. Make it smaller.`;
     case 'damaged':
-      return `The skill ${input.name} couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills or try a different version.`;
+      return `The skill ${input.name} couldn't be loaded because its files are damaged, so Aman is working without it. Remove it from your skills.`;
+    case 'no_files':
+      return `The skill ${input.name} has no files to load, so Aman is working without it. Add its files to the skill.`;
     default: {
       const unreachable: never = input.cause;
       throw new Error(`unexpected skill copy cause: ${String(unreachable)}`);
@@ -73,9 +78,9 @@ export interface StagedSkill {
   skill: Skill;
   /** The commit a git skill was fetched at; null for registry skills. */
   objectId: string | null;
-  /** Files to upload into the skill's staging folder before its command runs. */
-  uploads: readonly SandboxInitUpload[];
-  /** The one step that moves the staged skill into place. Its failure removes only this skill's staging. */
+  /** The skill's tar archive, uploaded to the sandbox's transfer folder. */
+  archive: SandboxInitUpload;
+  /** The one step that unpacks and moves the skill into place. Its failure removes only this skill. */
   command: string;
 }
 
@@ -162,7 +167,8 @@ function isInside(input: { path: string; root: string }): boolean {
 
 /**
  * Rejects an archive that is not a tar, holds a link or special file, or has a path that leaves the
- * skill folder. The archive is listed, never extracted, on the host.
+ * skill folder. An archive with no files is reported as having no files. The archive is listed,
+ * never extracted, on the host.
  */
 async function assertSafeArchive(input: {
   archive: Buffer;
@@ -207,29 +213,35 @@ async function assertSafeArchive(input: {
         throw new Error('archive path leaves the skill folder');
       }
     }
+    if (!details.some(line => line.startsWith('-'))) {
+      throw new SkillNoFilesError('archive has no files');
+    }
   } finally {
     await rm(work, { recursive: true, force: true });
   }
 }
 
-interface SkillFile {
-  relPath: string;
-  content: Buffer;
-}
-
 /**
- * Every regular file under the skill folder. The folder and each file must resolve to a real path
- * inside the checkout. Any link inside the skill fails the whole skill, so none is followed.
+ * Checks the skill folder: every entry resolves inside the checkout, no link is followed, and there
+ * is at least one file. Any link inside the skill fails the whole skill.
  */
-async function readSkillFiles(input: { skillDir: string; repo: string; expectedDir: string }): Promise<SkillFile[]> {
+async function checkSkillFolder(input: { skillDir: string; repo: string; expectedDir: string }): Promise<void> {
   const repoReal = await realpath(input.repo);
-  const dirReal = await realpath(input.skillDir);
+  let dirReal: string;
+  try {
+    dirReal = await realpath(input.skillDir);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      throw new SkillNoFilesError('skill folder is missing', { cause: error });
+    }
+    throw error;
+  }
   if (dirReal !== input.expectedDir || !isInside({ path: dirReal, root: repoReal })) {
     throw new Error('skill folder is a link or leaves the repository');
   }
-  const files: SkillFile[] = [];
+  let count = 0;
   let bytes = 0;
-  const walk = async (dir: string, prefix: string): Promise<void> => {
+  const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.name === '.git') {
         continue;
@@ -237,10 +249,9 @@ async function readSkillFiles(input: { skillDir: string; repo: string; expectedD
       if (entry.isSymbolicLink()) {
         throw new Error('skill contains a link');
       }
-      const relPath = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        await walk(path, relPath);
+        await walk(path);
         continue;
       }
       if (!entry.isFile()) {
@@ -250,16 +261,17 @@ async function readSkillFiles(input: { skillDir: string; repo: string; expectedD
       if (!isInside({ path: real, root: repoReal })) {
         throw new Error('skill file leaves the repository');
       }
-      const content = await readFile(real);
-      bytes += content.byteLength;
-      if (bytes > MAX_SKILL_BYTES || files.length >= MAX_SKILL_FILES) {
+      count += 1;
+      bytes += (await readFile(real)).byteLength;
+      if (bytes > MAX_SKILL_BYTES || count > MAX_SKILL_FILES) {
         throw new SkillTooLargeError('skill is too large');
       }
-      files.push({ relPath, content });
     }
   };
-  await walk(dirReal, '');
-  return files;
+  await walk(dirReal);
+  if (count === 0) {
+    throw new SkillNoFilesError('skill folder has no files');
+  }
 }
 
 function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string {
@@ -275,11 +287,12 @@ function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string 
   throw new SkillMissingVersionError('ref not found in the repository');
 }
 
+/** Sparse-clones the skill folder at a pinned commit, checks it, and packs it into a tar archive. */
 async function fetchGitSkill(input: {
   skill: GitSkill;
   host: HostCommandRunner;
   signal: AbortSignal;
-}): Promise<{ objectId: string; files: SkillFile[] }> {
+}): Promise<{ objectId: string; archive: Buffer }> {
   const { skill, host, signal } = input;
   if (!isSafeSubdir(skill.path) || !isSafeRef(skill.ref) || skill.url.startsWith('-')) {
     throw new Error('git skill has an unsafe url, ref or path');
@@ -323,12 +336,25 @@ async function fetchGitSkill(input: {
     await run(['-C', repo, 'checkout', '-q', 'FETCH_HEAD'], work);
     const repoReal = await realpath(repo);
     const expectedDir = skill.path === '' ? repoReal : join(repoReal, skill.path);
-    const files = await readSkillFiles({ skillDir: join(repo, skill.path), repo, expectedDir });
-    if (files.length === 0) {
-      // A folder with only a submodule, or nothing tracked, has no skill in it to load.
-      throw new Error('skill has no files');
+    await checkSkillFolder({ skillDir: join(repo, skill.path), repo, expectedDir });
+    const tarPath = join(work, 'skill.tar');
+    const packed = await host.run({
+      argv: [TAR_BINARY, '--exclude=.git', '-cf', tarPath, '-C', expectedDir, '.'],
+      env: HOST_PATH_ENV,
+      cwd: work,
+      timeoutMs: GIT_TIMEOUT_MS,
+      signal,
+      maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
+      limits: HOST_TOOL_LIMITS,
+    });
+    if (packed.exitCode !== 0) {
+      throw new Error('skill folder could not be packed');
     }
-    return { objectId, files };
+    const archive = await readFile(tarPath);
+    if (archive.byteLength > MAX_SKILL_BYTES) {
+      throw new SkillTooLargeError('skill archive is too large');
+    }
+    return { objectId, archive };
   } finally {
     await rm(work, { recursive: true, force: true });
   }
@@ -341,9 +367,10 @@ async function fetchGitSkill(input: {
 export async function copySkillsIntoSandbox(input: {
   skills: readonly Skill[];
   skillsDir: string;
+  archiveDir: string;
   deps: SkillCopyDeps;
 }): Promise<SkillCopyResult> {
-  const { skillsDir, deps } = input;
+  const { skillsDir, archiveDir, deps } = input;
   const signal = deps.signal ?? new AbortController().signal;
   const fetchArchive =
     deps.fetchArchive ?? ((url: string, abort: AbortSignal) => fetchRegistryArchive({ url, signal: abort }));
@@ -356,7 +383,7 @@ export async function copySkillsIntoSandbox(input: {
       if (!isSafeSkillName(skill.name)) {
         throw new Error('unsafe skill name');
       }
-      const paths = stagingPaths({ skillsDir, name: skill.name });
+      const paths = stagingPaths({ skillsDir, archiveDir, name: skill.name });
       if (skill.type === 'registry') {
         const archive = await fetchArchive(skill.presignedUrl, signal);
         await assertSafeArchive({ archive, host, signal });
@@ -364,8 +391,8 @@ export async function copySkillsIntoSandbox(input: {
           name: skill.name,
           skill,
           objectId: null,
-          uploads: [{ remotePath: paths.archive, content: archive }],
-          command: registryStageCommand(paths),
+          archive: { remotePath: paths.archive, content: archive },
+          command: stageCommand(paths),
         });
         continue;
       }
@@ -374,11 +401,8 @@ export async function copySkillsIntoSandbox(input: {
         name: skill.name,
         skill,
         objectId: fetched.objectId,
-        uploads: fetched.files.map(file => ({
-          remotePath: posix.join(paths.stage, file.relPath),
-          content: file.content,
-        })),
-        command: gitStageCommand(paths),
+        archive: { remotePath: paths.archive, content: fetched.archive },
+        command: stageCommand(paths),
       });
     } catch (error) {
       if (signal.aborted) {
@@ -400,33 +424,40 @@ function causeOf(error: unknown): SkillCopyCause {
   if (error instanceof SkillTooLargeError) {
     return 'too_large';
   }
+  if (error instanceof SkillNoFilesError) {
+    return 'no_files';
+  }
   return 'damaged';
 }
 
 interface StagingPaths {
   /** Where the skill lives once it is in place. */
   dir: string;
-  /** Where the skill's files are staged until the move. */
+  /** The skill's own folder in the sandbox's staging area, until the move. */
   stage: string;
-  /** Where a registry tarball is uploaded before it is unpacked into the staging folder. */
+  /** The skill's tar archive, in the transfer folder. */
   archive: string;
+  /** The staging area itself, removed once it is empty. */
+  staging: string;
 }
 
-function stagingPaths(input: { skillsDir: string; name: string }): StagingPaths {
+function stagingPaths(input: { skillsDir: string; archiveDir: string; name: string }): StagingPaths {
   const staging = posix.join(input.skillsDir, STAGING_DIR_NAME);
   return {
     dir: posix.join(input.skillsDir, input.name),
     stage: posix.join(staging, input.name),
-    archive: posix.join(staging, `${input.name}.tar`),
+    archive: posix.join(input.archiveDir, `.tfy-skill-${input.name}.tar`),
+    staging,
   };
 }
 
-// Unpacks into the staging folder and moves it into place. Any failure removes this skill's staging
-// and returns non-zero, so the sandbox's init carries on without this skill.
-function registryStageCommand(paths: StagingPaths): string {
+// Unpacks into the skill's staging folder and moves it into place. A failure removes this skill's
+// staging and archive and exits non-zero, so the sandbox's init carries on without this skill.
+function stageCommand(paths: StagingPaths): string {
   const dir = shellEscape(paths.dir);
   const stage = shellEscape(paths.stage);
   const archive = shellEscape(paths.archive);
+  const staging = shellEscape(paths.staging);
   return [
     '(',
     [
@@ -437,12 +468,6 @@ function registryStageCommand(paths: StagingPaths): string {
       `rm -rf -- ${dir}`,
       `mv -- ${stage} ${dir}`,
     ].join(' && '),
-    `) || { rm -rf -- ${stage} ${archive}; false; }`,
+    `) && { rmdir -- ${staging} 2>/dev/null || true; } || { rm -rf -- ${stage} ${archive}; rmdir -- ${staging} 2>/dev/null || true; false; }`,
   ].join(' ');
-}
-
-function gitStageCommand(paths: StagingPaths): string {
-  const dir = shellEscape(paths.dir);
-  const stage = shellEscape(paths.stage);
-  return `( rm -rf -- ${dir} && mv -- ${stage} ${dir} ) || { rm -rf -- ${stage}; false; }`;
 }

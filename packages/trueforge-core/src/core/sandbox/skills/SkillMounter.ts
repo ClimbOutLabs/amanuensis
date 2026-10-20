@@ -201,8 +201,16 @@ export class SkillMounter implements ISkillMounter {
   }
 
   /** Fetches and checks each skill on the host, before anything is sent to a sandbox with no network. */
-  planOfflineSkills(paths: { skillsDir: string }, deps: SkillCopyDeps = {}): Promise<SkillCopyResult> {
-    return copySkillsIntoSandbox({ skills: this.skills, skillsDir: paths.skillsDir, deps });
+  planOfflineSkills(
+    paths: { skillsDir: string; archiveDir: string },
+    deps: SkillCopyDeps = {},
+  ): Promise<SkillCopyResult> {
+    return copySkillsIntoSandbox({
+      skills: this.skills,
+      skillsDir: paths.skillsDir,
+      archiveDir: paths.archiveDir,
+      deps,
+    });
   }
 
   /**

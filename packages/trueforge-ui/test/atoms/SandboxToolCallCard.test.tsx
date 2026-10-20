@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SandboxToolCallCard } from '@/atoms/SandboxToolCallCard.js';
+import { parseSandboxResult } from '@/utils/toolCallParsing.js';
 
 vi.mock('@/atoms/MonacoEditorCore.js', () => ({
   MonacoEditorCore: ({ value, options }: { value: string; options?: Record<string, unknown> }) => (
@@ -126,5 +127,23 @@ describe('SandboxToolCallCard', () => {
       "The skill echo couldn't be loaded, so Aman is working without it.",
     );
     expect(screen.queryByText('ok')).not.toBeInTheDocument();
+  });
+  it('shows a setup notice from the real result parser on a collapsed card', () => {
+    const notice =
+      "The skill echo couldn't be downloaded, so Aman is working without it. Check your internet connection.";
+    const parsed = parseSandboxResult(JSON.stringify({ response: { result: 'written' }, notices: [notice] }));
+    render(
+      <SandboxToolCallCard
+        name="write_file"
+        status="success"
+        expanded={false}
+        onToggle={vi.fn()}
+        hasContent
+        resultText={parsed.resultText}
+        notices={parsed.notices}
+      />,
+    );
+
+    expect(screen.getByTestId('sandbox-notices')).toHaveTextContent(notice);
   });
 });

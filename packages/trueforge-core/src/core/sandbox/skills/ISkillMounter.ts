@@ -12,7 +12,7 @@ export interface ISkillMounter {
   // The command (+ env, timeout) that installs these skills; Sandbox folds it into its init exec.
   getSandboxInit(paths: { skillsDir: string; skillDownloaderPath: string }): SandboxInit;
   // The sandbox-without-network path: the host fetches and checks each skill first, then the init covers only the staged ones.
-  planOfflineSkills(paths: { skillsDir: string }, deps?: SkillCopyDeps): Promise<SkillCopyResult>;
+  planOfflineSkills(paths: { skillsDir: string; archiveDir: string }, deps?: SkillCopyDeps): Promise<SkillCopyResult>;
   offlineSkillsInit(
     paths: { skillsDir: string; skillDownloaderPath: string },
     accepted: readonly StagedSkill[],
