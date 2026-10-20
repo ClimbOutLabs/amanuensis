@@ -205,3 +205,36 @@ describe('demo instance and connector mail', () => {
     });
   });
 });
+
+/** Names that start like a read but also name another service or a write. Main auto-denies each one. */
+const READS_NAMING_OTHER_ACTIONS = [
+  'list_messages_and_archive',
+  'list_and_pay_invoice',
+  'get_and_transfer_funds',
+  'getMessagesAndArchive',
+  'search-and-share-message',
+  'fetch-and-notify',
+];
+
+describe('connector reads that name another action keep main decision', () => {
+  // Expected values are main's: checked against origin/main's classifier before this change.
+  it.each(READS_NAMING_OTHER_ACTIONS)('%s is auto-denied as on main', async name => {
+    expect(await classifyTier(mailCall(name, { message_id: 'm1' }), makeCtx())).toMatchObject({
+      tier: 3,
+      auto_deny: 'destination_unverifiable',
+      reason: 'auto_denied',
+      card: null,
+    });
+  });
+
+  it.each(READS_NAMING_OTHER_ACTIONS)('%s is auto-denied as on main in a demo instance', async name => {
+    expect(
+      await classifyTier(mailCall(name, { message_id: 'm1' }), makeCtx(servicesFor({ demo: true }))),
+    ).toMatchObject({
+      tier: 3,
+      auto_deny: 'destination_unverifiable',
+      reason: 'auto_denied',
+      card: null,
+    });
+  });
+});

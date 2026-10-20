@@ -545,7 +545,40 @@ const CONNECTOR_WRITE_WORDS = [
   'upload',
   'invite',
   'schedule',
+  'archive',
+  'trash',
+  'label',
+  'star',
+  'snooze',
+  'unsubscribe',
+  'approve',
+  'accept',
+  'decline',
+  'cancel',
+  'submit',
+  'add',
+  'insert',
+  'edit',
+  'modify',
+  'rename',
+  'copy',
+  'sync',
+  'import',
+  'export',
+  'run',
+  'execute',
+  'apply',
+  'block',
+  'report',
+  'mute',
+  'pin',
+  'assign',
+  'close',
+  'merge',
+  'reopen',
 ];
+/** The external-service fragments a connector read may carry: reading mail or messages is not a send. */
+const CONNECTOR_READ_FRAGMENTS = new Set(['mail', 'email', 'message']);
 
 /**
  * Connector actions that are not external-service by name but still send data out. They only
@@ -737,8 +770,14 @@ function isConnectorRead({
   words: string;
   params: Record<string, unknown>;
 }): boolean {
+  const lowerName = tool_name.toLowerCase();
+  // Any other external-service fragment (pay, transfer, share, ...) keeps the call a send, as on main.
+  const namesOtherService = EXTERNAL_SERVICE_FRAGMENTS.some(
+    fragment => !CONNECTOR_READ_FRAGMENTS.has(fragment) && lowerName.includes(fragment),
+  );
   return (
     CONNECTOR_READ_VERBS.some(verb => words.startsWith(`_${verb}_`)) &&
+    !namesOtherService &&
     !hasPhrase(words, ...CONNECTOR_WRITE_WORDS) &&
     nestedRecipientValues(params).length === 0 &&
     hiddenSendKind({ tool_name, words, params }) === null
