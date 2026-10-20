@@ -99,6 +99,8 @@ test_list() {
   assert_contains "$OUT" "running"
   assert_contains "$OUT" "8792"
   assert_contains "$OUT" "second@example.invalid"
+  assert_contains "$OUT" "PERSON"
+  assert_not_contains "$OUT" "OWNER"
   rm -f "$SB_STATE/up/aman-second"
   run_install instance list
   assert_contains "$OUT" "stopped"
@@ -403,6 +405,7 @@ Name for this instance:=>main
 Name for this instance:=>Bad_Name
 Name for this instance:=>work
 Your email=>work@example.invalid
+What should Aman call you?=>
 Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
 Enter password again=>$SENTINEL_PASSWORD" instance add
   assert_eq "$RC" 0

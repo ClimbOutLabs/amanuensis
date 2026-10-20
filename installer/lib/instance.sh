@@ -397,6 +397,11 @@ instance_collect() {
   fi
   ask_valid I_EMAIL "Your email, used to sign in" "" "Example: you@example.com" email_problem
   I_OWNER_NAME=${OPT_YOUR_NAME:-}
+  # Without a terminal nobody can answer, so the start of the email is kept and the name can be changed later.
+  if [ -z "$I_OWNER_NAME" ] && [ ! -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+    I_OWNER_NAME=$(owner_name_default "$I_EMAIL")
+    say "Aman will call you $I_OWNER_NAME. You can change that later in Personalization."
+  fi
   ask_valid I_OWNER_NAME "What should Aman call you?" "$(owner_name_default "$I_EMAIL")" "" display_name_problem
   if [ -n "$I_PUBLIC_URL" ]; then
     valid_origin "$I_PUBLIC_URL" || usage_die "The public address must look like https://aman.example.com, with nothing after the name."
@@ -1012,7 +1017,7 @@ cmd_instance_list() {
     *) warn "Docker is not running or not reachable, so the STATE column is unknown" ;;
   esac
   {
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR OWNER ADDRESS
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR PERSON ADDRESS
     for name in $(reg_names); do
       state=unknown
       case "$DOCKER_ACCESS" in direct | sg) state=$(instance_state "$name") ;; esac

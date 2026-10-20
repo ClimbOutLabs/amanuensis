@@ -23,12 +23,12 @@ assert_called() { # instance, name
 install_answering() { # reply...
   local replies='' reply
   for reply in "$@"; do replies="$replies"$'\n'"What should Aman call you?=>$reply"; done
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>$EMAIL$replies
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for $EMAIL=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" --local-only
+Enter password again=>$SENTINEL_PASSWORD" --local-only
 }
 
 install_yes() { # extra args...
