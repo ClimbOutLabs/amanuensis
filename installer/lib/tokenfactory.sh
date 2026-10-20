@@ -8,7 +8,7 @@ TF_DEFAULT_MODEL=nvidia/nemotron-3-super-120b-a12b
 # The length is counted here, not in the pattern: macOS regex refuses repeat counts above 255.
 valid_tf_key() { [ "${#1}" -ge 16 ] && [ "${#1}" -le 512 ] && matches_whole "$1" '^[A-Za-z0-9._~+/=-]+$'; }
 valid_tf_model() { matches_whole "$1" '^[A-Za-z0-9][A-Za-z0-9._/:-]{0,127}$'; }
-valid_tf_cap() { matches_whole "$1" '^[1-9][0-9]{0,11}$'; }
+valid_tf_cap() { matches_whole "$1" '^[1-9][[:digit:]]{0,11}$'; }
 
 # The key is never echoed in a message, only its problem.
 tf_key_problem() {

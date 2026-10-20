@@ -22,7 +22,7 @@ test_dry_run_plans_the_sandbox() {
   assert_flat_contains "$OUT" "--sandbox-root"
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
   run_install --dry-run --verbose --email owner@example.invalid
-  assert_flat_contains "$OUT" "The sandbox: base images, Ubuntu packages"
+  assert_flat_contains "$OUT" "The sandbox: base images, system packages"
   assert_log_lacks "aman-sandbox.mjs"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME"
@@ -199,16 +199,16 @@ test_host_node_opt_in_needs_a_new_enough_node() {
 }
 
 test_cgroup_and_low_disk() {
-  t_begin "cgroup v1 only warns, an unknown cgroup setup blocks, and too little disk for the slot disks blocks"
+  t_begin "an older memory-limit setup only warns, an unknown memory-limit setup blocks, and too little disk for the slot disks blocks"
   sandbox_new
   STUB_CGROUP=1
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT$ERR" "cgroup v1"
+  assert_flat_contains "$OUT$ERR" "older memory-limit setup"
   STUB_CGROUP=3
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "unknown cgroup setup"
+  assert_flat_contains "$OUT$ERR" "unknown memory-limit setup"
   assert_flat_contains "$OUT$ERR" "--no-sandbox"
   STUB_CGROUP=2
   STUB_DF_KB=$((15 * 1024 * 1024))
@@ -577,11 +577,11 @@ test_remove_deletes_slots_left_by_a_removed_instance() {
   assert_rc 0
   assert_log_has "aman-sandbox.mjs --down --purge --instance main"
   assert_log_has "sudo -n true"
-  assert_flat_contains "$OUT" "Deleted the sandboxes that instance main left behind."
+  assert_flat_contains "$OUT" "Removed instance main."
   assert_no_path "$SB/aman-slots/main"
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main does not exist; nothing to do."
+  assert_no_path "$SB/aman-slots/main"
   sandbox_drop
 }
 

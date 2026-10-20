@@ -79,7 +79,7 @@ test_the_authority_and_the_certificate() {
   assert_contains "$info" '"leaf_names":["127.0.0.1","192.168.1.20","localhost","spark","spark.local"]'
   assert_contains "$info" '"root_days_left":3'
   local days
-  days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\([0-9]*\).*/\1/p')
+  days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\([[:digit:]]*\).*/\1/p')
   if [ "$days" -ge 396 ] && [ "$days" -le 397 ]; then t_pass; else t_fail "the certificate lasts $days days"; fi
   local key_before
   key_before=$(cat "$AMAN_HOME/tls/ca/root.key")

@@ -229,7 +229,7 @@ run_install_tty() {
   set +e
   OUT=$(python3 "$TESTS_DIR/pty_run.py" "$SB/answers" -- env -i "${RUN_ENV[@]}" TERM=dumb bash "$SB_INSTALLER/install.sh" "$@")
   set -e
-  RC=$(printf '%s\n' "$OUT" | sed -n 's/^\[exit \([0-9]*\)\]$/\1/p' | tail -n 1)
+  RC=$(printf '%s\n' "$OUT" | sed -n 's/^\[exit \([[:digit:]]*\)\]$/\1/p' | tail -n 1)
   ERR=
 }
 

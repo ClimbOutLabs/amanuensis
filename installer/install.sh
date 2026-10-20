@@ -150,7 +150,7 @@ Amanuensis installer
 Options
   --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
   --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses admin rights)
-  --install-docker      let the installer install Docker with admin rights (Debian, Ubuntu)
+  --install-docker      let the installer install Docker with admin rights (Linux systems that use apt)
   --add-docker-group    let the installer give your user access to Docker (needs admin rights)
   --sandbox-root        let the installer do the sandbox steps that need admin rights without asking
   --tls-root            let the installer do the --tls caddy steps that need admin rights without asking
@@ -177,7 +177,7 @@ Options
   --port N              the port for the app on this computer
   --login-port N        the port for the sign-in service on this computer
   --tls local|off|caddy  https on your network with a certificate made on this computer (default), plain http, or
-                        https at --public-url and --login-url with Caddy on this computer (Ubuntu, Let's Encrypt)
+                        https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
@@ -346,6 +346,7 @@ on_exit() {
   upgrade_on_exit
   import_on_exit
   migrate_on_exit
+  if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
 }
