@@ -4,8 +4,8 @@ import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMa
 import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
-import { CenteredModal } from '../atoms/primitives/CenteredModal.js';
 import { Icon } from '../icons/Icon.js';
+import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
@@ -176,7 +176,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   batchSize,
   disabled = false,
 }) => {
-  const [confirmingAlways, setConfirmingAlways] = useState(false);
   const hasDetails =
     card.destination !== null ||
     card.recipient !== null ||
@@ -273,18 +272,13 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             </Button>
           )}
           {onApproveAlways !== undefined && (
-            <Button
-              variant="secondary"
+            <AlwaysAllowToolControl
               size="small"
-              title={APPROVAL_CHOICES.alwaysAllowTool.hint}
-              onClick={() => {
-                setConfirmingAlways(true);
-              }}
-              disabled={disabled}
               className="flex-1"
-            >
-              {APPROVAL_CHOICES.alwaysAllowTool.label}
-            </Button>
+              disabled={disabled}
+              description={`The agent will run "${toolName}" on this connector without asking, in every chat.`}
+              onConfirm={onApproveAlways}
+            />
           )}
           <Button
             variant="secondary"
@@ -303,49 +297,6 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </Button>
         )}
       </div>
-
-      {onApproveAlways !== undefined && (
-        <CenteredModal
-          open={confirmingAlways}
-          onOpenChange={open => {
-            if (!open) setConfirmingAlways(false);
-          }}
-          title="Always allow this tool?"
-          description={`The agent will run "${toolName}" on this connector without asking, in every chat.`}
-          contentSized
-          aria-label="Confirm always allowing this tool"
-        >
-          <div className="flex flex-col gap-4 px-5 py-4">
-            <p className="font-sans text-sm leading-relaxed text-text-primary">
-              You can remove this later in connector settings.
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="small"
-                onClick={() => {
-                  setConfirmingAlways(false);
-                }}
-                data-testid="always-allow-cancel"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="small"
-                onClick={() => {
-                  setConfirmingAlways(false);
-                  onApproveAlways();
-                }}
-                data-testid="always-allow-confirm"
-              >
-                Confirm
-              </Button>
-            </div>
-          </div>
-        </CenteredModal>
-      )}
     </div>
   );
 };

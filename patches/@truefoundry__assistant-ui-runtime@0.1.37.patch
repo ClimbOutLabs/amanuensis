@@ -2556,10 +2556,10 @@ index 7d09601fe67f4a76b394dbca71fb91a352b6fc15..53dc0d2559f44cb2cc82b4f2989df16e
      }
  }
 diff --git a/src/toolApproval.test.ts b/src/toolApproval.test.ts
-index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..244a58adefa7fc9d3bb0d13ee476ffdde2202df5 100644
+index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7a3a083bcf87b02d8bacedfc65ee6f89842431d9 100644
 --- a/src/toolApproval.test.ts
 +++ b/src/toolApproval.test.ts
-@@ -1,7 +1,9 @@
+@@ -1,8 +1,11 @@
  import { describe, expect, it } from "vitest";
  
  import {
@@ -2567,9 +2567,11 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..244a58adefa7fc9d3bb0d13ee476ffdd
      applyApprovalDecisionsToMessage,
 +    collectApprovalDecisionsFromTurnInput,
      collectApprovalInputs,
++    mapApprovalDecision,
      messageHasPendingApprovals,
  } from "./toolApproval.js";
-@@ -96,11 +98,75 @@ describe("toolApproval", () => {
+ 
+@@ -96,11 +99,82 @@ describe("toolApproval", () => {
                  type: "user.tool_approval",
                  threadId: "main",
                  toolCallId: "approval-1",
@@ -2627,6 +2629,13 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..244a58adefa7fc9d3bb0d13ee476ffdd
 +        ]);
 +    });
 +
++    it("maps allow-standing to a standing always grant", () => {
++        expect(mapApprovalDecision(true, undefined, "allow-standing")).toEqual({
++            status: "allow",
++            scope: "always",
++        });
++    });
++
 +    it("restores chat scope from a persisted approval continuation", () => {
 +        const decisions = collectApprovalDecisionsFromTurnInput([
 +            {
@@ -2647,7 +2656,7 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..244a58adefa7fc9d3bb0d13ee476ffdd
          const pending = {
              id: "turn-1-assistant",
 diff --git a/src/toolApproval.ts b/src/toolApproval.ts
-index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e205e45fdc3610183063c3c23e88c19111d592de 100644
+index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225767e670a 100644
 --- a/src/toolApproval.ts
 +++ b/src/toolApproval.ts
 @@ -19,6 +19,7 @@ export { ROOT_THREAD_ID } from "./constants.js";
@@ -2698,7 +2707,7 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e205e45fdc3610183063c3c23e88c191
              ...(event.approval.status === "deny" && event.approval.reason != null
                  ? { reason: event.approval.reason }
                  : {}),
-@@ -381,9 +394,16 @@ export function resolveToolApprovalUpdate(
+@@ -381,9 +394,18 @@ export function resolveToolApprovalUpdate(
  export function mapApprovalDecision(
      approved: boolean,
      reason?: string,
@@ -2711,12 +2720,14 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e205e45fdc3610183063c3c23e88c191
 +            scope:
 +                optionId === "allow-chat" || optionId === "allow-always"
 +                    ? "chat"
-+                    : "once",
++                    : optionId === "allow-standing"
++                      ? "always"
++                      : "once",
 +        };
      }
      return { status: "deny", ...(reason != null ? { reason } : {}) };
  }
-@@ -437,7 +457,11 @@ export function collectApprovalInputs(
+@@ -437,7 +459,11 @@ export function collectApprovalInputs(
                  type: "user.tool_approval",
                  threadId: scopedThreadId,
                  toolCallId: approval.id,

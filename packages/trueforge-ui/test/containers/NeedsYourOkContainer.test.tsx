@@ -174,7 +174,8 @@ describe('NeedsYourOkContainer', () => {
   it('sends Always allow only where the server offered it', async () => {
     answerHeldAction.mockResolvedValue(undefined);
     renderBrief({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
     await waitFor(() => {
       expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'always_allow' }));
     });

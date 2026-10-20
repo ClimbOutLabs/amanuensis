@@ -1198,6 +1198,17 @@ describe('connector reads can be always allowed', () => {
     expect(decision.inspection).toBe(false);
   });
 
+  test('a connector read of a secret path is never always-allowed, even with a grant on it', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', path: '/srv/secrets/token.txt' } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.inspection).toBe(false);
+  });
+
   test.each([{ read_only_hint: true, open_world_hint: true }, { read_only_hint: false }])(
     'a mail read that claims %j is never always-allowed',
     async mcp_hints => {

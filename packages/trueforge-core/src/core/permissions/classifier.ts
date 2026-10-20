@@ -2068,12 +2068,14 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || sensitiveReadHit(action.canonical_params);
   // Eligible for "Always allow" like an annotated read-only tool. Only an explicit open-world or
-  // not-read-only claim, or the search provider, rules it out; the arguments already ruled out recipients.
+  // not-read-only claim, the search provider, or a read of a secret path rules it out; the arguments
+  // already ruled out recipients.
   const grantableRead =
     extraction.connector_read &&
     action.mcp_hints.open_world_hint !== true &&
     action.mcp_hints.read_only_hint !== false &&
-    action.mcp_search_provider !== true;
+    action.mcp_search_provider !== true &&
+    !sensitiveReadHit(action.canonical_params);
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
