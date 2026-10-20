@@ -30,38 +30,65 @@ export interface PromptReportInput {
   sandbox?: Sandbox | undefined;
 }
 
-// Opening or closing tags the instruction builder emits, plus CDATA blocks that hold escaped user text.
-const TAG_OR_CDATA_PATTERN = /<(\/?)([a-z][a-z0-9-]*)>|<!\[CDATA\[[\s\S]*?\]\]>/g;
+// The instruction builder puts each tag on its own line, and escaped content opens with `<tag><![CDATA[`
+// and closes with `]]></tag>`. Tags inside the sentences of static prompt text are not structure.
+const STRUCTURE_PATTERN =
+  /^<(?<close>\/)?(?<tag>[a-z][a-z0-9-]*)>$|^<(?<cdataOpen>[a-z][a-z0-9-]*)><!\[CDATA\[$|^\]\]><\/(?<cdataClose>[a-z][a-z0-9-]*)>$/gm;
 
-/** Splits the rendered system prompt at its nested tags. CDATA is skipped so user text never reads as structure. */
+/** Splits the rendered system prompt at its nested sections. Escaped (CDATA) content is never read as structure. */
 function sectionRows(system: string): PromptReportRow[] {
-  const rows: PromptReportRow[] = [];
+  const rows: (PromptReportRow & { start: number })[] = [];
   const open: { name: string; path: string; start: number }[] = [];
-  for (const match of system.matchAll(TAG_OR_CDATA_PATTERN)) {
-    const [text, closing, name] = match;
-    if (name === undefined) {
+  let cdataSection: string | undefined;
+  for (const match of system.matchAll(STRUCTURE_PATTERN)) {
+    const { close, tag, cdataOpen, cdataClose } = match.groups ?? {};
+    const end = match.index + match[0].length;
+    if (cdataSection !== undefined) {
+      if (cdataClose !== cdataSection) {
+        continue;
+      }
+      cdataSection = undefined;
+      closeSection(cdataClose, end);
       continue;
     }
-    if (closing === '') {
-      const parent = open[open.length - 1];
-      const path = parent === undefined ? '' : [parent.path, name].filter(part => part !== '').join('/');
-      open.push({ name, path, start: match.index });
+    if (cdataOpen !== undefined) {
+      cdataSection = cdataOpen;
+      openSection(cdataOpen, match.index);
       continue;
     }
+    if (tag === undefined) {
+      continue;
+    }
+    if (close === undefined) {
+      openSection(tag, match.index);
+    } else {
+      closeSection(tag, end);
+    }
+  }
+  // Rows are pushed as sections close; sort them so each parent comes before its children.
+  return rows.sort((a, b) => a.start - b.start).map(({ name, tokens }) => ({ name, tokens }));
+
+  function openSection(name: string, start: number): void {
+    const parent = open[open.length - 1];
+    const path = parent === undefined ? '' : [parent.path, name].filter(part => part !== '').join('/');
+    open.push({ name, path, start });
+  }
+
+  function closeSection(name: string | undefined, end: number): void {
     const current = open.pop();
-    if (current?.name !== name) {
-      throw new Error(`System prompt tag ${name} closes without an opening tag`);
+    if (current === undefined || current.name !== name) {
+      throw new Error(`System prompt tag ${name ?? ''} closes without an opening tag`);
     }
     // The root `system-prompt` element is the only one left at depth zero.
     if (open.length === 0) {
-      continue;
+      return;
     }
     rows.push({
       name: current.path,
-      tokens: Math.round(estimateTokensForString(system.slice(current.start, match.index + text.length))),
+      tokens: Math.round(estimateTokensForString(system.slice(current.start, end))),
+      start: current.start,
     });
   }
-  return rows;
 }
 
 async function* answerStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
