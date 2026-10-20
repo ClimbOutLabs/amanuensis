@@ -6,6 +6,7 @@ import {
   createWebSearchTurnState,
   hasReadPrivateData,
   markPrivateDataRead,
+  privateTextForChecks,
 } from '../../../../src/core/permissions/webSearch';
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
@@ -90,6 +91,55 @@ describe('privateDataReadCapability', () => {
       const { turn, run } = preLLM([assistantCalling('web_search')]);
       expect(await run()).toEqual([]);
       expect(hasReadPrivateData(turn)).toBe(false);
+    });
+  });
+
+  describe('the text of mail and calendar results', () => {
+    const MAIL = 'From: Maria Costa <maria.costa@harbour-clinic.example>';
+
+    function resultOf(content: string): ContextMessage {
+      return { role: 'tool', tool_call_id: 'call-1', content };
+    }
+
+    const postToolCall = async (turn: ReturnType<typeof createWebSearchTurnState>, context: ContextMessage[]) => {
+      const [processor] = privateDataReadCapability({ turn }).postToolCallProcessors ?? [];
+      await collect(processor?.processPostToolCall(execution(context)) ?? []);
+    };
+
+    it('keeps the result of a mail read for the checks', async () => {
+      const turn = createWebSearchTurnState();
+      markPrivateDataRead(turn);
+      await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
+      expect(privateTextForChecks(turn)).toEqual([MAIL]);
+    });
+
+    it('keeps a calendar read result, qualified by its server', async () => {
+      const turn = createWebSearchTurnState();
+      markPrivateDataRead(turn);
+      await postToolCall(turn, [assistantCalling('google_calendar__list_events'), resultOf('{"summary":"Dinner"}')]);
+      expect(privateTextForChecks(turn)).toEqual(['{"summary":"Dinner"}']);
+    });
+
+    it('keeps no text from a tool that is not a mail or calendar read', async () => {
+      const turn = createWebSearchTurnState();
+      markPrivateDataRead(turn);
+      await postToolCall(turn, [assistantCalling('web_search'), resultOf('Lisbon tapas')]);
+      expect(privateTextForChecks(turn)).toBeUndefined();
+    });
+
+    it('has no text to check against when the mark was only restored from saved state', async () => {
+      const turn = createWebSearchTurnState();
+      privateDataReadCapability({ turn }).state?.load(true);
+      await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
+      expect(privateTextForChecks(turn)).toBeUndefined();
+    });
+
+    it('has no text to check against when the mail call was only in the context before this turn', async () => {
+      const turn = createWebSearchTurnState();
+      const [preLLM] = privateDataReadCapability({ turn }).preLLMProcessors ?? [];
+      await collect(preLLM?.processPreLLM(execution([assistantCalling('read_email')])) ?? []);
+      await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
+      expect(privateTextForChecks(turn)).toBeUndefined();
     });
   });
 });

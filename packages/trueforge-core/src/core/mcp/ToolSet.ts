@@ -16,8 +16,8 @@ import {
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
+  isSilentSearchReason,
   runOneAtATime,
-  SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
 import {
@@ -142,6 +142,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
+    case 'private_text_check':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something from your mail or calendar.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
@@ -402,7 +404,7 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
+    if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
@@ -521,7 +523,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: decision.reason === SEARCH_SILENT_REASON,
+              waiveUnclassified: isSilentSearchReason(decision.reason),
             })),
       },
       classification: decision,

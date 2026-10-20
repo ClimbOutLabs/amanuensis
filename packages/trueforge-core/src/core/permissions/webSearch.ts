@@ -16,6 +16,14 @@ const MAX_RESULT_URLS = 500;
 /** Reason code for a search the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
 
+/** Reason code for a search that ran without asking after a mail or calendar read, because its text was checked. */
+export const SEARCH_AFTER_READ_SILENT_REASON = 'mcp_search_after_read_checked';
+
+/** Whether a decision reason is a search that ran without asking, after a private read or not. */
+export function isSilentSearchReason(reason: string): boolean {
+  return reason === SEARCH_SILENT_REASON || reason === SEARCH_AFTER_READ_SILENT_REASON;
+}
+
 /** Reason codes for a designated-provider call that stops for approval, and why. */
 export const SEARCH_ASK_REASONS = [
   'mcp_search_setting_ask',
@@ -48,8 +56,14 @@ export interface WebSearchTurnState {
   fetchesByHost: Map<string, number>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
-  /** True once the session read private data (mail), after which a search asks instead of running silently. */
+  /** True once the session read private data (mail, calendar or a secret), after which a search is checked or asks. */
   privateDataRead: boolean;
+  /** Text of the mail and calendar results this turn received, so a later search can be checked against it. */
+  privateTexts: string[];
+  /** True once at least one mail or calendar result was received as text. */
+  privateTextCaptured: boolean;
+  /** True when the private mark came from saved state or old context, whose text this turn never saw. */
+  privateTextLost: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -61,6 +75,9 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     fetchesByHost: new Map(),
     sentText: '',
     privateDataRead: false,
+    privateTexts: [],
+    privateTextCaptured: false,
+    privateTextLost: false,
     admission: Promise.resolve(),
   };
 }
@@ -222,8 +239,44 @@ export function markPrivateDataRead(state: WebSearchTurnState): void {
   state.privateDataRead = true;
 }
 
+/** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
+export function markPrivateDataReadFromHistory(state: WebSearchTurnState): void {
+  state.privateDataRead = true;
+  state.privateTextLost = true;
+}
+
 export function hasReadPrivateData(state: WebSearchTurnState): boolean {
   return state.privateDataRead;
+}
+
+/** Above this, the text is not kept whole, so a check could miss a copy; the turn then asks. */
+const MAX_PRIVATE_TEXT_CHARS = 2_000_000;
+
+/** Keeps the text a mail or calendar result returned, for the checks on later searches and maps. */
+export function recordPrivateReadText(input: { state: WebSearchTurnState; text: string }): void {
+  const { state, text } = input;
+  state.privateTextCaptured = true;
+  if (state.privateTextLost) {
+    return;
+  }
+  const kept = state.privateTexts.reduce((total, held) => total + held.length, 0);
+  if (kept + text.length > MAX_PRIVATE_TEXT_CHARS) {
+    state.privateTexts = [];
+    state.privateTextLost = true;
+    return;
+  }
+  state.privateTexts.push(text);
+}
+
+/**
+ * The text a search or map is checked against, or undefined when it is not all there: the mark came
+ * from earlier history, or no mail or calendar result was received this turn to compare with.
+ */
+export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
+  if (state.privateTextLost || !state.privateTextCaptured) {
+    return undefined;
+  }
+  return state.privateTexts;
 }
 
 /**

@@ -1,6 +1,11 @@
 import { CALENDAR_READ_TOOL_NAMES } from '../../calendar/toolContract';
 import { GMAIL_READ_TOOL_NAMES } from '../../email/gmail/toolContract';
-import { hasReadPrivateData, markPrivateDataRead, type WebSearchTurnState } from '../../permissions/webSearch';
+import {
+  hasReadPrivateData,
+  markPrivateDataReadFromHistory,
+  recordPrivateReadText,
+  type WebSearchTurnState,
+} from '../../permissions/webSearch';
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
 import type { AgentCapability } from '../AgentCapability';
@@ -35,6 +40,31 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
  */
 export function privateDataReadCapability(input: { turn: WebSearchTurnState }): AgentCapability {
   let saved = false;
+  // Result messages already kept for the checks, so each one is read once per turn.
+  const kept = new Set<string>();
+  function keepNewReadResults(context: AgentThreadExecutionContext['context']): void {
+    const readCallIds = new Set<string>();
+    for (const message of context) {
+      if (isLLMContextMessage(message) && message.role === 'assistant') {
+        for (const call of message.tool_calls ?? []) {
+          if (isPrivateReadToolName(call.function.name)) {
+            readCallIds.add(call.id);
+          }
+        }
+      }
+    }
+    for (const message of context) {
+      if (
+        isLLMContextMessage(message) &&
+        message.role === 'tool' &&
+        readCallIds.has(message.tool_call_id) &&
+        !kept.has(message.tool_call_id)
+      ) {
+        kept.add(message.tool_call_id);
+        recordPrivateReadText({ state: input.turn, text: message.content });
+      }
+    }
+  }
   async function* saveWhenSet() {
     await Promise.resolve();
     if (saved || !hasReadPrivateData(input.turn)) {
@@ -49,7 +79,7 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
       load: state => {
         if (state === true) {
           saved = true;
-          markPrivateDataRead(input.turn);
+          markPrivateDataReadFromHistory(input.turn);
         }
       },
     },
@@ -57,12 +87,19 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
       {
         processPreLLM: execution => {
           if (!hasReadPrivateData(input.turn) && contextReadPrivateData(execution.context)) {
-            markPrivateDataRead(input.turn);
+            markPrivateDataReadFromHistory(input.turn);
           }
           return saveWhenSet();
         },
       },
     ],
-    postToolCallProcessors: [{ processPostToolCall: () => saveWhenSet() }],
+    postToolCallProcessors: [
+      {
+        processPostToolCall: execution => {
+          keepNewReadResults(execution.context);
+          return saveWhenSet();
+        },
+      },
+    ],
   };
 }

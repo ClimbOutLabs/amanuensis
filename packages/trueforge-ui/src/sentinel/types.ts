@@ -238,7 +238,7 @@ export type SentinelUserSettings = {
   tier2_auto_allow: Tier2ActionKind[];
   /** While on, the search provider you designated runs web searches without asking. Default: on. */
   search_without_asking: boolean;
-  /** While on, maps run without asking unless this chat has read private data. Default: off. */
+  /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
   maps_without_asking: boolean;
 };
 
