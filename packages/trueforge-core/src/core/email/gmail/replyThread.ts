@@ -27,10 +27,20 @@ export function answeredMessageOf(message: GmailMessage): AnsweredMessage {
   };
 }
 
+/** The one readable address of a From header, or null when it is not exactly one address Aman can use. */
+function readableAddress(from: string): string | null {
+  const address = fromAddress(from);
+  return address === null || address.length > MAX_ADDRESS_CHARS ? null : address;
+}
+
 /** The sender's address only, so a display name cannot add words or a second address to the card. */
 function senderAddress(from: string): string {
-  const address = fromAddress(from);
-  return address === null || address.length > MAX_ADDRESS_CHARS ? UNREADABLE_SENDER : address;
+  return readableAddress(from) ?? UNREADABLE_SENDER;
+}
+
+/** The address a reply to this message goes to: its sender's, or null when that cannot be read for certain. */
+export function replyRecipientOf(message: GmailMessage): string | null {
+  return readableAddress(headerOf({ message, name: 'From' }));
 }
 
 type ReplyCheck = { ok: true; answered: AnsweredMessage | null } | { ok: false; reason: string };

@@ -85,7 +85,9 @@ export const visible = <T extends z.ZodType<string>>(schema: T) =>
   schema.refine(text => !hasHiddenCharacters(text), VISIBLE_ONLY);
 
 const DraftContentShape = {
-  to: z.array(visible(z.email())).min(1).max(20),
+  // A recipient may be left out only on a reply, which is then addressed to the sender of the message it
+  // answers; the check below holds that line for both draft shapes.
+  to: z.array(visible(z.email())).max(20).optional(),
   subject: visible(z.string().min(1).max(300)),
   body: visible(z.string().max(20_000)),
   cc: z.array(visible(z.email())).max(20).optional(),
@@ -103,11 +105,24 @@ export const TOO_MANY_SELECTORS = {
 };
 const draftSelectors = (draft: { subject: string; body: string }) => fewSelectors([draft.subject, draft.body]);
 
-export const DraftEmailSchema = z.object(DraftContentShape).strict().refine(draftSelectors, TOO_MANY_SELECTORS);
+/** A draft is addressed: it names a recipient, or it answers a message and goes to that message's sender. */
+export const NO_RECIPIENT = {
+  message:
+    'The draft has no recipient. Add an address in "to", or pass "in_reply_to" so the reply is addressed to the sender of that message.',
+};
+const draftAddressed = (draft: { to: readonly string[] | undefined; in_reply_to: string | undefined }) =>
+  (draft.to?.length ?? 0) > 0 || draft.in_reply_to !== undefined;
+
+export const DraftEmailSchema = z
+  .object(DraftContentShape)
+  .strict()
+  .refine(draftSelectors, TOO_MANY_SELECTORS)
+  .refine(draftAddressed, NO_RECIPIENT);
 export const UpdateDraftSchema = z
   .object({ draft_id: id, ...DraftContentShape })
   .strict()
-  .refine(draftSelectors, TOO_MANY_SELECTORS);
+  .refine(draftSelectors, TOO_MANY_SELECTORS)
+  .refine(draftAddressed, NO_RECIPIENT);
 
 export type DraftContent = z.infer<typeof DraftEmailSchema>;
 

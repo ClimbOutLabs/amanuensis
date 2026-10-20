@@ -8,8 +8,8 @@ export interface ReplyTarget {
   referencesHeader: string;
 }
 
-/** The fields of a draft as written, after any reply threading has been decided. */
-export type RawDraftContent = Pick<DraftContent, 'to' | 'cc' | 'bcc' | 'subject' | 'body'>;
+/** The fields of a draft as written, after its reply threading and recipients have been decided. */
+export type RawDraftContent = Pick<DraftContent, 'cc' | 'bcc' | 'subject' | 'body'> & { to: string[] };
 
 /** Longest encoded word in bytes of text: base64 makes 60 characters, plus 12 of framing, under the 75 limit. */
 const MAX_WORD_BYTES = 45;
