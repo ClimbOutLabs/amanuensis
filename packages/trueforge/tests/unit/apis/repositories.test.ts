@@ -436,6 +436,22 @@ describe('work on a repo API', () => {
     });
   });
 
+  it('answers a missing repo address with the same plain words', async () => {
+    const { app } = await setup({ fetchGithub: demoGithubFetch() });
+    const expected = {
+      error: {
+        message:
+          'That does not look like a GitHub repo address. Paste the full address, like https://github.com/owner/name.',
+      },
+    };
+    const sessionResponse = await app.request('/sessions/session-1/repository/github-repository');
+    expect(sessionResponse.status).toBe(400);
+    expect(await sessionResponse.json()).toEqual(expected);
+    const publicResponse = await app.request('/repositories/github/metadata');
+    expect(publicResponse.status).toBe(400);
+    expect(await publicResponse.json()).toEqual(expected);
+  });
+
   it('reports a repo GitHub cannot find in plain words', async () => {
     const { app } = await setup({ fetchGithub: demoGithubFetch() });
     const response = await app.request(

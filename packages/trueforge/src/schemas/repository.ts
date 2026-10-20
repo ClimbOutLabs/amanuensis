@@ -182,7 +182,9 @@ export const GetGithubRepositoryDetailsResponseSchema = z
   .strict()
   .openapi('GetGithubRepositoryDetailsResponse');
 
-export const GithubRepositoryQuerySchema = z.object({ clone_url: CloneUrlSchema }).openapi('GithubRepositoryQuery');
+export const GithubRepositoryQuerySchema = z
+  .object({ clone_url: CloneUrlSchema.optional() })
+  .openapi('GithubRepositoryQuery');
 
 export const StartRepositoryWorkRequestSchema = z
   .object({

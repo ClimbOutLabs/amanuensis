@@ -326,7 +326,7 @@ export function createRepositoriesRouter(deps: RepositoriesRouterDeps) {
 
   const githubMetadataHandler: RouteHandler<typeof getGithubRepositoryDetailsRoute> = async c => {
     const { clone_url: cloneUrl } = c.req.valid('query');
-    const parsed = parseGithubCloneUrl(cloneUrl);
+    const parsed = cloneUrl === undefined ? undefined : parseGithubCloneUrl(cloneUrl);
     if (parsed === undefined) {
       return c.json({ error: { message: INVALID_GITHUB_URL_MESSAGE } }, 400);
     }
@@ -546,7 +546,7 @@ export function createSessionRepositoryRouter(deps: SessionRepositoryRouterDeps)
     if (owned.status === 'forbidden') {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
-    const parsed = parseGithubCloneUrl(cloneUrl);
+    const parsed = cloneUrl === undefined ? undefined : parseGithubCloneUrl(cloneUrl);
     if (parsed === undefined) {
       return c.json({ error: { message: INVALID_GITHUB_URL_MESSAGE } }, 400);
     }
