@@ -19,6 +19,8 @@ import { getErrorMessage } from '@/utils/getErrorMessage.js';
 export type WorkOnRepoControlsProps = {
   sessionId: string | null;
   isRunning: boolean;
+  /** True when the newest turn shows its work did not go through, so a clone it ran did not land. */
+  turnFailed?: boolean;
   /** Sends a chat message in this thread; used for the clone request the person approves. */
   sendMessage: (text: string) => void;
 };
@@ -56,7 +58,74 @@ function commandIdFor(proposal: RepositoryCommandProposal, all: RepositoryComman
   return `${proposal.purpose}-${kindSuffix}-${index + 1}`;
 }
 
-export function WorkOnRepoControls({ sessionId, isRunning, sendMessage }: WorkOnRepoControlsProps) {
+/** One part of a chat message, narrowed to what the turn outcome checks read. */
+type TurnPartState = {
+  type: string;
+  status?: { type: string };
+  isError?: boolean;
+  approval?: { approved?: boolean; resolution?: string };
+};
+
+type TurnMessageState = {
+  role: string;
+  status?: { type: string };
+  content: readonly TurnPartState[];
+};
+
+/** The thread shape the turn outcome checks read, in the shape the thread state hands over. */
+export type TurnThreadState = {
+  thread: { messages: readonly TurnMessageState[] };
+};
+
+function lastAssistantMessage(state: TurnThreadState): TurnMessageState | undefined {
+  const messages = state.thread.messages;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'assistant') {
+      return message;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * True while the newest assistant message waits on the person, for example for an
+ * approval: the turn has paused, not finished, so a clone it is running has not landed.
+ */
+export function threadTurnAwaitingAction(state: TurnThreadState): boolean {
+  const message = lastAssistantMessage(state);
+  if (message === undefined) {
+    return false;
+  }
+  if (message.status?.type === 'requires-action') {
+    return true;
+  }
+  return message.content.some(part => part.type === 'tool-call' && part.status?.type === 'requires-action');
+}
+
+/**
+ * True when the newest assistant message shows its work did not go through: the
+ * message ended in error, the person turned one of its calls down, an approval
+ * lapsed, or its last call failed. A call that failed early but was recovered
+ * within the same message does not count.
+ */
+export function threadTurnFailed(state: TurnThreadState): boolean {
+  const message = lastAssistantMessage(state);
+  if (message === undefined) {
+    return false;
+  }
+  if (message.status?.type === 'incomplete') {
+    return true;
+  }
+  const toolCalls = message.content.filter(part => part.type === 'tool-call');
+  if (toolCalls.some(part => part.approval?.approved === false || part.approval?.resolution !== undefined)) {
+    return true;
+  }
+  const last = toolCalls[toolCalls.length - 1];
+  return last !== undefined && (last.status?.type === 'incomplete' || last.isError === true);
+}
+
+export function WorkOnRepoControls({ sessionId, isRunning, turnFailed = false, sendMessage }: WorkOnRepoControlsProps) {
   const api = useRepositoryWork();
   const [binding, setBinding] = useState<SessionRepositoryBinding | null>(null);
   const [repository, setRepository] = useState<RepositorySummary | null>(null);
@@ -144,9 +213,9 @@ export function WorkOnRepoControls({ sessionId, isRunning, sendMessage }: WorkOn
     };
   }, [isRunning, refreshBinding]);
 
-  // The bind waits until the clone turn has been seen running and then finished:
-  // binding earlier would point the clone turn itself at a checkout that does
-  // not exist yet, and the turn would fail.
+  // The bind waits until the clone turn has been seen running and then finished
+  // cleanly: binding earlier would point the clone turn itself at a checkout that
+  // does not exist yet, and the turn would fail.
   useEffect(() => {
     if (pendingStart && isRunning) {
       sawCloneTurnRef.current = true;
@@ -155,6 +224,14 @@ export function WorkOnRepoControls({ sessionId, isRunning, sendMessage }: WorkOn
 
   useEffect(() => {
     if (!pendingStart || !sessionId || isRunning || !sawCloneTurnRef.current || startingRef.current) {
+      return;
+    }
+    // The clone turn ended without the clone going through, so there is no
+    // checkout to connect: say so instead of binding the chat to a missing folder.
+    if (turnFailed) {
+      setStartError('The repo could not be cloned, so this chat is not connected to it. Try again.');
+      setPendingStart(null);
+      sawCloneTurnRef.current = false;
       return;
     }
     startingRef.current = true;
@@ -177,7 +254,7 @@ export function WorkOnRepoControls({ sessionId, isRunning, sendMessage }: WorkOn
         sawCloneTurnRef.current = false;
       }
     })();
-  }, [api, pendingStart, sessionId, isRunning, refreshBinding]);
+  }, [api, pendingStart, sessionId, isRunning, turnFailed, refreshBinding]);
 
   const openPanel = useCallback(() => {
     setPanelOpen(true);
@@ -487,6 +564,10 @@ function ConnectedThreadWorkOnRepoControls() {
   const aui = useAui();
   const remoteId = useAuiState(state => state.threadListItem.remoteId);
   const isRunning = useThreadIsRunning();
+  // A turn paused on the person (an approval, for one) has not finished, so it
+  // still counts as running here; a turn whose work did not go through is no clone.
+  const awaitingAction = useAuiState(threadTurnAwaitingAction);
+  const turnFailed = useAuiState(threadTurnFailed);
   const sendMessage = useCallback(
     (text: string) => {
       aui.composer().setText(text);
@@ -494,5 +575,12 @@ function ConnectedThreadWorkOnRepoControls() {
     },
     [aui],
   );
-  return <WorkOnRepoControls sessionId={remoteId ?? null} isRunning={isRunning} sendMessage={sendMessage} />;
+  return (
+    <WorkOnRepoControls
+      sessionId={remoteId ?? null}
+      isRunning={isRunning || awaitingAction}
+      turnFailed={turnFailed}
+      sendMessage={sendMessage}
+    />
+  );
 }
