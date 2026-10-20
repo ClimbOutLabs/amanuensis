@@ -250,6 +250,39 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
         ? part.result
         : JSON.stringify(part.result, null, 2);
   const mapsResult = parseMapsResult(resultString, part.toolName);
+  // A failed map a later map in the same answer replaces shrinks to one quiet line: the answer
+  // has moved on, and the full failure panel would only repeat what the new map already fixed.
+  const replaced = useAuiState(s => {
+    if (mapsResult.data !== null) {
+      return false;
+    }
+    const parts = s.message.parts;
+    const ownIndex = parts.findIndex(
+      candidate => candidate.type === 'tool-call' && candidate.toolCallId === part.toolCallId,
+    );
+    if (ownIndex === -1) {
+      return false;
+    }
+    return parts.slice(ownIndex + 1).some(candidate => {
+      if (candidate.type !== 'tool-call' || !isMapsToolName(candidate.toolName)) {
+        return false;
+      }
+      const later =
+        candidate.result === undefined
+          ? undefined
+          : typeof candidate.result === 'string'
+            ? candidate.result
+            : JSON.stringify(candidate.result, null, 2);
+      return parseMapsResult(later, candidate.toolName).data !== null;
+    });
+  });
+  if (replaced) {
+    return (
+      <p className="maps-card-replaced" data-testid="map-card-replaced">
+        This map did not work. A later map in this answer replaces it.
+      </p>
+    );
+  }
   if (part.status?.type === 'running' && mapsResult.data === null) {
     return (
       <div className="maps-card" data-testid="map-card-loading">
