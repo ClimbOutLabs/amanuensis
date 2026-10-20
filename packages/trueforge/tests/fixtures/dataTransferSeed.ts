@@ -622,6 +622,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     offline_mode: true,
     tier2_auto_allow: ['file_write'],
     search_without_asking: true,
+    maps_without_asking: true,
   });
 
   const baseVault = join(input.memoryDir, tenantId);

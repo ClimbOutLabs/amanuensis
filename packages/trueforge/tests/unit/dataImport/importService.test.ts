@@ -3490,6 +3490,24 @@ describe('runDataImport when Aman internals have changed', () => {
     }
   });
 
+  it('reads permission settings from before the maps switch without noting them', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-permissions');
+    try {
+      const older = await repack(archive, entries => {
+        const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+        delete recordAt(settings['permission_settings'], 'permission settings')['maps_without_asking'];
+        entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+      });
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).not.toContain('permission setting');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('still refuses a chat message that is itself broken', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-broken-message');

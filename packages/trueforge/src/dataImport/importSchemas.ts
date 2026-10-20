@@ -554,11 +554,17 @@ export const ImportConnectorRecordSchema = z.object({
 export type ImportConnectorRecord = z.infer<typeof ImportConnectorRecordSchema>;
 export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 
+/** Permission settings as an export wrote them. Exports from before the maps switch lack it, so it reads as off. */
+const ImportPermissionSettingsSchema = z.object({
+  ...SentinelUserSettingsSchema.shape,
+  maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(false),
+});
+
 export const ImportSettingsFileSchema = z.object({
   /** Instance-wide toggles; only present for an administrator's export. */
   instance: z.array(z.object({ key: z.string().min(1), value: z.string() })),
   // Never applied on import.
-  permission_settings: internal(SentinelUserSettingsSchema, { label: LEFT_OUT.permissionSetting }),
+  permission_settings: internal(ImportPermissionSettingsSchema, { label: LEFT_OUT.permissionSetting }),
 });
 export type ImportSettingsFile = z.infer<typeof ImportSettingsFileSchema>;
 

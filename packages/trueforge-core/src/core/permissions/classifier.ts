@@ -64,13 +64,15 @@ import {
   type ExtractionResult,
 } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
-import { isMapsToolName, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
+import { isMapsToolName, MAPS_SILENT_REASON, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
+  appendOutboundTrace,
   checkOutboundStrings,
   collectOutboundStrings,
   describeOutboundRule,
   maskServerSecrets,
+  type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
@@ -210,15 +212,6 @@ function mapsCardLabel(value: unknown): string {
   const shown =
     chars.length > MAPS_CARD_PLACE_MAX_CHARS ? `${chars.slice(0, MAPS_CARD_PLACE_MAX_CHARS - 1).join('')}…` : value;
   return escapeDisplayText(JSON.stringify(shown));
-}
-
-/**
- * Single predicate owning the maps approval policy. Both maps tools are Tier 3
- * for now; when the policy changes (e.g. approved providers run without asking),
- * only this predicate changes.
- */
-export function isMapsToolAlwaysTier3(tool_name: string): boolean {
-  return isMapsToolName(tool_name);
 }
 
 /** Host part of a URL for card display; falls back to the raw value. */
@@ -1384,6 +1377,23 @@ function searchSummaryText(strings: OutboundStrings): string {
 }
 
 /**
+ * The outbound secret guard over the text a silent call would send. The search provider and embedded
+ * maps both run it, so both stop on the same things: a held key, and text the guard cannot read.
+ */
+async function outboundGuard(input: {
+  ctx: ClassifyContext;
+  strings: OutboundStrings | undefined;
+}): Promise<{ secrets: readonly string[]; verdict: OutboundGuardVerdict }> {
+  const { ctx, strings } = input;
+  const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  const verdict: OutboundGuardVerdict =
+    strings === undefined
+      ? { ok: false, rule: 'uninspectable' }
+      : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
+  return { secrets, verdict };
+}
+
+/**
  * A designated-provider call that stops for approval. The card shows the exact text the call would
  * send. An unattended run holds it for the owner like any other call that asks.
  */
@@ -1507,11 +1517,7 @@ async function classifySearchProviderTool(input: {
   };
 
   // A held key is masked whether or not searches are set to ask.
-  const secrets = await ctx.services.outboundSecrets(owner);
-  const verdict =
-    strings === undefined
-      ? ({ ok: false, rule: 'uninspectable' } as const)
-      : checkOutboundStrings({ strings, secrets, earlier: ctx.web_search.sentText });
+  const { secrets, verdict } = await outboundGuard({ ctx, strings });
   if (!verdict.ok && verdict.rule === 'server_secret') {
     return heldWithoutKey(secrets);
   }
@@ -1554,6 +1560,43 @@ async function classifySearchProviderTool(input: {
     reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
+  });
+}
+
+/** Detail for a maps call that asks although the user let maps run without asking, because the chat is not clean. */
+const MAPS_ASKED_DETAIL =
+  'Maps asked this time because this chat read private data or the request holds text that must not leave.';
+
+/** Detail for a maps call that always asks, because the user has not let maps run without asking. */
+const MAPS_ALWAYS_ASKS_DETAIL = 'Maps tools are always Tier 3 by policy.';
+
+/**
+ * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
+ * the search provider's silent-run rules hold: the chat has read no private data, and the outbound guard
+ * finds nothing sensitive in the call's strings. Returns undefined when the call should show its card.
+ */
+async function classifyMapsSilently(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+}): Promise<TierDecision | undefined> {
+  const { action, ctx } = input;
+  const strings = collectOutboundStrings(action.canonical_params);
+  const { verdict } = await outboundGuard({ ctx, strings });
+  if (!verdict.ok) {
+    return undefined;
+  }
+  if (hasReadPrivateData(ctx.web_search) || ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+    return undefined;
+  }
+  // The text leaves with this call, so a later silent search or map sees a secret split across the two.
+  if (strings !== undefined) {
+    ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
+  }
+  const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
+  return tier1Decision({
+    reason: MAPS_SILENT_REASON,
+    reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+    sensitive_read: false,
   });
 }
 
@@ -2342,10 +2385,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         }),
       });
     }
-    // Embedded maps: always Tier 3, whatever hints the tool declares. The card
-    // names the place strings verbatim and the configured hosts from server
-    // config; the destination never comes from model params.
-    if (isMapsToolAlwaysTier3(name)) {
+    // Embedded maps: Tier 3 whatever hints the tool declares, unless the user let maps run without
+    // asking and the silent-run rules hold. The card names the place strings verbatim and the
+    // configured hosts from server config; the destination never comes from model params.
+    if (isMapsToolName(name)) {
       // Offline outranks the card: a stale call is denied, not offered for approval.
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
@@ -2353,6 +2396,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           reason_detail: 'Maps need network access, which is disabled while offline.',
           sensitive_read: false,
         });
+      }
+      const runsWithoutAsking = await ctx.services.mapsWithoutAsking({
+        tenant_id: ctx.tenant_id,
+        created_by: ctx.created_by,
+      });
+      const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
+      if (silent !== undefined) {
+        return silent;
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -2374,7 +2425,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: 'maps_tool',
-        reason_detail: 'Maps tools are always Tier 3 by policy.',
+        reason_detail: runsWithoutAsking ? MAPS_ASKED_DETAIL : MAPS_ALWAYS_ASKS_DETAIL,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

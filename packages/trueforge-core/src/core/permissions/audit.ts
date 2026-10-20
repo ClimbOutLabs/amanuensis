@@ -7,6 +7,7 @@
  */
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
+import { MAPS_SILENT_REASON } from './mapsToolNames';
 import {
   isSearchHoldCardText,
   savedSearchHoldReason,
@@ -53,7 +54,7 @@ export async function recordClassificationAudit(input: {
   }
   const decision = input.decision;
   let outcome: AuditOutcome | null = null;
-  if (decision.tier === 1 && decision.sensitive_read) {
+  if (decision.tier === 1 && (decision.sensitive_read || decision.reason === MAPS_SILENT_REASON)) {
     outcome = 'logged';
   } else if (decision.tier === 3 && decision.auto_deny !== null) {
     outcome = 'auto_denied';

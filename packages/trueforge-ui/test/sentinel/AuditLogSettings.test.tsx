@@ -26,8 +26,18 @@ function stubApi(listUserAuditEntries: SentinelApi['listUserAuditEntries']): Sen
   return {
     listAuditEntries: vi.fn(async () => []),
     listUserAuditEntries,
-    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
-    updateUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+    getUserSettings: vi.fn(async () => ({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    })),
+    updateUserSettings: vi.fn(async () => ({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    })),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
 }
