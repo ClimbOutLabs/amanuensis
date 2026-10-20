@@ -1,6 +1,7 @@
 import type { ChatCompletionTool } from 'openai/resources/chat';
 import type { MCPServerInitInfo } from '../events/schema';
 import type { MCPAuthRequired } from '../mcp/IMCPServer';
+import { isRecord } from '../util/records';
 import { type IToolSet, isAuthRequired } from './IMCPServer';
 import { getUniqueSanitizedToolName } from './toolNames';
 
@@ -18,10 +19,6 @@ export interface ConvertMCPServersToToolsResult {
   convertedTools: ConvertToolsResult;
   initializationInfo: MCPServerInitInfo[];
   authRequirementInfo: MCPAuthRequired[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** The member types of a union-shaped schema (anyOf, oneOf, or a type list); undefined when not a union. */

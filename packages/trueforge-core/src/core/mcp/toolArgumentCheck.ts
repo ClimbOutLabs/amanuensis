@@ -9,6 +9,8 @@
  * reports the rest as plain problems the model can act on. It never sees, and never repeats, a
  * provider's own validation wording.
  */
+import type { RawToolCall } from '../llm/LLMTypes';
+import { isRecord } from '../util/records';
 
 /** The part of a JSON schema this check reads. Read from offered tool definitions by toParameterSchema. */
 export interface ToolParameterSchema {
@@ -29,8 +31,20 @@ export interface ArgumentProblem {
   expected: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/**
+ * Reads one call's argument text as a record; undefined when the text is not a finished JSON
+ * object. A provider that streams no argument text sends the call with empty text for its
+ * arguments, which the executor reads as an empty object; it is read the same way here, so the
+ * schema check, not an "incomplete" refusal, decides what happens to such a call.
+ */
+export function parseToolCallArguments(call: RawToolCall): Record<string, unknown> | undefined {
+  const text = call.function.arguments === '' ? '{}' : call.function.arguments;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readSchema(value: unknown): ToolParameterSchema | undefined {

@@ -14,6 +14,7 @@ import { CREATE_EVENT_TOOL_NAME, GET_EVENT_TOOL_NAME } from '../calendar/toolCon
 import type { RawAssistantMessage, RawToolCall } from '../llm/LLMTypes';
 import {
   checkToolArguments,
+  parseToolCallArguments,
   toolArgumentProblemMessage,
   toParameterSchema,
   type ToolParameterSchema,
@@ -35,23 +36,6 @@ interface ModelReplyGuardOutcome {
   invalidCalls: Map<string, string>;
   /** True when the reply still holds more calls than one reply may make after duplicates merged. */
   tooManyCalls: boolean;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseArguments(call: RawToolCall): Record<string, unknown> | undefined {
-  // A provider that streams no argument text sends the call with empty text for its
-  // arguments, which the executor reads as an empty object; read it the same way here, so
-  // the schema check, not an "incomplete" refusal, decides what happens to such a call.
-  const text = call.function.arguments === '' ? '{}' : call.function.arguments;
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 const ID_FIELD_PATTERN = /"(?:id|event_id)"\s*:\s*"([^"]+)"/g;
@@ -78,7 +62,7 @@ export function collectKnownEventIds(context: readonly ContextMessage[]): Set<st
     }
     if (message.role === 'assistant' && 'tool_calls' in message && Array.isArray(message.tool_calls)) {
       for (const call of message.tool_calls) {
-        const args = parseArguments(call);
+        const args = parseToolCallArguments(call);
         const eventId = args?.['event_id'];
         if (typeof eventId === 'string') {
           ids.add(eventId);
@@ -108,7 +92,7 @@ export function guardModelReply(input: {
   const cleaned: RawToolCall[] = [];
 
   for (const call of calls) {
-    const args = parseArguments(call);
+    const args = parseToolCallArguments(call);
     if (args === undefined) {
       invalidCalls.set(
         call.id,
@@ -152,7 +136,7 @@ export function guardModelReply(input: {
   const seen = new Set<string>();
   const deduped: RawToolCall[] = [];
   for (const call of cleaned) {
-    const args = parseArguments(call);
+    const args = parseToolCallArguments(call);
     const signature = `${call.function.name}:${args === undefined ? call.function.arguments : stableStringify(args)}`;
     if (seen.has(signature)) {
       continue;
