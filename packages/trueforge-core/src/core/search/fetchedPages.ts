@@ -203,6 +203,10 @@ function urlSpellings(raw: string): string[] {
   } catch {
     // A link that does not decode has only the spelling it was passed in.
   }
+  // A query string writes a space as "+", and a page or a result may print it back as a space.
+  for (const spelling of [...spellings]) {
+    spellings.add(spelling.replace(/\+/g, ' '));
+  }
   for (const spelling of [...spellings]) {
     spellings.add(spelling.replace(/^https?:\/\//i, ''));
   }

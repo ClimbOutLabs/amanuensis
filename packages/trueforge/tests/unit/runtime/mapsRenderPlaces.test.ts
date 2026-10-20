@@ -119,7 +119,10 @@ describe('render_places', () => {
     expect(asked).toEqual(['12 Example Street, Lisbon 1100-000']);
     expect(body['places']).toHaveLength(1);
     expect(body['refused']).toEqual([
-      { name: 'Garden Health Centre', reason: 'Aman has not read that page, so the details cannot be checked.' },
+      {
+        name: 'Garden Health Centre',
+        reason: 'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
+      },
     ]);
   });
 
@@ -137,7 +140,10 @@ describe('render_places', () => {
     expect(asked).toEqual([]);
     expect(body).toMatchObject({ status: 'error', code: 'not_grounded' });
     expect(body['refused']).toEqual([
-      { name: 'Harbour Family Clinic', reason: 'Aman has not read that page, so the details cannot be checked.' },
+      {
+        name: 'Harbour Family Clinic',
+        reason: 'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
+      },
     ]);
   });
 

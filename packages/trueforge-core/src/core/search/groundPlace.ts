@@ -18,7 +18,7 @@ export interface GroundedPlace extends PlaceClaim {
 
 export type GroundResult =
   | { ok: true; place: GroundedPlace }
-  | { ok: false; reason: 'source_not_fetched' | 'name_not_found' | 'address_not_found' };
+  | { ok: false; reason: 'source_not_fetched' | 'name_not_found' | 'address_not_found' | 'address_apart_from_name' };
 
 const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
 const MIN_PHONE_SUFFIX_DIGITS = 7;
@@ -77,7 +77,13 @@ function tokensOf(text: string): string[] {
 }
 
 /** Every run of the page's words that is exactly the given words, as start and end positions. */
-function occurrences(tokens: readonly string[], phrase: readonly string[]): { start: number; end: number }[] {
+function occurrences({
+  tokens,
+  phrase,
+}: {
+  tokens: readonly string[];
+  phrase: readonly string[];
+}): { start: number; end: number }[] {
   const found: { start: number; end: number }[] = [];
   if (phrase.length === 0 || phrase.length > tokens.length) {
     return found;
@@ -97,10 +103,13 @@ function occurrences(tokens: readonly string[], phrase: readonly string[]): { st
  */
 const MAX_WORDS_BETWEEN_NAME_AND_ADDRESS = 4;
 
-function closeTogether(
-  nameHits: readonly { start: number; end: number }[],
-  addressHits: readonly { start: number; end: number }[],
-): boolean {
+function closeTogether({
+  nameHits,
+  addressHits,
+}: {
+  nameHits: readonly { start: number; end: number }[];
+  addressHits: readonly { start: number; end: number }[];
+}): boolean {
   return nameHits.some(name =>
     addressHits.some(address => {
       const between = Math.max(address.start - name.end, name.start - address.end, 0);
@@ -173,14 +182,19 @@ export function groundPlace({
   const pageWords = normalizedWords(page.text);
   const pageTokens = tokensOf(page.text);
   const nameTokens = tokensOf(claim.name);
-  const nameHits = nameIsSpecific(nameTokens) ? occurrences(pageTokens, nameTokens) : [];
+  const nameHits = nameIsSpecific(nameTokens) ? occurrences({ tokens: pageTokens, phrase: nameTokens }) : [];
   if (nameHits.length === 0) {
     return { ok: false, reason: 'name_not_found' };
   }
   const addressTokens = tokensOf(claim.address);
-  const addressHits = addressIsSpecific(addressTokens) ? occurrences(pageTokens, addressTokens) : [];
-  if (addressHits.length === 0 || !closeTogether(nameHits, addressHits)) {
+  const addressHits = addressIsSpecific(addressTokens)
+    ? occurrences({ tokens: pageTokens, phrase: addressTokens })
+    : [];
+  if (addressHits.length === 0) {
     return { ok: false, reason: 'address_not_found' };
+  }
+  if (!closeTogether({ nameHits, addressHits })) {
+    return { ok: false, reason: 'address_apart_from_name' };
   }
   const found = (value: string | null): string | null =>
     value !== null && pageHas({ pageWords, value }) ? value : null;

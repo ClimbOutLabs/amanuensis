@@ -210,7 +210,7 @@ describe('groundPlace checks the name and the address together', () => {
     const pages = listingsStore();
     expect(groundPlace({ claim: listingClaim('Hope House', '12 Main St'), pages, scope: SCOPE })).toEqual({
       ok: false,
-      reason: 'address_not_found',
+      reason: 'address_apart_from_name',
     });
   });
 

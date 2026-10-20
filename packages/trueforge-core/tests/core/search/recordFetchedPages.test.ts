@@ -137,6 +137,34 @@ describe('recordFetchedPages keeps the requested link itself out of the stored t
     ).toEqual({ ok: false, reason: 'name_not_found' });
   });
 
+  it('stores an echoed path whose plus signs show as spaces without those words, so a made-up place cannot pin', () => {
+    const pages = store();
+    const url = 'https://site.example/Joe+Cafe+12+Main+St';
+    const text = 'Result for https://site.example/Joe Cafe 12 Main St';
+    recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
+    expect(
+      groundPlace({
+        claim: { ...claim, name: 'Joe Cafe', address: '12 Main St', source_url: url },
+        pages,
+        scope: SCOPE,
+      }),
+    ).toEqual({ ok: false, reason: 'name_not_found' });
+  });
+
+  it('stores an echoed query string whose plus signs show as spaces without those words, so a made-up place cannot pin', () => {
+    const pages = store();
+    const url = 'https://site.example/?name=Joe+Cafe&addr=12+Main+St';
+    const text = 'Result for https://site.example/?name=Joe Cafe&addr=12 Main St';
+    recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
+    expect(
+      groundPlace({
+        claim: { ...claim, name: 'Joe Cafe', address: '12 Main St', source_url: url },
+        pages,
+        scope: SCOPE,
+      }),
+    ).toEqual({ ok: false, reason: 'name_not_found' });
+  });
+
   it('still records the real words of a plain text result that also names its link', () => {
     const pages = store();
     const text = `${PAGE_TEXT}\nSource: ${PAGE_URL}`;

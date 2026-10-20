@@ -503,9 +503,12 @@ function mapsErrorResult({
 }
 
 const REFUSAL_REASONS = {
-  source_not_fetched: 'Aman has not read that page, so the details cannot be checked.',
+  source_not_fetched:
+    'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
   name_not_found: 'The name is not on that page. Copy it word for word from the page and try again.',
   address_not_found: 'The address is not on that page. Copy it word for word from the page and try again.',
+  address_apart_from_name:
+    'The name and address are not together on that page. Copy them from one listing and try again.',
 } as const;
 
 const OUT_OF_AREA_REASON =
@@ -605,7 +608,7 @@ function stateCodeOf(tokens: readonly string[]): string | undefined {
 }
 
 /** Whether the result name names a US state of its own, by name or by code, other than the given one. */
-function displayNamesOtherState(displayWords: string, ownCode: string): boolean {
+function displayNamesOtherState({ displayWords, ownCode }: { displayWords: string; ownCode: string }): boolean {
   for (const [name, code] of Object.entries(US_STATE_CODES)) {
     if (code !== ownCode && displayWords.includes(` ${name} `)) {
       return true;
@@ -662,7 +665,11 @@ export function isInRequestedArea({ query, displayName }: { query: string; displ
   }
   return !areaParts.slice(1).some(part => {
     const code = stateCodeOf(part);
-    return code !== undefined && !areaPartAppears(part, displayWords) && displayNamesOtherState(displayWords, code);
+    return (
+      code !== undefined &&
+      !areaPartAppears(part, displayWords) &&
+      displayNamesOtherState({ displayWords, ownCode: code })
+    );
   });
 }
 
