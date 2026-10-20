@@ -206,7 +206,10 @@ describe('demo instance and connector mail', () => {
   });
 });
 
-/** Names that start like a read but also name another service or a write. Main auto-denies each one. */
+/**
+ * Connector names that start like a read but also name another service or a write. Each one keeps the
+ * decision it had on main, in live and demo instances alike.
+ */
 const READS_NAMING_OTHER_ACTIONS = [
   'list_messages_and_archive',
   'list_and_pay_invoice',
@@ -214,27 +217,31 @@ const READS_NAMING_OTHER_ACTIONS = [
   'getMessagesAndArchive',
   'search-and-share-message',
   'fetch-and-notify',
+  'get_mail_and_wire',
+  'list_messages_and_deliver',
+  'get_message_and_text',
+  'get_messages_and_buy',
 ];
 
+/** Main's decision for each name above, checked by running origin/main's classifier on each name before this change. */
+const MAIN_OTHER_ACTION_DECISION = {
+  tier: 3,
+  auto_deny: 'destination_unverifiable',
+  reason: 'auto_denied',
+  reason_detail: 'External-service action with no verifiable destination; never carded.',
+  card: null,
+};
+
 describe('connector reads that name another action keep main decision', () => {
-  // Expected values are main's: checked against origin/main's classifier before this change.
   it.each(READS_NAMING_OTHER_ACTIONS)('%s is auto-denied as on main', async name => {
-    expect(await classifyTier(mailCall(name, { message_id: 'm1' }), makeCtx())).toMatchObject({
-      tier: 3,
-      auto_deny: 'destination_unverifiable',
-      reason: 'auto_denied',
-      card: null,
-    });
+    expect(await classifyTier(mailCall(name, { message_id: 'm1' }), makeCtx())).toMatchObject(
+      MAIN_OTHER_ACTION_DECISION,
+    );
   });
 
   it.each(READS_NAMING_OTHER_ACTIONS)('%s is auto-denied as on main in a demo instance', async name => {
     expect(
       await classifyTier(mailCall(name, { message_id: 'm1' }), makeCtx(servicesFor({ demo: true }))),
-    ).toMatchObject({
-      tier: 3,
-      auto_deny: 'destination_unverifiable',
-      reason: 'auto_denied',
-      card: null,
-    });
+    ).toMatchObject(MAIN_OTHER_ACTION_DECISION);
   });
 });

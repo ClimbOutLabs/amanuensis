@@ -524,61 +524,34 @@ const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 
 
 /** The first word of a connector call that only reads. */
 const CONNECTOR_READ_VERBS = ['list', 'get', 'search', 'read', 'count', 'fetch', 'find', 'show', 'view'];
-/** A connector call with any of these words in its name sends or writes, whatever it starts with. */
-const CONNECTOR_WRITE_WORDS = [
-  ...DESTRUCTIVE_AND_INSTALL_WORDS,
-  'send',
-  'reply',
-  'forward',
-  'post',
-  'publish',
-  'share',
-  'draft',
-  'create',
-  'update',
-  'move',
-  'mark',
-  'flag',
-  'set',
-  'write',
-  'save',
-  'upload',
-  'invite',
-  'schedule',
-  'archive',
-  'trash',
-  'label',
-  'star',
-  'snooze',
-  'unsubscribe',
-  'approve',
-  'accept',
-  'decline',
-  'cancel',
-  'submit',
-  'add',
-  'insert',
-  'edit',
-  'modify',
-  'rename',
-  'copy',
-  'sync',
-  'import',
-  'export',
-  'run',
-  'execute',
-  'apply',
-  'block',
-  'report',
-  'mute',
-  'pin',
-  'assign',
-  'close',
-  'merge',
-  'reopen',
-];
-/** The external-service fragments a connector read may carry: reading mail or messages is not a send. */
-const CONNECTOR_READ_FRAGMENTS = new Set(['mail', 'email', 'message']);
+/**
+ * Every word a connector read name may carry. A name with any other word is not a read, so it keeps the
+ * decision it had before reads were recognized. A deny-list of send words can never be complete.
+ */
+const CONNECTOR_READ_WORDS = new Set([
+  ...CONNECTOR_READ_VERBS,
+  'message',
+  'messages',
+  'mail',
+  'mails',
+  'email',
+  'emails',
+  'thread',
+  'threads',
+  'unread',
+  'attachment',
+  'attachments',
+  'inbox',
+  'mailbox',
+  'mailboxes',
+  'header',
+  'headers',
+  'body',
+  'folder',
+  'folders',
+  'by',
+  'id',
+]);
 
 /**
  * Connector actions that are not external-service by name but still send data out. They only
@@ -758,8 +731,9 @@ function hiddenSendKind({
 }
 
 /**
- * A connector call that only reads: a read verb first, no send or write word in its name, and no recipient or
- * hidden send in its arguments. Its annotations still decide how it is approved; they never make it a send.
+ * A connector call that only reads: every word of its name is a read word, and the first is a read verb. It
+ * also has no recipient or hidden send in its arguments. Its annotations still decide how it is approved;
+ * they never make it a send.
  */
 function isConnectorRead({
   tool_name,
@@ -770,15 +744,12 @@ function isConnectorRead({
   words: string;
   params: Record<string, unknown>;
 }): boolean {
-  const lowerName = tool_name.toLowerCase();
-  // Any other external-service fragment (pay, transfer, share, ...) keeps the call a send, as on main.
-  const namesOtherService = EXTERNAL_SERVICE_FRAGMENTS.some(
-    fragment => !CONNECTOR_READ_FRAGMENTS.has(fragment) && lowerName.includes(fragment),
-  );
+  const nameWordList = words.split('_').filter(word => word !== '');
+  const firstWord = nameWordList[0];
   return (
-    CONNECTOR_READ_VERBS.some(verb => words.startsWith(`_${verb}_`)) &&
-    !namesOtherService &&
-    !hasPhrase(words, ...CONNECTOR_WRITE_WORDS) &&
+    firstWord !== undefined &&
+    CONNECTOR_READ_VERBS.includes(firstWord) &&
+    nameWordList.every(word => CONNECTOR_READ_WORDS.has(word)) &&
     nestedRecipientValues(params).length === 0 &&
     hiddenSendKind({ tool_name, words, params }) === null
   );
