@@ -9,7 +9,8 @@
 
 /** Said to the person, through the tool result, when a project needs a package from a git address. */
 export const PACKAGE_GIT_DEPENDENCY_MESSAGE =
-  "This project needs a package from a git address, which the sandbox can't reach yet.";
+  "This project needs a package from a git address, which the sandbox can't reach yet. " +
+  "Replace it with the package's name and version from the package registry, then try again.";
 
 /**
  * Dependency files read when a download command runs in a repo that allows package downloads.
@@ -143,7 +144,10 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
   if ((base === 'python' || base === 'python3') && argv[1] === '-m' && argv[2] === 'pip' && argv[3] === 'install') {
     return 'pypi';
   }
-  if (NPM_PROGRAMS.has(base) && (sub === 'install' || sub === 'ci' || sub === 'add' || sub === 'update')) {
+  if (
+    NPM_PROGRAMS.has(base) &&
+    (sub === 'install' || sub === 'i' || sub === 'ci' || sub === 'add' || sub === 'update')
+  ) {
     return 'npm';
   }
   if (base === 'npx' && argv[1] === 'npm' && (argv[2] === 'install' || argv[2] === 'ci')) {
@@ -250,8 +254,12 @@ function isGitSpec(spec: string): boolean {
     /^[^\s/@]+@[^\s/:]+:/.test(value) ||
     // In dependency position, a URL on a git host is a clone address, never a registry download.
     /^https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org)\//i.test(value) ||
-    // user/repo shorthand.
-    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?$/.test(value)
+    // user/repo shorthand. Local paths (./lib, ../shared, /abs/path) wear the same two-part
+    // shape but name files on this machine, so they never count as shorthand.
+    (!value.startsWith('./') &&
+      !value.startsWith('../') &&
+      !value.startsWith('/') &&
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?$/.test(value))
   );
 }
 
@@ -310,6 +318,152 @@ function findPackageJsonGitDependency(content: string): string | undefined {
     const hit = findGitSpecInOverrides(source);
     if (hit !== undefined) {
       return hit;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Flags whose next word is a setting value, per package family: an index or registry address, a
+ * file to read, a folder to write to. Those values are settings, not package specs, so the word
+ * after one is never judged as a spec. pip's -e and --editable are absent on purpose: the word
+ * after them is a spec. Cargo's --git is absent for the same reason.
+ */
+const FLAG_VALUE_WORDS: Record<PackageDownloadEcosystem, ReadonlySet<string>> = {
+  pypi: new Set([
+    '--index-url',
+    '--extra-index-url',
+    '--default-index',
+    '--index',
+    '--find-links',
+    '--proxy',
+    '--requirement',
+    '--constraint',
+    '--target',
+    '--prefix',
+    '--root',
+    '--cache-dir',
+    '--src',
+    '--cert',
+    '--client-cert',
+    '--trusted-host',
+    '--python-version',
+    '--platform',
+    '--abi',
+    '--implementation',
+    '--global-option',
+    '--install-option',
+    '--report',
+    '--python',
+    '--keyring-provider',
+    '--progress-bar',
+    '--dest',
+    '--group',
+    '--source',
+    '-i',
+    '-r',
+    '-c',
+    '-f',
+    '-t',
+    '-d',
+  ]),
+  npm: new Set([
+    '--registry',
+    '--proxy',
+    '--https-proxy',
+    '--prefix',
+    '--cache',
+    '--userconfig',
+    '--globalconfig',
+    '--workspace',
+    '--tag',
+    '--otp',
+    '--loglevel',
+    '--logdir',
+    '--init-module',
+    '-w',
+  ]),
+  go: new Set([
+    '-C',
+    '-mod',
+    '-modfile',
+    '-tags',
+    '-ldflags',
+    '-gcflags',
+    '-asmflags',
+    '-toolexec',
+    '-o',
+    '-exec',
+    '-run',
+    '-count',
+    '-timeout',
+    '-bench',
+    '-benchtime',
+    '-coverprofile',
+    '-output',
+  ]),
+  cargo: new Set([
+    '--registry',
+    '--index',
+    '--manifest-path',
+    '--target',
+    '--path',
+    '--features',
+    '--package',
+    '--color',
+    '--config',
+    '-F',
+    '-p',
+  ]),
+};
+
+/**
+ * Whether one word from a download command's own argument list names a package the mirrors
+ * cannot serve: the same specs the manifest checks refuse, plus a bare web address, which as a
+ * command argument is a direct download the mirrors would never see.
+ */
+function isRefusedCommandSpec(word: string): boolean {
+  if (isGitSpec(word) || GIT_SPEC_PATTERNS.some(pattern => pattern.test(word))) {
+    return true;
+  }
+  return /^https?:\/\//i.test(word);
+}
+
+/**
+ * The first package spec on a download command's own argument list that the mirrors cannot
+ * serve, or undefined. A manifest is not the only place such a spec can hide: one typed
+ * straight into the command would be fetched by the tool itself, around the mirrors. Only
+ * download commands are read, and only their package words: flag spellings are skipped, and
+ * so is the value of a flag that takes one, because a setting is not a package.
+ */
+export function findCommandLineGitDependency(command: string): string | undefined {
+  for (const words of splitShellCommands(command)) {
+    const argv = programWords(words);
+    const ecosystem = segmentDownloadEcosystem(argv);
+    if (ecosystem === undefined) {
+      continue;
+    }
+    const valueWords = FLAG_VALUE_WORDS[ecosystem];
+    let skipNext = false;
+    let positionalOnly = false;
+    for (const word of argv.slice(1)) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      if (!positionalOnly && word === '--') {
+        positionalOnly = true;
+        continue;
+      }
+      if (!positionalOnly && word.startsWith('-')) {
+        if (!word.includes('=') && valueWords.has(word)) {
+          skipNext = true;
+        }
+        continue;
+      }
+      if (isRefusedCommandSpec(word)) {
+        return word;
+      }
     }
   }
   return undefined;

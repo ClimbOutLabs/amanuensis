@@ -1,6 +1,7 @@
 import {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  findCommandLineGitDependency,
   findGitDependency,
   packageDownloadCardWhat,
   splitShellCommands,
@@ -30,6 +31,7 @@ describe('commandDownloadsPackages', () => {
     'python3 -m pip install flask',
     'cd app && npm ci',
     'npm install',
+    'npm i lodash',
     'pnpm add vitest',
     'yarn install',
     'cargo build --release',
@@ -206,12 +208,85 @@ describe('findGitDependency', () => {
     const content = JSON.stringify({ dependencies: { local: 'file:///home/user/project' } });
     expect(findGitDependency([{ name: 'package.json', content }])).toBeUndefined();
   });
+
+  it.each([
+    ['a current-directory path', './lib'],
+    ['a parent-directory path', '../shared'],
+    ['an absolute path', '/abs/path'],
+  ])('ignores %s as a package.json dependency', (_name, spec) => {
+    const content = JSON.stringify({ dependencies: { local: spec } });
+    expect(findGitDependency([{ name: 'package.json', content }])).toBeUndefined();
+  });
+
+  it('ignores local paths in package.json overrides, and still finds git specs there', () => {
+    const local = JSON.stringify({ overrides: { local: '../shared' } });
+    expect(findGitDependency([{ name: 'package.json', content: local }])).toBeUndefined();
+    const git = JSON.stringify({ overrides: { lib: 'example/lib' } });
+    expect(findGitDependency([{ name: 'package.json', content: git }])?.file).toBe('package.json');
+  });
+});
+
+describe('findCommandLineGitDependency', () => {
+  it.each([
+    ['a pip git spec', 'pip install git+https://github.com/org/repo', 'git+https://github.com/org/repo'],
+    [
+      'a pip git spec over ssh',
+      'pip install git+ssh://git@github.com/org/repo.git',
+      'git+ssh://git@github.com/org/repo.git',
+    ],
+    ['a pip hg spec', 'pip install hg+https://bitbucket.org/org/repo', 'hg+https://bitbucket.org/org/repo'],
+    ['a pip bare ssh address', 'pip install ssh://git@github.com/org/repo.git', 'ssh://git@github.com/org/repo.git'],
+    ['a pip editable git spec', 'pip install -e git+https://github.com/org/repo', 'git+https://github.com/org/repo'],
+    [
+      'a web address as the package',
+      'pip install https://files.pythonhosted.org/pkg-1.0.tar.gz',
+      'https://files.pythonhosted.org/pkg-1.0.tar.gz',
+    ],
+    ['an npm shorthand', 'npm i github:org/repo', 'github:org/repo'],
+    ['an npm user/repo shorthand', 'npm install org/repo', 'org/repo'],
+    ['an npm scp-style address', 'npm install git@github.com:org/repo.git', 'git@github.com:org/repo.git'],
+    ['a cargo git option', 'cargo add serde --git https://github.com/org/repo', 'https://github.com/org/repo'],
+    [
+      'a git spec in a later command',
+      'npm ci && pip install git+https://github.com/org/repo',
+      'git+https://github.com/org/repo',
+    ],
+  ])('finds %s', (_name, command, expected) => {
+    expect(findCommandLineGitDependency(command)).toBe(expected);
+  });
+
+  it.each([
+    'pip install requests',
+    'pip install requests>=2',
+    'pip install "requests[security]>=2"',
+    'pip install ./lib',
+    'pip install ../shared',
+    'pip install /abs/path/pkg-1.0-py3-none-any.whl',
+    'pip install --index-url https://example.com/simple requests',
+    'pip install --index-url=https://example.com/simple requests',
+    'pip install -r requirements.txt',
+    'pip install --requirement https://example.com/requirements.txt',
+    'npm install --registry https://registry.example.com lodash',
+    'npm install lodash@1.2.3',
+    'npm ci',
+    'go get github.com/org/mod@v1.2.3',
+    'go test -run TestThing/SubTest ./...',
+    'cargo build --release',
+    'cargo add serde --features derive',
+    'git clone https://github.com/org/repo',
+    'pip install requests && git clone https://github.com/org/repo',
+    'echo git+https://github.com/org/repo',
+    'ls -la',
+  ])('leaves %s alone', command => {
+    expect(findCommandLineGitDependency(command)).toBeUndefined();
+  });
 });
 
 describe('PACKAGE_GIT_DEPENDENCY_MESSAGE', () => {
-  it('is the plain message the coordinator approved', () => {
+  it('is the plain message the coordinator approved, with its one next step', () => {
     expect(PACKAGE_GIT_DEPENDENCY_MESSAGE).toBe(
-      "This project needs a package from a git address, which the sandbox can't reach yet.",
+      "This project needs a package from a git address, which the sandbox can't reach yet. " +
+        "Replace it with the package's name and version from the package registry, then try again.",
     );
   });
 });

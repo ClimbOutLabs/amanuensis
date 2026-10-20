@@ -102,6 +102,7 @@ import {
 } from './hostAuthenticatedGit';
 import {
   commandDownloadsPackages,
+  findCommandLineGitDependency,
   findGitDependency,
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   PACKAGE_MANIFEST_FILES,
@@ -3660,6 +3661,7 @@ export class Sandbox extends LocalToolMCP {
         const refusal = await this.packageGitDependencyRefusal({
           sandboxId: input.sandboxId,
           cwd: input.cwd,
+          command: input.command,
         });
         if (refusal !== undefined) {
           return { success: false, error: refusal };
@@ -3737,15 +3739,20 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Refuses a download command when the project's dependency files name a package from a git address,
-   * with the one plain sentence for that case. Reads the manifests at the command's directory and, when
-   * different, the bound repo's root; an unreadable manifest is skipped, because the tool itself will
-   * report a broken file better than a guess here.
+   * Refuses a download command when the command itself, or the project's dependency files, name a
+   * package from a git address, with the one plain sentence for that case. The command's own words
+   * are read first: a spec typed into the command never reaches a manifest. Then the manifests at
+   * the command's directory and, when different, the bound repo's root; an unreadable manifest is
+   * skipped, because the tool itself will report a broken file better than a guess here.
    */
   private async packageGitDependencyRefusal(input: {
     sandboxId: string;
     cwd: string | undefined;
+    command: string;
   }): Promise<string | undefined> {
+    if (findCommandLineGitDependency(input.command) !== undefined) {
+      return PACKAGE_GIT_DEPENDENCY_MESSAGE;
+    }
     const workspaceDir = this.provider.getWorkspaceDir();
     const dirs = new Set<string>();
     const addDir = (dir: string | undefined): void => {

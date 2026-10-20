@@ -474,7 +474,8 @@ export class PackageMirrorGateway {
 
   /**
    * Fetches one upstream address, following redirects by hand: every hop must stay on this mirror's
-   * own list, and only GET and HEAD are ever sent. Returns undefined when a hop leaves the list.
+   * own list, at the same host and port as an address on that list and carrying no user name or
+   * password, and only GET and HEAD are ever sent. Returns undefined when a hop leaves the list.
    */
   async #fetchUpstream(input: {
     ecosystem: MirrorEcosystem;
@@ -506,11 +507,17 @@ export class PackageMirrorGateway {
       } catch {
         return undefined;
       }
-      const allowed = this.#bases[input.ecosystem].some(candidate => new URL(candidate).hostname === next.hostname);
+      const allowed = this.#bases[input.ecosystem].some(candidate => {
+        const base = new URL(candidate);
+        return base.hostname === next.hostname && base.port === next.port;
+      });
       const schemeOk = this.#testMode
         ? next.protocol === 'http:' || next.protocol === 'https:'
         : next.protocol === 'https:';
-      if (!allowed || !schemeOk) {
+      // A redirect carrying a user name or password would send those credentials upstream, so
+      // it is refused even when it points at a listed host.
+      const carriesCredentials = next.username !== '' || next.password !== '';
+      if (!allowed || !schemeOk || carriesCredentials) {
         return undefined;
       }
       url = next.toString();

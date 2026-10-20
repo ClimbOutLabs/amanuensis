@@ -1,5 +1,6 @@
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
+import { PACKAGE_GIT_DEPENDENCY_MESSAGE } from '../../../src/core/sandbox/packageMirrors';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, type BoundRepository } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -19,7 +20,7 @@ const PACKAGE_CARD_WHAT = "Aman wants to download this project's packages from t
 const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 
-function makeProvider(execCalls: SandboxExecParams[]): SandboxProvider {
+function makeProvider(execCalls: SandboxExecParams[], files?: Record<string, string>): SandboxProvider {
   return {
     type: 'test',
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
@@ -54,7 +55,7 @@ function makeProvider(execCalls: SandboxExecParams[]): SandboxProvider {
     getFileUploadsDir: () => '/prov/uploads',
     getSkillsDir: () => '/prov/skills',
     getSkillDownloaderPath: () => '/prov/git_downloader.py',
-    downloadFile: jest.fn(async () => Buffer.from('')),
+    downloadFile: jest.fn(async (params: { path: string }) => Buffer.from(files?.[params.path] ?? '')),
     uploadFile: jest.fn().mockResolvedValue(undefined),
     createCodeModeTransport: jest.fn(),
   };
@@ -65,9 +66,10 @@ function makeSandbox(input: {
   allowed: () => boolean;
   allowPackageDownloads: () => Promise<void>;
   boundRepository?: BoundRepository | undefined;
+  files?: Record<string, string> | undefined;
 }): Sandbox {
   return new Sandbox({
-    provider: makeProvider(input.execCalls),
+    provider: makeProvider(input.execCalls, input.files),
     boundRepository: input.boundRepository,
     loadBoundRepository: input.boundRepository === undefined ? undefined : async () => input.boundRepository,
     workspaceVerificationCoordinator:
@@ -233,5 +235,74 @@ describe('the first package download in a repo', () => {
       throw new Error('Expected a tool result');
     }
     expect(allowPackageDownloads).not.toHaveBeenCalled();
+  });
+});
+
+describe('a package the mirrors cannot serve', () => {
+  async function runCommand(input: {
+    execCalls: SandboxExecParams[];
+    command: string;
+    files?: Record<string, string> | undefined;
+  }) {
+    const sandbox = makeSandbox({
+      execCalls: input.execCalls,
+      allowed: () => true,
+      allowPackageDownloads: async () => undefined,
+      boundRepository: BOUND_REPOSITORY,
+      ...(input.files === undefined ? {} : { files: input.files }),
+    });
+    const response = await sandbox.callTool(
+      {
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'Install a package', purpose: 'execute', command: input.command },
+      },
+      { status: 'allow' },
+    );
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    return response.result;
+  }
+
+  function resultText(result: { content: readonly { type: string; text?: string }[] }): string {
+    const content = result.content[0];
+    if (content?.type !== 'text' || content.text === undefined) {
+      throw new Error('Expected a text tool result');
+    }
+    return content.text;
+  }
+
+  it.each([
+    ['a git spec on the command line', 'pip install git+https://github.com/org/repo'],
+    ['a shorthand on the command line', 'npm i github:org/repo'],
+    ['a web address on the command line', 'pip install https://files.pythonhosted.org/pkg-1.0.tar.gz'],
+  ])('refuses %s before anything runs', async (_name, command) => {
+    const execCalls: SandboxExecParams[] = [];
+    const result = await runCommand({ execCalls, command });
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(PACKAGE_GIT_DEPENDENCY_MESSAGE);
+    expect(execCalls.some(params => params.command === command)).toBe(false);
+  });
+
+  it('refuses a git dependency named in the project manifest', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const result = await runCommand({
+      execCalls,
+      command: 'pip install requests',
+      files: {
+        '/work/package.json': JSON.stringify({ dependencies: { lib: 'github:org/repo' } }),
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(PACKAGE_GIT_DEPENDENCY_MESSAGE);
+    expect(execCalls.some(params => params.command === 'pip install requests')).toBe(false);
+  });
+
+  it('runs a command whose package argument is a local path', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const result = await runCommand({ execCalls, command: 'pip install ./lib' });
+    expect(result.isError).toBe(false);
+    const pipExec = execCalls.find(params => params.command === 'pip install ./lib');
+    expect(pipExec?.packageMirrorToken).toBe('mirror-token');
   });
 });

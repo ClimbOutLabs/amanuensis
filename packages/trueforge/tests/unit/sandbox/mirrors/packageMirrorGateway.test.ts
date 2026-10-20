@@ -61,13 +61,22 @@ interface Harness {
   token: string;
   port: number;
   upstreamHits: string[];
+  otherHits: string[];
   cacheDir: string;
   close: () => Promise<void>;
 }
 
 async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: number }): Promise<Harness> {
   const upstreamHits: string[] = [];
+  const otherHits: string[] = [];
   let upstreamPort = 0;
+  let otherPort = 0;
+  const other = createServer((req, res) => {
+    const url = req.url ?? '/';
+    otherHits.push(`${req.method ?? ''} ${url}`);
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end(`other server saw ${url}`);
+  });
   const upstream = createServer((req, res) => {
     const url = req.url ?? '/';
     upstreamHits.push(`${req.method ?? ''} ${url}`);
@@ -131,6 +140,21 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
       res.end();
       return;
     }
+    if (url === '/redir-user') {
+      res.writeHead(302, { location: `http://someone@${origin.slice('http://'.length)}/simple/requests/` });
+      res.end();
+      return;
+    }
+    if (url === '/redir-pass') {
+      res.writeHead(302, { location: `http://someone:secret@${origin.slice('http://'.length)}/simple/requests/` });
+      res.end();
+      return;
+    }
+    if (url === '/redir-other-port') {
+      res.writeHead(302, { location: `http://127.0.0.1:${String(otherPort)}/simple/requests/` });
+      res.end();
+      return;
+    }
     if (url === '/big') {
       const body = Buffer.alloc(4096, 1);
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': body.length });
@@ -146,6 +170,7 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
     res.end(`upstream saw ${url}`);
   });
   upstreamPort = await listen(upstream);
+  otherPort = await listen(other);
   const upstreamBase = `http://127.0.0.1:${String(upstreamPort)}`;
   const registry = new PackageMirrorTokenRegistry();
   const token = registry.issue({
@@ -176,10 +201,12 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
     token,
     port,
     upstreamHits,
+    otherHits,
     cacheDir,
     close: async () => {
       await closeServer(server);
       await closeServer(upstream);
+      await closeServer(other);
     },
   };
 }
@@ -303,6 +330,40 @@ describe('PackageMirrorGateway', () => {
       const on = await call(harness.port, { path: '/pypi/redir-on', token: harness.token });
       expect(on.status).toBe(200);
       expect(on.body).toContain('requests-2.0-py3-none-any.whl');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a redirect carrying a user name, without contacting its target', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/pypi/redir-user', token: harness.token });
+      expect(reply.status).toBe(502);
+      expect(harness.upstreamHits).toEqual(['GET /redir-user']);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a redirect carrying a password, without contacting its target', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/pypi/redir-pass', token: harness.token });
+      expect(reply.status).toBe(502);
+      expect(harness.upstreamHits).toEqual(['GET /redir-pass']);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a redirect to another port on the same host', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/pypi/redir-other-port', token: harness.token });
+      expect(reply.status).toBe(502);
+      expect(harness.upstreamHits).toEqual(['GET /redir-other-port']);
+      expect(harness.otherHits).toEqual([]);
     } finally {
       await harness.close();
     }

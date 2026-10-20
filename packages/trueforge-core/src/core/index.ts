@@ -307,7 +307,12 @@ export type {
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
-export { PACKAGE_GIT_DEPENDENCY_MESSAGE, commandDownloadsPackages, findGitDependency } from './sandbox/packageMirrors';
+export {
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  commandDownloadsPackages,
+  findCommandLineGitDependency,
+  findGitDependency,
+} from './sandbox/packageMirrors';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
