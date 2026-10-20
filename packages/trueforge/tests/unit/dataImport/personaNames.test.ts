@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { repairPersonaNames } from '../../../src/dataImport/personaNames';
+import { personaMatchKey } from '../../../src/personas/persona';
 import { PersonaContentSchema } from '../../../src/schemas/persona';
 
 /** A personas.json entry as an older version wrote it; only the name fields matter here. */
@@ -224,5 +225,117 @@ describe('repairPersonaNames', () => {
     expect(lines).toEqual([
       'Dropped the persona alias "  " of the persona "Zara", because it has no letters or numbers.',
     ]);
+  });
+});
+
+/** A small seeded generator, so the generated sets are the same on every run. */
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const FUZZ_PIECES = [
+  'Zara',
+  'Dr',
+  '.',
+  ' ',
+  '\t',
+  '\n',
+  '\u00a0',
+  '&',
+  '🌟',
+  '\uFE0F',
+  '\u20E3',
+  '1',
+  'हि',
+  '्',
+  'e\u0301',
+  '_',
+  "'",
+  '-',
+  '*',
+  'my',
+  'The',
+  'a',
+  'x'.repeat(20),
+  '𝒜',
+  '!',
+  '',
+];
+
+function fuzzText(random: () => number): string {
+  let out = '';
+  for (let count = Math.floor(random() * 7); count > 0; count -= 1) {
+    out += FUZZ_PIECES[Math.floor(random() * FUZZ_PIECES.length)] ?? '';
+  }
+  return out;
+}
+
+describe('repairPersonaNames whitespace, marks and report text', () => {
+  it('keeps a name whose only change is a no-break space, and reports nothing', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara\u00a0Quinn')]);
+    expect(namesOf(json)[0]?.display_name).toBe('Zara Quinn');
+    expect(lines).toEqual([]);
+  });
+
+  it('treats a tab and a trailing newline as spaces, and reports nothing', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara\tQuinn\n')]);
+    expect(namesOf(json)[0]?.display_name).toBe('Zara Quinn');
+    expect(lines).toEqual([]);
+  });
+
+  it('removes a variation selector that follows an emoji, keeps the name, and reports it', () => {
+    const { json, lines } = repairPersonaNames([entry('Zara 🌟\uFE0F Quinn')]);
+    expect(namesOf(json)[0]?.display_name).toBe('Zara Quinn');
+    expect(lines).toEqual([
+      `Renamed the persona "Zara 🌟\uFE0F Quinn" to "Zara Quinn", because names can only use letters, numbers, spaces, _ - and '.`,
+    ]);
+    expectAcceptedByAppRules(json);
+  });
+
+  it('removes a keycap mark that follows a digit, keeping the digit', () => {
+    const { json, lines } = repairPersonaNames([entry('Room 1\uFE0F\u20E3')]);
+    expect(namesOf(json)[0]?.display_name).toBe('Room 1');
+    expect(lines).toHaveLength(1);
+    expectAcceptedByAppRules(json);
+  });
+
+  it('shows a tab or newline in a quoted name as a space, never raw', () => {
+    const { lines } = repairPersonaNames([entry('Zara\nQuinn.', ['Dr.\tKim'])]);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).not.toMatch(/[\t\n\r]/);
+    }
+  });
+});
+
+describe('repairPersonaNames over generated sets', () => {
+  it('keeps every repaired set valid and unique, with plain report lines, across 3,000 generated sets', () => {
+    const random = seededRandom(20261019);
+    let totalLines = 0;
+    for (let set = 0; set < 3000; set += 1) {
+      const personas = Array.from({ length: 1 + Math.floor(random() * 3) }, () =>
+        entry(
+          fuzzText(random),
+          Array.from({ length: Math.floor(random() * 3) }, () => fuzzText(random)),
+        ),
+      );
+      const { json, lines } = repairPersonaNames(personas);
+      totalLines += lines.length;
+      expectAcceptedByAppRules(json);
+      const keys = namesOf(json)
+        .flatMap(({ display_name, aliases }) => [display_name, ...aliases])
+        .map(personaMatchKey);
+      expect(new Set(keys).size).toBe(keys.length);
+      for (const line of lines) {
+        expect(line).not.toMatch(/[\t\n\r]/);
+      }
+    }
+    expect(totalLines).toBeGreaterThan(0);
   });
 });

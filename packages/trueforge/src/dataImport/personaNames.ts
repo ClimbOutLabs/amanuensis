@@ -1,5 +1,5 @@
 import { isPersonaDeterminer, personaMatchKey } from '../personas/persona';
-import { PERSONA_NAME_MAX_LENGTH, PersonaNameSchema } from '../schemas/persona';
+import { PERSONA_NAME_CHARACTER, PERSONA_NAME_MAX_LENGTH, PersonaNameSchema } from '../schemas/persona';
 import { isRecord } from './lenient';
 
 export interface PersonaNameRepair {
@@ -100,7 +100,7 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
     }
     taken.set(personaMatchKey(finalName), index);
     if (reason !== undefined) {
-      lines.push(`Renamed the persona "${candidate.displayName}" to "${finalName}", because ${reason}.`);
+      lines.push(`Renamed the persona "${shown(candidate.displayName)}" to "${shown(finalName)}", because ${reason}.`);
     }
     return finalName;
   });
@@ -123,7 +123,9 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
         return [alias];
       }
       const drop = (because: string) => {
-        lines.push(`Dropped the persona alias "${alias}" of the persona "${finalName}", because ${because}.`);
+        lines.push(
+          `Dropped the persona alias "${shown(alias)}" of the persona "${shown(finalName)}", because ${because}.`,
+        );
         return [];
       };
       const cleaned = fitsPersonaName(alias)
@@ -149,7 +151,7 @@ export function repairPersonaNames(json: unknown): PersonaNameRepair {
       taken.set(key, index);
       if (cleaned.reason !== undefined) {
         lines.push(
-          `Renamed the persona alias "${alias}" of the persona "${finalName}" to "${cleaned.text}", because ${cleaned.reason}.`,
+          `Renamed the persona alias "${shown(alias)}" of the persona "${shown(finalName)}" to "${shown(cleaned.text)}", because ${cleaned.reason}.`,
         );
       }
       return [cleaned.text];
@@ -171,6 +173,11 @@ function candidateOf(entry: unknown): PersonaCandidate | undefined {
   return { entry, persona, displayName: persona['display_name'], aliases };
 }
 
+/** A value as it is shown in a line: whitespace and control characters become spaces. */
+function shown(value: string): string {
+  return value.replace(/[\s\p{Cc}]/gu, ' ');
+}
+
 /** Whether a name is accepted as it is, by the same schema and reserved-word check a new name gets. */
 function fitsPersonaName(value: string): boolean {
   return PersonaNameSchema.safeParse(value).success && !isPersonaDeterminer(personaMatchKey(value));
@@ -186,24 +193,30 @@ function wantedKey(name: string): string | undefined {
 }
 
 /**
- * Cleans a name in the order the rules apply: the Unicode form is made composed, other characters
- * become spaces, spaces collapse, the ends are trimmed, the name is cut to length, and leading
- * characters that are not a letter or number are dropped. Only a visible change gives a reason.
+ * Cleans a name in the order the rules apply: the Unicode form is made composed, marks that belong to
+ * no letter are removed, whitespace and other characters become spaces, spaces collapse, the ends are
+ * trimmed, the name is cut to length, and leading characters that are not a letter or number are dropped.
+ * Only a visible change gives a reason.
  */
 function cleanName(raw: string): CleanedName {
-  const composed = raw.normalize('NFC');
+  const { kept, removedMark } = dropMarksOffLetters(raw.normalize('NFC'));
   // In some scripts a combining mark is part of its letter, so removing it would change the word.
-  if (/\p{M}/u.test(composed)) {
+  if (/\p{M}/u.test(kept)) {
     return { text: '', reason: MARK_REASON, unusable: MARK_REASON };
   }
-  const spaced = composed
-    .replace(/[^\p{L}\p{N} _'-]/gu, ' ')
+  const charactersChanged = Array.from(kept).some(
+    character => !/\s/u.test(character) && !PERSONA_NAME_CHARACTER.test(character),
+  );
+  const spaced = Array.from(kept, character =>
+    /\s/u.test(character) || !PERSONA_NAME_CHARACTER.test(character) ? ' ' : character,
+  )
+    .join('')
     .replace(/ +/g, ' ')
     .trim();
   const cut = truncate(spaced, PERSONA_NAME_MAX_LENGTH);
   const text = cut.replace(/^[^\p{L}\p{N}]+/u, '');
   let reason: string | undefined;
-  if (/[^\p{L}\p{N} _'-]/u.test(composed)) {
+  if (charactersChanged || removedMark) {
     reason = CHARACTERS_REASON;
   } else if (characterCount(spaced) > PERSONA_NAME_MAX_LENGTH) {
     reason = LENGTH_REASON;
@@ -217,6 +230,27 @@ function cleanName(raw: string): CleanedName {
     return { text, reason, unusable: RESERVED_REASON };
   }
   return { text, reason, unusable: undefined };
+}
+
+/**
+ * Drops a combining mark that follows no letter, such as a variation selector after an emoji, and keeps
+ * the marks that belong to a letter. The base is the last character that is not a mark.
+ */
+function dropMarksOffLetters(value: string): { kept: string; removedMark: boolean } {
+  let kept = '';
+  let removedMark = false;
+  let base = '';
+  for (const character of value) {
+    if (!/\p{M}/u.test(character)) {
+      base = character;
+      kept += character;
+    } else if (/\p{L}/u.test(base)) {
+      kept += character;
+    } else {
+      removedMark = true;
+    }
+  }
+  return { kept, removedMark };
 }
 
 /** Counted in code points, as the name schema's length check counts them. */

@@ -21,7 +21,10 @@ export const PersonaIdParamsSchema = z
  * The `u` flag is what makes `\p{L}` a Unicode property escape rather than a
  * literal `p`, so it cannot be dropped from the runtime check.
  */
-export const PERSONA_NAME_REGEX = /^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u;
+/** The characters a name may use, as a character class. Built once so the import repair tests the same set. */
+const PERSONA_NAME_CHARACTER_CLASS = "[\\p{L}\\p{N} _'-]";
+export const PERSONA_NAME_CHARACTER = new RegExp(PERSONA_NAME_CHARACTER_CLASS, 'u');
+const PERSONA_NAME_REGEX = new RegExp(`^[\\p{L}\\p{N}]${PERSONA_NAME_CHARACTER_CLASS}*$`, 'u');
 export const PERSONA_NAME_MAX_LENGTH = 48;
 
 export const PersonaNameSchema = z
