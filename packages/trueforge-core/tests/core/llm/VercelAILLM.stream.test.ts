@@ -1182,6 +1182,23 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     expect(final.output.tool_calls).toBeUndefined();
   });
 
+  it('streams a sentence that names the closing results tag, byte for byte', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'The closing tag </function_res' },
+      { type: 'text-delta', id: 't1', text: 'ults> ends the block.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('The closing tag </function_results> ends the block.');
+    expect(final.tool_markup).toBeUndefined();
+    expect(final.output.content).toBe('The closing tag </function_results> ends the block.');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
   it('keeps a nested-argument call streamed in multi-token pieces exact', async () => {
     // The owner's calendar failure shape: nested start/end blocks and an attendees list whose
     // argument JSON arrives in pieces of several tokens at once. The pieces must concatenate into

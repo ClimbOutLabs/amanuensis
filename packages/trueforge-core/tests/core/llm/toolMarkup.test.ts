@@ -226,6 +226,145 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
   });
 });
 
+describe('ToolMarkupGuard prose naming the strong tags', () => {
+  it('keeps a sentence that names the closing results tag as text, byte for byte', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The closing tag </function_results> ends the block.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps that sentence whole when it streams in pieces, split inside the tag', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('The closing tag </function_res');
+    shown += guard.push('ults> ends the block.');
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe('The closing tag </function_results> ends the block.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps prose that names the DSML marker with no call shape around it as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The marker <｜DSML｜ opens a call block in that format.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps that prose whole when the marker streams in split pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('The marker <｜DS');
+    shown += guard.push('ML｜ opens a call block in that format.');
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe('The marker <｜DSML｜ opens a call block in that format.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps prose that names the DSML wrapper as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The <｜DSML｜tool_calls> wrapper holds the calls in that format.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps prose that names the results block with no closing tag as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'A <function_results> block holds results the model made up.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('never releases a results block streamed in pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Checking now. <function_res');
+    shown += guard.push('ults>The event was added.</function_results> All done.');
+    expect(shown).toBe('Checking now. ');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+
+  it('releases a prose invoke example and still captures the real DSML call after it, in one piece', () => {
+    const guard = new ToolMarkupGuard();
+    const text =
+      'Use <invoke name="x"> to start a call. Now: ' +
+      '<｜DSML｜invoke name="create_event"><｜DSML｜parameter name="title" string="true">Dentist</｜DSML｜parameter></｜DSML｜invoke>';
+    const shown = guard.push(text);
+    expect(shown).toBe('Use <invoke name="x"> to start a call. Now: ');
+    expect(guard.finish()).toEqual({
+      status: 'recovered',
+      calls: [{ name: 'create_event', arguments: { title: 'Dentist' } }],
+    });
+  });
+});
+
+describe('ToolMarkupGuard indented code blocks', () => {
+  const ENVELOPE = '<invoke name="create_event"><parameter name="title">Dentist</parameter></invoke>';
+
+  it('keeps a complete envelope inside an indented code block as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = `Review:\n\n    ${ENVELOPE}`;
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps it whole when the block streams in pieces, split inside the envelope', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Review:\n\n    <invoke name="cre');
+    expect(guard.inMarkup).toBe(false);
+    shown += guard.push('ate_event"><parameter name="title">Dentist</parameter></invoke>');
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(`Review:\n\n    ${ENVELOPE}`);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps it whole when the split falls inside the indentation', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    shown += guard.push('Review:\n\n  ');
+    shown += guard.push('  ');
+    shown += guard.push(ENVELOPE);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(`Review:\n\n    ${ENVELOPE}`);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('still captures a genuine envelope after the indented block ends', () => {
+    const guard = new ToolMarkupGuard();
+    const text = `Review:\n\n    <invoke name="x">an example</invoke>\n\nFor real: ${ENVELOPE}`;
+    const shown = guard.push(text);
+    expect(shown).toBe('Review:\n\n    <invoke name="x">an example</invoke>\n\nFor real: ');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+
+  it('streams an indented block followed by ordinary prose whole', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Snippet:\n\n    total = 0\n    total += 1\n\nThat adds one.';
+    const shown = guard.push(text);
+    expect(guard.inMarkup).toBe(false);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('does not treat a two-space indent as a code block', () => {
+    const guard = new ToolMarkupGuard();
+    const text = `Review:\n\n  ${ENVELOPE}`;
+    const shown = guard.push(text);
+    expect(shown).toBe('Review:\n\n  ');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+});
+
 describe('parseToolMarkup', () => {
   it('rebuilds a DSML call, with JSON parameters parsed and string parameters kept as text', () => {
     const outcome = parseToolMarkup(DSML_CREATE);
