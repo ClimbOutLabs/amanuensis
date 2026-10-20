@@ -153,24 +153,35 @@ export interface DataImportRequest {
 
 const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
-/** Lines about left-out details shown in the summary; the import log has them all. */
-const LEFT_OUT_LINES_SHOWN = 20;
+/** Chats or sections whose left-out rows are shown in the summary; the import log has them all. */
+const LEFT_OUT_OWNERS_SHOWN = 20;
+/** Longest name shown in the left-out table before it is cut short with "...". */
+const LEFT_OUT_NAME_SHOWN = 36;
+/** Width of the name column in the left-out table, so the counts line up. */
+const LEFT_OUT_NAME_COLUMN = 42;
+/** Persona name changes shown in the summary; the import log has them all. */
+const PERSONA_CHANGES_SHOWN = 20;
 
 const SECTION_OWNERS: Readonly<Record<string, string>> = { 'settings.json': 'Your settings' };
 
-/** "a", "a and b", "a, b and c". */
-function plainList(parts: readonly string[]): string {
-  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
+/** One row of the summary's left-out table: whose detail it was, and how many of one kind were left out. */
+interface LeftOutRow {
+  /** The report's key for the chat or section, so the summary can cap the table by owner, not by row. */
+  owner: string;
+  name: string;
+  count: number;
+  /** Singular label, such as "tool detail"; the plural comes from LEFT_OUT_PLURALS. */
+  label: string;
 }
 
-/** One line per chat or section that lost internal details, saying how many of each kind. */
-function leftOutLines({
+/** One row per chat or section and kind of internal detail an older version lost. */
+function leftOutRows({
   report,
   titles,
 }: {
   report: LeftOutReport;
   titles: ReadonlyMap<string, string | null>;
-}): string[] {
+}): LeftOutRow[] {
   const merged: LeftOutByOwner = new Map();
   for (const owners of report.values()) {
     for (const [owner, counts] of owners) {
@@ -179,21 +190,23 @@ function leftOutLines({
       merged.set(owner, into);
     }
   }
-  const lines: string[] = [];
+  const rows: LeftOutRow[] = [];
   for (const [owner, counts] of merged) {
-    const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
-    if (total === 0) {
-      continue;
-    }
     const name = owner.startsWith('chat:')
-      ? `Chat '${titles.get(owner.slice('chat:'.length)) ?? 'Untitled chat'}'`
+      ? (titles.get(owner.slice('chat:'.length)) ?? 'Untitled chat')
       : (SECTION_OWNERS[owner.slice('section:'.length)] ?? `The ${owner.slice('section:'.length)} section`);
-    const parts = [...counts].map(
-      ([label, count]) => `${String(count)} ${count === 1 ? label : (LEFT_OUT_PLURALS[label] ?? label)}`,
-    );
-    lines.push(`${name}: ${plainList(parts)} from an older version ${total === 1 ? 'was' : 'were'} left out.`);
+    for (const [label, count] of counts) {
+      if (count > 0) {
+        rows.push({ owner, name, count, label });
+      }
+    }
   }
-  return lines;
+  return rows;
+}
+
+/** A name for the left-out table, cut short with "..." when it is longer than the table shows. */
+function leftOutName(name: string): string {
+  return name.length > LEFT_OUT_NAME_SHOWN ? `${name.slice(0, LEFT_OUT_NAME_SHOWN - 3)}...` : name;
 }
 
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
@@ -951,6 +964,7 @@ function buildSummary({
   standInAgentNames,
   filesLeftBehind,
   leftOut,
+  personaChanges,
   trimmedSpaces,
   dryRun,
 }: {
@@ -958,52 +972,91 @@ function buildSummary({
   connectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
-  /** One plain line per chat or section that lost internal details. */
-  leftOut: readonly string[];
+  /** Rows of the left-out table: internal details from an older version that did not come over. */
+  leftOut: readonly LeftOutRow[];
+  /** One sentence per persona name an older version wrote that today's rules changed or dropped. */
+  personaChanges: readonly string[];
   dryRun: boolean;
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
 }): string {
   const counts = [
-    pluralize(result.chats, 'chat', 'chats'),
-    pluralize(result.memories, 'memory', 'memories'),
-    pluralize(result.personas, 'persona', 'personas'),
-    pluralize(result.spaces, 'space', 'spaces'),
-    pluralize(result.agents, 'agent', 'agents'),
+    `  ${pluralize(result.chats, 'chat', 'chats')}`,
+    `  ${pluralize(result.memories, 'memory', 'memories')}`,
+    `  ${pluralize(result.personas, 'persona', 'personas')}`,
+    `  ${pluralize(result.spaces, 'space', 'spaces')}`,
+    `  ${pluralize(result.agents, 'agent', 'agents')}`,
     result.schedules === 0
-      ? pluralize(0, 'schedule', 'schedules')
-      : `${pluralize(result.schedules, 'schedule', 'schedules')} (off)`,
+      ? `  ${pluralize(0, 'schedule', 'schedules')}`
+      : `  ${pluralize(result.schedules, 'schedule', 'schedules')} (they will be off)`,
   ];
-  return [
-    dryRun
-      ? `This was a dry run, so nothing was imported. The import would bring ${counts.join(', ')}.`
-      : `Imported ${counts.join(', ')}.`,
-    'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time.',
-    auditEntries === 0
-      ? ''
-      : `${pluralize(auditEntries, 'permission history entry', 'permission history entries')} came along.`,
-    filesLeftBehind === 0
-      ? ''
-      : `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
-    standInAgentNames.length === 0
-      ? ''
-      : `Also created ${pluralize(standInAgentNames.length, 'stand-in agent', 'stand-in agents')} (${standInAgentNames.join(', ')}) because a chat or schedule refers to an agent the export does not include. Open the Agents page and give each one a model before you use it.`,
-    connectorNames.length === 0
-      ? ''
-      : `Connectors arrive unused, with no agent attached to them: ${connectorNames.join(', ')}. Attach each one to an agent on the Agents page when you want it.`,
-    trimmedSpaces === 0
-      ? ''
-      : `The older history of ${pluralize(trimmedSpaces, 'space', 'spaces')} was trimmed before the export, so ${trimmedSpaces === 1 ? 'its' : 'their'} versions now start at 1.`,
-    ...leftOut.slice(0, LEFT_OUT_LINES_SHOWN),
-    leftOut.length > LEFT_OUT_LINES_SHOWN
-      ? `And ${String(leftOut.length - LEFT_OUT_LINES_SHOWN)} more. The full list is in the import log.`
-      : '',
-    'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories.',
-    'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
-  ]
-    .filter(part => part !== '')
-    .join(' ');
+  const notes: string[] = [];
+  if (trimmedSpaces > 0) {
+    notes.push(
+      trimmedSpaces === 1
+        ? '1 space had older history trimmed, so its versions start at 1.'
+        : `${String(trimmedSpaces)} spaces had older history trimmed, so their versions start at 1.`,
+    );
+  }
+  if (connectorNames.length > 0) {
+    notes.push(`Connectors (${connectorNames.join(', ')}) come without an agent. Attach them on the Agents page.`);
+  }
+  if (standInAgentNames.length === 1) {
+    notes.push(
+      `A stand-in agent (${standInAgentNames[0] ?? ''}) was made because a chat or schedule names an agent that is not in the export. Give it a model on the Agents page before you use it.`,
+    );
+  } else if (standInAgentNames.length > 1) {
+    notes.push(
+      `Stand-in agents (${standInAgentNames.join(', ')}) were made because chats or schedules name agents that are not in the export. Give each one a model on the Agents page before you use it.`,
+    );
+  }
+  if (filesLeftBehind > 0) {
+    notes.push(
+      `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
+    );
+  }
+  notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
+  notes.push('Approvals given for one chat only do not carry over.');
+  if (auditEntries > 0) {
+    notes.push(`${pluralize(auditEntries, 'past permission decision', 'past permission decisions')} came along.`);
+  }
+  notes.push(
+    'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
+  );
+  notes.push('Permissions start fresh, so each tool will ask again.');
+
+  const sections: string[] = [[dryRun ? 'This export has:' : 'Imported:', ...counts].join('\n')];
+  if (leftOut.length > 0) {
+    const owners: string[] = [];
+    for (const row of leftOut) {
+      if (!owners.includes(row.owner)) {
+        owners.push(row.owner);
+      }
+    }
+    const shown = new Set(owners.slice(0, LEFT_OUT_OWNERS_SHOWN));
+    const rows = leftOut
+      .filter(row => shown.has(row.owner))
+      .map(
+        row =>
+          `  ${leftOutName(row.name).padEnd(LEFT_OUT_NAME_COLUMN)}${String(row.count)} ${row.count === 1 ? row.label : (LEFT_OUT_PLURALS[row.label] ?? row.label)}`,
+      );
+    if (owners.length > LEFT_OUT_OWNERS_SHOWN) {
+      rows.push(`  And ${String(owners.length - LEFT_OUT_OWNERS_SHOWN)} more. The full list is in the import log.`);
+    }
+    sections.push(['Left out, from an older version of Aman (your chats are complete):', ...rows].join('\n'));
+  }
+  if (personaChanges.length > 0) {
+    const rows = personaChanges.slice(0, PERSONA_CHANGES_SHOWN).map(change => `  • ${change}`);
+    if (personaChanges.length > PERSONA_CHANGES_SHOWN) {
+      rows.push(
+        `  And ${String(personaChanges.length - PERSONA_CHANGES_SHOWN)} more. The full list is in the import log.`,
+      );
+    }
+    sections.push(["Persona names changed to fit today's rules:", ...rows].join('\n'));
+  }
+  sections.push(['Good to know:', ...notes.map(note => `  • ${note}`)].join('\n'));
+  return sections.join('\n\n');
 }
 
 interface AgentPlan {
@@ -1384,12 +1437,14 @@ async function importArchive<TTransaction>(
     throw error;
   }
 
-  const leftOut = [
-    ...contents.personaRepairLines,
-    ...leftOutLines({ report: contents.leftOutReport, titles: sessions.titles }),
-  ];
+  const leftOut = leftOutRows({ report: contents.leftOutReport, titles: sessions.titles });
   if (leftOut.length > 0) {
-    deps.logger.info('Data import left out or repaired details from an older version', { left_out: leftOut });
+    deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
+  }
+  if (contents.personaRepairLines.length > 0) {
+    deps.logger.info('Data import repaired persona names from an older version', {
+      persona_changes: contents.personaRepairLines,
+    });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
   if (lock === undefined) {
@@ -1413,6 +1468,7 @@ async function importArchive<TTransaction>(
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
         leftOut,
+        personaChanges: contents.personaRepairLines,
         trimmedSpaces,
         dryRun: true,
       }),
@@ -1719,6 +1775,7 @@ async function importArchive<TTransaction>(
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
         leftOut,
+        personaChanges: contents.personaRepairLines,
         trimmedSpaces,
         dryRun: false,
       }),

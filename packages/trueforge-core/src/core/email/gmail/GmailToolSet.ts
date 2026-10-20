@@ -20,6 +20,7 @@ import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
 import { GmailApi, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
+import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
 import { answeredMessageOf, checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
@@ -429,15 +430,18 @@ export class GmailToolSet extends LocalToolMCP {
     const body = call.body.trim();
     const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
     const reviewable: ReviewableDraft = {
-      to: call.to,
-      cc: call.cc ?? [],
-      bcc: call.bcc ?? [],
+      to: call.to.map(address => mailboxOf(address)),
+      cc: (call.cc ?? []).map(address => mailboxOf(address)),
+      bcc: (call.bcc ?? []).map(address => mailboxOf(address)),
       subject,
       body,
       threadId: threadId ?? '',
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
+      // The model's recipients are validated bare addresses (toolContract), so no name is left off today. This check
+      // stays as a defence in case that contract ever admits display names.
+      nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
     };
     if (answered === undefined && existing !== undefined) {
       // Headers kept from a saved draft are not the model's, but anyone may have edited that draft in Gmail.
@@ -686,7 +690,9 @@ export class GmailToolSet extends LocalToolMCP {
       if (
         !recipientsAllowed({
           allowlist: this.#options.sentinel.services.demoSendAllowlist,
-          recipients: [...assessed.draft.to, ...assessed.draft.cc, ...assessed.draft.bcc],
+          recipients: [...assessed.draft.to, ...assessed.draft.cc, ...assessed.draft.bcc].map(
+            mailbox => mailbox.address,
+          ),
         })
       ) {
         return errorResult(DEMO_SEND_REFUSAL);

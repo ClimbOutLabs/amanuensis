@@ -5,7 +5,8 @@
  */
 import { z } from '@hono/zod-openapi';
 
-import type { ShellApprovalBinding } from './approvalTokens';
+import type { ShellApprovalBinding } from './approvalTokens.js';
+import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export type Tier = 1 | 2 | 3;
@@ -47,15 +48,15 @@ export const Tier3EmailSchema = z
     action: z
       .enum(['send', 'save', 'change'])
       .describe('What happens to the message: sent, saved as a draft, or a saved draft changed.'),
-    to: z.array(z.string()).describe('Recipients.'),
-    cc: z.array(z.string()).describe('Copied recipients.'),
-    bcc: z.array(z.string()).describe('Hidden copy recipients.'),
+    to: z.array(Tier3MailboxSchema).describe('Recipients.'),
+    cc: z.array(Tier3MailboxSchema).describe('Copied recipients.'),
+    bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
     subject: z.string().describe('Subject line.'),
     body: z.string().describe('The whole message text, exactly as it will be sent.'),
     replaces: z
       .object({
         subject: z.string().describe('Subject of the draft being replaced.'),
-        to: z.array(z.string()).describe('Recipients of the draft being replaced.'),
+        to: z.array(Tier3MailboxSchema).describe('Recipients of the draft being replaced.'),
       })
       .nullable()
       .describe('The saved draft a change replaces, or null.'),

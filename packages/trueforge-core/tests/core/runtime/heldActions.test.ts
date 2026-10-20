@@ -19,6 +19,7 @@ import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadConstructorInput } from '../../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
+import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
@@ -703,5 +704,71 @@ describe('audit rows for a web search held before its audit text was stored', ()
     expect(h.audit.length).toBeGreaterThanOrEqual(2);
     expectNoCaughtText(h);
     expect(h.audit.at(-1)?.description).toContain('Search the web through mail. Held because');
+  });
+});
+
+describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)', () => {
+  it('merges 22 identical reads into one call, which runs once', async () => {
+    const calls = Array.from({ length: 22 }, (_, index) => ({
+      id: `call-read-${String(index)}`,
+      name: 'read_note',
+      args: '{}',
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    const { brief } = await runBrief(h);
+
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+  });
+
+  it('queues 15 distinct held sends without tripping the cap', async () => {
+    const calls = Array.from({ length: 15 }, (_, index) => ({
+      id: `call-send-${String(index)}`,
+      name: 'send_note',
+      args: JSON.stringify({ to: `person${String(index)}@example.com`, body: 'Lunch at noon?' }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    const { brief } = await runBrief(h);
+
+    const listed = brief.events.flatMap(event =>
+      event.type === EventType.TOOL_APPROVAL_REQUIRED
+        ? event.tool_calls.filter(call => call.held === true).map(call => call.id)
+        : [],
+    );
+    expect(listed).toHaveLength(15);
+    expect(h.callTool).not.toHaveBeenCalled();
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
+  });
+
+  it('runs 20 distinct reads at once, one under the cap', async () => {
+    const calls = Array.from({ length: 20 }, (_, index) => ({
+      id: `call-read-${String(index)}`,
+      name: 'read_note',
+      args: JSON.stringify({ note: `n${String(index)}` }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    const { brief } = await runBrief(h);
+
+    expect(h.callTool).toHaveBeenCalledTimes(20);
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+  });
+
+  it('still stops the run when more than 20 calls would run at once', async () => {
+    const calls = Array.from({ length: 21 }, (_, index) => ({
+      id: `call-read-${String(index)}`,
+      name: 'read_note',
+      args: JSON.stringify({ note: `n${String(index)}` }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    const { brief } = await runBrief(h);
+
+    expect(h.callTool).not.toHaveBeenCalled();
+    expect(brief.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);
   });
 });

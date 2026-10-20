@@ -32,6 +32,13 @@ import {
   SCHEDULE_SERVER_ID,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  isSpaceReadToolName,
+  isSpaceWriteToolName,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -95,6 +102,7 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
+import { mailboxText, type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
@@ -1549,15 +1557,32 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Said on a card when a recipient's name was left off because it looked like an address. */
+const NAME_LEFT_OFF_LINE = ' The name was left off this address because it looked like an address.';
+
 /** Most characters of subject the card shows inside its sentence. */
 const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
 
-function displayList(addresses: readonly string[]): string {
-  const shown = addresses.map(address => escapeDisplayText(address));
+/** One recipient as `Name (address)`, or the bare address when it has no name, so the address is always shown. */
+/** Already-escaped items in a sentence: `A, B and C`. */
+function joinSentence(shown: readonly string[]): string {
   if (shown.length <= 1) {
     return shown.join('');
   }
   return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
+}
+
+function displayList(addresses: readonly string[]): string {
+  return joinSentence(addresses.map(address => escapeDisplayText(address)));
+}
+
+function recipientList(recipients: readonly Tier3Mailbox[]): string {
+  return joinSentence(recipients.map(mailbox => mailboxText(mailbox, { escape: escapeDisplayText })));
+}
+
+/** A recipient for the structured email block: its name and address, each escaped as the card escapes text. */
+function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
+  return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
 }
 
 function cardText(text: string): string {
@@ -1589,9 +1614,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
         ? 'change'
         : 'save';
   const parts = [
-    `to ${displayList(content.to) === '' ? 'no one' : displayList(content.to)}`,
-    ...(content.cc.length > 0 ? [`Copy: ${displayList(content.cc)}`] : []),
-    ...(content.bcc.length > 0 ? [`Hidden copy: ${displayList(content.bcc)}`] : []),
+    `to ${recipientList(content.to) === '' ? 'no one' : recipientList(content.to)}`,
+    ...(content.cc.length > 0 ? [`Copy: ${recipientList(content.cc)}`] : []),
+    ...(content.bcc.length > 0 ? [`Hidden copy: ${recipientList(content.bcc)}`] : []),
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
@@ -1610,8 +1635,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (kind === 'send'
       ? `Send ${subject} from your Gmail ${recipientsLine}.`
       : kind === 'change'
-        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${displayList(replaces.to) === '' ? 'no one' : displayList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) + threadLine;
+        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) +
+    threadLine +
+    (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1626,9 +1653,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     outbound_truncated: false,
     email: {
       action: kind,
-      to: content.to.map(address => escapeDisplayText(address)),
-      cc: content.cc.map(address => escapeDisplayText(address)),
-      bcc: content.bcc.map(address => escapeDisplayText(address)),
+      to: content.to.map(escapedMailbox),
+      cc: content.cc.map(escapedMailbox),
+      bcc: content.bcc.map(escapedMailbox),
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
       replaces:
@@ -1636,7 +1663,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
           ? null
           : {
               subject: escapeDisplayText(replaces.subject),
-              to: replaces.to.map(address => escapeDisplayText(address)),
+              to: replaces.to.map(escapedMailbox),
             },
       reply_in_thread:
         answered === undefined
@@ -1699,7 +1726,7 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     (draft === undefined ||
       !recipientsAllowed({
         allowlist: ctx.services.demoSendAllowlist,
-        recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+        recipients: [...draft.to, ...draft.cc, ...draft.bcc].map(mailbox => mailbox.address),
       }))
   ) {
     return demoRefusal(DEMO_SEND_REFUSAL);
@@ -1737,10 +1764,16 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
       : review.guests_emailed
         ? ` Google emails ${guests} about it.`
         : ` Guests: ${guests}. Google does not email them.`;
+  // An event that runs over more than one day is often a broken end date, so the card asks.
+  const spanWarning =
+    review.span_days > 1 ? ` This event runs over ${String(review.span_days)} days. Is that right?` : '';
+  // The same event was already created in this chat in the last few minutes: ask before adding another.
+  const duplicateLead =
+    review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
   const plainWhat =
     review.action === 'create'
-      ? `Add ${title} to your Google Calendar on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`;
+      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1757,7 +1790,7 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
       action: review.action,
       calendar: show(review.calendar),
       title: show(review.title),
-      when: show(review.when),
+      when: show(review.short_when),
       time_zone: show(review.time_zone),
       duration: show(review.duration),
       location: show(review.location),
@@ -1770,7 +1803,7 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
           ? null
           : {
               title: show(review.before.title),
-              when: show(review.before.when),
+              when: show(review.before.short_when),
               duration: show(review.before.duration),
               location: show(review.before.location),
             },
@@ -1914,6 +1947,57 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
     return tier1Decision({ reason: 'schedule_read', reason_detail: 'Read your schedules.', sensitive_read: false });
   }
   return failClosedDecision({ reason_detail: 'Unknown schedule tool.' });
+}
+
+/**
+ * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
+ * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
+ * that revert_space can restore. Any other name fails closed.
+ */
+function classifySpaceTool(action: SentinelAction): TierDecision {
+  if (isSpaceWriteToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_write', reason_detail: spaceWriteLine(action), sensitive_read: false });
+  }
+  if (isSpaceReadToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_read', reason_detail: 'Read your spaces.', sensitive_read: false });
+  }
+  return failClosedDecision({ reason_detail: 'Unknown space tool.' });
+}
+
+/** Most characters of a space's name the line in the chat shows. */
+const SPACE_NAME_MAX_CHARS = 80;
+
+/**
+ * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, made safe
+ * to show, then capped the way the Gmail card caps a subject. Null when the call carries no name, or
+ * the name is only whitespace, so the line falls back to naming no space.
+ */
+function spaceDisplayName(name: string | null): string | null {
+  if (name === null) {
+    return null;
+  }
+  const oneLine = name.replace(/\s+/g, ' ').trim();
+  if (oneLine === '') {
+    return null;
+  }
+  const chars = Array.from(escapeDisplayText(oneLine));
+  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : chars.join('');
+}
+
+/**
+ * The plain line a space write shows instead of a card, parallel to the line a silent search shows.
+ * Create and update calls carry the space's name; a revert call names only the space's id, so its
+ * line cannot.
+ */
+function spaceWriteLine(action: SentinelAction): string {
+  const shown = spaceDisplayName(stringParam(action.canonical_params, 'name'));
+  if (action.tool_name === CREATE_SPACE_TOOL_NAME) {
+    return shown === null ? 'Created a space.' : `Created space: ${shown}`;
+  }
+  if (action.tool_name === UPDATE_SPACE_TOOL_NAME) {
+    return shown === null ? 'Updated a space.' : `Updated space: ${shown}`;
+  }
+  return 'Restored a space to an earlier version.';
 }
 
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -2200,6 +2284,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
+    return classifySpaceTool(action);
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool

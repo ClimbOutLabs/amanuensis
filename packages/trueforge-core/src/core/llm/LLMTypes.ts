@@ -336,6 +336,7 @@ export type MCPToolInfo = z.infer<typeof MCPToolInfoSchema>;
 export type ToolInfo = z.infer<typeof ToolInfoSchema>;
 export type InternalEnrichedToolCall = z.infer<typeof InternalEnrichedToolCallSchema>;
 export type EnrichedToolCall = z.infer<typeof EnrichedToolCallSchema>;
+export type RawToolCall = z.infer<typeof RawToolCallSchema>;
 export type RawAssistantMessage = z.infer<typeof RawAssistantMessageSchema>;
 export type InternalEnrichedAssistantMessage = z.infer<typeof InternalEnrichedAssistantMessageSchema>;
 export type EnrichedAssistantMessage = z.infer<typeof EnrichedAssistantMessageSchema>;
@@ -378,6 +379,13 @@ export interface RawAssistantMessageWithUsage {
   usage: CompletionUsage;
   /** null when the stream ended without a finish_reason chunk (e.g. provider omitted it). */
   finish_reason: FinishReason | null;
+  /**
+   * Set when the reply's answer text carried leaked tool-call markup. 'recovered' means the
+   * markup was rebuilt into output.tool_calls and the markup itself is not in the content;
+   * 'broken' means the markup could not be rebuilt and the runtime must stop the answer without
+   * running or trusting anything in it. Absent when the reply had no markup.
+   */
+  tool_markup?: 'recovered' | 'broken';
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

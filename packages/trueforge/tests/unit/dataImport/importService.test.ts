@@ -203,12 +203,24 @@ describe('runDataImport', () => {
       expect(result.agents).toBe(1);
       expect(result.schedules_off).toBe(true);
       expect(result.summary).toBe(
-        'Imported 3 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off). ' +
-          'Chats keep their dates and totals, but Approve for this chat choices do not carry over; personas, spaces, folders and schedules show the import time. ' +
-          '3 permission history entries came along. ' +
-          'Connectors arrive unused, with no agent attached to them: dcr-connector, header-connector, plain-connector. Attach each one to an agent on the Agents page when you want it. ' +
-          'Not imported: model keys, connector sign-ins and keys, and your own skills and registered repositories. ' +
-          'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
+        [
+          'Imported:',
+          '  3 chats',
+          '  3 memories',
+          '  2 personas',
+          '  1 space',
+          '  1 agent',
+          '  2 schedules (they will be off)',
+          '',
+          'Good to know:',
+          '  • Connectors (dcr-connector, header-connector, plain-connector) come without an agent. Attach them on the Agents page.',
+          '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
+          '  • Approvals given for one chat only do not carry over.',
+          '  • 3 past permission decisions came along.',
+          '  • Not brought over: model keys, connector sign-ins, your own skills.',
+          '    Add your model again and sign in to your connectors.',
+          '  • Permissions start fresh, so each tool will ask again.',
+        ].join('\n'),
       );
 
       const sessions = await target.stores.sessionStore.listSessions({
@@ -898,8 +910,8 @@ describe('runDataImport keeps what the archive recorded', () => {
       });
       const result = await runDataImport(importDeps(target), importRequest(withoutAgents));
       expect(result.agents).toBe(0);
-      expect(result.summary).toContain('Also created 1 stand-in agent (reporter)');
-      expect(result.summary).toContain('give each one a model before you use it');
+      expect(result.summary).toContain('A stand-in agent (reporter) was made');
+      expect(result.summary).toContain('Give it a model on the Agents page before you use it.');
       const standIn = await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
       const sourceAgent = await source.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName });
       expect(standIn).toBeDefined();
@@ -1862,8 +1874,7 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       expect(byName.get('dcr-one')?.manifest.auth).toEqual({ type: 'dcr' });
       expect(JSON.stringify(servers)).not.toContain('invented-token');
       expect(JSON.stringify(servers)).not.toContain('invented-secret');
-      expect(result.summary).toContain('header-one, client-one, dcr-one');
-      expect(result.summary).toContain('arrive unused');
+      expect(result.summary).toContain('Connectors (header-one, client-one, dcr-one) come without an agent.');
     } finally {
       await source.close();
       await target.close();
@@ -1943,9 +1954,7 @@ describe('runDataImport treats imported connectors and settings as untrusted', (
       expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
         'false',
       );
-      expect(result.summary).toContain(
-        'Permission settings and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.',
-      );
+      expect(result.summary).toContain('Permissions start fresh, so each tool will ask again.');
     } finally {
       await source.close();
       await target.close();
@@ -1998,7 +2007,7 @@ describe('runDataImport keeps the default web search connector a new instance is
       const seeded = await addDefaultSearchConnector(target);
       const result = await runDataImport(importDeps(target), importRequest(archive));
       expect(result.connectors).toBe(3);
-      expect(result.summary).toContain('dcr-connector, header-connector, plain-connector.');
+      expect(result.summary).toContain('Connectors (dcr-connector, header-connector, plain-connector)');
       const kept = (await connectorRows(target)).find(row => row.name === seeded.name);
       expect(kept).toEqual(seeded);
     } finally {
@@ -2019,7 +2028,7 @@ describe('runDataImport keeps the default web search connector a new instance is
       ]);
       const result = await runDataImport(importDeps(target), importRequest(tampered));
       expect(result.connectors).toBe(1);
-      expect(result.summary).toContain('no agent attached to them: plain-one.');
+      expect(result.summary).toContain('Connectors (plain-one) come without an agent.');
       const rows = await connectorRows(target);
       expect(rows.map(row => row.name).sort()).toEqual([seeded.name, 'plain-one'].sort());
       expect(rows.find(row => row.name === seeded.name)).toEqual(seeded);
@@ -2333,7 +2342,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
           .reverse()
           .map(activation => [activation.id, activation.persona_id, activation.source]),
       );
-      expect(result.summary).toContain('3 permission history entries');
+      expect(result.summary).toContain('3 past permission decisions came along.');
     } finally {
       await source.close();
       await target.close();
@@ -2357,7 +2366,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
       expect(
         await target.stores.auditStore.listOwned({ tenant_id: TENANT, created_by: 'bob', limit: 10, offset: 0 }),
       ).toEqual([]);
-      expect(result.summary).not.toContain('permission history');
+      expect(result.summary).not.toContain('past permission decisions');
     } finally {
       await source.close();
       await target.close();
@@ -2556,7 +2565,7 @@ describe('runDataImport repairs persona names an older version wrote', () => {
     try {
       const older = await withOlderPersonaNames(archive, [{ display_name: 'Dr. Kim & Co' }]);
       const dry = await runDataImport(importDeps(target), { ...importRequest(older), dryRun: true });
-      expect(dry.summary).toMatch(/^This was a dry run, so nothing was imported\./);
+      expect(dry.summary).toMatch(/^This export has:/);
       expect(dry.summary).toContain(`Renamed the persona "Dr. Kim & Co" to "Dr Kim Co", because ${LETTERS_RULE}.`);
       expect(await storedPersonaNames(target)).toEqual([]);
 
@@ -3299,12 +3308,10 @@ describe('runDataImport with an export from an older version', () => {
 
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(4);
-      expect(result.summary).toContain("Chat 'First chat': 1 background note from an older version was left out.");
-      expect(result.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
-      expect(result.summary).not.toContain('Your chats are complete');
-      expect(result.summary).toContain(
-        'The older history of 1 space was trimmed before the export, so its versions now start at 1.',
-      );
+      expect(result.summary).toContain('Left out, from an older version of Aman (your chats are complete):');
+      expect(result.summary).toContain(`  First chat${' '.repeat(32)}1 background note`);
+      expect(result.summary).toContain(`  Untitled chat${' '.repeat(29)}1 tool detail`);
+      expect(result.summary).toContain('1 space had older history trimmed, so its versions start at 1.');
 
       const store = target.stores.sessionStore;
       const recalls = (
@@ -3459,11 +3466,9 @@ describe('runDataImport when Aman internals have changed', () => {
       const result = await runDataImport(importDeps(target), importRequest(changed));
       expect(result.chats).toBe(4);
       for (const chat of ['First chat', 'Morning digest', 'Unfinished chat', 'Untitled chat']) {
-        expect(result.summary).toMatch(
-          new RegExp(`Chat '${chat}': [^.]* from an older version (was|were) left out\\.`),
-        );
+        expect(result.summary).toMatch(new RegExp(`^  ${chat} +\\d+ `, 'm'));
       }
-      expect(result.summary).toContain('Your settings: 1 permission setting from an older version was left out.');
+      expect(result.summary).toContain(`  Your settings${' '.repeat(29)}1 permission setting`);
       const messages = async (instance: Instance, sessionId: string, turnId: string) =>
         (
           (await instance.stores.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId }))?.snapshot.threads[
@@ -3573,7 +3578,7 @@ describe('runDataImport keeps what people see strict', () => {
       });
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.chats).toBe(3);
-      expect(result.summary).toContain("Chat 'First chat': 1 tool detail from an older version was left out.");
+      expect(result.summary).toContain(`  First chat${' '.repeat(32)}1 tool detail`);
     } finally {
       await source.close();
       await target.close();
@@ -3596,7 +3601,7 @@ describe('runDataImport keeps what people see strict', () => {
         });
       });
       const result = await runDataImport(importDeps(target), importRequest(broken));
-      expect(result.summary).toContain("Chat 'First chat': 1 tool detail from an older version was left out.");
+      expect(result.summary).toContain(`  First chat${' '.repeat(32)}1 tool detail`);
     } finally {
       await source.close();
       await target.close();
@@ -3621,8 +3626,8 @@ describe('runDataImport tells the person everything it left out', () => {
       const older = await repack(archive, asOlderVersionExport);
 
       const dry = await runDataImport(importDeps(target), { ...importRequest(older), dryRun: true });
-      expect(dry.summary).toMatch(/^This was a dry run, so nothing was imported\. The import would bring 4 chats/);
-      expect(dry.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
+      expect(dry.summary).toMatch(/^This export has:\n  4 chats/);
+      expect(dry.summary).toContain(`  Untitled chat${' '.repeat(29)}1 tool detail`);
       const sessions = await target.stores.sessionStore.listSessions({
         tenant_id: TENANT,
         limit: 10,
@@ -3639,14 +3644,57 @@ describe('runDataImport tells the person everything it left out', () => {
       expect(sessions.data).toEqual([]);
 
       const real = await runDataImport(importDeps(target), importRequest(older));
-      expect(real.summary).toContain("Chat 'Untitled chat': 1 tool detail from an older version was left out.");
+      expect(real.summary).toContain(`  Untitled chat${' '.repeat(29)}1 tool detail`);
     } finally {
       await source.close();
       await target.close();
     }
   });
 
-  it('shows the first 20 lines and logs the full list', async () => {
+  it('prints the report as a counts list, a left-out table with long names cut short, and short notes', async () => {
+    const source = await makeInstance('source-layout');
+    const target = await makeInstance('target-layout');
+    try {
+      await seedLongChat(source, { sessionId: 'layout-chat', turns: 1 });
+      const archive = await exportInstanceArchive({ instance: source, tenantId: TENANT, subjectId: 'alice' });
+      const changed = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records.filter(item => item['kind'] === 'session')) {
+          const session = recordAt(record['session'], 'session');
+          session['title'] = 'Sourdough starter troubleshooting and other kitchen questions';
+          session['metrics'] = { total_turns: 'many' };
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      const result = await runDataImport(importDeps(target), { ...importRequest(changed), dryRun: true });
+      expect(result.summary).toBe(
+        [
+          'This export has:',
+          '  1 chat',
+          '  0 memories',
+          '  0 personas',
+          '  0 spaces',
+          '  0 agents',
+          '  0 schedules',
+          '',
+          'Left out, from an older version of Aman (your chats are complete):',
+          '  Sourdough starter troubleshooting...      1 chat detail',
+          '',
+          'Good to know:',
+          '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
+          '  • Approvals given for one chat only do not carry over.',
+          '  • Not brought over: model keys, connector sign-ins, your own skills.',
+          '    Add your model again and sign in to your connectors.',
+          '  • Permissions start fresh, so each tool will ask again.',
+        ].join('\n'),
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('shows the first 20 chats and logs the full list', async () => {
     const source = await makeInstance('source-many-left-out');
     const target = await makeInstance('target-many-left-out');
     try {
@@ -3662,16 +3710,13 @@ describe('runDataImport tells the person everything it left out', () => {
         entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
       });
       const result = await runDataImport(importDeps(target), importRequest(changed));
-      expect(result.summary.match(/Chat 'Long chat': /g)).toHaveLength(20);
+      expect(result.summary.match(/^  Long chat +\d+ chat details?$/gm)).toHaveLength(20);
       expect(result.summary).toContain('And 3 more. The full list is in the import log.');
-      expect(target.logger.info).toHaveBeenCalledWith(
-        'Data import left out or repaired details from an older version',
-        {
-          left_out: expect.arrayContaining([expect.stringContaining("Chat 'Long chat'")]),
-        },
-      );
+      expect(target.logger.info).toHaveBeenCalledWith('Data import left out internal details from an older version', {
+        left_out: expect.arrayContaining([expect.objectContaining({ name: 'Long chat' })]),
+      });
       const logged: unknown = target.logger.info.mock.calls.find(
-        ([message]) => message === 'Data import left out or repaired details from an older version',
+        ([message]) => message === 'Data import left out internal details from an older version',
       )?.[1];
       expect(recordAt(logged, 'logged list')['left_out']).toHaveLength(23);
     } finally {
@@ -3721,7 +3766,7 @@ describe('runDataImport with a tool call of a kind this version does not know', 
       const archive = await repack(await olderArchive(source), withUnknownToolKind('plain-connector'));
       const result = await runDataImport(importDeps(target), importRequest(archive));
       expect(result.chats).toBe(4);
-      expect(result.summary).toContain("Chat 'Untitled chat': 2 tool details from an older version were left out.");
+      expect(result.summary).toContain(`  Untitled chat${' '.repeat(29)}2 tool details`);
       const turn = await target.stores.sessionStore.getTurn({ session_id: 'edited-chat', turn_id: 'edited-turn-3' });
       const call = turn?.snapshot.threads[MAIN_THREAD_ID]?.context.find(message => 'tool_calls' in message);
       expect(call).toMatchObject({ tool_calls: [{ id: 'call-older-route', tool_info: { type: 'mcp' } }] });
@@ -3788,7 +3833,7 @@ describe('runDataImport review: subagents, tool kinds and dry runs', () => {
         entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
       });
       const result = await runDataImport(importDeps(target), importRequest(changed));
-      expect(result.summary).toContain("Chat 'First chat': 1 background note from an older version was left out.");
+      expect(result.summary).toContain(`  First chat${' '.repeat(32)}1 background note`);
       const events = await target.stores.sessionStore.listTurnEvents({
         session_id: SEED_IDS.sessionMain,
         turn_id: 'session-1-turn-1',
@@ -3813,7 +3858,7 @@ describe('runDataImport review: subagents, tool kinds and dry runs', () => {
         thread['completion'] = { type: 'done', output: 'Done.', send_to_parent: { role: 'tool' } };
       });
       const result = await runDataImport(importDeps(target), importRequest(broken));
-      expect(result.summary).toMatch(/: 3 assistant details from an older version were left out\./);
+      expect(result.summary).toMatch(/^  .+ +3 assistant details$/m);
       const { turn } = await importedScheduledChat(target);
       const main = turn?.snapshot.threads['main'];
       expect(main?.parent ?? null).toBeNull();
