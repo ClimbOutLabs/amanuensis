@@ -665,11 +665,17 @@ describe('GoogleSetupPanel', () => {
     const offlineApi = (offlineMode: boolean): SentinelApi => ({
       listAuditEntries: async () => [],
       listUserAuditEntries: async () => ({ entries: [] }),
-      getUserSettings: async () => ({ offline_mode: offlineMode, tier2_auto_allow: [], search_without_asking: true }),
+      getUserSettings: async () => ({
+        offline_mode: offlineMode,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+      }),
       updateUserSettings: async () => ({
         offline_mode: offlineMode,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       }),
       listSentinelSessionContext: async () => ({ approvals: [] }),
     });

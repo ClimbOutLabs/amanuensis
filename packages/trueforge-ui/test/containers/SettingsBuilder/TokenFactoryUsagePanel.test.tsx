@@ -181,6 +181,7 @@ describe('ModelSettings', () => {
         offline_mode: offline,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       };
       const api: SentinelApi = {
         listAuditEntries: vi.fn(async () => []),

@@ -97,7 +97,12 @@ describe('AmanRuntimeRail', () => {
 
   it('keeps offline mode visible when the rail is collapsed', async () => {
     window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
-    const settings: SentinelUserSettings = { offline_mode: true, tier2_auto_allow: [], search_without_asking: true };
+    const settings: SentinelUserSettings = {
+      offline_mode: true,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),

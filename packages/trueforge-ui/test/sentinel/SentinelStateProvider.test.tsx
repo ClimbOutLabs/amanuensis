@@ -76,11 +76,17 @@ describe('SentinelStateProvider', () => {
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       })),
       listSentinelSessionContext: vi.fn(
         () =>
@@ -116,11 +122,17 @@ describe('SentinelStateProvider', () => {
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({
         approvals: [{ toolCallId: 'call-9', tier: 3 as const, card: CARD, eventId: null, threadId: null }],

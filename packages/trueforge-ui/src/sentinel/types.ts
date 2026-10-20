@@ -238,6 +238,8 @@ export type SentinelUserSettings = {
   tier2_auto_allow: Tier2ActionKind[];
   /** While on, the search provider you designated runs web searches without asking. Default: on. */
   search_without_asking: boolean;
+  /** While on, maps run without asking unless this chat has read private data. Default: off. */
+  maps_without_asking: boolean;
 };
 
 /**
@@ -655,10 +657,13 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
 /** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
-  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+  if (!isRecord(settings)) {
+    return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true, maps_without_asking: false };
+  }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
   };
 }

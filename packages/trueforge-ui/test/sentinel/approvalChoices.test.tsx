@@ -68,7 +68,12 @@ describe('approval choices', () => {
   });
 
   it('lists all four choices in order on the Settings permissions page, with no Always deny', async () => {
-    const settings = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+    const settings = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),

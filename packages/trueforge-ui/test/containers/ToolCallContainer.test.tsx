@@ -903,11 +903,13 @@ describe('ToolCallContainer', () => {
           offline_mode: false,
           tier2_auto_allow: [],
           search_without_asking: true,
+          maps_without_asking: false,
         })),
         updateUserSettings: vi.fn(async () => ({
           offline_mode: false,
           tier2_auto_allow: [],
           search_without_asking: true,
+          maps_without_asking: false,
         })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
@@ -975,11 +977,17 @@ describe('ToolCallContainer: held search request', () => {
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
     };

@@ -605,7 +605,12 @@ describe('parseAuditEntries', () => {
 
 describe('parseUserSettings', () => {
   it('defaults to offline off, nothing relaxed and searches running without asking', () => {
-    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+    const defaults = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
     expect(parseUserSettings({ data: null })).toEqual(defaults);
@@ -619,7 +624,12 @@ describe('parseUserSettings', () => {
       parseUserSettings({
         data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
       }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+    ).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+    });
   });
 
   it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
@@ -627,11 +637,17 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
+  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
     });
   });
 });

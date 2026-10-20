@@ -1,13 +1,20 @@
+import type { AuditLogWriter, AuditRecordInput } from '../../../src/core/permissions/audit';
 import {
+  classifyHostToolCall,
   classifyTier,
-  isMapsToolAlwaysTier3,
   mapsDestinationHosts,
   type ClassifyContext,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import {
+  createSentinelHostContext,
+  defaultSentinelServices,
+  type SentinelServices,
+} from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
+import { InMemoryPrivateDataReadStore } from '../../../src/core/permissions/privateDataReads';
+import { createWebSearchTurnState, markPrivateDataRead } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -50,14 +57,14 @@ const PLACE_CLAIM = {
   source_url: 'https://harbour-clinic.example/en',
 };
 
-describe('isMapsToolAlwaysTier3', () => {
+describe('isMapsToolName', () => {
   it('matches the maps tools only', () => {
-    expect(isMapsToolAlwaysTier3('render_map')).toBe(true);
-    expect(isMapsToolAlwaysTier3('render_route')).toBe(true);
-    expect(isMapsToolAlwaysTier3('render_places')).toBe(true);
-    expect(isMapsToolAlwaysTier3('web_search')).toBe(false);
-    expect(isMapsToolAlwaysTier3('exec')).toBe(false);
-    expect(isMapsToolAlwaysTier3('')).toBe(false);
+    expect(isMapsToolName('render_map')).toBe(true);
+    expect(isMapsToolName('render_route')).toBe(true);
+    expect(isMapsToolName('render_places')).toBe(true);
+    expect(isMapsToolName('web_search')).toBe(false);
+    expect(isMapsToolName('exec')).toBe(false);
+    expect(isMapsToolName('')).toBe(false);
   });
 });
 
@@ -319,5 +326,128 @@ describe('maps classifier branch', () => {
       expect(decision.card?.plain_what).toContain('"3 Test Road"');
       expect(decision.card?.plain_what).not.toContain('"4 Test Road"');
     });
+  });
+});
+
+describe('maps without asking', () => {
+  const HELD_VALUE = 'maps-held-value-0001';
+  const withServices = (overrides: Partial<SentinelServices>): SentinelServices => ({
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    ...overrides,
+  });
+  const maps_on = withServices({ mapsWithoutAsking: () => Promise.resolve(true) });
+
+  it("keeps today's card when the setting is off", async () => {
+    for (const services of [defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), withServices({})]) {
+      const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services));
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('maps_tool');
+      expect(decision.card?.plain_what).toBe(
+        'Send "Paris" to nominatim.openstreetmap.org to find it, then load map tiles for that area from tile.openstreetmap.org.',
+      );
+    }
+  });
+
+  it('runs a clean chat silently when the setting is on', async () => {
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(maps_on));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(MAPS_SILENT_REASON);
+    expect(decision.card).toBeNull();
+    expect(decision.approval_token_id).toBeNull();
+    expect(decision.reason_detail).toBe('Maps ran without asking: Paris');
+  });
+
+  it('runs every maps tool silently on a clean chat', async () => {
+    for (const action of [
+      mapsAction('render_map', { place_name: 'Paris' }),
+      mapsAction('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }),
+      mapsAction('render_places', { places: [PLACE_CLAIM] }),
+    ]) {
+      expect((await classifyTier(action, makeCtx(maps_on))).tier).toBe(1);
+    }
+  });
+
+  it('asks on the second silent map when a secret is split across the two', async () => {
+    const services = withServices({
+      mapsWithoutAsking: () => Promise.resolve(true),
+      outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+    });
+    const ctx = makeCtx(services);
+    const first = await classifyTier(mapsAction('render_map', { place_name: HELD_VALUE.slice(0, 10) }), ctx);
+    expect(first.tier).toBe(1);
+    const second = await classifyTier(mapsAction('render_map', { place_name: HELD_VALUE.slice(10) }), ctx);
+    expect(second.tier).toBe(3);
+    expect(second.reason).toBe('maps_tool');
+  });
+
+  it('asks again after the chat read email or calendar', async () => {
+    const ctx = makeCtx(maps_on);
+    markPrivateDataRead(ctx.web_search);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('maps_tool');
+  });
+
+  it('asks again after the chat read something private like a secrets file', async () => {
+    const private_reads = new InMemoryPrivateDataReadStore();
+    private_reads.markPrivateDataRead({ tenant_id: 't1', conversation_id: 'conv-1' });
+    const services = withServices({ mapsWithoutAsking: () => Promise.resolve(true), private_reads });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('maps_tool');
+  });
+
+  it('asks with the card when a place holds a secret the host keeps', async () => {
+    const services = withServices({
+      mapsWithoutAsking: () => Promise.resolve(true),
+      outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+    });
+    const decision = await classifyTier(
+      mapsAction('render_map', { place_name: `Paris ${HELD_VALUE}` }),
+      makeCtx(services),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('maps_tool');
+    expect(decision.card).not.toBeNull();
+  });
+
+  it('denies offline before the setting is consulted', async () => {
+    const services = withServices({
+      mapsWithoutAsking: () => Promise.resolve(true),
+      isOffline: () => Promise.resolve(true),
+    });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services));
+    expect(decision.auto_deny).toBe('offline_mode');
+    expect(decision.tier).toBe(3);
+  });
+
+  it('runs silently in an unattended run on the same clean-chat rule', async () => {
+    const services = withServices({ mapsWithoutAsking: () => Promise.resolve(true), unattended: true });
+    expect((await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services))).tier).toBe(1);
+  });
+
+  it('records a silent map in the audit log with the maps reason', async () => {
+    const records: AuditRecordInput[] = [];
+    const audit: AuditLogWriter = {
+      record: input => {
+        records.push(input);
+        return Promise.resolve();
+      },
+    };
+    const sentinel = createSentinelHostContext({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 'conv-1',
+      services: withServices({ mapsWithoutAsking: () => Promise.resolve(true), audit }),
+    });
+    const decision = await classifyHostToolCall({
+      action: mapsAction('render_map', { place_name: 'Paris' }),
+      sentinel,
+      repository_id: null,
+      workspace_cwd: null,
+    });
+    expect(decision.reason).toBe(MAPS_SILENT_REASON);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ tier: 1, tool_name: 'render_map', outcome: 'logged' });
   });
 });
