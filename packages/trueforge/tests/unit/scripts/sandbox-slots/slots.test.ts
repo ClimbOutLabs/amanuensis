@@ -17,6 +17,7 @@ interface Call {
   args: string[];
   env: Record<string, string>;
   interactive: boolean;
+  echo: boolean;
 }
 
 /** A scripted docker: `respond` returns the result for a call, or undefined to answer success. */
@@ -26,7 +27,13 @@ function fakeRunner(respond: (call: Call) => Partial<CommandResult> | Error | un
 } {
   const calls: Call[] = [];
   const run: CommandRunner = input => {
-    const call = { command: input.command, args: input.args, env: input.env, interactive: input.interactive };
+    const call = {
+      command: input.command,
+      args: input.args,
+      env: input.env,
+      interactive: input.interactive,
+      echo: input.echo,
+    };
     calls.push(call);
     const answer = respond(call);
     if (answer instanceof Error) {
@@ -127,7 +134,13 @@ describe('runSandboxSlots', () => {
       seen.push({ args: input.args, env: input.env });
       return Promise.resolve({
         ...OK,
-        ...defaultAnswers({ command: input.command, args: input.args, env: input.env, interactive: input.interactive }),
+        ...defaultAnswers({
+          command: input.command,
+          args: input.args,
+          env: input.env,
+          interactive: input.interactive,
+          echo: input.echo,
+        }),
       });
     };
     const result = await runSandboxSlots({ ...BASE_OPTIONS, run: runner, fix: false, instance: 'lab' });
@@ -336,6 +349,73 @@ describe('runSandboxSlots', () => {
     });
     expect(result).toMatchObject({ ok: false, step: 'start' });
     expect(!result.ok && result.error).toContain('attestation FAILED seccomp');
+  });
+
+  test('a start failure names the attestation line from the slot log, without its log prefix, and reads the logs out loud', async () => {
+    const { result, calls } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'container aman-slots-sandbox-2-1 is unhealthy' };
+      }
+      if (text.includes(' logs ')) {
+        return {
+          stdout:
+            'sandbox-2-1  | 2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer',
+        };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain(
+      'attestation FAILED network: interfaces: eth0 has a route off this computer',
+    );
+    expect(!result.ok && result.error).not.toContain('sandbox-2-1  |');
+    const logs = calls.find(call => joined(call).includes(' logs '));
+    expect(logs?.echo).toBe(true);
+  });
+
+  test('slots that fail to start for another reason keep the log tail as the detail', async () => {
+    const { result } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'image not found' };
+      }
+      if (text.includes(' logs ')) {
+        return { stdout: 'sandbox-1-1  | starting up' };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('image not found');
+  });
+
+  test('a slot that is down fails its check with the attestation line from its own log', async () => {
+    const { result, calls } = await run(call => {
+      const text = joined(call);
+      if (text.includes('sandbox-2') && text.includes('healthcheck')) {
+        return { exitCode: 1, stderr: 'Error response from daemon: container is not running' };
+      }
+      if (text.includes(' logs ')) {
+        return {
+          stdout: 'sandbox-2-1  | 2026-10-10 11:57:00 attestation FAILED runsc: the sandbox runtime did not answer',
+        };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain('attestation FAILED runsc: the sandbox runtime did not answer');
+    expect(calls.some(call => joined(call).includes(' logs ') && call.echo)).toBe(true);
+  });
+
+  test('a slot whose agent answers with its failing checks keeps that answer, and the logs are not read', async () => {
+    const { result, calls } = await run(call =>
+      joined(call).includes('sandbox-3') && joined(call).includes('healthcheck')
+        ? { exitCode: 1, stdout: 'FAIL apparmor: the profile is not enforced', stderr: 'attestation failed: apparmor' }
+        : undefined,
+    );
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain('Sandbox 3');
+    expect(calls.some(call => joined(call).includes(' logs '))).toBe(false);
   });
 
   test('a slot whose attestation fails after start fails the run', async () => {
