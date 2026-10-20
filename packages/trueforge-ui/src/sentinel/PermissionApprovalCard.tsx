@@ -1,5 +1,6 @@
 'use client';
 
+import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
@@ -86,13 +87,8 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** One recipient as `Name (address)`, or the bare address when it has no name. The address is always in full. */
-function mailboxText({ name, address }: SentinelApprovalMailbox): string {
-  return name === '' ? address : `${name} (${address})`;
-}
-
 function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
-  return mailboxes.map(mailboxText).join(', ');
+  return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
 }
 
 /** What a change replaces, with the recipients of that saved draft. */

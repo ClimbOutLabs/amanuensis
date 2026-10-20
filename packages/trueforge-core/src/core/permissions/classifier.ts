@@ -95,7 +95,7 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
-import type { Tier3Mailbox } from './tierMailbox';
+import { mailboxText, type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
@@ -1557,11 +1557,6 @@ const NAME_LEFT_OFF_LINE = ' The name was left off this address because it looke
 const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
 
 /** One recipient as `Name (address)`, or the bare address when it has no name, so the address is always shown. */
-function recipientText(mailbox: Tier3Mailbox): string {
-  const address = escapeDisplayText(mailbox.address);
-  return mailbox.name === '' ? address : `${escapeDisplayText(mailbox.name)} (${address})`;
-}
-
 /** Already-escaped items in a sentence: `A, B and C`. */
 function joinSentence(shown: readonly string[]): string {
   if (shown.length <= 1) {
@@ -1575,7 +1570,7 @@ function displayList(addresses: readonly string[]): string {
 }
 
 function recipientList(recipients: readonly Tier3Mailbox[]): string {
-  return joinSentence(recipients.map(recipientText));
+  return joinSentence(recipients.map(mailbox => mailboxText(mailbox, { escape: escapeDisplayText })));
 }
 
 /** A recipient for the structured email block: its name and address, each escaped as the card escapes text. */

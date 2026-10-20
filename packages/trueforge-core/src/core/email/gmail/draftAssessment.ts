@@ -14,7 +14,7 @@ import {
   isPlainTextContentType,
   MAX_IDEOGRAPHIC_SELECTORS,
 } from './mimeText';
-import { addressListIsPlain, mailboxesIn, nameLeftOffIn } from './results';
+import { addressListIsPlain, mailboxesIn } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
 const MAX_SENDABLE_BODY_CHARS = 20_000;
@@ -198,7 +198,8 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     inReplyTo: rawHeaderOf({ part: payload, name: 'in-reply-to' }),
     references: rawHeaderOf({ part: payload, name: 'references' }),
     fromName,
-    nameLeftOff: ['To', 'Cc', 'Bcc'].some(name => nameLeftOffIn({ message, name })),
+    // A saved draft's headers are delivered as Gmail holds them, names included, so none is left off.
+    nameLeftOff: false,
   };
   if (input.forSend) {
     if (

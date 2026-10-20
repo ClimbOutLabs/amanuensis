@@ -24,3 +24,9 @@ export function readStoredMailbox(value: unknown): Tier3Mailbox | undefined {
   const parsed = StoredMailboxSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }
+
+/** One recipient as `Name (address)`, or the bare address when it has no name. `escape` is applied to each part. */
+export function mailboxText(mailbox: Tier3Mailbox, options: { escape: (text: string) => string }): string {
+  const address = options.escape(mailbox.address);
+  return mailbox.name === '' ? address : `${options.escape(mailbox.name)} (${address})`;
+}

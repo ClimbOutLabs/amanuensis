@@ -46,7 +46,7 @@ describe('message reading', () => {
       mailboxesOf('=?UTF-8?Q?Maya_L=C3=B3pez?= <maya@example.com>, "boss@example.com" <other@evil.example>'),
     ).toEqual([
       { name: 'Maya López', address: 'maya@example.com' },
-      { name: '', address: 'other@evil.example' },
+      { name: 'boss@example.com', address: 'other@evil.example' },
     ]);
   });
 });
@@ -171,13 +171,22 @@ describe('result shapes', () => {
 });
 
 describe('mailbox headers that could read two ways', () => {
-  it('keeps the header and leaves off a quoted display name that looks like an address', () => {
-    expect(addressListIsPlain('"boss@example.com" <other@example.org>')).toBe(true);
-    expect(mailboxesOf('"boss@example.com" <other@example.org>')).toEqual([{ name: '', address: 'other@example.org' }]);
-    expect(addressListIsPlain('"Jane Doe (Acme)" <jane@example.com>')).toBe(true);
-    expect(mailboxesOf('"Jane Doe (Acme)" <jane@example.com>')).toEqual([{ name: '', address: 'jane@example.com' }]);
+  it('keeps the name Gmail holds on a quoted display name that looks like an address', () => {
+    expect(addressListIsPlain('"boss@company.com" <other@evil.example>')).toBe(true);
+    expect(mailboxesOf('"boss@company.com" <other@evil.example>')).toEqual([
+      { name: 'boss@company.com', address: 'other@evil.example' },
+    ]);
+    expect(mailboxesOf('"Jane Doe (Acme)" <jane@acme.example>')).toEqual([
+      { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+    ]);
     expect(mailboxesOf('"Grace Lee" <grace@example.com>')).toEqual([
       { name: 'Grace Lee', address: 'grace@example.com' },
+    ]);
+  });
+
+  it('shows a parenthesis around the address as the whole text, so nothing is hidden', () => {
+    expect(mailboxesOf('other@evil.example (<boss@company.com>)')).toEqual([
+      { name: '', address: 'other@evil.example (<boss@company.com>)' },
     ]);
   });
 

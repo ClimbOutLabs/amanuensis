@@ -199,6 +199,21 @@ describe('Gmail write classification', () => {
     expect(decision.card?.email?.to).toEqual([{ name: '', address: 'other@evil.example' }]);
   });
 
+  it('shows a saved draft recipient with the name Gmail holds, and the real address in full', async () => {
+    const to = [
+      { name: 'boss@company.com', address: 'other@evil.example' },
+      { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+    ];
+    const decision = await classifyTier(
+      gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, to, cc: [], bcc: [] } }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toContain(
+      'to boss@company.com (other@evil.example) and Jane Doe (Acme) (jane@acme.example).',
+    );
+    expect(decision.card?.email?.to).toEqual(to);
+  });
+
   it('shows no name-left-off line when every name was kept', async () => {
     const decision = await classifyTier(gmail('send_draft', { draft_id: 'd1' }, { mail_draft: CONTENT }), makeCtx());
     expect(decision.card?.plain_what).not.toContain('The name was left off');

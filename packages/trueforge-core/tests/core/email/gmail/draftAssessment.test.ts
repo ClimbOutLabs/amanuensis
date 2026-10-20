@@ -50,6 +50,27 @@ describe('assessDraft', () => {
     });
   });
 
+  it('delivers a saved draft with each recipient name as Gmail holds it, even one that looks like an address', () => {
+    const result = forSend(
+      plainDraft({
+        id: 'd2',
+        to: '"boss@company.com" <other@evil.example>, "Jane Doe (Acme)" <jane@acme.example>',
+        subject: 'Lease',
+        body: 'Thursday works.',
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      draft: {
+        to: [
+          { name: 'boss@company.com', address: 'other@evil.example' },
+          { name: 'Jane Doe (Acme)', address: 'jane@acme.example' },
+        ],
+        nameLeftOff: false,
+      },
+    });
+  });
+
   it('refuses a draft with an attachment, however it is named', () => {
     const withFile = message({
       id: 'd1',

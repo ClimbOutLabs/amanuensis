@@ -439,6 +439,8 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
+      // The model's recipients are validated bare addresses (toolContract), so no name is left off today. This check
+      // stays as a defence in case that contract ever admits display names.
       nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
     };
     if (answered === undefined && existing !== undefined) {
