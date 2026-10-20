@@ -1744,10 +1744,16 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
       : review.guests_emailed
         ? ` Google emails ${guests} about it.`
         : ` Guests: ${guests}. Google does not email them.`;
+  // An event that runs over more than one day is often a broken end date, so the card asks.
+  const spanWarning =
+    review.span_days > 1 ? ` This event runs over ${String(review.span_days)} days. Is that right?` : '';
+  // The same event was already created in this chat in the last few minutes: ask before adding another.
+  const duplicateLead =
+    review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
   const plainWhat =
     review.action === 'create'
-      ? `Add ${title} to your Google Calendar on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.when)} (${show(review.time_zone)}).${guestLine}`;
+      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
   return {
     plain_what: plainWhat,
     plain_why: plainWhy(input.agent_intent),
@@ -1764,7 +1770,7 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
       action: review.action,
       calendar: show(review.calendar),
       title: show(review.title),
-      when: show(review.when),
+      when: show(review.short_when),
       time_zone: show(review.time_zone),
       duration: show(review.duration),
       location: show(review.location),
@@ -1777,7 +1783,7 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
           ? null
           : {
               title: show(review.before.title),
-              when: show(review.before.when),
+              when: show(review.before.short_when),
               duration: show(review.before.duration),
               location: show(review.before.location),
             },
