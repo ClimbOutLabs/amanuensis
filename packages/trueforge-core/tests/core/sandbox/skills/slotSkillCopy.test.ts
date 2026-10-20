@@ -180,6 +180,18 @@ describe('copySkillsIntoSandbox for registry skills', () => {
     expect(result.failed.get('hardlinked')).toEqual({ cause: 'damaged' });
   });
 
+  test('leaves out a zero-byte download as having no files, not as damaged', async () => {
+    const result = await copySkillsIntoSandbox({
+      skills: [registry({ name: 'zero', presignedUrl: 'https://dl.example/zero.tar' })],
+      skillsDir: SKILLS_DIR,
+      archiveDir: ARCHIVE_DIR,
+      deps: { fetchArchive: () => Promise.resolve(Buffer.alloc(0)) },
+    });
+
+    expect(result.staged).toEqual([]);
+    expect(result.failed.get('zero')).toEqual({ cause: 'no_files' });
+  });
+
   test('leaves out an archive with no entries, as having no files', async () => {
     const empty = archiveOf(() => undefined);
     const result = await copySkillsIntoSandbox({

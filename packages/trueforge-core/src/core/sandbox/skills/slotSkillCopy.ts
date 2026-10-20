@@ -175,6 +175,10 @@ async function assertSafeArchive(input: {
   host: HostCommandRunner;
   signal: AbortSignal;
 }): Promise<void> {
+  // A zero-byte download is not a tar, but it holds nothing to load, so it is reported as having no files.
+  if (input.archive.byteLength === 0) {
+    throw new SkillNoFilesError('archive is empty');
+  }
   const work = await mkdtemp(join(tmpdir(), 'tfy-archive-'));
   try {
     const file = join(work, 'skill.tar');
