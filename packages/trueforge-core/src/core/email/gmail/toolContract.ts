@@ -110,7 +110,7 @@ export const NO_RECIPIENT = {
   message:
     'The draft has no recipient. Add an address in "to", or pass "in_reply_to" so the reply is addressed to the sender of that message.',
 };
-const draftAddressed = (draft: { to: readonly string[] | undefined; in_reply_to: string | undefined }) =>
+const draftAddressed = (draft: { to?: readonly string[] | undefined; in_reply_to?: string | undefined }) =>
   (draft.to?.length ?? 0) > 0 || draft.in_reply_to !== undefined;
 
 export const DraftEmailSchema = z

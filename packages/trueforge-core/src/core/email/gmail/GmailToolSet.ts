@@ -23,13 +23,7 @@ import type { GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
-import {
-  answeredMessageOf,
-  checkReplyThreading,
-  isReply,
-  replyRecipientOf,
-  type AnsweredMessage,
-} from './replyThread';
+import { answeredMessageOf, checkReplyThreading, isReply, replyRecipientOf, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
   listDraftsResult,
