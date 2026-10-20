@@ -360,7 +360,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /** Fake GitHub API for the invented octo-example/demo-repo repo; never touches the network. */
 function demoGithubFetch(input: { size?: number } = {}): typeof fetch {
-  return (request: RequestInfo | URL) => {
+  return (request: Parameters<typeof fetch>[0]) => {
     const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
     if (url === 'https://api.github.com/user/repos?per_page=100&sort=updated') {
       return Promise.resolve(jsonResponse([DEMO_REPO]));
