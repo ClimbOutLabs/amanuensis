@@ -507,6 +507,8 @@ const REFUSAL_REASONS = {
     'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
   name_not_found: 'The name is not on that page. Copy it word for word from the page and try again.',
   address_not_found: 'The address is not on that page. Copy it word for word from the page and try again.',
+  place_only_in_address:
+    "That place only appears in the page's web address. Read a page that lists it, then try again.",
   address_apart_from_name:
     'The name and address are not together on that page. Copy them from one listing and try again.',
 } as const;

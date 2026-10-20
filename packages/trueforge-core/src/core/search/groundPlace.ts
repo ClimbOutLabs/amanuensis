@@ -18,7 +18,15 @@ export interface GroundedPlace extends PlaceClaim {
 
 export type GroundResult =
   | { ok: true; place: GroundedPlace }
-  | { ok: false; reason: 'source_not_fetched' | 'name_not_found' | 'address_not_found' | 'address_apart_from_name' };
+  | {
+      ok: false;
+      reason:
+        | 'source_not_fetched'
+        | 'name_not_found'
+        | 'address_not_found'
+        | 'address_apart_from_name'
+        | 'place_only_in_address';
+    };
 
 const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
 const MIN_PHONE_SUFFIX_DIGITS = 7;
@@ -74,6 +82,45 @@ function pageHas({ pageWords, value }: { pageWords: string; value: string }): bo
 function tokensOf(text: string): string[] {
   const words = normalizedWords(text).trim();
   return words === '' ? [] : words.split(' ');
+}
+
+/** Undoes %-escapes up to three times, so a doubly encoded link still yields its words. */
+function urlTokensOf(url: string): string[] {
+  let decoded = url;
+  for (let round = 0; round < 3; round += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      break;
+    }
+    if (next === decoded) {
+      break;
+    }
+    decoded = next;
+  }
+  return tokensOf(decoded);
+}
+
+/**
+ * Whether every word of the claimed name and address comes from the page's own link. A page reader
+ * may print the link it was given, so those words prove nothing about the page.
+ */
+function placeOnlyInUrl({
+  nameTokens,
+  addressTokens,
+  url,
+}: {
+  nameTokens: readonly string[];
+  addressTokens: readonly string[];
+  url: string;
+}): boolean {
+  const claimed = [...nameTokens, ...addressTokens];
+  if (claimed.length === 0) {
+    return false;
+  }
+  const words = new Set(urlTokensOf(url));
+  return claimed.every(token => words.has(token));
 }
 
 /** Every run of the page's words that is exactly the given words, as start and end positions. */
@@ -179,14 +226,17 @@ export function groundPlace({
   if (page === undefined) {
     return { ok: false, reason: 'source_not_fetched' };
   }
+  const nameTokens = tokensOf(claim.name);
+  const addressTokens = tokensOf(claim.address);
+  if (placeOnlyInUrl({ nameTokens, addressTokens, url: claim.source_url })) {
+    return { ok: false, reason: 'place_only_in_address' };
+  }
   const pageWords = normalizedWords(page.text);
   const pageTokens = tokensOf(page.text);
-  const nameTokens = tokensOf(claim.name);
   const nameHits = nameIsSpecific(nameTokens) ? occurrences({ tokens: pageTokens, phrase: nameTokens }) : [];
   if (nameHits.length === 0) {
     return { ok: false, reason: 'name_not_found' };
   }
-  const addressTokens = tokensOf(claim.address);
   const addressHits = addressIsSpecific(addressTokens)
     ? occurrences({ tokens: pageTokens, phrase: addressTokens })
     : [];

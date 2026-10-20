@@ -1,5 +1,11 @@
 import { createLogger } from 'winston';
-import { RemoteMCP, ToolSet, createSentinelHostContext, createWebSearchTurnState, defaultSentinelServices } from '../../../src/core';
+import {
+  RemoteMCP,
+  ToolSet,
+  createSentinelHostContext,
+  createWebSearchTurnState,
+  defaultSentinelServices,
+} from '../../../src/core';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import { FetchedPageStore, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
@@ -49,8 +55,7 @@ function harness(
       transportType: 'streamable-http' as const,
       sessionId: null,
       listTools: () => Promise.resolve({ tools: [searchTool(toolNames.search), fetchTool(toolNames.fetch)] }),
-      callTool: callParams =>
-        Promise.resolve({ content: [{ type: 'text', text: result(callParams.name) }] }),
+      callTool: callParams => Promise.resolve({ content: [{ type: 'text', text: result(callParams.name) }] }),
       close: () => Promise.resolve(),
     }),
   );
@@ -62,7 +67,8 @@ function harness(
     web_search: createWebSearchTurnState(),
   });
   const pages =
-    shared?.pages ?? new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
+    shared?.pages ??
+    new FetchedPageStore({ now: () => Date.parse('2026-10-17T10:00:00Z'), ttlMs: 60_000, maxPages: 10 });
   const scope = shared?.scope ?? CHAT_SCOPE;
   const toolSet = new ToolSet({
     source: new RemoteMCP({
@@ -138,7 +144,10 @@ describe('ToolSet records pages read through the search provider', () => {
   it('does not record search results as read pages', async () => {
     const searched = JSON.stringify({ results: [{ url: PAGE_URL, title: 'Hope House', content: PAGE_TEXT }] });
     const { toolSet, pages, scope } = harness(() => searched);
-    await toolSet.callTool({ name: 'web_search', arguments: { query: 'food pantry New Orleans' } }, { status: 'allow' });
+    await toolSet.callTool(
+      { name: 'web_search', arguments: { query: 'food pantry New Orleans' } },
+      { status: 'allow' },
+    );
     expect(pages.recall({ scope, url: PAGE_URL })).toBeUndefined();
   });
 
@@ -196,17 +205,50 @@ describe('ToolSet records only pages Aman reads itself', () => {
     ],
   ];
 
-  it.each(ECHOES)('refuses a place whose only page is %s echoed by a tool that is not a page reader', async (_label, url, text) => {
-    const { toolSet, pages, scope } = harness(() => text, { search: 'web_search', fetch: 'lookup_listing' });
-    await toolSet.callTool({ name: 'lookup_listing', arguments: { url } }, { status: 'allow' });
-    expect(
-      groundPlace({ claim: { ...hopeClaim, name: 'Joe Cafe', address: '12 Main St', source_url: url }, pages, scope }),
-    ).toEqual({ ok: false, reason: 'source_not_fetched' });
-  });
+  it.each(ECHOES)(
+    'refuses a place whose only page is %s echoed by a tool that is not a page reader',
+    async (_label, url, text) => {
+      const { toolSet, pages, scope } = harness(() => text, { search: 'web_search', fetch: 'lookup_listing' });
+      await toolSet.callTool({ name: 'lookup_listing', arguments: { url } }, { status: 'allow' });
+      expect(
+        groundPlace({
+          claim: { ...hopeClaim, name: 'Joe Cafe', address: '12 Main St', source_url: url },
+          pages,
+          scope,
+        }),
+      ).toEqual({ ok: false, reason: 'source_not_fetched' });
+    },
+  );
 
   it('still grounds a place from a plain text page that the host web_fetch read', async () => {
     const { toolSet, pages, scope } = harness(name => (name === 'web_fetch' ? PAGE_TEXT : 'called'));
     await toolSet.callTool({ name: 'web_fetch', arguments: { url: PAGE_URL } }, { status: 'allow' });
     expect(groundPlace({ claim: hopeClaim, pages, scope })).toMatchObject({ ok: true });
+  });
+});
+
+describe('a page reader that echoes its own link cannot ground a place from that link', () => {
+  const ECHOED_LINKS: [string, string][] = [
+    ['a path with plus signs', 'https://site.example/Joe+Cafe+12+Main+St'],
+    ['a path with %20 escapes', 'https://site.example/Joe%20Cafe%2012%20Main%20St'],
+    ['a path encoded twice', 'https://site.example/Joe%2520Cafe%252012%2520Main%2520St'],
+    ['a query string only', 'https://site.example/?name=Joe+Cafe&addr=12+Main+St'],
+    ['a path only', 'https://site.example/joe-cafe/12-main-st'],
+    ['a fragment only', 'https://site.example/listing#Joe+Cafe+12+Main+St'],
+  ];
+
+  it.each(ECHOED_LINKS)('refuses a place whose words only come from %s that web_fetch echoed', async (_label, url) => {
+    const { toolSet, pages, scope } = harness(name => (name === 'web_fetch' ? `Could not read ${url}` : 'called'));
+    await toolSet.callTool({ name: 'web_fetch', arguments: { url } }, { status: 'allow' });
+    expect(
+      groundPlace({ claim: { ...hopeClaim, name: 'Joe Cafe', address: '12 Main St', source_url: url }, pages, scope }),
+    ).toEqual({ ok: false, reason: 'place_only_in_address' });
+  });
+
+  it('still grounds a real page at a plain link with no place words in it', async () => {
+    const url = 'https://listings.example/food';
+    const { toolSet, pages, scope } = harness(name => (name === 'web_fetch' ? PAGE_TEXT : 'called'));
+    await toolSet.callTool({ name: 'web_fetch', arguments: { url } }, { status: 'allow' });
+    expect(groundPlace({ claim: { ...hopeClaim, source_url: url }, pages, scope })).toMatchObject({ ok: true });
   });
 });
