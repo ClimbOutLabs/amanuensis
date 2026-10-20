@@ -113,6 +113,7 @@ export const ListSessionsRequestQuerySchema = z
       'Inclusive upper bound on `created_at` (ISO-8601 / RFC 3339).',
     ),
     agent_id: z.string().min(1).optional().describe('When set, only sessions bound to this agent id are returned.'),
+    folder_id: z.string().min(1).optional().describe('When set, only sessions filed in this folder are returned.'),
     created_by_me: z
       .stringbool()
       .optional()

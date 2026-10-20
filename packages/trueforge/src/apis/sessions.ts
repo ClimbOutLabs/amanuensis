@@ -564,6 +564,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
           });
       const { data, pagination } = await deps.sessionStore.listSessions({
         agent_id: query.agent_id,
+        folder_id: query.folder_id,
         created_by_or_agent_ids: {
           created_by_subject_id: requestContext.subject.id,
           agent_ids: managedAgentIds,

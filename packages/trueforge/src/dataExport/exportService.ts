@@ -320,6 +320,7 @@ export async function runDataExport<TTransaction>(
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       }),
     );
   }
@@ -645,6 +646,7 @@ async function personaNamesOfOthers<TTransaction>(
       metadata: undefined,
       source_type: undefined,
       source_id: undefined,
+      folder_id: undefined,
     }),
   );
   for await (const session of sessions) {

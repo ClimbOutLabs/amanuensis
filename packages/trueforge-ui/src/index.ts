@@ -319,6 +319,7 @@ export type { ThreadGroupPart } from './containers/ToolGroupContainer.js';
 export { TrueForgeUI } from './containers/TrueForgeUI.js';
 export type {
   ChatFolder,
+  ChatFolderSession,
   ChatFolderSnapshot,
   ChatFolderStore,
   ChatLayout,

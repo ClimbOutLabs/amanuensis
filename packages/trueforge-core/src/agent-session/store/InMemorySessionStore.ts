@@ -680,6 +680,9 @@ export class InMemorySessionStore<
       ) {
         continue;
       }
+      if (input.folder_id !== undefined && stored.record.folder_id !== input.folder_id) {
+        continue;
+      }
       if (createdByOrAgentIds !== undefined) {
         const creatorMatches =
           stored.record.created_by_subject.subject_id === createdByOrAgentIds.created_by_subject_id;

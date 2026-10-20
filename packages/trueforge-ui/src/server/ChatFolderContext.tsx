@@ -7,9 +7,19 @@ export type ChatFolder = {
   name: string;
 };
 
+/** One chat in a folder, as the sidebar needs it, loaded from the server by folder. */
+export type ChatFolderSession = {
+  sessionId: string;
+  title: string | null;
+  updatedAt: Date;
+  agentName: string | null;
+  isMutable: boolean;
+};
+
 export type ChatFolderSnapshot = {
   folders: ChatFolder[];
   assignments: Array<{ sessionId: string; folderId: string }>;
+  folderSessions: Array<{ folderId: string; sessions: ChatFolderSession[] }>;
 };
 
 /** Host-owned persistence for organizing remote chats. */
@@ -24,10 +34,16 @@ export interface ChatFolderStore {
 type ChatFolderContextValue = {
   folders: readonly ChatFolder[];
   assignments: ReadonlyMap<string, string>;
+  folderSessions: ReadonlyMap<string, readonly ChatFolderSession[]>;
+  loadError: string | null;
   createFolder(input: { name: string }): Promise<ChatFolder>;
   renameFolder(input: { folderId: string; name: string }): Promise<void>;
   deleteFolder(input: { folderId: string }): Promise<void>;
   moveChat(input: { sessionId: string; folderId: string | null }): Promise<void>;
+  /** Keeps a folder row's title in step after a rename saved through the server. */
+  updateFolderSessionTitle(input: { sessionId: string; title: string }): void;
+  /** Drops a folder row after its chat was deleted through the server. */
+  removeFolderSession(input: { sessionId: string }): void;
 };
 
 const ChatFolderContext = createContext<ChatFolderContextValue | null>(null);
@@ -39,11 +55,17 @@ function sortFolders(folders: readonly ChatFolder[]): ChatFolder[] {
 export function ChatFolderProvider({ store, children }: { store?: ChatFolderStore; children: ReactNode }) {
   const [folders, setFolders] = useState<readonly ChatFolder[]>([]);
   const [assignments, setAssignments] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [folderSessions, setFolderSessions] = useState<ReadonlyMap<string, readonly ChatFolderSession[]>>(
+    () => new Map(),
+  );
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (store === undefined) {
       setFolders([]);
       setAssignments(new Map());
+      setFolderSessions(new Map());
+      setLoadError(null);
       return;
     }
 
@@ -54,9 +76,13 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
         if (cancelled) return;
         setFolders(sortFolders(snapshot.folders));
         setAssignments(new Map(snapshot.assignments.map(row => [row.sessionId, row.folderId])));
+        setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions])));
+        setLoadError(null);
       })
       .catch(() => {
+        if (cancelled) return;
         // Folder organization is optional. Keep chat history usable if it cannot load.
+        setLoadError('Could not load folder chats. Refresh the page to try again.');
       });
     return () => {
       cancelled = true;
@@ -88,9 +114,58 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       await store.deleteFolder({ folderId });
       setFolders(current => current.filter(folder => folder.id !== folderId));
       setAssignments(current => new Map([...current].filter(([, assignedFolderId]) => assignedFolderId !== folderId)));
+      setFolderSessions(current => {
+        const next = new Map(current);
+        next.delete(folderId);
+        return next;
+      });
     },
     [store],
   );
+
+  const updateFolderSessionTitle = useCallback(({ sessionId, title }: { sessionId: string; title: string }) => {
+    setFolderSessions(current => {
+      let changed = false;
+      const next = new Map<string, readonly ChatFolderSession[]>();
+      for (const [folderId, sessions] of current) {
+        if (sessions.some(session => session.sessionId === sessionId)) {
+          changed = true;
+          next.set(
+            folderId,
+            sessions.map(session => (session.sessionId === sessionId ? { ...session, title } : session)),
+          );
+        } else {
+          next.set(folderId, sessions);
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
+  const removeFolderSession = useCallback(({ sessionId }: { sessionId: string }) => {
+    setFolderSessions(current => {
+      let changed = false;
+      const next = new Map<string, readonly ChatFolderSession[]>();
+      for (const [folderId, sessions] of current) {
+        if (sessions.some(session => session.sessionId === sessionId)) {
+          changed = true;
+          next.set(
+            folderId,
+            sessions.filter(session => session.sessionId !== sessionId),
+          );
+        } else {
+          next.set(folderId, sessions);
+        }
+      }
+      return changed ? next : current;
+    });
+    setAssignments(current => {
+      if (!current.has(sessionId)) return current;
+      const next = new Map(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
 
   const moveChat = useCallback(
     async ({ sessionId, folderId }: { sessionId: string; folderId: string | null }) => {
@@ -119,8 +194,31 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
 
   const value = useMemo<ChatFolderContextValue | null>(() => {
     if (store === undefined) return null;
-    return { folders, assignments, createFolder, renameFolder, deleteFolder, moveChat };
-  }, [assignments, createFolder, deleteFolder, folders, moveChat, renameFolder, store]);
+    return {
+      folders,
+      assignments,
+      folderSessions,
+      loadError,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveChat,
+      updateFolderSessionTitle,
+      removeFolderSession,
+    };
+  }, [
+    assignments,
+    createFolder,
+    deleteFolder,
+    folderSessions,
+    folders,
+    loadError,
+    moveChat,
+    removeFolderSession,
+    renameFolder,
+    store,
+    updateFolderSessionTitle,
+  ]);
 
   return <ChatFolderContext.Provider value={value}>{children}</ChatFolderContext.Provider>;
 }

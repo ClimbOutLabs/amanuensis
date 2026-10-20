@@ -675,6 +675,58 @@ describe('sessions HTTP agent binding', () => {
     expect(invalid.status).toBe(400);
   });
 
+  it('lists only the sessions filed in a folder when folder_id is given', async () => {
+    const createSession = async () => {
+      const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const createFolder = async (name: string) => {
+      const created = await app.request('/api/session-folders', jsonInit('POST', { name }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const listSessions = async (query: string) => {
+      const res = await app.request(`/?${query}`);
+      expect(res.status).toBe(200);
+      return ListSessionsResponseSchema.parse(await res.json());
+    };
+
+    const workId = await createFolder('Work');
+    const filedIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = await createSession();
+      const assigned = await app.request(`/${id}/folder`, jsonInit('PUT', { folder_id: workId }));
+      expect(assigned.status).toBe(200);
+      filedIds.push(id);
+    }
+    const otherFolderId = await createFolder('Other');
+    const otherId = await createSession();
+    await app.request(`/${otherId}/folder`, jsonInit('PUT', { folder_id: otherFolderId }));
+    const unfiledId = await createSession();
+
+    const all = await listSessions(`folder_id=${workId}`);
+    expect(all.data.map(s => s.id).sort()).toEqual([...filedIds].sort());
+    expect(all.data.every(s => s.folder_id === workId)).toBe(true);
+
+    const page1 = await listSessions(`folder_id=${workId}&limit=2`);
+    expect(page1.data).toHaveLength(2);
+    const next = page1.pagination.next_page_token;
+    expect(next).toBeDefined();
+    const page2 = await listSessions(`folder_id=${workId}&limit=2&page_token=${encodeURIComponent(next ?? '')}`);
+    expect(page2.data).toHaveLength(1);
+    const pagedIds = [...page1.data, ...page2.data].map(s => s.id).sort();
+    expect(pagedIds).toEqual([...filedIds].sort());
+
+    const empty = await listSessions(`folder_id=${await createFolder('Empty')}`);
+    expect(empty.data).toEqual([]);
+
+    const unfiltered = await listSessions('');
+    expect(unfiltered.data.map(s => s.id)).toEqual(expect.arrayContaining([...filedIds, otherId, unfiledId]));
+  });
+
   it("does not assign another user's folder", async () => {
     const createdSession = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
     const session = (await createdSession.json()) as { data: { id: string } };

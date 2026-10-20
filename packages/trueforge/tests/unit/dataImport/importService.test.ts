@@ -235,6 +235,7 @@ describe('runDataImport', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data.map(session => session.session_id).sort()).toEqual([
         SEED_IDS.sessionMain,
@@ -732,6 +733,7 @@ async function chatsOf(instance: Instance, userId: string) {
     metadata: undefined,
     source_type: undefined,
     source_id: undefined,
+    folder_id: undefined,
   });
   return page.data;
 }
@@ -889,6 +891,7 @@ describe('runDataImport keeps what the archive recorded', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(newestFirst.data.map(session => session.session_id)).toEqual([
         SEED_IDS.sessionRunning,
@@ -1276,6 +1279,7 @@ describe('runDataImport failure handling', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data).toHaveLength(0);
       expect(
@@ -1331,6 +1335,7 @@ describe('runDataImport failure handling', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data).toHaveLength(0);
       expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
@@ -2832,6 +2837,7 @@ describe('runDataImport never restores a live approval', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data).toHaveLength(3);
       for (const session of sessions.data) {
@@ -3149,6 +3155,7 @@ describe('runDataImport dry run on a long chat', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data).toEqual([]);
     } finally {
@@ -3658,6 +3665,7 @@ describe('runDataImport tells the person everything it left out', () => {
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
       });
       expect(sessions.data).toEqual([]);
 

@@ -339,6 +339,9 @@ export async function listSessions(
   if (input.agent_id !== undefined) {
     query = query.where('agent_id', '=', input.agent_id);
   }
+  if (input.folder_id !== undefined) {
+    query = query.where('folder_id', '=', input.folder_id);
+  }
   query = whereCreatedByOrAgentIds(query, input.created_by_or_agent_ids);
   if (input.metadata !== undefined) {
     if (Object.keys(input.metadata).length === 0) {

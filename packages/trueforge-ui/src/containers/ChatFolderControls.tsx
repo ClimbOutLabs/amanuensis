@@ -169,18 +169,21 @@ function ChatFolderDialog({
  * Rename dialog, styled to match `FolderManageDialog`'s rename form below. Persists via
  * `server.updateSession({ sessionId, title })`, then renames the thread-list row locally
  * (`aui.threadListItem().rename`, the same call `useSyncSessionTitle` uses) so the sidebar
- * updates immediately without waiting on a refetch.
+ * updates immediately without waiting on a refetch. Folder rows that are not thread-list
+ * items pass `onRenamed` instead: the saved title is handed back for the row to update.
  */
 function RenameChatDialog({
   sessionId,
   currentTitle,
   open,
   onOpenChange,
+  onRenamed,
 }: {
   sessionId: string;
   currentTitle: string;
   open: boolean;
   onOpenChange(open: boolean): void;
+  onRenamed?: (title: string) => void;
 }) {
   const server = useOptionalServer();
   const aui = useAui();
@@ -204,10 +207,14 @@ function RenameChatDialog({
     setError(null);
     try {
       await server.updateSession({ sessionId, title: normalized });
-      try {
-        await aui.threadListItem().rename(normalized);
-      } catch {
-        // Persistence above already succeeded; the local rename is a best-effort display update.
+      if (onRenamed !== undefined) {
+        onRenamed(normalized);
+      } else {
+        try {
+          await aui.threadListItem().rename(normalized);
+        } catch {
+          // Persistence above already succeeded; the local rename is a best-effort display update.
+        }
       }
       onOpenChange(false);
     } catch (renameError) {
@@ -258,12 +265,21 @@ export function ThreadListItemActions({
   canDelete,
   canRename,
   title,
+  onDelete,
+  onRenamed,
 }: {
   sessionId: string;
   currentFolderId: string | null;
   canDelete: boolean;
   canRename: boolean;
   title: string;
+  /**
+   * Folder rows that are not thread-list items delete through this instead of the
+   * runtime's item delete. The callback handles its own errors.
+   */
+  onDelete?: () => Promise<void>;
+  /** Folder rows that are not thread-list items update their title through this after a rename saves. */
+  onRenamed?: (title: string) => void;
 }) {
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
@@ -293,7 +309,13 @@ export function ThreadListItemActions({
     />
   );
   const renameDialog = canRename ? (
-    <RenameChatDialog sessionId={sessionId} currentTitle={title} open={renameOpen} onOpenChange={setRenameOpen} />
+    <RenameChatDialog
+      sessionId={sessionId}
+      currentTitle={title}
+      open={renameOpen}
+      onOpenChange={setRenameOpen}
+      onRenamed={onRenamed}
+    />
   ) : null;
 
   if (useSheet) {
@@ -342,10 +364,25 @@ export function ThreadListItemActions({
                 </button>
               ) : null}
               {canDelete ? (
-                <ThreadListItemPrimitive.Delete className={deleteItemClass} onClick={() => setSheetOpen(false)}>
-                  <Icon name="trash" className="size-3.5" />
-                  Delete
-                </ThreadListItemPrimitive.Delete>
+                onDelete !== undefined ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={deleteItemClass}
+                    onClick={() => {
+                      setSheetOpen(false);
+                      void onDelete();
+                    }}
+                  >
+                    <Icon name="trash" className="size-3.5" />
+                    Delete
+                  </button>
+                ) : (
+                  <ThreadListItemPrimitive.Delete className={deleteItemClass} onClick={() => setSheetOpen(false)}>
+                    <Icon name="trash" className="size-3.5" />
+                    Delete
+                  </ThreadListItemPrimitive.Delete>
+                )
               ) : null}
             </div>
           </BottomSheet>
@@ -386,12 +423,19 @@ export function ThreadListItemActions({
             </ThreadListItemMorePrimitive.Item>
           ) : null}
           {canDelete ? (
-            <ThreadListItemPrimitive.Delete asChild>
-              <ThreadListItemMorePrimitive.Item className={deleteItemClass}>
+            onDelete !== undefined ? (
+              <ThreadListItemMorePrimitive.Item className={deleteItemClass} onSelect={() => void onDelete()}>
                 <Icon name="trash" className="size-3.5" />
                 Delete
               </ThreadListItemMorePrimitive.Item>
-            </ThreadListItemPrimitive.Delete>
+            ) : (
+              <ThreadListItemPrimitive.Delete asChild>
+                <ThreadListItemMorePrimitive.Item className={deleteItemClass}>
+                  <Icon name="trash" className="size-3.5" />
+                  Delete
+                </ThreadListItemMorePrimitive.Item>
+              </ThreadListItemPrimitive.Delete>
+            )
           ) : null}
         </ThreadListItemMorePrimitive.Content>
       </ThreadListItemMorePrimitive.Root>

@@ -173,6 +173,8 @@ export interface ListSessionsInput {
   end_timestamp: Date | undefined;
   /** When set, only sessions bound to this named agent id. */
   agent_id: string | undefined;
+  /** When set, only sessions filed in this folder. */
+  folder_id: string | undefined;
   /** When set, match creator or named-agent binding. Empty `agent_ids` means creator-only. */
   created_by_or_agent_ids:
     | {

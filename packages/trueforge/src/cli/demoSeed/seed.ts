@@ -418,6 +418,7 @@ async function removeEarlierSeeds<TTransaction>({
       metadata: { [DEMO_MARKER]: 'true' },
       source_type: undefined,
       source_id: undefined,
+      folder_id: undefined,
     });
     if (sessions.length === 0) {
       return removed;
