@@ -238,6 +238,26 @@ describe('findCommandLineGitDependency', () => {
     ['a pip bare ssh address', 'pip install ssh://git@github.com/org/repo.git', 'ssh://git@github.com/org/repo.git'],
     ['a pip editable git spec', 'pip install -e git+https://github.com/org/repo', 'git+https://github.com/org/repo'],
     [
+      'a pip editable git spec after an equals sign',
+      'pip install --editable=git+https://github.com/org/repo',
+      'git+https://github.com/org/repo',
+    ],
+    [
+      'a pip editable git spec stuck onto the short flag',
+      'pip install -egit+https://github.com/org/repo',
+      'git+https://github.com/org/repo',
+    ],
+    [
+      'a pip editable git spec after an equals sign, in quotes',
+      'pip install --editable="git+https://github.com/org/repo"',
+      'git+https://github.com/org/repo',
+    ],
+    [
+      'a web address as an editable spec',
+      'pip install --editable=https://example.com/x.whl',
+      'https://example.com/x.whl',
+    ],
+    [
       'a web address as the package',
       'pip install https://files.pythonhosted.org/pkg-1.0.tar.gz',
       'https://files.pythonhosted.org/pkg-1.0.tar.gz',
@@ -264,6 +284,9 @@ describe('findCommandLineGitDependency', () => {
     'pip install /abs/path/pkg-1.0-py3-none-any.whl',
     'pip install --index-url https://example.com/simple requests',
     'pip install --index-url=https://example.com/simple requests',
+    'pip install --index-url=https://example.com/simple',
+    'pip install --editable=./lib',
+    'pip install -e./lib',
     'pip install -r requirements.txt',
     'pip install --requirement https://example.com/requirements.txt',
     'npm install --registry https://registry.example.com lodash',

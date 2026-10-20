@@ -274,6 +274,10 @@ describe('a package the mirrors cannot serve', () => {
 
   it.each([
     ['a git spec on the command line', 'pip install git+https://github.com/org/repo'],
+    [
+      'an editable git spec in equals form on the command line',
+      'pip install --editable=git+https://github.com/org/repo',
+    ],
     ['a shorthand on the command line', 'npm i github:org/repo'],
     ['a web address on the command line', 'pip install https://files.pythonhosted.org/pkg-1.0.tar.gz'],
   ])('refuses %s before anything runs', async (_name, command) => {

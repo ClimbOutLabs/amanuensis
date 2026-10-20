@@ -418,6 +418,34 @@ const FLAG_VALUE_WORDS: Record<PackageDownloadEcosystem, ReadonlySet<string>> = 
 };
 
 /**
+ * Flags whose value is a package spec rather than a setting, per package family: pip's editable
+ * flag names the package to install. Such a value is judged as a spec however it reaches the
+ * flag: as the next word, after an equals sign, or stuck onto the short flag itself.
+ */
+const SPEC_VALUE_FLAGS: Record<PackageDownloadEcosystem, ReadonlySet<string>> = {
+  pypi: new Set(['-e', '--editable']),
+  npm: new Set<string>(),
+  go: new Set<string>(),
+  cargo: new Set<string>(),
+};
+
+/**
+ * The package spec a flag carries inside its own word, or undefined: the value after an equals
+ * sign on a spec flag (--editable=git+https://...), or the value stuck onto a short spec flag
+ * (-egit+...). A flag whose value is a setting never unpacks, so its value stays unjudged.
+ */
+function attachedSpecValue(word: string, specFlags: ReadonlySet<string>): string | undefined {
+  const equals = word.indexOf('=');
+  if (equals !== -1) {
+    return specFlags.has(word.slice(0, equals)) ? word.slice(equals + 1) : undefined;
+  }
+  if (!word.startsWith('--') && word.length > 2) {
+    return specFlags.has(word.slice(0, 2)) ? word.slice(2) : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Whether one word from a download command's own argument list names a package the mirrors
  * cannot serve: the same specs the manifest checks refuse, plus a bare web address, which as a
  * command argument is a direct download the mirrors would never see.
@@ -434,7 +462,8 @@ function isRefusedCommandSpec(word: string): boolean {
  * serve, or undefined. A manifest is not the only place such a spec can hide: one typed
  * straight into the command would be fetched by the tool itself, around the mirrors. Only
  * download commands are read, and only their package words: flag spellings are skipped, and
- * so is the value of a flag that takes one, because a setting is not a package.
+ * so is the value of a flag that takes one, because a setting is not a package. A spec flag's
+ * attached value is read as a word of its own, because it names the package itself.
  */
 export function findCommandLineGitDependency(command: string): string | undefined {
   for (const words of splitShellCommands(command)) {
@@ -444,6 +473,7 @@ export function findCommandLineGitDependency(command: string): string | undefine
       continue;
     }
     const valueWords = FLAG_VALUE_WORDS[ecosystem];
+    const specWords = SPEC_VALUE_FLAGS[ecosystem];
     let skipNext = false;
     let positionalOnly = false;
     for (const word of argv.slice(1)) {
@@ -456,7 +486,12 @@ export function findCommandLineGitDependency(command: string): string | undefine
         continue;
       }
       if (!positionalOnly && word.startsWith('-')) {
-        if (!word.includes('=') && valueWords.has(word)) {
+        const attached = attachedSpecValue(word, specWords);
+        if (attached !== undefined) {
+          if (isRefusedCommandSpec(attached)) {
+            return attached;
+          }
+        } else if (!word.includes('=') && valueWords.has(word)) {
           skipNext = true;
         }
         continue;
