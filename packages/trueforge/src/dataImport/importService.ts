@@ -117,6 +117,7 @@ import {
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
+import { repairPersonaNames } from './personaNames';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -158,6 +159,8 @@ const LEFT_OUT_OWNERS_SHOWN = 20;
 const LEFT_OUT_NAME_SHOWN = 36;
 /** Width of the name column in the left-out table, so the counts line up. */
 const LEFT_OUT_NAME_COLUMN = 42;
+/** Persona name changes shown in the summary; the import log has them all. */
+const PERSONA_CHANGES_SHOWN = 20;
 
 const SECTION_OWNERS: Readonly<Record<string, string>> = { 'settings.json': 'Your settings' };
 
@@ -348,14 +351,17 @@ function parseSection<TSchema extends z.ZodType>({
   schema,
   logger,
   leftOut,
+  prepare,
 }: {
   files: ReadonlyMap<string, Buffer>;
   name: string;
   schema: TSchema;
   logger: DataImportDeps<never>['logger'];
   leftOut: LeftOutReport;
+  /** Brings an older version's values up to today's rules before the strict read. */
+  prepare: (json: unknown) => unknown;
 }): z.infer<TSchema> {
-  const json = readSectionJson({ files, name });
+  const json = prepare(readSectionJson({ files, name }));
   const { result, leftOut: counts } = countingLeftOut(() => schema.safeParse(json));
   if (!result.success) {
     rejectSection({ name, json, error: result.error, logger });
@@ -470,6 +476,8 @@ interface ArchiveContents {
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
   leftOutReport: LeftOutReport;
+  /** Persona names and aliases an older version wrote that today's rules changed or dropped. */
+  personaRepairLines: string[];
 }
 
 /** The sessions/ file names in order; a gap in the numbering is a missing file. */
@@ -638,8 +646,12 @@ function loadArchive(input: {
     }
   }
   const leftOut: LeftOutReport = new Map();
-  const section = <TSchema extends z.ZodType>(name: string, schema: TSchema): z.infer<TSchema> =>
-    parseSection({ files, name, schema, logger, leftOut });
+  const section = <TSchema extends z.ZodType>(
+    name: string,
+    schema: TSchema,
+    prepare: (json: unknown) => unknown = json => json,
+  ): z.infer<TSchema> => parseSection({ files, name, schema, logger, leftOut, prepare });
+  const personaRepairLines: string[] = [];
 
   const manifest = section('manifest.json', ImportManifestSchema);
   if (manifest.format !== 'aman-export') {
@@ -677,7 +689,11 @@ function loadArchive(input: {
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
     folders,
     agents: section('agents.json', ImportAgentsFileSchema),
-    personas: section('personas.json', ImportPersonasFileSchema),
+    personas: section('personas.json', ImportPersonasFileSchema, json => {
+      const repaired = repairPersonaNames(json);
+      personaRepairLines.push(...repaired.lines);
+      return repaired.json;
+    }),
     personalization: section('personalization.json', ImportPersonalizationFileSchema),
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
@@ -688,6 +704,7 @@ function loadArchive(input: {
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
+    personaRepairLines,
   };
   validateCrossReferences(contents);
   return contents;
@@ -947,6 +964,7 @@ function buildSummary({
   standInAgentNames,
   filesLeftBehind,
   leftOut,
+  personaChanges,
   trimmedSpaces,
   dryRun,
 }: {
@@ -956,6 +974,8 @@ function buildSummary({
   standInAgentNames: string[];
   /** Rows of the left-out table: internal details from an older version that did not come over. */
   leftOut: readonly LeftOutRow[];
+  /** One sentence per persona name an older version wrote that today's rules changed or dropped. */
+  personaChanges: readonly string[];
   dryRun: boolean;
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
@@ -1025,6 +1045,15 @@ function buildSummary({
       rows.push(`  And ${String(owners.length - LEFT_OUT_OWNERS_SHOWN)} more. The full list is in the import log.`);
     }
     sections.push(['Left out, from an older version of Aman (your chats are complete):', ...rows].join('\n'));
+  }
+  if (personaChanges.length > 0) {
+    const rows = personaChanges.slice(0, PERSONA_CHANGES_SHOWN).map(change => `  • ${change}`);
+    if (personaChanges.length > PERSONA_CHANGES_SHOWN) {
+      rows.push(
+        `  And ${String(personaChanges.length - PERSONA_CHANGES_SHOWN)} more. The full list is in the import log.`,
+      );
+    }
+    sections.push(["Persona names changed to fit today's rules:", ...rows].join('\n'));
   }
   sections.push(['Good to know:', ...notes.map(note => `  • ${note}`)].join('\n'));
   return sections.join('\n\n');
@@ -1412,6 +1441,11 @@ async function importArchive<TTransaction>(
   if (leftOut.length > 0) {
     deps.logger.info('Data import left out internal details from an older version', { left_out: leftOut });
   }
+  if (contents.personaRepairLines.length > 0) {
+    deps.logger.info('Data import repaired persona names from an older version', {
+      persona_changes: contents.personaRepairLines,
+    });
+  }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
   if (lock === undefined) {
     const result: Omit<ImportDataResult, 'summary'> = {
@@ -1434,6 +1468,7 @@ async function importArchive<TTransaction>(
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
         leftOut,
+        personaChanges: contents.personaRepairLines,
         trimmedSpaces,
         dryRun: true,
       }),
@@ -1740,6 +1775,7 @@ async function importArchive<TTransaction>(
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
         leftOut,
+        personaChanges: contents.personaRepairLines,
         trimmedSpaces,
         dryRun: false,
       }),
