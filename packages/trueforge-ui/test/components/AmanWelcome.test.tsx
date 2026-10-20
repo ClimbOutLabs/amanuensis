@@ -6,10 +6,14 @@ import { AmanWelcome, amanWelcomeHeading } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { TOUR_HIDDEN_STORAGE_KEY } from '@/utils/tourDisplayPreference.js';
 
-const { composer, server } = vi.hoisted(() => ({
-  composer: { setText: vi.fn(), send: vi.fn() },
-  server: { grantedFeatures: [] as string[], sandboxEnabled: false, hasCatalog: true },
-}));
+const { composer, server } = vi.hoisted(() => {
+  const server: { grantedFeatures: string[]; sandboxEnabled: boolean; hasCatalog: boolean } = {
+    grantedFeatures: [],
+    sandboxEnabled: false,
+    hasCatalog: true,
+  };
+  return { composer: { setText: vi.fn(), send: vi.fn() }, server };
+});
 
 vi.mock('@assistant-ui/react', async importOriginal => ({
   ...(await importOriginal<typeof import('@assistant-ui/react')>()),
