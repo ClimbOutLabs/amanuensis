@@ -288,23 +288,29 @@ func (c *Collector) interfaceInfo(name string) (NetIface, error) {
 	return NetIface{Up: iface.Flags&net.FlagUp != 0, Addresses: len(addrs)}, nil
 }
 
-// routeInterfaces lists the interface of every route in a /proc/net route table; skip is the number of header lines
-// and column the position of the interface name.
-func routeInterfaces(path string, skip, column int) ([]string, error) {
-	raw, err := os.ReadFile(path)
+// routeTable locates the interface column of a /proc/net route table; skip is its number of header lines.
+type routeTable struct {
+	path   string
+	skip   int
+	column int
+}
+
+// routeInterfaces lists the interface of every route in a route table.
+func routeInterfaces(t routeTable) ([]string, error) {
+	raw, err := os.ReadFile(t.path)
 	if err != nil {
 		return nil, err
 	}
 	var names []string
 	for i, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
-		if i < skip || len(fields) == 0 {
+		if i < t.skip || len(fields) == 0 {
 			continue
 		}
-		if len(fields) <= column {
+		if len(fields) <= t.column {
 			return nil, errors.New("unreadable route line")
 		}
-		names = append(names, fields[column])
+		names = append(names, fields[t.column])
 	}
 	return names, nil
 }
@@ -314,7 +320,8 @@ func (c *Collector) checkNetwork() Check {
 	if err != nil {
 		return fail(CheckNetwork, "cannot read interfaces")
 	}
-	var names, offenders []string
+	var names, offenders, idle []string
+	hasLo := false
 	lines := strings.Split(string(raw), "\n")
 	for i, line := range lines {
 		if i < 2 || strings.TrimSpace(line) == "" {
@@ -330,6 +337,7 @@ func (c *Collector) checkNetwork() Check {
 	for _, name := range names {
 		switch {
 		case name == "lo":
+			hasLo = true
 		case !fallbackTunnelDevices[name]:
 			offenders = append(offenders, name)
 		default:
@@ -340,19 +348,24 @@ func (c *Collector) checkNetwork() Check {
 				offenders = append(offenders, name+" (up)")
 			} else if info.Addresses > 0 {
 				offenders = append(offenders, name+" (has an address)")
+			} else {
+				idle = append(idle, name)
 			}
 		}
 	}
 	if len(offenders) > 0 {
 		return fail(CheckNetwork, "interfaces: "+strings.Join(offenders, " "))
 	}
+	if !hasLo {
+		return fail(CheckNetwork, "no loopback interface")
+	}
 	// With nothing but lo and idle tunnel devices left, a route that leaves through any other interface would still
 	// be a way out.
-	routes, err := routeInterfaces(filepath.Join(c.Proc, "net", "route"), 1, 0)
+	routes, err := routeInterfaces(routeTable{path: filepath.Join(c.Proc, "net", "route"), skip: 1, column: 0})
 	if err != nil {
 		return fail(CheckNetwork, "cannot read routes")
 	}
-	routes6, err := routeInterfaces(filepath.Join(c.Proc, "net", "ipv6_route"), 0, 9)
+	routes6, err := routeInterfaces(routeTable{path: filepath.Join(c.Proc, "net", "ipv6_route"), skip: 0, column: 9})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fail(CheckNetwork, "cannot read routes")
 	}
@@ -361,10 +374,10 @@ func (c *Collector) checkNetwork() Check {
 			return fail(CheckNetwork, "route via "+name)
 		}
 	}
-	if len(names) == 1 {
+	if len(idle) == 0 {
 		return pass(CheckNetwork, "only lo")
 	}
-	return pass(CheckNetwork, "only lo and idle tunnel devices")
+	return pass(CheckNetwork, "only lo and idle tunnel devices: "+strings.Join(idle, " "))
 }
 
 func (c *Collector) checkDockerSocket() Check {

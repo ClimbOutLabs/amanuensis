@@ -17,7 +17,7 @@ import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../co
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
-import { fetchedPages } from '../core/search/fetchedPages';
+import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
 import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
 import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
@@ -367,6 +367,7 @@ export class TurnResourceResolver<
       workspace_cwd: workspace_cwd ?? null,
       web_search: this.webSearchTurn,
     });
+    const pageScope: FetchedPageScope = { tenant_id, conversation_id: session_id };
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
         const source = await this.getOrCreateToolSource({
@@ -388,6 +389,7 @@ export class TurnResourceResolver<
                   fetchImpl: (target, init) => fetch(target, init),
                 }),
                 pages: fetchedPages,
+                scope: pageScope,
               });
             }
             return new RemoteMCP({
@@ -413,6 +415,8 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          pages: fetchedPages,
+          pagesScope: pageScope,
         });
       }),
     );

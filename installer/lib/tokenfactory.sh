@@ -5,7 +5,8 @@
 # Must equal DEFAULT_TOKEN_FACTORY_MODEL in packages/trueforge/src/runtime/tokenFactoryDefaults.ts (contract test).
 TF_DEFAULT_MODEL=nvidia/nemotron-3-super-120b-a12b
 
-valid_tf_key() { matches_whole "$1" '^[A-Za-z0-9._~+/=-]{16,512}$'; }
+# The length is counted here, not in the pattern: macOS regex refuses repeat counts above 255.
+valid_tf_key() { [ "${#1}" -ge 16 ] && [ "${#1}" -le 512 ] && matches_whole "$1" '^[A-Za-z0-9._~+/=-]+$'; }
 valid_tf_model() { matches_whole "$1" '^[A-Za-z0-9][A-Za-z0-9._/:-]{0,127}$'; }
 valid_tf_cap() { matches_whole "$1" '^[1-9][[:digit:]]{0,11}$'; }
 

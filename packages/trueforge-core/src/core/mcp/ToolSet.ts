@@ -20,6 +20,12 @@ import {
   SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
+import {
+  isPageReaderTool,
+  recordFetchedPages,
+  type FetchedPageScope,
+  type FetchedPageStore,
+} from '../search/fetchedPages';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -157,6 +163,8 @@ export class ToolSet implements IToolSet {
   private readonly searchProvider: boolean;
   private readonly searchTools: ReadonlySet<string>;
   private readonly searchPlumbingFields: readonly string[];
+  private readonly pages: FetchedPageStore | undefined;
+  private readonly pagesScope: FetchedPageScope | undefined;
 
   constructor(params: {
     source: ToolSource;
@@ -183,6 +191,17 @@ export class ToolSet implements IToolSet {
      * declares it read-only or this list names it. Has no effect without `sentinel`.
      */
     searchProvider?: SearchProviderGrant | undefined;
+    /**
+     * The shared memory of pages read this session, written after every successful call so a
+     * place found on a page can be checked against it whatever tool read the page. Set by the
+     * host only.
+     */
+    pages?: FetchedPageStore | undefined;
+    /**
+     * The tenant and chat the pages memory is written for; a page is recorded only when the
+     * host names the chat it belongs to. Set by the host only, alongside `pages`.
+     */
+    pagesScope?: FetchedPageScope | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -197,6 +216,8 @@ export class ToolSet implements IToolSet {
     this.searchProvider = params.searchProvider !== undefined;
     this.searchTools = new Set(params.searchProvider?.tools);
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
+    this.pages = params.pages;
+    this.pagesScope = params.pagesScope;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -290,6 +311,23 @@ export class ToolSet implements IToolSet {
       params,
       response: await this.source.callTool(params, decision, context),
     });
+    if (
+      this.pages !== undefined &&
+      this.pagesScope !== undefined &&
+      (this.firstParty || this.searchProvider) &&
+      isPageReaderTool(params.name) &&
+      isCallToolResponseResult(response) &&
+      response.result.isError !== true
+    ) {
+      // Only Aman's own page readers record: a tool from any other server may echo its input, so its
+      // text is never a page the model read.
+      recordFetchedPages({
+        pages: this.pages,
+        scope: this.pagesScope,
+        toolArguments: params.arguments ?? {},
+        texts: resultTexts(response.result),
+      });
+    }
     if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
       // What a search returned is what a later fetch in this turn may name. A call that itself
       // names a URL is a fetch: its page's links are not search results, so they stay unreturned.

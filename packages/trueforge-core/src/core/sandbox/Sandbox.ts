@@ -1,3 +1,4 @@
+import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import dedent from 'dedent';
 import type { Logger } from 'winston';
@@ -13,12 +14,13 @@ import {
   StructuredEditPreconditionBlockedError,
   ToolPreDispatchError,
 } from '../errors';
-import type { ApprovalDecision } from '../events/schema';
+import type { ApprovalDecision, TextContentPart } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import { estimateTokensForString } from '../llm/usage';
 import type { MappedMCPTool } from '../mcp/convertMCPServers';
 import {
+  isCallToolResponseResult,
   toolResultResponse,
   type CallToolResponse,
   type IToolSet,
@@ -106,10 +108,18 @@ import {
   withTrustedPath,
   type ExecResult,
   type SandboxExecParams,
+  type SandboxInit,
   type SandboxProvider,
 } from './provider/Provider';
 import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
+import {
+  SKILL_COPY_FAILED_REASON,
+  skillCopyFailedNotice,
+  type SkillCopyCause,
+  type SkillCopyFailure,
+  type StagedSkill,
+} from './skills/slotSkillCopy';
 import { pushCardFields } from './slots/git/pushCard';
 import {
   GIT_INDEX_ENTRIES_COMMAND,
@@ -123,7 +133,6 @@ import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
-import { SKILLS_NO_NETWORK_REASON } from './skills/constants';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
@@ -283,6 +292,23 @@ export interface SandboxOptions {
    * is preserved.
    */
   sentinel?: SentinelHostContext | undefined;
+}
+
+/**
+ * Adds setup notices to a tool result's structured `notices` field. A JSON object keeps its own fields;
+ * other text is kept as the response's result.
+ */
+function withNoticesField(input: { text: string; notices: readonly string[] }): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(input.text);
+  } catch {
+    value = undefined;
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return JSON.stringify({ ...value, notices: input.notices });
+  }
+  return JSON.stringify({ response: { result: input.text }, notices: input.notices });
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
@@ -1970,6 +1996,10 @@ export class Sandbox extends LocalToolMCP {
   private mcpClientInstall: CodeModeClientInstall | undefined;
   /** Cached prerequisite check results: skill name -> reason unavailable. Empty map = all available. */
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
+  // Kept apart from the prerequisite cache, which the prerequisite check clears.
+  private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
+  // Plain lines for the person, shown once on the next exec result.
+  private pendingSkillNotices: string[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -2888,12 +2918,50 @@ export class Sandbox extends LocalToolMCP {
     return this.cachedSkillsSection;
   }
 
-  /** Skills download over the network, so a sandbox without one reports every skill unavailable. */
-  private unavailableSkillsForPrompt(): Map<string, string> | undefined {
-    if (!this.hasNetwork()) {
-      return new Map((this.skillMounter?.skillNames() ?? []).map(name => [name, SKILLS_NO_NETWORK_REASON]));
+  /**
+   * Setup can raise skill notices outside an exec (an upload, a patch, a file read). They reach the
+   * person on the next tool result of any kind, not on an unrelated exec.
+   */
+  override async callTool(
+    params: CallToolRequest['params'],
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
+    const response = await super.callTool(params, approvalDecision, context);
+    if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+      return response;
     }
-    return this.unavailableSkillsCache.size > 0 ? this.unavailableSkillsCache : undefined;
+    const notices = this.takeSkillNotices();
+    const [first, ...rest] = response.result.content;
+    const head: TextContentPart =
+      first?.type === 'text'
+        ? { type: 'text', text: withNoticesField({ text: first.text, notices }) }
+        : { type: 'text', text: JSON.stringify({ notices }) };
+    return {
+      ...response,
+      result: { ...response.result, content: [head, ...(first?.type === 'text' ? rest : response.result.content)] },
+    };
+  }
+
+  private takeSkillNotices(): string[] {
+    const notices = this.pendingSkillNotices;
+    this.pendingSkillNotices = [];
+    return notices;
+  }
+
+  /** Exec output as text, with any skill notices for the person added once. */
+  private execResultText(serialized: Record<string, unknown>): string {
+    const notices = this.takeSkillNotices();
+    return JSON.stringify(notices.length === 0 ? serialized : { ...serialized, notices });
+  }
+
+  /** Skills left out when they were copied into the sandbox, plus any missing prerequisites. */
+  private unavailableSkillsForPrompt(): Map<string, string> | undefined {
+    const merged = new Map(this.unavailableSkillsCache);
+    for (const name of this.skillCopyFailures.keys()) {
+      merged.set(name, SKILL_COPY_FAILED_REASON);
+    }
+    return merged.size > 0 ? merged : undefined;
   }
 
   buildInstruction(builder: InstructionBuilder): void {
@@ -3562,6 +3630,46 @@ export class Sandbox extends LocalToolMCP {
       throw new StructuredEditPreconditionBlockedError(
         'The structured-edit target changed after approval. No edit was dispatched. Read the target again and submit a fresh edit request.',
       );
+    }
+  }
+
+  /**
+   * Uploads one staged skill and runs its move step. Returns the cause when the skill does not land;
+   * only an abort is rethrown.
+   */
+  private async stageOfflineSkill(input: {
+    sandboxId: string;
+    staged: StagedSkill;
+    signal: AbortSignal | undefined;
+  }): Promise<SkillCopyCause | undefined> {
+    const { sandboxId, staged, signal } = input;
+    try {
+      await this.provider.uploadFile({
+        sandboxId,
+        remotePath: staged.archive.remotePath,
+        content: staged.archive.content,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      const result = await awaitWithAbort({
+        operation: this.hostExec({
+          sandboxId,
+          command: staged.command,
+          ...(signal === undefined ? {} : { signal }),
+        }),
+        signal,
+      });
+      if (!result.success || result.response.exitCode !== 0) {
+        this.logger.warn('Skill could not be put in place in the sandbox', { skill: staged.name });
+        return 'damaged';
+      }
+      return undefined;
+    } catch (error) {
+      throwIfSignalAborted(signal);
+      this.logger.warn('Skill could not be copied into the sandbox', {
+        skill: staged.name,
+        ...extractErrorLogFields(error),
+      });
+      return 'damaged';
     }
   }
 
@@ -4309,8 +4417,8 @@ export class Sandbox extends LocalToolMCP {
       return;
     }
 
-    // Only check if there are skills; the sandbox is guaranteed live here. Without a network none can load.
-    if (!this.skillMounter || !this.hasNetwork()) {
+    // Only check if there are skills; the sandbox is guaranteed live here.
+    if (!this.skillMounter) {
       this.prerequisitesChecked = true;
       return;
     }
@@ -4784,7 +4892,7 @@ export class Sandbox extends LocalToolMCP {
 
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(execution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(execution.serialized) }],
           isError: !isExecResultOk(execution.result) || execution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -4842,7 +4950,7 @@ export class Sandbox extends LocalToolMCP {
       }
       return {
         result: {
-          content: [{ type: 'text', text: JSON.stringify(retryExecution.serialized) }],
+          content: [{ type: 'text', text: this.execResultText(retryExecution.serialized) }],
           isError: !isExecResultOk(retryExecution.result) || retryExecution.verificationPassed === false,
         },
         wasInitialized: undefined,
@@ -6282,14 +6390,35 @@ export class Sandbox extends LocalToolMCP {
     }
 
     // Fold skill installation into this single init exec. The mounter returns a declarative
-    // command + env + timeout; runs even when empty so existing skills are cleaned up. A sandbox
-    // with no network skips it: the downloader can't fetch, and the provider refuses its env.
-    const skillInit = this.hasNetwork()
-      ? this.skillMounter?.getSandboxInit({
-          skillsDir,
-          skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId),
-        })
-      : undefined;
+    // command + env + timeout. With network it runs even when empty so existing skills are cleaned
+    // up; without it the host copies the skills in and nothing is sent when there are none.
+    const skillPaths = { skillsDir, skillDownloaderPath: this.provider.getSkillDownloaderPath(sandboxId) };
+    let skillInit: SandboxInit | undefined;
+    if (this.hasNetwork()) {
+      skillInit = this.skillMounter?.getSandboxInit(skillPaths);
+    } else {
+      // Each skill is staged and moved into place by its own step; only the ones that land are handed
+      // to the downloader, so a bad skill cannot fail the start for the others.
+      const archiveDir =
+        this.provider.getDocumentSnapshotDir?.(sandboxId) ?? this.provider.getFileUploadsDir(sandboxId);
+      const plan = await this.skillMounter?.planOfflineSkills({ skillsDir, archiveDir }, { signal });
+      const failed = new Map<string, SkillCopyFailure>(plan?.failed ?? []);
+      const accepted: StagedSkill[] = [];
+      for (const staged of plan?.staged ?? []) {
+        const cause = await this.stageOfflineSkill({ sandboxId, staged, signal });
+        if (cause === undefined) {
+          accepted.push(staged);
+        } else {
+          failed.set(staged.name, { cause });
+        }
+      }
+      skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);
+      this.skillCopyFailures = failed;
+      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
+        skillCopyFailedNotice({ name, cause: failure.cause }),
+      );
+      this.cachedSkillsSection = undefined;
+    }
     if (skillInit) {
       for (const upload of skillInit.uploads) {
         await this.provider.uploadFile({

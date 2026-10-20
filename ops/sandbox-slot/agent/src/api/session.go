@@ -42,6 +42,12 @@ var allowedEnv = map[string]bool{
 
 var allowedEnvPattern = regexp.MustCompile(`^(LC_[A-Z_]{1,32}|GIT_CONFIG_(KEY|VALUE)_[0-9]{1,3})$`)
 
+// skillsDirEnv may be set only to skillsDirPath, the fixed directory the host copies skills into.
+const (
+	skillsDirEnv  = "TFY_SKILLS_DIR"
+	skillsDirPath = "/workspace/.aman/skills"
+)
+
 func envNameAllowed(name string) bool { return allowedEnv[name] || allowedEnvPattern.MatchString(name) }
 
 func validateEnv(env map[string]string) error {
@@ -52,6 +58,12 @@ func validateEnv(env map[string]string) error {
 	for name, value := range env {
 		if !envNamePattern.MatchString(name) {
 			return fmt.Errorf("env name %q is not allowed", name)
+		}
+		if name == skillsDirEnv {
+			if value != skillsDirPath {
+				return fmt.Errorf("env %s must be %s", skillsDirEnv, skillsDirPath)
+			}
+			continue
 		}
 		if !envNameAllowed(name) {
 			denied = append(denied, name)

@@ -1,8 +1,10 @@
-import { MapsRouteResultSchema } from '@truefoundry/trueforge-core/core';
+import { MapsRouteResultSchema, type FetchedPageScope } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import { mapsCapability } from '../../../src/runtime/mapsCapability';
 import { encodePolyline } from '../../../src/runtime/mapsPolyline';
+
+const PAGES_SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -82,6 +84,7 @@ function harness(options: { transit?: unknown; road?: unknown; timezone?: string
   const capability = mapsCapability({
     tracing: NOOP_AGENT_TRACING,
     logger: createLogger({ silent: true }),
+    pages_scope: PAGES_SCOPE,
     timezone: options.timezone ?? 'Europe/Lisbon',
   });
   const toolSet = capability.systemToolSets?.[0];

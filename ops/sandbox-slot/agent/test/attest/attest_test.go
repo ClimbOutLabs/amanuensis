@@ -136,6 +136,10 @@ func TestEachMissingGuaranteeFailsClosed(t *testing.T) {
 		{"second interface", attest.CheckNetwork, func(w *world, _ *attest.Collector) {
 			w.write("proc/net/dev", "Inter-|   Receive\n face |bytes\n    lo: 0 0\n  eth0: 1 1\n")
 		}},
+		{"no loopback interface", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("gre0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
+		}},
 		{"unknown interface that is down and unaddressed", attest.CheckNetwork, func(w *world, c *attest.Collector) {
 			w.devices("lo", "dummy0")
 			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
@@ -211,8 +215,13 @@ func TestIdleFallbackTunnelDevicesPass(t *testing.T) {
 	w.write("proc/net/ipv6_route", loopbackRoute)
 	c := w.collector()
 	c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
-	if got := check(c.Collect(), attest.CheckNetwork); !got.OK {
+	got := check(c.Collect(), attest.CheckNetwork)
+	if !got.OK {
 		t.Fatalf("down, unaddressed fallback devices with only loopback routes must pass: %+v", got)
+	}
+	const wantDetail = "only lo and idle tunnel devices: erspan0 gre0 gretap0 ip6_vti0 ip6gre0 ip6tnl0 ip_vti0 sit0 tunl0"
+	if got.Detail != wantDetail {
+		t.Fatalf("pass detail = %q, want %q", got.Detail, wantDetail)
 	}
 }
 
