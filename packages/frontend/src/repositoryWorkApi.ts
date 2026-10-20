@@ -226,7 +226,7 @@ export function createRepositoryWorkApi(fetcher: typeof fetch): RepositoryWorkAp
     },
 
     async unbindSessionRepository(sessionId) {
-      await parseData(
+      await parseOk(
         fetcher(apiPath(`/api/v1/sessions/${encodeURIComponent(sessionId)}/repository`), { method: 'DELETE' }),
       );
     },

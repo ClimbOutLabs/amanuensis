@@ -205,6 +205,19 @@ test('reads the binding, proposals, confirms with wire names, dismisses and unbi
   assert.equal(unbindCapture.method, 'DELETE');
 });
 
+test('stopping work on a repo succeeds when the server answers with an empty reply', async () => {
+  const capture: Captured = {};
+  const emptyFetcher: typeof fetch = async (url, init) => {
+    capture.url = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+    capture.method = init?.method ?? 'GET';
+    return new Response(null, { status: 200 });
+  };
+  const api = createRepositoryWorkApi(emptyFetcher);
+  await api.unbindSessionRepository('session-1');
+  assert.equal(capture.url, '/api/v1/sessions/session-1/repository');
+  assert.equal(capture.method, 'DELETE');
+});
+
 test('surfaces the server plain error message', async () => {
   const api = createRepositoryWorkApi(
     fetcherReturning({ error: { message: 'Connect GitHub first, under Connectors.' } }, {}, 422),
