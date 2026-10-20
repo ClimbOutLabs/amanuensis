@@ -522,6 +522,37 @@ function toRecipient(fields: ExtractedCardFields): string {
 
 const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase', 'install'];
 
+/** The first word of a connector call that only reads. */
+const CONNECTOR_READ_VERBS = ['list', 'get', 'search', 'read', 'count', 'fetch', 'find', 'show', 'view'];
+/**
+ * Every word a connector read name may carry. A name with any other word is not a read, so it keeps the
+ * decision it had before reads were recognized. A deny-list of send words can never be complete.
+ */
+const CONNECTOR_READ_WORDS = new Set([
+  ...CONNECTOR_READ_VERBS,
+  'message',
+  'messages',
+  'mail',
+  'mails',
+  'email',
+  'emails',
+  'thread',
+  'threads',
+  'unread',
+  'attachment',
+  'attachments',
+  'inbox',
+  'mailbox',
+  'mailboxes',
+  'header',
+  'headers',
+  'body',
+  'folder',
+  'folders',
+  'by',
+  'id',
+]);
+
 /**
  * Connector actions that are not external-service by name but still send data out. They only
  * change the card's wording and destination: tiers, auto-deny and offline handling come from
@@ -615,6 +646,8 @@ export interface ExtractionResult {
   /** True when the fallback fired: external-service action, no verifiable destination. */
   destination_unverifiable: boolean;
   external_service: boolean;
+  /** A connector call that only reads (see isConnectorRead): never a send, and never an unverifiable destination. */
+  connector_read: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
   connector_what: string | null;
   /** The call sends data out (a send family, an external service, or a named recipient); it is never trusted by a hint or grant. */
@@ -695,6 +728,35 @@ function hiddenSendKind({
     return 'draft';
   }
   return null;
+}
+
+/**
+ * A connector call that only reads: every word of its name is a read word, and the first is a read verb. It
+ * also has no recipient or hidden send in its arguments. Its annotations still decide how it is approved;
+ * they never make it a send.
+ */
+function isConnectorRead({
+  tool_name,
+  words,
+  params,
+}: {
+  tool_name: string;
+  words: string;
+  params: Record<string, unknown>;
+}): boolean {
+  // Only plain ASCII names count: a lookalike or hidden character splits words and could hide a send.
+  if (!/^[A-Za-z0-9._ -]+$/.test(tool_name)) {
+    return false;
+  }
+  const nameWordList = words.split('_').filter(word => word !== '');
+  const firstWord = nameWordList[0];
+  return (
+    firstWord !== undefined &&
+    CONNECTOR_READ_VERBS.includes(firstWord) &&
+    nameWordList.every(word => CONNECTOR_READ_WORDS.has(word)) &&
+    nestedRecipientValues(params).length === 0 &&
+    hiddenSendKind({ tool_name, words, params }) === null
+  );
 }
 
 /** True when nothing in the text would show: only whitespace and hidden characters. */
@@ -883,6 +945,7 @@ export function extractCardFields(input: {
       fields: base,
       destination_unverifiable: destinationUnverifiable,
       external_service: externalService,
+      connector_read: false,
       connector_what: null,
       sends: externalService,
       incomplete_send: incompleteSend({
@@ -905,6 +968,9 @@ export function extractCardFields(input: {
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
     ? undefined
     : CONNECTOR_FAMILIES.find(f => f.match(words, input.canonical_params));
+  const connectorRead =
+    family?.sends === undefined &&
+    isConnectorRead({ tool_name: input.tool_name, words, params: input.canonical_params });
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
   const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
@@ -912,7 +978,7 @@ export function extractCardFields(input: {
     ? null
     : hiddenSendKind({ tool_name: input.tool_name, words, params: input.canonical_params });
   const sends =
-    externalService ||
+    (externalService && !connectorRead) ||
     family?.sends !== undefined ||
     hidden !== null ||
     (readOnly ? hasPhrase(words, 'send') : recipients.length > 0);
@@ -933,8 +999,9 @@ export function extractCardFields(input: {
   };
   return {
     fields,
-    destination_unverifiable: destinationUnverifiable,
+    destination_unverifiable: destinationUnverifiable && !connectorRead,
     external_service: externalService,
+    connector_read: connectorRead,
     sends,
     incomplete_send: incompleteSend({
       hidden,
