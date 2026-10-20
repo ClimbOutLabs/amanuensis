@@ -744,6 +744,10 @@ function isConnectorRead({
   words: string;
   params: Record<string, unknown>;
 }): boolean {
+  // Only plain ASCII names count: a lookalike or hidden character splits words and could hide a send.
+  if (!/^[A-Za-z0-9._ -]+$/.test(tool_name)) {
+    return false;
+  }
   const nameWordList = words.split('_').filter(word => word !== '');
   const firstWord = nameWordList[0];
   return (

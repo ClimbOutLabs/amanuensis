@@ -107,6 +107,26 @@ describe('connector mail reads', () => {
   });
 });
 
+describe('connector names with lookalike or hidden characters are not reads', () => {
+  // A Cyrillic letter, a soft hyphen and a zero-width space: each would split the name into words that pass as a read.
+  it.each([
+    ['list_messages with a Cyrillic letter at the end', 'list_messages\u0435'],
+    ['get with a soft hyphen before _message', 'get\u00AD_message'],
+    ['list_messages with a zero-width space', 'list_messages\u200B'],
+    ['list with a zero-width space before _messages', 'list\u200B_messages'],
+  ])('%s keeps the decision for a connector that is not read', async (_label, tool_name) => {
+    const params = { mailbox: 'INBOX' };
+    expect(await classifyTier(mailCall(tool_name, params), makeCtx())).toMatchObject({
+      tier: 3,
+      auto_deny: 'destination_unverifiable',
+    });
+    expect(await classifyTier(mailCall(tool_name, params), makeCtx(servicesFor({ demo: true })))).toMatchObject({
+      tier: 3,
+      auto_deny: 'destination_unverifiable',
+    });
+  });
+});
+
 describe('connector mail sends keep their decisions', () => {
   it('send-email, reply-to-message and create-draft are unchanged without a recipient', async () => {
     expect(await classifyTier(mailCall('send-email', { subject: 'Hi', body: 'Hello' }), makeCtx())).toMatchObject({
