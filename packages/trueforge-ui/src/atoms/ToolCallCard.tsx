@@ -25,6 +25,8 @@ export type ToolCallCardProps = {
   showResponseLine?: boolean;
   responseIcon?: ReactNode;
   approvalSlot?: ReactNode;
+  /** Shown beside the header even when the card is collapsed, so it is never hidden in the body. */
+  noticeSlot?: ReactNode;
   requestSlot?: ReactNode;
   responseSlot?: ReactNode;
   highlightCard?: boolean;
@@ -71,6 +73,7 @@ export function ToolCallCard({
   showExpandChevron = true,
   showResponseLine = false,
   approvalSlot,
+  noticeSlot,
   requestSlot,
   responseSlot,
   highlightCard = false,
@@ -145,6 +148,7 @@ export function ToolCallCard({
         dataTestPrefix={dataTestPrefix ? `${dataTestPrefix}-header` : undefined}
         persistentChildren={
           <>
+            {noticeSlot}
             {approvalSlot}
             {expanded && showResponseLine && responseSlot && (
               <div data-testid={dataTestPrefix ? `${dataTestPrefix}-response` : undefined}>{responseSlot}</div>

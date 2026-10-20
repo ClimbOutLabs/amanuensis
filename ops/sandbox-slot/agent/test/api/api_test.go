@@ -354,6 +354,28 @@ func TestExecAllowsGitHardeningEnv(t *testing.T) {
 	}
 }
 
+func TestExecAllowsSkillsDirAtTheFixedPath(t *testing.T) {
+	e := newEnv(t, true)
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["env"] = map[string]string{"TFY_SKILLS_DIR": "/workspace/.aman/skills"}
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestExecRefusesSkillsDirAtAnyOtherPath(t *testing.T) {
+	for _, value := range []string{"", "/opt/tfy/skills", "/workspace/.aman/skills/", "/workspace/.aman/skills/../../etc", "/workspace/.aman/transfer"} {
+		e := newEnv(t, true)
+		rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+			m["env"] = map[string]string{"TFY_SKILLS_DIR": value}
+		}))
+		if rec.Code != 400 {
+			t.Errorf("TFY_SKILLS_DIR=%q: %d %s", value, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestFilesRoundTripAndStayInsideTheTree(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("data"))
