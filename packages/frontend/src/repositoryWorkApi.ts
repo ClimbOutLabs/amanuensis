@@ -73,10 +73,15 @@ function parseGithubDetails(value: unknown): GithubRepositoryDetails {
   if (!isRecord(value)) {
     throw new Error('GitHub response is not readable. Reload the page and try again.');
   }
-  const branches = value.branches;
-  if (!Array.isArray(branches) || branches.some(branch => typeof branch !== 'string')) {
+  if (!Array.isArray(value.branches)) {
     throw new Error('GitHub response is missing branches. Reload the page and try again.');
   }
+  const branches = value.branches.map(branch => {
+    if (typeof branch !== 'string') {
+      throw new Error('GitHub response is missing branches. Reload the page and try again.');
+    }
+    return branch;
+  });
   return { ...parseGithubOption(value), branches };
 }
 
