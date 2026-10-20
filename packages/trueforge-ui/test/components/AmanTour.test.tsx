@@ -33,8 +33,13 @@ describe('AmanTour', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: 'Your own AI. It knows your life and gets things done, never without your OK.',
+        name: 'Aman is your chief of staff.',
       }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'It keeps track of your life. It runs on your own computer, and nothing leaves without your OK.',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Try a day with Aman' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'What Aman can do' })).toBeInTheDocument();

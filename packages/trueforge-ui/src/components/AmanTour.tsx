@@ -5,7 +5,9 @@ import type { ReactNode } from 'react';
 import { WelcomeScreen } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
 
-export const TOUR_HEADLINE = 'Your own AI. It knows your life and gets things done, never without your OK.';
+export const TOUR_HEADLINE = 'Aman is your chief of staff.';
+export const TOUR_SUBLINE =
+  'It keeps track of your life. It runs on your own computer, and nothing leaves without your OK.';
 
 /** What this instance can do, so the tour only offers prompts that will work here. */
 export type TourCapabilities = {
@@ -130,6 +132,7 @@ export function AmanTour({ capabilities, onSend, canSend, onHide, setup }: AmanT
   return (
     <div data-testid="aman-tour" className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-6">
       <WelcomeScreen heading={TOUR_HEADLINE} className="mb-0" />
+      <p className="-mt-4 text-center text-base text-text-secondary">{TOUR_SUBLINE}</p>
       {setup}
       {canSend ? null : (
         <p className="text-center text-sm text-text-secondary">Choose a model in Settings before you start a chat.</p>

@@ -44,7 +44,7 @@ const EXPECTATIONS = {
 } as const;
 
 /** The tour's own headline, the first thing an ordinary new chat shows. */
-const TOUR_HEADING = 'Your own AI. It knows your life and gets things done, never without your OK.';
+const TOUR_HEADING = 'Aman is your chief of staff.';
 
 async function screenshotDir(): Promise<string> {
   const configured = process.env.AMAN_SCREENSHOT_DIR;
