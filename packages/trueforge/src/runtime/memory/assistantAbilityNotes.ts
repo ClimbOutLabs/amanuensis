@@ -87,7 +87,10 @@ function filterAssistantText(text: string): string {
       keptLines.push(kept);
     }
   }
-  return keptLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return keptLines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**

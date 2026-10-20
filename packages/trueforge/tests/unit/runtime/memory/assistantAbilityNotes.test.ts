@@ -31,7 +31,7 @@ describe('stripAssistantAbilityNotes', () => {
     'The user is unable to access her old account.',
     'Marta has no access to the shared drive.',
     'The user prefers a short summary every morning.',
-    'The user told Aman he can\'t swim.',
+    "The user told Aman he can't swim.",
   ])('keeps a fact about the person: %s', fact => {
     expect(stripAssistantAbilityNotes(fact)).toBe(fact);
   });
@@ -56,7 +56,8 @@ describe('stripAssistantAbilityNotes', () => {
   });
 
   it('drops an ability sentence inside a longer assistant statement and keeps the rest', () => {
-    const content = 'Turn summary: The inbox check failed because I can\'t read email right now. The user moved the dentist appointment to Friday.';
+    const content =
+      "Turn summary: The inbox check failed because I can't read email right now. The user moved the dentist appointment to Friday.";
     const result = stripAssistantAbilityNotes(content);
     expect(result).toContain('The user moved the dentist appointment to Friday.');
     expect(result).not.toContain("can't read email");
@@ -67,7 +68,8 @@ describe('stripAssistantAbilityNotes', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: "Please check my email. Also note I can't read my email at work, the firewall blocks it.",
-      assistantText: "I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
+      assistantText:
+        "I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
       completedAt: '2026-09-19T12:00:00.000Z',
     });
     if (item === undefined) {
@@ -96,9 +98,12 @@ describe('stripAssistantAbilityNotes', () => {
   });
 
   it('filters a learned profile document the same way', () => {
-    const content = ['## Preferences', '', '- Prefers tea in the morning.', "- Aman can't access the work calendar."].join(
-      '\n',
-    );
+    const content = [
+      '## Preferences',
+      '',
+      '- Prefers tea in the morning.',
+      "- Aman can't access the work calendar.",
+    ].join('\n');
     const result = stripAssistantAbilityNotes(content);
     expect(result).toContain('Prefers tea in the morning.');
     expect(result).not.toContain("can't access the work calendar");
