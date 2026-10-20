@@ -13,12 +13,7 @@ import {
 } from '../mcp/IMCPServer';
 import { defineTool, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { deniedToolCallText } from '../mcp/ToolSet';
-import {
-  FETCHED_PAGE_TEXT_MAX_CHARS,
-  type FetchedPageScope,
-  type FetchedPageStore,
-  withoutUrlText,
-} from './fetchedPages';
+import { FETCHED_PAGE_TEXT_MAX_CHARS, type FetchedPageScope, type FetchedPageStore } from './fetchedPages';
 import {
   extractCreditsFor,
   TAVILY_API_HOST,
@@ -150,10 +145,7 @@ export class TavilySource implements ToolSource {
       const outcome = await this.#client.extract({ urls, signal });
       const pages = outcome.pages.map(page => {
         const text = page.text.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS);
-        // The stored copy drops the page's own link, the same rule the shared recording path
-        // applies: only text the page itself carried can be checked against a claim later.
-        const stored = withoutUrlText({ text: page.text, url: page.url }).slice(0, FETCHED_PAGE_TEXT_MAX_CHARS);
-        const kept = this.#pages.remember({ scope: this.#scope, url: page.url, text: stored });
+        const kept = this.#pages.remember({ scope: this.#scope, url: page.url, text });
         return { url: page.url, title: page.title, fetched_at: kept.fetched_at, text };
       });
       return toolResultResponse({

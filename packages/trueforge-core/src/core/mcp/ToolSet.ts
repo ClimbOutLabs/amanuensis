@@ -20,7 +20,12 @@ import {
   SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
-import { recordFetchedPages, type FetchedPageScope, type FetchedPageStore } from '../search/fetchedPages';
+import {
+  isPageReaderTool,
+  recordFetchedPages,
+  type FetchedPageScope,
+  type FetchedPageStore,
+} from '../search/fetchedPages';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -309,11 +314,13 @@ export class ToolSet implements IToolSet {
     if (
       this.pages !== undefined &&
       this.pagesScope !== undefined &&
+      (this.firstParty || this.searchProvider) &&
+      isPageReaderTool(params.name) &&
       isCallToolResponseResult(response) &&
       response.result.isError !== true
     ) {
-      // Every page reading tool records what it read, not only one provider: a place claim is
-      // checked against this memory, so a page read any other way must count too.
+      // Only Aman's own page readers record: a tool from any other server may echo its input, so its
+      // text is never a page the model read.
       recordFetchedPages({
         pages: this.pages,
         scope: this.pagesScope,

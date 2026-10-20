@@ -101,70 +101,7 @@ describe('recordFetchedPages', () => {
   });
 });
 
-describe('recordFetchedPages keeps the requested link itself out of the stored text', () => {
-  it('stores a plain text result that names the link, without the words of the link itself', () => {
-    const pages = store();
-    const url = 'https://pages.example/hope-house-916-st-andrew-street';
-    const text = `You asked for ${url}\nThat page could not be loaded.`;
-    const count = recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
-    expect(count).toBe(1);
-    const kept = pages.recall({ scope: SCOPE, url });
-    expect(kept?.text).not.toContain(url);
-    expect(kept?.text).toContain('could not be loaded');
-    expect(
-      groundPlace({
-        claim: { ...claim, source_url: url },
-        pages,
-        scope: SCOPE,
-      }),
-    ).toEqual({ ok: false, reason: 'name_not_found' });
-  });
-
-  it('stores a plain text result that names the link in its decoded spelling, without those words either', () => {
-    const pages = store();
-    const url = 'https://pages.example/hope%20house%20916%20st%20andrew%20street';
-    const text = 'You asked for https://pages.example/hope house 916 st andrew street\nThat page could not be loaded.';
-    const count = recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
-    expect(count).toBe(1);
-    const kept = pages.recall({ scope: SCOPE, url });
-    expect(kept?.text).not.toContain('hope house 916');
-    expect(
-      groundPlace({
-        claim: { ...claim, source_url: url },
-        pages,
-        scope: SCOPE,
-      }),
-    ).toEqual({ ok: false, reason: 'name_not_found' });
-  });
-
-  it('stores an echoed path whose plus signs show as spaces without those words, so a made-up place cannot pin', () => {
-    const pages = store();
-    const url = 'https://site.example/Joe+Cafe+12+Main+St';
-    const text = 'Result for https://site.example/Joe Cafe 12 Main St';
-    recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
-    expect(
-      groundPlace({
-        claim: { ...claim, name: 'Joe Cafe', address: '12 Main St', source_url: url },
-        pages,
-        scope: SCOPE,
-      }),
-    ).toEqual({ ok: false, reason: 'name_not_found' });
-  });
-
-  it('stores an echoed query string whose plus signs show as spaces without those words, so a made-up place cannot pin', () => {
-    const pages = store();
-    const url = 'https://site.example/?name=Joe+Cafe&addr=12+Main+St';
-    const text = 'Result for https://site.example/?name=Joe Cafe&addr=12 Main St';
-    recordFetchedPages({ pages, scope: SCOPE, toolArguments: { url }, texts: [text] });
-    expect(
-      groundPlace({
-        claim: { ...claim, name: 'Joe Cafe', address: '12 Main St', source_url: url },
-        pages,
-        scope: SCOPE,
-      }),
-    ).toEqual({ ok: false, reason: 'name_not_found' });
-  });
-
+describe('recordFetchedPages with a plain text result', () => {
   it('still records the real words of a plain text result that also names its link', () => {
     const pages = store();
     const text = `${PAGE_TEXT}\nSource: ${PAGE_URL}`;

@@ -171,3 +171,42 @@ describe('ToolSet records pages read through a Tavily shaped server', () => {
     expect(pages.recall({ scope, url: PAGE_URL })?.text).toBe(PAGE_TEXT);
   });
 });
+
+describe('ToolSet records only pages Aman reads itself', () => {
+  const ECHOES: [string, string, string][] = [
+    [
+      'a path with plus signs shown as spaces',
+      'https://site.example/Joe+Cafe+12+Main+St',
+      'Result for https://site.example/Joe Cafe 12 Main St',
+    ],
+    [
+      'a query string shown with spaces',
+      'https://site.example/?name=Joe+Cafe&addr=12+Main+St',
+      'Result for https://site.example/?name=Joe Cafe&addr=12 Main St',
+    ],
+    [
+      'a fragment shown with spaces',
+      'https://site.example/listing#Joe+Cafe+12+Main+St',
+      'Result for https://site.example/listing#Joe Cafe 12 Main St',
+    ],
+    [
+      'a path decoded twice',
+      'https://site.example/Joe%2520Cafe%252012%2520Main%2520St',
+      'Result for https://site.example/Joe Cafe 12 Main St',
+    ],
+  ];
+
+  it.each(ECHOES)('refuses a place whose only page is %s echoed by a tool that is not a page reader', async (_label, url, text) => {
+    const { toolSet, pages, scope } = harness(() => text, { search: 'web_search', fetch: 'lookup_listing' });
+    await toolSet.callTool({ name: 'lookup_listing', arguments: { url } }, { status: 'allow' });
+    expect(
+      groundPlace({ claim: { ...hopeClaim, name: 'Joe Cafe', address: '12 Main St', source_url: url }, pages, scope }),
+    ).toEqual({ ok: false, reason: 'source_not_fetched' });
+  });
+
+  it('still grounds a place from a plain text page that the host web_fetch read', async () => {
+    const { toolSet, pages, scope } = harness(name => (name === 'web_fetch' ? PAGE_TEXT : 'called'));
+    await toolSet.callTool({ name: 'web_fetch', arguments: { url: PAGE_URL } }, { status: 'allow' });
+    expect(groundPlace({ claim: hopeClaim, pages, scope })).toMatchObject({ ok: true });
+  });
+});

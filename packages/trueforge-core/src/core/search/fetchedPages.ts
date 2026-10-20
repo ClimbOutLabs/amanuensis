@@ -1,3 +1,5 @@
+import { TAVILY_EXTRACT_TOOL_NAME } from './TavilyClient';
+
 /**
  * Short-lived server memory of the pages any page reading tool returned, so a place claim can be
  * checked against the text the model actually saw. Kept per chat, because a held call resumes in
@@ -195,51 +197,22 @@ function collectPages(node: unknown, into: { url: string; text: string }[], dept
   }
 }
 
-/** The spellings a link may be printed in inside a result: as passed, decoded, and without its scheme. */
-function urlSpellings(raw: string): string[] {
-  const spellings = new Set<string>([raw]);
-  try {
-    spellings.add(decodeURIComponent(raw));
-  } catch {
-    // A link that does not decode has only the spelling it was passed in.
-  }
-  // A query string writes a space as "+", and a page or a result may print it back as a space.
-  for (const spelling of [...spellings]) {
-    spellings.add(spelling.replace(/\+/g, ' '));
-  }
-  for (const spelling of [...spellings]) {
-    spellings.add(spelling.replace(/^https?:\/\//i, ''));
-  }
-  return [...spellings].filter(spelling => spelling !== '');
-}
-
 /**
- * A result with the requested link itself taken out. Only text the fetched page carried counts
- * toward a check; the words of the link that was asked for are not page text, so a result that
- * prints its own link back adds nothing a claim could be checked against.
+ * The tools that read a page for the person, by name. Only these record what they return: any other
+ * tool may echo the link it was given, or any text, and a page that tool never read must not count.
  */
-export function withoutUrlText({ text, url }: { text: string; url: string }): string {
-  let kept = text;
-  for (const spelling of urlSpellings(url)) {
-    const wanted = spelling.toLowerCase();
-    let rest = kept;
-    let out = '';
-    let at = rest.toLowerCase().indexOf(wanted);
-    while (at >= 0) {
-      out += rest.slice(0, at);
-      rest = rest.slice(at + spelling.length);
-      at = rest.toLowerCase().indexOf(wanted);
-    }
-    kept = out + rest;
-  }
-  return kept;
+const PAGE_READER_TOOL_NAMES: ReadonlySet<string> = new Set(['web_fetch', TAVILY_EXTRACT_TOOL_NAME]);
+
+/** Whether a tool reads a page, so its result may be recorded as page text. */
+export function isPageReaderTool(name: string): boolean {
+  return PAGE_READER_TOOL_NAMES.has(name);
 }
 
 /**
- * Records what a page reading tool actually read, so a later place claim can be checked against it
- * whatever provider read the page. Only a page the call itself named as the page to read counts:
- * a search names no page, even when its text is itself a link, and a page a result only links to
- * was never read. Returns how many pages were recorded.
+ * Records what a page reading tool actually read, so a later place claim can be checked against it.
+ * Only a page the call itself named as the page to read counts: a search names no page, even when
+ * its text is itself a link, and a page a result only links to was never read. The caller decides
+ * which tools are page readers. Returns how many pages were recorded.
  */
 export function recordFetchedPages(input: {
   pages: FetchedPageStore;
@@ -265,11 +238,8 @@ export function recordFetchedPages(input: {
       if (named.size === 1) {
         const only = [...named.values()][0];
         if (only !== undefined && only.length <= MAX_STORED_URL_CHARS && text.trim() !== '') {
-          const kept = withoutUrlText({ text, url: only });
-          if (kept.trim() !== '') {
-            input.pages.remember({ scope: input.scope, url: only, text: kept.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS) });
-            recorded.add(pageUrlKey(only));
-          }
+          input.pages.remember({ scope: input.scope, url: only, text: text.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS) });
+          recorded.add(pageUrlKey(only));
         }
       }
       continue;
@@ -279,15 +249,12 @@ export function recordFetchedPages(input: {
     for (const candidate of candidates) {
       const key = pageUrlKey(candidate.url);
       if (named.has(key) && !recorded.has(key) && candidate.url.length <= MAX_STORED_URL_CHARS) {
-        const kept = withoutUrlText({ text: candidate.text, url: candidate.url });
-        if (kept.trim() !== '') {
-          input.pages.remember({
-            scope: input.scope,
-            url: candidate.url,
-            text: kept.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS),
-          });
-          recorded.add(key);
-        }
+        input.pages.remember({
+          scope: input.scope,
+          url: candidate.url,
+          text: candidate.text.slice(0, FETCHED_PAGE_TEXT_MAX_CHARS),
+        });
+        recorded.add(key);
       }
     }
   }
