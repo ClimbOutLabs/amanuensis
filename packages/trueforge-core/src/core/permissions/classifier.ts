@@ -2067,6 +2067,13 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || sensitiveReadHit(action.canonical_params);
+  // Eligible for "Always allow" like an annotated read-only tool. Only an explicit open-world or
+  // not-read-only claim, or the search provider, rules it out; the arguments already ruled out recipients.
+  const grantableRead =
+    extraction.connector_read &&
+    action.mcp_hints.open_world_hint !== true &&
+    action.mcp_hints.read_only_hint !== false &&
+    action.mcp_search_provider !== true;
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -2208,15 +2215,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
   // tool (the user's standing grant) skips the card, but only after every escalation above, never
   // for a sensitive path, and only while the tool still claims to be read-only and explicitly
-  // closed-world (an absent openWorldHint means open).
+  // closed-world (an absent openWorldHint means open). A connector read that the extractor
+  // recognized is grantable without those hints, since its arguments carry no recipient.
+  const closedWorldRead = readOnlyHint && action.mcp_hints.open_world_hint === false;
   if (
     action.tool_type === 'mcp' &&
-    readOnlyHint &&
-    action.mcp_hints.open_world_hint === false &&
+    (closedWorldRead || grantableRead) &&
     !extraction.sends &&
     !sensitiveReadHit(action.canonical_params)
   ) {
-    if (action.mcp_first_party === true) {
+    if (closedWorldRead && action.mcp_first_party === true) {
       return tier1Decision({
         reason: FIRST_PARTY_TOOL_REASON,
         reason_detail: `First-party read-only tool \`${action.tool_name}\`${
@@ -2238,6 +2246,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         reason: TOOL_GRANT_REASON,
         reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
         sensitive_read: readsPrivateData,
+        inspection: grantableRead,
       });
     }
   }
@@ -2261,6 +2270,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
+    inspection: grantableRead,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,

@@ -478,6 +478,18 @@ describe('held actions', () => {
     expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
   });
 
+  it('offers always allow for a held mail read the owner may grant, and never for a held send', () => {
+    const mailRead = {
+      ...heldRef,
+      tool_call_id: 'call-read',
+      tool_name: 'list-messages',
+      tier3_card: { plain_what: 'Run list-messages on Apple Mail.' },
+    };
+    const send = { ...heldRef, tool_call_id: 'call-send', tool_name: 'send-email', can_always_allow: false };
+    const parsed = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [mailRead, send] });
+    expect(parsed.map(info => info.held?.alwaysAllowOffered)).toEqual([true, false]);
+  });
+
   it('reads the same fields after the SDK camel-cases them', () => {
     const parsed = ToolApprovalRequiredEvent.parseOrThrow(
       {

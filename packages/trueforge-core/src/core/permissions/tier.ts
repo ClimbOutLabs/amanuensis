@@ -187,6 +187,11 @@ export interface TierDecision {
    * Re-verified byte-for-byte immediately before invocation.
    */
   shell_binding: ShellApprovalBinding | null;
+  /**
+   * True for a connector read that may be granted "Always allow" like an annotated read-only tool. The call
+   * is stamped as inspection, so the grant and chat scope both apply to it.
+   */
+  inspection: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -221,6 +226,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     silent_search_query: null,
     audit_description: null,
     shell_binding: null,
+    inspection: false,
   };
 }
 
@@ -237,6 +243,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     silent_search_query: null,
     audit_description: null,
     shell_binding: null,
+    inspection: false,
   };
 }
 
@@ -246,6 +253,7 @@ export function tier1Decision(input: {
   reason_detail: string | null;
   sensitive_read: boolean;
   silent_search_query?: string | null | undefined;
+  inspection?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -254,6 +262,7 @@ export function tier1Decision(input: {
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
     silent_search_query: input.silent_search_query ?? null,
+    inspection: input.inspection === true,
   };
 }
 
@@ -292,6 +301,7 @@ export function tier3Decision(input: {
   approval_binding?: TrackedExecutionBinding | null | undefined;
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
+  inspection?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -305,6 +315,7 @@ export function tier3Decision(input: {
     approval_binding: input.approval_binding ?? null,
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
+    inspection: input.inspection === true,
   };
 }
 

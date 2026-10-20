@@ -80,6 +80,7 @@ export function stampSentinelDecision(input: {
   | 'pre_dispatch_failure'
   | 'silent_search_query'
   | 'audit_description'
+  | 'effect'
 > {
   const decision = input.decision;
   return {
@@ -90,6 +91,8 @@ export function stampSentinelDecision(input: {
     approval_token_id: decision.approval_token_id,
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
+    // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
+    ...(decision.inspection ? { effect: 'inspect' as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:

@@ -15,7 +15,9 @@ import {
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -522,5 +524,28 @@ describe('canonical tool admissions', () => {
       decision: { status: 'allow', scope: 'once' },
       admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
     });
+  });
+});
+
+describe('connector read inspection is stamped from the classifier decision', () => {
+  const readDecision = tier1Decision({
+    reason: 'mcp_tool_grant',
+    reason_detail: 'Always allowed.',
+    sensitive_read: true,
+    inspection: true,
+  });
+
+  it('stamps inspection so the standing grant and chat scope both apply to a connector read', () => {
+    const info = { ...toolInfo('apple-mail', 'list-messages'), ...stampSentinelDecision({ decision: readDecision }) };
+    expect(info.effect).toBe('inspect');
+    expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+  });
+
+  it('leaves effect unset when the decision is not inspection', () => {
+    const plain = tier1Decision({ reason: 'gmail_read', reason_detail: null, sensitive_read: true });
+    const info = { ...toolInfo('apple-mail', 'list-messages'), ...stampSentinelDecision({ decision: plain }) };
+    expect(info.effect).toBeUndefined();
+    expect(allowsToolGrant(info)).toBe(false);
   });
 });

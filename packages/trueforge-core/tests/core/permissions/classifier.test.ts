@@ -1071,3 +1071,116 @@ describe('verifyPreDispatch', () => {
     expect(result).toMatch(/changed|invalid/i);
   });
 });
+
+describe('connector reads can be always allowed', () => {
+  const mailServer = 'apple-mail';
+  const readNames = [
+    'list-messages',
+    'search-messages',
+    'get-message',
+    'get-thread',
+    'get-unread-count',
+    'list-attachments',
+    'fetch-attachment',
+  ];
+
+  function readAction(input: {
+    tool_name: string;
+    canonical_params?: Record<string, unknown>;
+    mcp_hints?: SentinelAction['mcp_hints'];
+    mcp_server_name?: string;
+  }): SentinelAction {
+    return {
+      tool_name: input.tool_name,
+      canonical_params: input.canonical_params ?? { account: 'work' },
+      tool_type: 'mcp',
+      mcp_server_name: input.mcp_server_name ?? mailServer,
+      mcp_hints: input.mcp_hints ?? {},
+    };
+  }
+
+  function grantFor(tool_name: string, mcp_server_name = mailServer): ToolGrantKey {
+    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name };
+  }
+
+  function servicesGranting(keys: ToolGrantKey[]): SentinelServices {
+    const grants = new RevocableGrantStore();
+    for (const key of keys) {
+      void grants.recordToolGrant(key);
+    }
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.tool_grants = grants;
+    return services;
+  }
+
+  test.each(readNames)('%s with a standing grant runs at Tier 1 and still marks private data', async name => {
+    const services = servicesGranting([grantFor(name)]);
+    const decision = await classifyTier(readAction({ tool_name: name }), makeCtx({ services }));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.inspection).toBe(true);
+  });
+
+  test.each(readNames)('%s without a grant asks with a card, as before', async name => {
+    const decision = await classifyTier(readAction({ tool_name: name }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.card).not.toBeNull();
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.inspection).toBe(true);
+  });
+
+  test('a scheduled run reads mail when the owner granted it', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages' }),
+      makeCtx({ services: forUnattendedRun(services) }),
+    );
+    expect(decision.tier).toBe(1);
+  });
+
+  test('a scheduled run holds an ungranted mail read for the owner rather than dropping it', async () => {
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages' }),
+      makeCtx({ services: forUnattendedRun(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' })) }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.inspection).toBe(true);
+  });
+
+  test.each([
+    ['send-email', { to: 'someone@example.com', subject: 'hi' }],
+    ['reply-to-message', { id: '1', body: 'thanks' }],
+    ['create-draft', { to: 'someone@example.com', subject: 'hi' }],
+    ['get-message', { id: '1', to: 'someone@example.com' }],
+    ['get-contacts', { id: '1' }],
+  ])('%s is never always-allowed, even with a grant on it', async (name, canonical_params) => {
+    const services = servicesGranting([grantFor(name)]);
+    const decision = await classifyTier(readAction({ tool_name: name, canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.inspection).toBe(false);
+  });
+
+  test.each([{ read_only_hint: true, open_world_hint: true }, { read_only_hint: false }])(
+    'a mail read that claims %j is never always-allowed',
+    async mcp_hints => {
+      const services = servicesGranting([grantFor('list-messages')]);
+      const decision = await classifyTier(readAction({ tool_name: 'list-messages', mcp_hints }), makeCtx({ services }));
+      expect(decision.tier).toBe(3);
+      expect(decision.inspection).toBe(false);
+    },
+  );
+
+  test('a grant on one read does not cover another read, or the same read on another connector', async () => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const otherRead = await classifyTier(readAction({ tool_name: 'get-message' }), makeCtx({ services }));
+    const otherConnector = await classifyTier(
+      readAction({ tool_name: 'list-messages', mcp_server_name: 'work-mail' }),
+      makeCtx({ services }),
+    );
+    expect([otherRead.tier, otherConnector.tier]).toEqual([3, 3]);
+  });
+});
