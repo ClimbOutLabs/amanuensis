@@ -74,6 +74,11 @@ services:
 @@IF_SANDBOX@@      - slot_ctl_2:/run/aman-slots/2:ro
 @@IF_SANDBOX@@      - slot_ctl_3:/run/aman-slots/3:ro
 @@IF_SANDBOX@@      - slot_ctl_4:/run/aman-slots/4:ro
+@@IF_SANDBOX@@      # One small writable volume per slot, only so the app can run the package mirrors the slot reaches there.
+@@IF_SANDBOX@@      - slot_mirror_1:/run/aman-slots/1/mirror
+@@IF_SANDBOX@@      - slot_mirror_2:/run/aman-slots/2/mirror
+@@IF_SANDBOX@@      - slot_mirror_3:/run/aman-slots/3/mirror
+@@IF_SANDBOX@@      - slot_mirror_4:/run/aman-slots/4/mirror
     depends_on:
       loopback:
         condition: service_started
@@ -177,6 +182,19 @@ volumes:
 @@IF_SANDBOX@@    external: true
 @@IF_SANDBOX@@  slot_ctl_4:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_4
+@@IF_SANDBOX@@    external: true
+
+@@IF_SANDBOX@@  slot_mirror_1:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_1
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_mirror_2:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_2
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_mirror_3:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_3
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_mirror_4:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_4
 @@IF_SANDBOX@@    external: true
 
 networks:

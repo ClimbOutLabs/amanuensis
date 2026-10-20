@@ -671,6 +671,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<number>;
   revision: Generated<number>;
   created_at: string;
   updated_at: string;

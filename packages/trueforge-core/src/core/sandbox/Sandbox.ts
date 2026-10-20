@@ -103,6 +103,14 @@ import {
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
 import {
+  commandDownloadsPackages,
+  findCommandLineGitDependency,
+  findGitDependency,
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  PACKAGE_MANIFEST_FILES,
+  packageDownloadCardWhat,
+} from './packageMirrors';
+import {
   ensureExecSuccess,
   shellEscape,
   withTrustedPath,
@@ -244,6 +252,24 @@ export interface SandboxOptions {
   boundRepository?: BoundRepository | undefined;
   /** Re-reads the owner-scoped repository record for final plan admission. */
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
+  /**
+   * Resolves the package mirror token for the bound repository when the person has allowed package
+   * downloads for it, or undefined when downloads are not allowed. Re-read on every command, so
+   * removing the allowance takes effect on the next call. Absent outside the server runtime.
+   */
+  loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  /**
+   * Whether the person has allowed package downloads for the bound repository. Re-read whenever a
+   * download command is stamped, so the first download in a repo shows its own approval card.
+   * Absent outside the server runtime; the ordinary card is shown then.
+   */
+  loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
+  /**
+   * Records that the person allowed package downloads for the bound repository. Called when a
+   * download command the person approved is about to run, before the mirror token is resolved, so
+   * the approved command itself can download. Absent outside the server runtime.
+   */
+  allowPackageDownloads?: (() => Promise<void>) | undefined;
   /** Receives bounded repository command-source files after the checkout is verified. */
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
   /** Durable cross-replica coordinator for semantic verification and workspace mutations. */
@@ -1969,6 +1995,9 @@ export class Sandbox extends LocalToolMCP {
   private readonly sentinelContext: SentinelHostContext | undefined;
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
+  private readonly loadPackageMirrorToken: (() => Promise<string | undefined>) | undefined;
+  private readonly loadPackageDownloadsAllowed: (() => Promise<boolean>) | undefined;
+  private readonly allowPackageDownloads: (() => Promise<void>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
   private readonly onRepositorySources: RepositoryCommandSourceObserver | undefined;
   private readonly workspaceVerificationCoordinator: WorkspaceVerificationCoordinator | undefined;
@@ -2067,6 +2096,9 @@ export class Sandbox extends LocalToolMCP {
     this.provider = options.provider;
     this.boundRepository = options.boundRepository;
     this.loadBoundRepository = options.loadBoundRepository;
+    this.loadPackageMirrorToken = options.loadPackageMirrorToken;
+    this.loadPackageDownloadsAllowed = options.loadPackageDownloadsAllowed;
+    this.allowPackageDownloads = options.allowPackageDownloads;
     this.onRepositorySources = options.onRepositorySources;
     this.workspaceVerificationCoordinator = options.workspaceVerificationCoordinator;
     this.workspaceLeaseOwnerId = options.workspaceLeaseOwnerId;
@@ -2348,6 +2380,30 @@ export class Sandbox extends LocalToolMCP {
         }`;
       }
     }
+    // The first download in a repo that has not allowed downloads gets its own card wording: what the
+    // person is agreeing to is downloads for this repo, not just this one command. A failed read
+    // leaves the ordinary card in place; the command still runs offline, never the reverse.
+    let packageCard: { plain_what: string } | undefined;
+    if (
+      params.name === SANDBOX_EXEC_TOOL_NAME &&
+      !invalidExecPreflight &&
+      this.boundRepository !== undefined &&
+      this.loadPackageDownloadsAllowed !== undefined &&
+      commandDownloadsPackages(command)
+    ) {
+      try {
+        if (!(await this.loadPackageDownloadsAllowed())) {
+          const what = packageDownloadCardWhat(command);
+          if (what !== undefined) {
+            packageCard = { plain_what: what };
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Could not read the package download setting; the ordinary card is shown', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     const gitRemotePrecondition =
       params.name === SANDBOX_EXEC_TOOL_NAME && !invalidExecPreflight
         ? await this.observeHostAuthenticatedGitRemotes({ command, env, cwd })
@@ -2372,7 +2428,13 @@ export class Sandbox extends LocalToolMCP {
       // The whole stamp is carried; the failure and approval fields below are resolved against host checks.
       ...(sentinelStamp === undefined
         ? {}
-        : { ...sentinelStamp, tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }) }),
+        : {
+            ...sentinelStamp,
+            tier3_card: withPackageDownloadCard({
+              card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
+              packageCard,
+            }),
+          }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
       // the raw wire arguments. Record the exact mint identity so pre-dispatch
@@ -3698,6 +3760,22 @@ export class Sandbox extends LocalToolMCP {
     signal?: AbortSignal | undefined;
     approvedGitRemotes?: GitRemotePrecondition | undefined;
   }): Promise<ExecResult> {
+    // Only the model's own commands can carry a package mirror grant: host-built commands (git,
+    // verification, file reads) never download packages and never see the token.
+    let packageMirrorToken: string | undefined;
+    if (!input.hostAuthored) {
+      packageMirrorToken = await this.resolvePackageMirrorToken();
+      if (packageMirrorToken !== undefined && commandDownloadsPackages(input.command)) {
+        const refusal = await this.packageGitDependencyRefusal({
+          sandboxId: input.sandboxId,
+          cwd: input.cwd,
+          command: input.command,
+        });
+        if (refusal !== undefined) {
+          return { success: false, error: refusal };
+        }
+      }
+    }
     // A command carrying the token never runs inside the in-sandbox lock wrapper, so the token reaches
     // only the pinned git process. The host-side workspace mutation lock already serialises it.
     const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
@@ -3709,12 +3787,115 @@ export class Sandbox extends LocalToolMCP {
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.approvedGitRemotes === undefined ? {} : { approvedGitRemotes: input.approvedGitRemotes }),
+      ...(packageMirrorToken === undefined ? {} : { packageMirrorToken }),
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
     };
     const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
+  }
+
+  /**
+   * The package mirror token for this session's bound repository, or undefined when the person has
+   * not allowed downloads for it. A resolver failure keeps the sandbox offline, never the reverse.
+   */
+  private async resolvePackageMirrorToken(): Promise<string | undefined> {
+    const load = this.loadPackageMirrorToken;
+    if (load === undefined || this.boundRepository === undefined) {
+      return undefined;
+    }
+    try {
+      return await load();
+    } catch (error) {
+      this.logger.warn('Could not resolve the package mirror grant; the command runs offline', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Records the bound repository's download allowance after the person approved a download command,
+   * or returns the plain refusal to run the command when the record cannot be saved. Running the
+   * command offline after an approval would fail in a way that hides why, so a failed save stops it
+   * before anything runs. Anything that is not an unapproved download command is left alone.
+   */
+  private async recordPackageDownloadsApproval(input: { command: string }): Promise<string | undefined> {
+    const allow = this.allowPackageDownloads;
+    const loadAllowed = this.loadPackageDownloadsAllowed;
+    if (
+      allow === undefined ||
+      loadAllowed === undefined ||
+      this.boundRepository === undefined ||
+      !commandDownloadsPackages(input.command)
+    ) {
+      return undefined;
+    }
+    try {
+      if (await loadAllowed()) {
+        return undefined;
+      }
+      await allow();
+      return undefined;
+    } catch (error) {
+      this.logger.error('Could not save the package download setting for this repository', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 'Aman could not save the download setting for this repo. Try again.';
+    }
+  }
+
+  /**
+   * Refuses a download command when the command itself, or the project's dependency files, name a
+   * package from a git address, with the one plain sentence for that case. The command's own words
+   * are read first: a spec typed into the command never reaches a manifest. Then the manifests at
+   * the command's directory and, when different, the bound repo's root; an unreadable manifest is
+   * skipped, because the tool itself will report a broken file better than a guess here.
+   */
+  private async packageGitDependencyRefusal(input: {
+    sandboxId: string;
+    cwd: string | undefined;
+    command: string;
+  }): Promise<string | undefined> {
+    if (findCommandLineGitDependency(input.command) !== undefined) {
+      return PACKAGE_GIT_DEPENDENCY_MESSAGE;
+    }
+    const workspaceDir = this.provider.getWorkspaceDir();
+    const dirs = new Set<string>();
+    const addDir = (dir: string | undefined): void => {
+      if (dir === undefined || dir === '') {
+        return;
+      }
+      if (dir.startsWith('/')) {
+        dirs.add(dir);
+      } else if (workspaceDir !== undefined) {
+        dirs.add(`${workspaceDir}/${dir}`);
+      }
+    };
+    addDir(input.cwd);
+    addDir(this.boundRepository?.workspace_cwd);
+    if (dirs.size === 0) {
+      dirs.add(workspaceDir ?? '/workspace');
+    }
+    for (const dir of dirs) {
+      const manifests: { name: string; content: string }[] = [];
+      for (const name of PACKAGE_MANIFEST_FILES) {
+        try {
+          const bytes = await this.provider.downloadFile({
+            sandboxId: input.sandboxId,
+            path: `${dir}/${name}`,
+          });
+          manifests.push({ name, content: bytes.subarray(0, 256 * 1024).toString('utf8') });
+        } catch {
+          // Missing or unreadable manifests are the tool's story to tell, not this check's.
+        }
+      }
+      if (findGitDependency(manifests) !== undefined) {
+        return PACKAGE_GIT_DEPENDENCY_MESSAGE;
+      }
+    }
+    return undefined;
   }
 
   private async captureWorkspaceVerificationIdentity(
@@ -4544,6 +4725,7 @@ export class Sandbox extends LocalToolMCP {
     try {
       result = await service.runCode(input, {
         signal: context?.signal,
+        packageMirrorToken: await this.resolvePackageMirrorToken(),
         attachments: [...this.runCodeIngressStaging.values()],
         onProgress: (message: string) => {
           provisioningMessages.push(message);
@@ -4831,6 +5013,15 @@ export class Sandbox extends LocalToolMCP {
       }
       // Nothing was shown for approval, so the remotes just read are the ones this call runs against.
       approvedRemotes = tool_info.git_remote_precondition;
+    }
+    if (approvalDecision !== undefined) {
+      // The person approved this call. When it is a download command in a repo that has not allowed
+      // downloads yet, that approval is the repo's allowance: record it before the command runs, so
+      // the mirror token resolves for this command and later ones in the repo.
+      const allowanceRefusal = await this.recordPackageDownloadsApproval({ command: resolvedInput.command });
+      if (allowanceRefusal !== undefined) {
+        return hostRefusalResponse(allowanceRefusal);
+      }
     }
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
@@ -6515,4 +6706,15 @@ function withHostGitCard(input: {
     destination: input.hostGitCard.destination,
     parsed_command: input.hostGitCard.parsed_command,
   };
+}
+
+/** The Sentinel card with the package download sentence in place of its generic wording. */
+function withPackageDownloadCard(input: {
+  card: Tier3Card | null | undefined;
+  packageCard: { plain_what: string } | undefined;
+}): Tier3Card | null | undefined {
+  if (input.card === null || input.card === undefined || input.packageCard === undefined) {
+    return input.card;
+  }
+  return { ...input.card, plain_what: input.packageCard.plain_what };
 }

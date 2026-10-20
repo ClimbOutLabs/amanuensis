@@ -127,6 +127,7 @@ import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
@@ -592,6 +593,77 @@ function createTurnResolver(deps: {
                     repository_id: currentSession.repository_id,
                     workspace_cwd: currentSession.workspace_cwd,
                     store: repositoryStore,
+                  });
+                },
+          loadPackageMirrorToken:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return undefined;
+                  }
+                  const repository = await repositoryStore.getRepository({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                  });
+                  if (repository === undefined) {
+                    return undefined;
+                  }
+                  if (!repository.package_downloads_allowed) {
+                    packageMirrorTokens.revokeRepository({
+                      tenant_id,
+                      created_by: userRef,
+                      repository_id: repository.id,
+                    });
+                    return undefined;
+                  }
+                  return packageMirrorTokens.issue({
+                    tenant_id,
+                    created_by: userRef,
+                    session_id: sessionId,
+                    repository_id: repository.id,
+                  });
+                },
+          loadPackageDownloadsAllowed:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return false;
+                  }
+                  const repository = await repositoryStore.getRepository({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                  });
+                  return repository?.package_downloads_allowed ?? false;
+                },
+          allowPackageDownloads:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return;
+                  }
+                  await repositoryStore.setPackageDownloadsAllowed({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                    allowed: true,
+                    expected_revision: undefined,
                   });
                 },
           workspaceVerificationCoordinator: repositoryStore,

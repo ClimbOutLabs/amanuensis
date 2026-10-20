@@ -119,7 +119,7 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
-import { slotsBackendEnabled } from './sandbox/slotBackend';
+import { slotsBackendEnabled, startPackageMirrorGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -1087,6 +1087,10 @@ try {
   // the sidecar is warm and recovers without a backend restart. The check is
   // advisory only; the backend boots regardless of STT state.
   startSttAvailabilityWatcher({ logger });
+
+  // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
+  // start, sandbox package downloads stay off and everything else keeps working.
+  await startPackageMirrorGateway({ logger });
 
   const server = serve(
     {

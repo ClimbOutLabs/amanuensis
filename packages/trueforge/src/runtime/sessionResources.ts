@@ -711,6 +711,9 @@ export function buildTurnSandbox(input: {
   existingSandboxId?: string | undefined;
   boundRepository?: BoundRepository | undefined;
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
+  loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
+  allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
   workspaceVerificationCoordinator?: WorkspaceVerificationCoordinator | undefined;
   workspaceLeaseOwnerId?: string | undefined;
@@ -746,6 +749,9 @@ export function buildTurnSandbox(input: {
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,
     loadBoundRepository: input.loadBoundRepository,
+    loadPackageMirrorToken: input.loadPackageMirrorToken,
+    loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
+    allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,
     workspaceVerificationCoordinator: input.workspaceVerificationCoordinator,
     workspaceLeaseOwnerId: input.workspaceLeaseOwnerId,

@@ -1147,6 +1147,7 @@ export class DockerDriver implements IsolationDriver {
       diskMb: 16,
       runId: input.runId,
       env: SANDBOX_RUN_ENV,
+      packageMirrorToken: undefined,
       sandboxIdentity: input.identity,
       signal: input.signal === undefined ? timeout : AbortSignal.any([input.signal, timeout]),
       harvestGraceMs: 0,

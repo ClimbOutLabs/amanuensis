@@ -143,6 +143,7 @@ function runParams(overrides: { signal?: AbortSignal | undefined } = {}): Driver
     sandboxIdentity: { uid: 65532, gid: 65532, chownRunDirs: true },
     signal: overrides.signal,
     harvestGraceMs: 2000,
+    packageMirrorToken: undefined,
   };
 }
 

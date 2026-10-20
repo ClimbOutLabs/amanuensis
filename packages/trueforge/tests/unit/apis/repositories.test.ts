@@ -123,6 +123,58 @@ describe('repository API', () => {
     });
   });
 
+  it('turns package downloads on and off for a repository through its route', async () => {
+    const { app, setUser } = await setup();
+    const createResponse = await app.request('/repositories', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        repository: { name: 'downloads', clone_url: 'https://example.test/downloads.git', default_branch: 'main' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = GetRepositoryResponseSchema.parse(await createResponse.json());
+    expect(created.data.package_downloads_allowed).toBe(false);
+    const repositoryId = created.data.id;
+
+    const allowResponse = await app.request(`/repositories/${repositoryId}/package-downloads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allowed: true, expected_revision: created.data.revision }),
+    });
+    expect(allowResponse.status).toBe(200);
+    const allowed = GetRepositoryResponseSchema.parse(await allowResponse.json());
+    expect(allowed.data.package_downloads_allowed).toBe(true);
+
+    const staleResponse = await app.request(`/repositories/${repositoryId}/package-downloads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allowed: false, expected_revision: created.data.revision }),
+    });
+    expect(staleResponse.status).toBe(409);
+
+    const stopResponse = await app.request(`/repositories/${repositoryId}/package-downloads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allowed: false }),
+    });
+    expect(stopResponse.status).toBe(200);
+    expect(GetRepositoryResponseSchema.parse(await stopResponse.json()).data.package_downloads_allowed).toBe(false);
+
+    setUser({
+      tenant_id: 'default',
+      subject: { id: 'owner-2', type: 'user', display_name: 'owner-2' },
+      roles: ['admin'],
+      user_credential: null,
+    });
+    const strangerResponse = await app.request(`/repositories/${repositoryId}/package-downloads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allowed: true }),
+    });
+    expect(strangerResponse.status).toBe(404);
+  });
+
   it('does not reveal another owner repository and rejects stale command writes', async () => {
     const { app, setUser } = await setup();
     const createResponse = await app.request('/repositories', {

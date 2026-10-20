@@ -1054,6 +1054,16 @@ export interface SharedServerConfiguration {
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
+   * Directory holding the package mirror cache. Derived: `{app data dir}/package-mirror-cache`.
+   * The mirrors are the download-only package gateways the sandbox slots reach; their cache is the
+   * only thing that lives here.
+   */
+  SANDBOX_MIRROR_CACHE_DIR: string;
+  /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
+  /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -1854,6 +1864,17 @@ const shared: SharedServerConfiguration = {
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
+  }),
+  SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+  }),
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_CACHE_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
+    defaultValue: 10 * 1024 * 1024 * 1024,
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
