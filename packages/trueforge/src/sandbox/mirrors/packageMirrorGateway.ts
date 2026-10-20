@@ -733,13 +733,19 @@ export class PackageMirrorGateway {
       return input.text;
     }
     const primaryHost = new URL(primary).hostname;
-    const pattern = /https?:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s"'<>\\]*)?/g;
+    const pattern = /https?:\/\/(?:[^\s"'<>\\/@]+@)?[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s"'<>\\]*)?/g;
     return input.text.replace(pattern, match => {
       let url: URL;
       try {
         url = new URL(match);
       } catch {
         return match;
+      }
+      if (url.username !== '' || url.password !== '') {
+        // A link whose address carries a name before the host (http://name@host/...) goes to the
+        // refusal path as a whole: rewriting only the part before the @ would leave the real host
+        // dangling after it as a junk path.
+        return `${input.publicBase}/${input.ecosystem}/off-list/${url.hostname}${url.pathname}`;
       }
       const tail = `${url.pathname}${url.search}${url.hash}`;
       if (url.hostname === primaryHost) {
@@ -803,7 +809,7 @@ export class PackageMirrorGateway {
     void this.#enforceCacheCap();
   }
 
-  /** Keeps the cache within its total cap by removing the least recently served files first. */
+  /** Keeps the cache within its total cap by removing the oldest stored files first. */
   async #enforceCacheCap(): Promise<void> {
     try {
       const names = (await readdir(this.#cacheDir)).filter(name => name.endsWith('.body'));

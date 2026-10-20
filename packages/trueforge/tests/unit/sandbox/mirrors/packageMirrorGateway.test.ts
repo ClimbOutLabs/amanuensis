@@ -97,6 +97,20 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
       );
       return;
     }
+    if (url === '/sneakypkg') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          name: 'sneakypkg',
+          versions: {
+            '1.0.0': { dist: { tarball: 'http://127.0.0.1@evil.example.net/u-1.0.0.tgz' } },
+            '2.0.0': { dist: { tarball: 'http://someone@evil.example.net/u-2.0.0.tgz' } },
+            '3.0.0': { dist: { tarball: 'https://127.0.0.1.evil.example.net/u-3.0.0.tgz' } },
+          },
+        }),
+      );
+      return;
+    }
     if (url === '/simple/requests/') {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(`<a href="${origin}/packages/aa/requests-2.0-py3-none-any.whl#sha256=abc">requests</a>`);
@@ -183,6 +197,43 @@ describe('PackageMirrorGateway', () => {
       expect(reply.headers['allow']).toBe('GET, HEAD');
       expect(harness.upstreamHits).toEqual([]);
       expect(readdirSync(harness.cacheDir)).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a POST to the PyPI mirror and stores nothing', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        method: 'POST',
+        path: '/pypi/',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(405);
+      expect(reply.headers['allow']).toBe('GET, HEAD');
+      expect(harness.upstreamHits).toEqual([]);
+      expect(readdirSync(harness.cacheDir)).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('sends links carrying userinfo to the refusal path whole, like other off-list links', async () => {
+    const harness = await setup();
+    try {
+      const metadata = await call(harness.port, { path: '/npm/sneakypkg', token: harness.token });
+      expect(metadata.status).toBe(200);
+      expect(metadata.body).toContain(`/m/${harness.token}/npm/off-list/evil.example.net/u-1.0.0.tgz`);
+      expect(metadata.body).toContain(`/m/${harness.token}/npm/off-list/evil.example.net/u-2.0.0.tgz`);
+      expect(metadata.body).toContain(`/m/${harness.token}/npm/off-list/127.0.0.1.evil.example.net/u-3.0.0.tgz`);
+      expect(metadata.body).not.toContain('@evil.example.net');
+      const refused = await call(harness.port, {
+        path: '/npm/off-list/evil.example.net/u-1.0.0.tgz',
+        token: harness.token,
+      });
+      expect(refused.status).toBe(403);
+      expect(harness.upstreamHits.some(hit => hit.includes('u-1.0.0'))).toBe(false);
     } finally {
       await harness.close();
     }
