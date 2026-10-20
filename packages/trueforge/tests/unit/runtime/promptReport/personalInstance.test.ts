@@ -1,6 +1,7 @@
 import type { PromptReport } from '@truefoundry/trueforge-core/core';
 import {
   measurePersonalInstance,
+  PERSONAL_INSTANCE_NAMES,
   type PersonalInstanceName,
 } from '../../../../src/runtime/promptReport/personalInstance';
 
@@ -147,7 +148,7 @@ function growth(name: PersonalInstanceName, report: PromptReport): string[] {
 }
 
 describe('personal instance prompt budget', () => {
-  it.each(Object.keys(BASELINE) as PersonalInstanceName[])('keeps %s within the budget', async name => {
+  it.each(PERSONAL_INSTANCE_NAMES)('keeps %s within the budget', async name => {
     const report = await measurePersonalInstance({ name });
     const baseline = BASELINE[name].total;
     const budget = Math.ceil(baseline * (1 + HEADROOM));

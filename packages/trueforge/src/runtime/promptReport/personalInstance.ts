@@ -23,6 +23,9 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 
 export type PersonalInstanceName = 'personal' | 'personal-with-google';
 
+/** Every standard setup the report measures, in report order. */
+export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
+
 const MODEL_NAME = 'personal/model';
 /** Never sent anywhere: stands in for a credential field the report does not read. */
 const STAND_IN = 'stand-in';
