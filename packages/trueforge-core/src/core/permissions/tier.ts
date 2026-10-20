@@ -192,6 +192,8 @@ export interface TierDecision {
    * is stamped as inspection, so the grant and chat scope both apply to it.
    */
   inspection: boolean;
+  /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
+  grant_host: string | null;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -227,6 +229,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     audit_description: null,
     shell_binding: null,
     inspection: false,
+    grant_host: null,
   };
 }
 
@@ -244,6 +247,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     audit_description: null,
     shell_binding: null,
     inspection: false,
+    grant_host: null,
   };
 }
 
@@ -302,6 +306,7 @@ export function tier3Decision(input: {
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
+  grant_host?: string | null | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -316,6 +321,7 @@ export function tier3Decision(input: {
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
+    grant_host: input.grant_host ?? null,
   };
 }
 

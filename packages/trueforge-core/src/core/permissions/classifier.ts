@@ -2240,6 +2240,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
+        mcp_server_host: action.mcp_server_host ?? null,
       }))
     ) {
       return tier1Decision({
@@ -2271,6 +2272,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
+    grant_host: action.mcp_server_host ?? null,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,

@@ -1879,7 +1879,7 @@ describe('mcp-servers routers', () => {
     };
 
     function grantFor(input: { created_by: string; tool_name: string }) {
-      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, mcp_server_host: 'notes.example.com', ...input };
     }
 
     async function listedGrants(): Promise<string[]> {

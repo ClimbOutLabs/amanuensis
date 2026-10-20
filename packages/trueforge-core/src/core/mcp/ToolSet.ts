@@ -81,6 +81,7 @@ export function stampSentinelDecision(input: {
   | 'silent_search_query'
   | 'audit_description'
   | 'effect'
+  | 'grant_host'
 > {
   const decision = input.decision;
   return {
@@ -93,6 +94,7 @@ export function stampSentinelDecision(input: {
     shell_binding: decision.shell_binding,
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
+    ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:

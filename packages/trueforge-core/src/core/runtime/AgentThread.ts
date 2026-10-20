@@ -1787,6 +1787,7 @@ export class AgentThread {
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
               tool_name: pending.tool_info.original_tool_name,
+              mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }
         }
@@ -4345,6 +4346,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };
       yield event;

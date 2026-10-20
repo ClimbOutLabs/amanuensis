@@ -17,6 +17,7 @@ import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissio
 import { useCallback, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -157,6 +158,16 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     });
   };
 
+  // A standing grant rides the runtime's option path; the runtime maps this option id to scope "always".
+  const respondAlwaysAllow = () => {
+    if (part.approval == null) return;
+    respondToNestedApproval({
+      approvalId: part.approval.id,
+      approved: true,
+      optionId: ALWAYS_ALLOW_TOOL_OPTION_ID,
+    });
+  };
+
   const onSelectOption = (optionId: string, reason?: string) => {
     if (optionId === 'allow-once') return respond({ optionId, approved: true });
     if (optionId === 'allow-chat') return respond({ optionId, approved: true });
@@ -219,6 +230,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         tier={approvalInfo.tier}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
+        onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}

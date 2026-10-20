@@ -176,6 +176,13 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  grant_host: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+    ),
   audit_description: z
     .string()
     .optional()

@@ -475,7 +475,8 @@ describe('held actions', () => {
 
   it('reads the held flag, the always-allow offer and the expiry', () => {
     const [info] = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [heldRef] });
-    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.alwaysAllowOffered).toBe(true);
   });
 
   it('offers always allow for a held mail read the owner may grant, and never for a held send', () => {
@@ -487,7 +488,7 @@ describe('held actions', () => {
     };
     const send = { ...heldRef, tool_call_id: 'call-send', tool_name: 'send-email', can_always_allow: false };
     const parsed = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [mailRead, send] });
-    expect(parsed.map(info => info.held?.alwaysAllowOffered)).toEqual([true, false]);
+    expect(parsed.map(info => info.alwaysAllowOffered)).toEqual([true, false]);
   });
 
   it('reads the same fields after the SDK camel-cases them', () => {
@@ -519,7 +520,8 @@ describe('held actions', () => {
       { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
     );
     const [info] = extractSentinelFromEvent(parsed);
-    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.alwaysAllowOffered).toBe(true);
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
@@ -532,7 +534,8 @@ describe('held actions', () => {
       type: 'tool.approval_required',
       tool_calls: [{ ...heldRef, can_always_allow: undefined, expires_at: undefined }],
     });
-    expect(held?.held).toEqual({ alwaysAllowOffered: false, expiresAt: null });
+    expect(held?.held).toEqual({ expiresAt: null });
+    expect(held?.alwaysAllowOffered).not.toBe(true);
   });
 
   it('reads the answers a session already recorded from the inputs of its turns', () => {

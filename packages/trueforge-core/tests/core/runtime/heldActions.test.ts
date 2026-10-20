@@ -272,7 +272,12 @@ describe('an unattended run', () => {
 
   it('still runs a read-only tool the owner always allowed, silently', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -508,7 +513,7 @@ describe('approving a held action later', () => {
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', mcp_server_host: null };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -715,7 +720,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: '{}',
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -750,7 +760,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(20);
@@ -765,7 +780,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).not.toHaveBeenCalled();

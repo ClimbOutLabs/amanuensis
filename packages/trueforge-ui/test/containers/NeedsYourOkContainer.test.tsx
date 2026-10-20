@@ -98,7 +98,7 @@ function renderBrief(
       threadId: 'main',
       ...(input.heldCards === false
         ? { notSaved: 'too_many' as const }
-        : { held: { alwaysAllowOffered: input.alwaysAllowOffered ?? false, expiresAt: input.expiresAt ?? null } }),
+        : { held: { expiresAt: input.expiresAt ?? null }, alwaysAllowOffered: input.alwaysAllowOffered ?? false }),
     });
     for (let index = 0; index < (input.notSaved ?? 0); index += 1) {
       publishSentinelEvent({

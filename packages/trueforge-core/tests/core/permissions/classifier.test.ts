@@ -444,18 +444,20 @@ describe('classifyTier external services', () => {
 
 /** A grant store the test can revoke from, keyed exactly like the server store. */
 class RevocableGrantStore implements ToolGrantStore {
-  private readonly grants = new Set<string>();
+  /** Grant identity to the connector host it was recorded for. */
+  private readonly grants = new Map<string, string | null>();
 
   private static id(key: ToolGrantKey): string {
     return JSON.stringify([key.tenant_id, key.created_by, key.mcp_server_name, key.tool_name]);
   }
 
   hasToolGrant(key: ToolGrantKey): Promise<boolean> {
-    return Promise.resolve(this.grants.has(RevocableGrantStore.id(key)));
+    const id = RevocableGrantStore.id(key);
+    return Promise.resolve(this.grants.has(id) && this.grants.get(id) === key.mcp_server_host);
   }
 
   recordToolGrant(key: ToolGrantKey): Promise<void> {
-    this.grants.add(RevocableGrantStore.id(key));
+    this.grants.set(RevocableGrantStore.id(key), key.mcp_server_host);
     return Promise.resolve();
   }
 
@@ -471,11 +473,13 @@ describe('classifyTier connector tools and standing grants', () => {
     created_by: 'u1',
     mcp_server_name: 'notes',
     tool_name: 'lookup_record',
+    mcp_server_host: null,
   };
 
   function connectorAction(input?: {
     tool_name?: string;
     mcp_server_name?: string;
+    mcp_server_host?: string | null;
     mcp_hints?: SentinelAction['mcp_hints'];
     canonical_params?: Record<string, unknown>;
   }): SentinelAction {
@@ -484,6 +488,7 @@ describe('classifyTier connector tools and standing grants', () => {
       canonical_params: input?.canonical_params ?? { id: '1' },
       tool_type: 'mcp',
       mcp_server_name: input?.mcp_server_name ?? grantKey.mcp_server_name,
+      ...(input?.mcp_server_host == null ? {} : { mcp_server_host: input.mcp_server_host }),
       mcp_hints: input?.mcp_hints ?? closedWorldRead,
     };
   }
@@ -518,6 +523,35 @@ describe('classifyTier connector tools and standing grants', () => {
     expect(decision.tier).toBe(1);
     expect(decision.reason).toBe(TOOL_GRANT_REASON);
     expect(decision.card).toBeNull();
+  });
+
+  test('a grant binds to the connector host: the same tool on a connector that now points elsewhere asks again', async () => {
+    const bound = { ...grantKey, mcp_server_host: 'mail.example.com' };
+    const { services } = grantedServices([bound]);
+
+    const sameHost = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com' }),
+      makeCtx({ services }),
+    );
+    expect(sameHost.tier).toBe(1);
+    expect(sameHost.reason).toBe(TOOL_GRANT_REASON);
+
+    const moved = await classifyTier(connectorAction({ mcp_server_host: 'other.example.com' }), makeCtx({ services }));
+    expect(moved.tier).toBe(3);
+    expect(moved.card).not.toBeNull();
+  });
+
+  test('a grant made for a connector with no URL does not cover one that has a host, and the reverse', async () => {
+    const { services: noHost } = grantedServices([{ ...grantKey, mcp_server_host: null }]);
+    const gained = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com' }),
+      makeCtx({ services: noHost }),
+    );
+    expect(gained.tier).toBe(3);
+
+    const { services: hosted } = grantedServices([{ ...grantKey, mcp_server_host: 'mail.example.com' }]);
+    const lost = await classifyTier(connectorAction(), makeCtx({ services: hosted }));
+    expect(lost.tier).toBe(3);
   });
 
   test('a grant is ignored once the tool omits openWorldHint, since absent means open-world', async () => {
@@ -1100,7 +1134,7 @@ describe('connector reads can be always allowed', () => {
   }
 
   function grantFor(tool_name: string, mcp_server_name = mailServer): ToolGrantKey {
-    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name };
+    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name, mcp_server_host: null };
   }
 
   function servicesGranting(keys: ToolGrantKey[]): SentinelServices {

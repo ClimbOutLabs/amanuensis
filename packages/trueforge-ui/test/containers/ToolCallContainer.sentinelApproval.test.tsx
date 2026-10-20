@@ -81,6 +81,8 @@ type PendingCall = {
   options?: ApprovalOptions;
   /** What the server said about chat scope; absent from older servers. */
   chatAllowOffered?: boolean;
+  /** What the server said about a standing "Always allow this tool"; absent when it did not say. */
+  alwaysAllowOffered?: boolean;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
@@ -108,6 +110,7 @@ function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) 
         eventId: call.event ?? 'evt-1',
         threadId: call.thread ?? 'main',
         ...(call.chatAllowOffered === undefined ? {} : { chatAllowOffered: call.chatAllowOffered }),
+        ...(call.alwaysAllowOffered === undefined ? {} : { alwaysAllowOffered: call.alwaysAllowOffered }),
       });
     }
   });
@@ -314,5 +317,41 @@ describe('ToolCallContainer Sentinel approvals', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
       expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
     });
+  });
+});
+
+describe('ToolCallContainer always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers Always allow this tool only on a card the server says may be always allowed', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('never offers it when the server did not say so, or said no', () => {
+    renderPending([
+      { id: 'send', tier: 3 },
+      { id: 'write', tier: 3, alwaysAllowOffered: false },
+    ]);
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation, and records nothing when the owner cancels', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(respondToApproval).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it('approves the call with the standing option once the owner confirms', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+    expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'read', approved: true, optionId: 'allow-standing' }],
+    ]);
   });
 });

@@ -427,3 +427,46 @@ describe('PermissionApprovalCard for mail', () => {
     });
   });
 });
+
+describe('PermissionApprovalCard always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers the option only when an always-allow handler is passed', () => {
+    renderCard({}, { onApproveAlways: vi.fn() });
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('does not offer the option without a handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks the owner to confirm before it records anything', () => {
+    const onApproveAlways = vi.fn();
+    renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
+    expect(onApproveAlways).not.toHaveBeenCalled();
+  });
+
+  it('calls nothing when the owner cancels the confirm step', () => {
+    const onApproveAlways = vi.fn();
+    const { onApprove } = renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+
+    expect(onApproveAlways).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('calls the handler once when the owner confirms', () => {
+    const onApproveAlways = vi.fn();
+    renderCard({}, { onApproveAlways });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+
+    expect(onApproveAlways).toHaveBeenCalledTimes(1);
+  });
+});
