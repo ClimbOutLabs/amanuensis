@@ -1377,10 +1377,20 @@ ${execNetworkSentences({ offline })} Make separate tool calls in one response; t
 }
 
 /** What the run_code description says is installed; the slot guest ships a smaller set than the Docker image. */
-function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string {
-  return offline
-    ? `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`
-    : 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
+function runCodeEnvironmentSentences({
+  offline,
+  packageDownloads,
+}: {
+  offline: boolean;
+  packageDownloads: boolean;
+}): string {
+  if (offline) {
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
+  }
+  if (packageDownloads) {
+    return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again. Never use the network to fetch web content.';
+  }
+  return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
 }
 
 /**
@@ -1391,14 +1401,16 @@ function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string 
  */
 export function createSandboxRunCodeDescription({
   offline,
+  packageDownloads,
   workspaceDir,
 }: {
   offline: boolean;
+  packageDownloads: boolean;
   workspaceDir: string;
 }): string {
   return `Run Python or Node.js code in an isolated, offline sandbox.
 language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}, such as ${workspaceDir}/size.py). A script_path run reads a copy of that one file, which is never changed; no other workspace file is visible to the run. Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
-${runCodeEnvironmentSentences({ offline })}
+${runCodeEnvironmentSentences({ offline, packageDownloads })}
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
@@ -4725,6 +4737,7 @@ export class Sandbox extends LocalToolMCP {
   private renderRunCodeDescription(): string {
     const runCodeDescription = createSandboxRunCodeDescription({
       offline: !this.hasNetwork(),
+      packageDownloads: this.packageDownloadsPossible(),
       workspaceDir: this.runCodeWorkspaceDir(),
     });
     const staged = [...this.runCodeIngressStaging.values()];
@@ -4746,26 +4759,60 @@ export class Sandbox extends LocalToolMCP {
 
   /**
    * Reads a file the model wrote under the workspace, for `run_code` script_path. Only that one file
-   * is read; the error text is shown to the model, so it never carries provider details.
+   * is read. The path is canonicalized in the sandbox first, so a symlink cannot lead outside the
+   * workspace, and only a regular file is read, so a device, fifo or directory is never opened. The
+   * error text is shown to the model, so it never carries provider details.
    */
   private async readRunCodeScript(scriptPath: string): Promise<Buffer> {
     const workspaceDir = this.runCodeWorkspaceDir();
     const resolved = posix.normalize(posix.isAbsolute(scriptPath) ? scriptPath : posix.join(workspaceDir, scriptPath));
+    const outsideWorkspace = new Error(
+      `script_path must be a file under ${workspaceDir}. Pass a path like ${workspaceDir}/size.py.`,
+    );
     if (!resolved.startsWith(`${workspaceDir}/`)) {
-      throw new Error(`script_path must be a file under ${workspaceDir}. Pass a path like ${workspaceDir}/size.py.`);
+      throw outsideWorkspace;
     }
+    const unreadable = (cause: unknown): Error =>
+      new Error(
+        `script_path "${scriptPath}" could not be read. Check that the file exists under ${workspaceDir}, or write it with write_file first.`,
+        { cause },
+      );
+    let sandboxId: string;
+    let canonicalWorkspace: string;
+    let canonicalScript: string;
     try {
       const { sandboxInfo } = await this.ensureReadySandbox();
-      return await this.provider.downloadFile({
-        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
-        path: resolved,
-      });
+      sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
+      [canonicalWorkspace, canonicalScript] = await Promise.all([
+        this.canonicalSandboxPath({ sandboxId, path: workspaceDir }),
+        this.canonicalSandboxPath({ sandboxId, path: resolved }),
+      ]);
     } catch (error) {
-      throw new Error(
-        `script_path "${scriptPath}" could not be read. Check that the file exists under ${workspaceDir}, or write it with write_file first.`,
-        { cause: error },
-      );
+      throw unreadable(error);
     }
+    if (!canonicalScript.startsWith(`${canonicalWorkspace}/`)) {
+      throw outsideWorkspace;
+    }
+    try {
+      const regular = await this.hostExec({ sandboxId, command: `test -f ${shellEscape(canonicalScript)}` });
+      if (!successfulExec(regular) || regular.response.exitCode !== 0) {
+        throw new Error('script_path is not a regular file');
+      }
+      return await this.provider.downloadFile({ sandboxId, path: canonicalScript });
+    } catch (error) {
+      throw unreadable(error);
+    }
+  }
+
+  /** Resolves every symlink and requires each path component to exist, or throws. */
+  private async canonicalSandboxPath({ sandboxId, path }: { sandboxId: string; path: string }): Promise<string> {
+    const canonical = canonicalPathFromExec(
+      await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` }),
+    );
+    if (canonical === undefined) {
+      throw new Error(`realpath did not resolve ${path}`);
+    }
+    return canonical;
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
