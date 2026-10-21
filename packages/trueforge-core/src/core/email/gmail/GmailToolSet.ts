@@ -19,7 +19,7 @@ import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
 import { hashDraft, type ReviewableDraft } from './draftReview';
 import { GmailApi, mapSkippingMissing } from './gmailApi';
-import type { GmailMessage } from './gmailWire';
+import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
@@ -28,6 +28,7 @@ import {
   getDraftResult,
   listDraftsResult,
   listThreadsResult,
+  MAX_ATTACHMENTS_LISTED,
   readEmailResult,
   threadResult,
   UNTRUSTED_NOTICE,
@@ -180,7 +181,7 @@ export class GmailToolSet extends LocalToolMCP {
           defineTool({
             name: DOWNLOAD_ATTACHMENT_TOOL_NAME,
             description:
-              "Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there (a PDF with the document tools, a calendar invite or text file directly). Find the attachment ids in the message's attachments list.",
+              "Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there (a PDF with the document tools, a calendar invite or text file directly). Name the attachment by its handle from the message's attachments list.",
             schema: DownloadAttachmentSchema,
             annotations: READ_ANNOTATIONS,
             handler: input => this.#downloadAttachment(input),
@@ -510,12 +511,17 @@ export class GmailToolSet extends LocalToolMCP {
     }
     try {
       const message = await this.#options.api.getMessage(input.message_id);
-      const attachment = listAttachments({ message, max: Number.POSITIVE_INFINITY }).attachments.find(
-        file => file.id === input.attachment_id,
-      );
+      const available = listAttachments({ message, max: Number.POSITIVE_INFINITY }).attachments;
+      const attachment = available.find(file => file.handle === input.attachment_handle);
       if (attachment === undefined) {
+        const names = available.slice(0, MAX_ATTACHMENTS_LISTED).map(file => `${file.filename} (${file.handle})`);
+        const more = available.length - names.length;
         return errorResult(
-          `Attachment not found on message ${input.message_id}. Read the message again for its current attachment ids.`,
+          `No attachment with handle "${input.attachment_handle}" on message ${input.message_id}. ` +
+            (names.length === 0
+              ? 'This message has no attachments.'
+              : `Its attachments are: ${names.join(', ')}${more > 0 ? `, and ${String(more)} more` : ''}.`),
+          { untrusted: true },
         );
       }
       if (attachment.size > MAX_BYTES_PER_DOCUMENT) {
@@ -523,10 +529,14 @@ export class GmailToolSet extends LocalToolMCP {
       }
       // The caps every attachment source shares, counted over what this turn already placed.
       assertAttachmentBatch([...this.#stagedSizes, attachment.size]);
-      const bytes = await this.#options.api.getAttachment({
-        messageId: input.message_id,
-        attachmentId: input.attachment_id,
-      });
+      // Gmail's attachment id changes on every read, so the one from this fresh read is used, never one a caller kept.
+      const bytes =
+        attachment.attachmentId === undefined
+          ? decodeAttachmentData(attachment.data ?? '')
+          : await this.#options.api.getAttachment({
+              messageId: input.message_id,
+              attachmentId: attachment.attachmentId,
+            });
       const staged = await stager.stageAttachment({
         filename: attachment.filename,
         bytes,
@@ -539,7 +549,7 @@ export class GmailToolSet extends LocalToolMCP {
           account: this.#options.account,
           untrusted_content: UNTRUSTED_NOTICE,
           message_id: input.message_id,
-          attachment_id: attachment.id,
+          attachment_handle: attachment.handle,
           filename: staged.filename,
           mime_type: attachment.mimeType,
           size: bytes.length,

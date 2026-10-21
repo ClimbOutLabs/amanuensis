@@ -98,7 +98,9 @@ describe('Tavily through the designated search provider path', () => {
     expect(card?.plain_what).not.toMatch(/endpoint/);
     expect(card?.plain_what).not.toContain('/search');
     expect(card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
-    expect(card?.plain_what).toMatch(/uses 2 Tavily credits\.$/);
+    expect(card?.plain_what).toMatch(
+      /uses 2 Tavily credits\. Searches are set to ask, so Aman is checking with you first.$/,
+    );
     expect(card?.destination_host).toBe('api.tavily.com');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
     expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
@@ -117,9 +119,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier3_card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
     expect(info.tier3_card?.destination_host).toBe('api.tavily.com');
-    expect(info.tier3_card?.plain_what).toMatch(
-      /Held because it names a link that no search result this turn returned\.$/,
-    );
+    expect(info.tier3_card?.plain_what).toMatch(/This opens a link that didn't come from your search results\.$/);
     expect(info.tier3_card?.why_asked_again).toBeNull();
     expect(isSearchHoldCardText(info.tier3_card?.plain_what ?? '')).toBe(true);
   });
@@ -150,7 +150,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier).toBe(3);
     const card = info.tier3_card;
     expect(card?.plain_what).toContain('2 Tavily credits');
-    expect(card?.plain_what).toMatch(/Held because it contains one of this computer's keys\.$/);
+    expect(card?.plain_what).toMatch(/This search contains something that looks like a password or key\.$/);
     expect(card?.why_asked_again).toBeNull();
     // The UI shows the masked outbound text instead of the model's raw arguments only for a card it recognizes.
     expect(isSearchHoldCardText(card?.plain_what ?? '')).toBe(true);

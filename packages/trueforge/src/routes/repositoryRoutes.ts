@@ -9,14 +9,19 @@ import {
   DeleteVerifyCommandProposalResponseSchema,
   DeleteVerifyCommandResponseSchema,
   DeleteVerifyCommandsRequestQuerySchema,
+  GetGithubRepositoryDetailsResponseSchema,
   GetRepositoryResponseSchema,
   GetSessionRepositoryBindingResponseSchema,
   GetVerifyCommandResponseSchema,
+  GithubRepositoryQuerySchema,
+  ListGithubRepositoriesResponseSchema,
   ListRepositoriesResponseSchema,
   ListVerifyCommandProposalsResponseSchema,
   ListVerifyCommandsResponseSchema,
   RepositoryParamsSchema,
   SetPackageDownloadsRequestSchema,
+  StartRepositoryWorkRequestSchema,
+  StartRepositoryWorkResponseSchema,
   UpsertVerifyCommandRequestSchema,
   VerifyCommandParamsSchema,
   VerifyCommandProposalParamsSchema,
@@ -268,6 +273,114 @@ export const bindSessionRepositoryRoute = createRoute({
     ...forbiddenResponse,
     ...notFoundResponse,
     ...conflictResponse,
+    ...protectedResponses,
+  },
+});
+
+const unprocessableResponse = {
+  422: {
+    content: { 'application/json': { schema: RequestErrorResponseSchema } },
+    description: 'The repo cannot be opened yet, with the reason and the next step.',
+  },
+};
+const upstreamResponse = {
+  502: {
+    content: { 'application/json': { schema: RequestErrorResponseSchema } },
+    description: 'GitHub could not be reached.',
+  },
+};
+
+export const getGithubRepositoryDetailsRoute = createRoute({
+  method: 'get',
+  path: '/github/metadata',
+  tags: [OpenApiTag.REPOSITORIES],
+  summary: 'Look up a public GitHub repo',
+  description: 'Reads one public GitHub repo and its branches, for the repo picker. Private repos need the chat route.',
+  'x-fern-sdk-group-name': ['repositories'],
+  'x-fern-sdk-method-name': 'get_github_metadata',
+  request: { query: GithubRepositoryQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetGithubRepositoryDetailsResponseSchema } },
+      description: 'Repo details and branches.',
+    },
+    ...invalidResponse,
+    ...notFoundResponse,
+    ...unprocessableResponse,
+    ...upstreamResponse,
+    ...protectedResponses,
+  },
+});
+
+export const listSessionGithubRepositoriesRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/repository/github-repositories',
+  tags: [OpenApiTag.REPOSITORIES],
+  summary: 'List the GitHub repos this chat can open',
+  description: 'Uses the GitHub connector attached to this chat. Without one, the answer says to connect GitHub.',
+  'x-fern-sdk-group-name': ['session-repository'],
+  'x-fern-sdk-method-name': 'list_github_repositories',
+  request: { params: SessionIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListGithubRepositoriesResponseSchema } },
+      description: 'Repos the person can pick from.',
+    },
+    ...forbiddenResponse,
+    ...notFoundResponse,
+    ...unprocessableResponse,
+    ...upstreamResponse,
+    ...protectedResponses,
+  },
+});
+
+export const getSessionGithubRepositoryRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/repository/github-repository',
+  tags: [OpenApiTag.REPOSITORIES],
+  summary: 'Look up one GitHub repo for this chat',
+  description: 'Reads one GitHub repo and its branches, using this chat GitHub connector when one is attached.',
+  'x-fern-sdk-group-name': ['session-repository'],
+  'x-fern-sdk-method-name': 'get_github_repository',
+  request: { params: SessionIdParamsSchema, query: GithubRepositoryQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetGithubRepositoryDetailsResponseSchema } },
+      description: 'Repo details and branches.',
+    },
+    ...invalidResponse,
+    ...forbiddenResponse,
+    ...notFoundResponse,
+    ...unprocessableResponse,
+    ...upstreamResponse,
+    ...protectedResponses,
+  },
+});
+
+export const startSessionRepositoryWorkRoute = createRoute({
+  method: 'post',
+  path: '/{session_id}/repository/start-work',
+  tags: [OpenApiTag.REPOSITORIES],
+  summary: 'Register a GitHub repo and bind this chat to its checkout',
+  description:
+    'Checks the repo size and branch on GitHub, registers the repo, and binds the chat to the checkout path the clone will use.',
+  'x-fern-sdk-group-name': ['session-repository'],
+  'x-fern-sdk-method-name': 'start_work',
+  request: {
+    params: SessionIdParamsSchema,
+    body: { content: { 'application/json': { schema: StartRepositoryWorkRequestSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: StartRepositoryWorkResponseSchema } },
+      description: 'The registered repo, the bound checkout path, and the chosen branch.',
+    },
+    ...invalidResponse,
+    ...forbiddenResponse,
+    ...notFoundResponse,
+    ...conflictResponse,
+    ...unprocessableResponse,
+    ...upstreamResponse,
     ...protectedResponses,
   },
 });

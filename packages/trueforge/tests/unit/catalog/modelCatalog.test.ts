@@ -22,6 +22,16 @@ describe('shipped model catalog', () => {
     ]);
   });
 
+  it('gives the default Token Factory model an explicit output cap and its context length', () => {
+    const preset = ModelCatalog.load()
+      .list()
+      .find(entry => entry.type === 'tokenfactory');
+    const defaultModel = preset?.models.find(model => model.model_id === DEFAULT_TOKEN_FACTORY_MODEL);
+
+    expect(defaultModel?.properties.max_output_tokens).toBe(32768);
+    expect(defaultModel?.properties.context_length).toBe(262144);
+  });
+
   it('lists the env-managed default model under the same name the preset gives it', () => {
     expect(envManagedDefaultModelName(DEFAULT_TOKEN_FACTORY_MODEL)).toBe('tokenfactory/nemotron-3-super-120b-a12b');
   });

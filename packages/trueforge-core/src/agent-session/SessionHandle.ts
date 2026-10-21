@@ -19,6 +19,8 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
+import { isChangeRequestReason } from '../core/permissions/changeRequest';
+import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
@@ -44,7 +46,7 @@ import type { CreateDynamicSubAgentThread } from '../core/runtime/CreateDynamicS
 import type { Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../core/util/abort';
-import { builtinsFromSpec } from './builtinsFromSpec';
+import { threadCapabilities } from './builtinsFromSpec';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { SessionRecord } from './models/SessionRecord';
 import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
@@ -239,13 +241,14 @@ export class SessionHandle<
    * come from the authoritative session record. Services are the session's
    * shared instance so grants and tokens are visible across threads.
    */
-  private createSentinelContext(services: SentinelServices): SentinelHostContext {
+  private createSentinelContext(services: SentinelServices, webSearch: WebSearchTurnState): SentinelHostContext {
     return createSentinelHostContext({
       services,
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
       workspace_cwd: this.session.workspace_cwd ?? null,
+      web_search: webSearch,
     });
   }
 
@@ -349,7 +352,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
-        sentinel: this.createSentinelContext(sentinelServices),
+        sentinel: this.createSentinelContext(sentinelServices, input.resolver.webSearchTurn),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -657,7 +660,8 @@ export class SessionHandle<
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
       return false;
     }
-    if (!items.every(item => item.approval.status === 'deny')) {
+    // A "Change it" denial hands the model the person's words, so the turn continues to a model call.
+    if (!items.every(item => item.approval.status === 'deny' && !isChangeRequestReason(item.approval.reason))) {
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
@@ -847,22 +851,20 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
-    const capabilities = [
-      ...builtinsFromSpec({
-        spec: input.spec,
-        definition,
-        compactionModel,
-        isChild,
-        sandbox: input.sandbox,
-        sandboxAvailable: Boolean(input.sandbox),
-        tracing: input.tracing,
-        logger: input.resolver.logger,
-        compactionContext: input.resolver.compactionContext,
-        compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
-        boundRepository: input.resolver.boundRepository,
-      }),
-      ...(extraCapabilities ?? []),
-    ];
+    const capabilities = threadCapabilities({
+      spec: input.spec,
+      definition,
+      compactionModel,
+      isChild,
+      sandbox: input.sandbox,
+      sandboxAvailable: Boolean(input.sandbox),
+      tracing: input.tracing,
+      logger: input.resolver.logger,
+      compactionContext: input.resolver.compactionContext,
+      compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+      boundRepository: input.resolver.boundRepository,
+      extraCapabilities,
+    });
     return new AgentThread({
       definition,
       threadId: input.threadId,
@@ -891,7 +893,7 @@ export class SessionHandle<
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
-      sentinel: this.createSentinelContext(input.sentinelServices),
+      sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
 
@@ -947,22 +949,20 @@ export class SessionHandle<
         // Sub-agents should return free-form summaries to the parent, not the user-facing structured response.
         responseFormat: undefined,
       };
-      const capabilities = [
-        ...builtinsFromSpec({
-          spec: input.spec,
-          definition: childDefinition,
-          compactionModel,
-          isChild: true,
-          sandbox: input.sandbox,
-          sandboxAvailable: Boolean(input.sandbox),
-          tracing: input.tracing,
-          logger: input.resolver.logger,
-          compactionContext: input.resolver.compactionContext,
-          compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
-          boundRepository: input.resolver.boundRepository,
-        }),
-        ...(extraCapabilities ?? []),
-      ];
+      const capabilities = threadCapabilities({
+        spec: input.spec,
+        definition: childDefinition,
+        compactionModel,
+        isChild: true,
+        sandbox: input.sandbox,
+        sandboxAvailable: Boolean(input.sandbox),
+        tracing: input.tracing,
+        logger: input.resolver.logger,
+        compactionContext: input.resolver.compactionContext,
+        compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+        boundRepository: input.resolver.boundRepository,
+        extraCapabilities,
+      });
       throwIfSignalAborted(params.signal);
       return new AgentThread({
         definition: childDefinition,
@@ -984,7 +984,7 @@ export class SessionHandle<
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
-        sentinel: this.createSentinelContext(input.sentinelServices),
+        sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });
     };
   }

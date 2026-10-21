@@ -69,6 +69,6 @@ describe('library check model', () => {
   });
 
   it('keeps the persona model when it is local', async () => {
-    await expect(judgeModelFor({ personaModel: 'spark/qwen', helperFqn })).resolves.toBe('spark/qwen');
+    await expect(judgeModelFor({ personaModel: 'host/qwen', helperFqn })).resolves.toBe('host/qwen');
   });
 });

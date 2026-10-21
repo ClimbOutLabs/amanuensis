@@ -31,18 +31,20 @@ function findChromiumExecutable(): string {
 
 const RENDER_TIMEOUT_MS = 45_000;
 const VIEWPORTS = [
-  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'desktop', width: 1440, height: 900 },
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
 
 /** What each fixture state must show; the screenshot is taken only after this is on screen. */
 const EXPECTATIONS = {
-  fresh: { heading: 'Welcome to Aman', progress: '0 of 3 done.' },
-  half: { heading: 'Welcome to Aman', progress: '2 of 3 done.' },
-  done: { heading: 'You are all set', progress: 'Everything on this list is done.' },
+  fresh: { heading: 'Get set up', progress: '0 of 3 done.' },
+  half: { heading: 'Get set up', progress: '2 of 3 done.' },
   settings: { heading: 'Welcome to Aman', progress: '2 of 3 done.' },
 } as const;
+
+/** The tour's own headline, the first thing an ordinary new chat shows. */
+const TOUR_HEADING = 'Aman is your chief of staff.';
 
 async function screenshotDir(): Promise<string> {
   const configured = process.env.AMAN_SCREENSHOT_DIR;
@@ -105,11 +107,44 @@ test('first-run screens render in light and dark at desktop and phone width', { 
           await page.screenshot({ path: join(outDir, `${state}-${viewport.name}-${theme}.png`), fullPage: true });
         };
 
-        for (const state of ['fresh', 'half', 'done', 'settings'] as const) {
+        for (const state of ['fresh', 'half', 'settings'] as const) {
           await open(state);
           await checkChecklist(page, state);
           await shoot(state);
         }
+
+        // Once every line is done the tour drops the checklist and keeps its headline.
+        await open('done');
+        await page.getByRole('heading', { name: TOUR_HEADING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.getByTestId('aman-first-run-guide').count(), 0);
+        await shoot('done');
+
+        // Every capability granted: the full prompt set is on screen.
+        await open('connected');
+        await page
+          .getByRole('button', { name: /Find forgotten subscriptions/ })
+          .waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.ok(await page.getByRole('button', { name: 'Handle your email' }).isVisible());
+        assert.ok(await page.getByRole('button', { name: 'Read files and run code' }).isVisible());
+        await shoot('connected');
+
+        // The Tour with the setup card open: the chosen area fills the day cards, and the question shows its choice.
+        await open('tour-focus');
+        await page.getByRole('button', { name: /Help me clear my head/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.ok(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isChecked());
+        await shoot('tour-focus');
+        // Nothing chosen: the general set, with the morning brief first.
+        await open('tour-none');
+        await page.getByRole('button', { name: /Help me plan my day/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.getByRole('button', { name: /What did I forget/ }).count(), 0);
+        assert.ok(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isVisible());
+        assert.ok(!(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isChecked()));
+        await shoot('tour-none');
+        // Hidden on request: the plain greeting, with a way back to the tour.
+        await open('hidden');
+        await page.getByRole('button', { name: 'Show the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.getByTestId('aman-tour').count(), 0);
+        await shoot('hidden');
 
         await open('line');
         const line = page.getByTestId('aman-name-prompt');

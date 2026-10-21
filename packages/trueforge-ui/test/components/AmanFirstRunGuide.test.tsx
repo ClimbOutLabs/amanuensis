@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from '@/components/AmanFirstRunGuide.js';
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
+import {
+  EMPTY_PERSONALIZATION_PROFILE,
+  PersonalizationProvider,
+  type PersonalizationProfile,
+} from '@/components/PersonalizationContext.js';
 
 function renderGuide(input: { setup: AmanSetupState; userName?: string | null; placement?: 'chat' | 'settings' }) {
   const api = {
@@ -99,7 +103,7 @@ describe('AmanFirstRunGuide', () => {
       },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
     expect(screen.getByTestId('aman-first-run-progress')).toHaveTextContent('2 of 3 done.');
     const items = screen.getAllByRole('listitem');
     expect(items.map(item => item.getAttribute('data-done'))).toEqual(['true', 'true', 'false']);
@@ -133,7 +137,7 @@ describe('AmanFirstRunGuide', () => {
 
   it('has no dismiss control when the host cannot remember one', async () => {
     renderGuide({ setup: { modelName: null, settingsHref: '/settings' } });
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
   });
@@ -153,5 +157,40 @@ describe('AmanFirstRunGuide', () => {
         firstRunGuide: { dismissed: true, dismiss() {} },
       }),
     ).toBe(false);
+  });
+});
+
+describe('AmanFirstRunGuide help question', () => {
+  it('saves a changed help choice to the profile at once, keeping the rest of the profile', async () => {
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => profile);
+    const saved: PersonalizationProfile = { ...EMPTY_PERSONALIZATION_PROFILE, user_name: 'Sam', help_areas: ['focus'] };
+    const api = {
+      getProfile: async () => saved,
+      updateProfile,
+      deleteProfile: async () => {},
+    };
+    render(
+      <PersonalizationProvider api={api}>
+        <AmanSetupProvider value={{ modelName: 'local/llama', hasChatted: false }}>
+          <AmanFirstRunGuide placement="chat" />
+        </AmanSetupProvider>
+      </PersonalizationProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Caring for someone' }));
+
+    expect(updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ user_name: 'Sam', help_areas: ['focus', 'caring'] }),
+    );
+  });
+
+  it('leaves the help question out of the Settings placement', async () => {
+    renderGuide({
+      setup: { modelName: 'local/llama', hasChatted: false },
+      placement: 'settings',
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'What would help you most?' })).not.toBeInTheDocument();
   });
 });

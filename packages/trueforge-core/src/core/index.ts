@@ -35,6 +35,8 @@ export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
 export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
+export { measurePromptRequest } from './runtime/promptReport';
+export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
 export {
   extractBase64,
   isAgentInputUserMessage,
@@ -56,10 +58,10 @@ export type {
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
 export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
+export { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
   DOCUMENTS_SERVER_ID,
-  EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
   documentCapability,
 } from './capabilities/builtins/DocumentTools';
@@ -393,7 +395,7 @@ export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/stru
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
 // Skills: the ISkillMounter seam lets hosts plug in their own skill sources
-export { InstructionBuilder } from './InstructionBuilder';
+export { InstructionBuilder, rootAgentIdentity, type RootAgentNames } from './InstructionBuilder';
 export {
   SKILLS_PREAMBLE,
   SkillMounter,
@@ -481,6 +483,7 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
   Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,
@@ -490,7 +493,7 @@ export {
   SILENT_SEARCH_LIMIT,
   createWebSearchTurnState,
   recordResultUrls,
-  remoteImageAskReason,
+  unreturnedUrls,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';

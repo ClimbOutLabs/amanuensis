@@ -199,7 +199,7 @@ The first start of an instance downloads the memory search model once (about 120
 aman import "$WORK/out/$PERSON.zip" --instance $PERSON --display-name "<owner name>"
 ```
 
-`aman import FILE` runs `installer/install.sh instance import <name> FILE`; `--instance` can be left out when the computer has one instance. `--display-name` is how imported chats name the owner; without it the import asks, and Enter keeps the part of the email before the `@`.
+`aman import FILE` runs `installer/install.sh instance import <name> FILE`; `--instance` can be left out when the computer has one instance. `--display-name` is how imported chats name the owner; without it they use the name Aman calls the owner. An instance with no such name asks, and Enter keeps the part of the email before the `@`.
 
 Before anything is written, the import starts the instance once if it never started, waits for the search model with one line ("Waiting for instance ... to finish downloading its search model"), and takes a backup named `<timestamp>-before-import` under `~/.amanuensis/backups/`, which is never pruned. Then it stops the app of that instance, restores the file in a one-off container with no network, and starts the app again. It prints a summary such as "Imported 5 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off)." and exits 0.
 
