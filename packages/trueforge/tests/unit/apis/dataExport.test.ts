@@ -571,6 +571,7 @@ describe('Data export route', () => {
       'agents.json',
       'schedules.json',
       'connectors.json',
+      'model_providers.json',
       'settings.json',
       'audit.json',
     ]);
@@ -747,6 +748,20 @@ describe('Data export route', () => {
     const planted = connectors.find(connector => connector.name === 'planted-connector');
     expect(planted?.manifest).not.toHaveProperty('auth');
     expect(planted?.manifest.url).toBe('https://connector.example.com/mcp/[redacted]/v1');
+  });
+
+  it('exports model provider setups without their keys', async () => {
+    const entries = readZipEntries(await exportZip('alice'));
+    const providers = z
+      .array(z.object({ name: z.string(), manifest: z.object({ type: z.string() }).passthrough() }))
+      .parse(zipEntryJson(entries, 'model_providers.json'));
+    const planted = providers.find(provider => provider.name === 'planted-provider');
+    expect(planted?.manifest).not.toHaveProperty('auth');
+    expect(planted?.manifest).toMatchObject({
+      type: 'custom',
+      base_url: 'https://provider.example.com/v1',
+      models: [{ model_id: 'planted-model', name: 'planted-model' }],
+    });
   });
 
   it('leaves out deployment-bound session fields', async () => {

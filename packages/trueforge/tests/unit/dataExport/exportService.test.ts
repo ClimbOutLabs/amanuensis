@@ -14,6 +14,7 @@ import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -65,6 +66,7 @@ async function makeDeps(
     auditStore: new SentinelAuditStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore: new SqliteModelProviderStore(db),
     listAgents: () => Promise.resolve([]),
     memorySource,
     personaKnowledgeDir: overrides?.personaKnowledgeDir ?? join(dir, 'knowledge'),
@@ -288,6 +290,74 @@ describe('runDataExport memory backends', () => {
       const names = await exportedNames({});
       expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
     });
+  });
+});
+
+describe('runDataExport model providers', () => {
+  const PLANTED_KEY = 'FAKE-KEY-planted-in-the-export-test';
+
+  it('exports each provider setup without its key', async () => {
+    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
+    try {
+      await deps.modelProviderStore.upsertProvider({
+        tenant_id: TENANT_ID,
+        name: 'openai',
+        manifest: {
+          type: 'openai',
+          base_url: 'https://api.openai.com/v1',
+          auth: { api_key: PLANTED_KEY },
+          models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
+        },
+      });
+      await deps.modelProviderStore.upsertProvider({
+        tenant_id: TENANT_ID,
+        name: 'lab-box',
+        manifest: {
+          type: 'custom',
+          name: 'lab-box',
+          base_url: 'https://llm.internal.example.com/v1',
+          models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+        },
+      });
+      const sink = new CollectingWritable();
+      await runDataExport(deps, { ...exportRequest(), secrets: [PLANTED_KEY] }, sink);
+      const entries = readZipEntries(sink.buffer());
+      expect(zipEntryJson(entries, 'model_providers.json')).toEqual([
+        {
+          name: 'lab-box',
+          manifest: {
+            type: 'custom',
+            name: 'lab-box',
+            base_url: 'https://llm.internal.example.com/v1',
+            models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+          },
+        },
+        {
+          name: 'openai',
+          manifest: {
+            type: 'openai',
+            base_url: 'https://api.openai.com/v1',
+            models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
+          },
+        },
+      ]);
+      for (const entry of entries) {
+        expect(entry.data.includes(Buffer.from(PLANTED_KEY))).toBe(false);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('writes an empty providers section when no provider is set up', async () => {
+    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
+    try {
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      expect(zipEntryJson(readZipEntries(sink.buffer()), 'model_providers.json')).toEqual([]);
+    } finally {
+      await close();
+    }
   });
 });
 

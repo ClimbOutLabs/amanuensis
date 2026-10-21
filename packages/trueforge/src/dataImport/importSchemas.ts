@@ -46,6 +46,7 @@ import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
+import { ModelProviderManifestSchema, modelProviderName } from '../schemas/modelProvider';
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import { PersonalizationProfileSchema, validatePersonalizationContent } from '../schemas/personalization';
@@ -553,6 +554,34 @@ export const ImportConnectorRecordSchema = z.object({
 });
 export type ImportConnectorRecord = z.infer<typeof ImportConnectorRecordSchema>;
 export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
+
+/**
+ * A provider setup from an export: the manifest a provider is restored from.
+ * An export never carries a key, so one written into the file means the file
+ * is not an export this Aman made, and the section is refused whole.
+ */
+const ImportModelProviderManifestSchema = ModelProviderManifestSchema.superRefine((manifest, ctx) => {
+  if (manifest.auth !== undefined) {
+    ctx.addIssue({ code: 'custom', message: 'A model provider in an export never carries a key.' });
+  }
+});
+
+export const ImportModelProviderRecordSchema = z
+  .object({
+    name: NameSchema,
+    manifest: ImportModelProviderManifestSchema,
+  })
+  .superRefine((record, ctx) => {
+    if (modelProviderName(record.manifest) !== record.name) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'A model provider entry is named differently from its own setup.',
+        path: ['name'],
+      });
+    }
+  });
+export type ImportModelProviderRecord = z.infer<typeof ImportModelProviderRecordSchema>;
+export const ImportModelProvidersFileSchema = z.array(ImportModelProviderRecordSchema);
 
 /** Permission settings as an export wrote them. Exports from before the maps switch lack it, so it reads as off. */
 const ImportPermissionSettingsSchema = z.object({

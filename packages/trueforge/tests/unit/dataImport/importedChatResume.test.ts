@@ -18,6 +18,7 @@ import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -234,6 +235,7 @@ describe('an imported chat never runs a tool without a fresh approval from the o
       auditStore: new SentinelAuditStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
+      modelProviderStore: new SqliteModelProviderStore(db),
     };
     baseArchive = await exportInstanceArchive({
       instance: { stores, memoryDir: sourceMemory, knowledgeDir: sourceKnowledge },

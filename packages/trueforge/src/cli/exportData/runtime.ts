@@ -130,6 +130,7 @@ async function buildSession<TTransaction>({
           auditStore: stores.auditStore,
           turnArtifactStore: stores.turnArtifactStore,
           mcpServerStore: stores.mcpServerStore,
+          modelProviderStore: stores.modelProviderStore,
           listAgents: () => listUserAgents(userId),
           memorySource,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,

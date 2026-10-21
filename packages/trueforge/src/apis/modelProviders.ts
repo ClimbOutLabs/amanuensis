@@ -53,6 +53,11 @@ function redactModelProvider(manifest: ModelProviderManifest): ModelProviderMani
   };
 }
 
+/** Provider types whose key is optional even when they are first set up: a local endpoint may need none. */
+function providerNeedsKeyAtSetup(manifest: ModelProviderManifest): boolean {
+  return manifest.type !== 'custom' && manifest.type !== 'truefoundry';
+}
+
 function resolveModelProviderManifestForWrite({
   incoming,
   existing,
@@ -60,10 +65,18 @@ function resolveModelProviderManifestForWrite({
   incoming: ModelProviderManifest;
   existing: ModelProviderManifest | undefined;
 }): ModelProviderManifest {
-  if (!('auth' in incoming) || incoming.auth === undefined) {
-    return incoming;
+  if (incoming.auth === undefined) {
+    if (!providerNeedsKeyAtSetup(incoming)) {
+      return incoming;
+    }
+    // No key named on a write that needs one: an update keeps the stored key,
+    // and a first setup without one is refused, as before.
+    if (existing?.auth !== undefined) {
+      return { ...incoming, auth: existing.auth };
+    }
+    throw new MissingStoredSecretError();
   }
-  const existingApiKey = existing && 'auth' in existing ? existing.auth?.api_key : undefined;
+  const existingApiKey = existing?.auth?.api_key;
   return {
     ...incoming,
     auth: {
