@@ -5,10 +5,10 @@ import {
   type PersonalInstanceName,
 } from '../../../../src/runtime/promptReport/personalInstance';
 
-/** Measured 2026-10-21; the memory provider's tools are not captured yet, so they are not counted. */
+/** Measured 2026-10-21 (spaces trimmed, name lookup added, picture rule shortened); the memory provider's tools are not captured yet, so they are not counted. */
 const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<string, number> }> = {
   personal: {
-    total: 12287,
+    total: 12011,
     rows: {
       'agent-identity': 38,
       'current-date': 36,
@@ -29,7 +29,7 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       'agent-capabilities/sub-agents': 263,
       'agent-capabilities/openui': 159,
       'agent-capabilities/active-speaker-context': 91,
-      'agent-capabilities/spaces': 1456,
+      'agent-capabilities/spaces': 1035,
       'agent-capabilities/schedules': 57,
       ask_user_question: 261,
       get_current_datetime: 100,
@@ -54,19 +54,19 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
-      create_space: 281,
-      get_space: 191,
+      create_space: 292,
+      get_space: 201,
       list_blocks: 127,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 531,
+      update_space: 554,
       create_sub_agent: 272,
       tavily_extract: 130,
       tavily_search: 134,
     },
   },
   'personal-with-google': {
-    total: 13352,
+    total: 13076,
     rows: {
       'agent-identity': 38,
       'current-date': 36,
@@ -87,7 +87,7 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       'agent-capabilities/sub-agents': 263,
       'agent-capabilities/openui': 159,
       'agent-capabilities/active-speaker-context': 91,
-      'agent-capabilities/spaces': 1456,
+      'agent-capabilities/spaces': 1035,
       'agent-capabilities/schedules': 57,
       ask_user_question: 261,
       get_current_datetime: 100,
@@ -119,12 +119,12 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       list_schedules: 75,
       pause_schedule: 94,
       resume_schedule: 97,
-      create_space: 281,
-      get_space: 191,
+      create_space: 292,
+      get_space: 201,
       list_blocks: 127,
       list_spaces: 98,
       revert_space: 192,
-      update_space: 531,
+      update_space: 554,
       create_sub_agent: 272,
       tavily_extract: 130,
       tavily_search: 134,

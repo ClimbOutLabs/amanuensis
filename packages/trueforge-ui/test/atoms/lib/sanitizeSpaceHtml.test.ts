@@ -24,10 +24,15 @@ describe('sanitizeSpaceHtml', () => {
     expect(out).toContain('style="color:blue"');
   });
 
-  it('drops an <img> with an https src', () => {
-    const out = sanitizeSpaceHtml('<img src="https://example.com/pic.png" alt="pic">');
-    expect(out).not.toContain('example.com');
-    expect(out).not.toContain('<img');
+  it('keeps an <img> with an https src; the server has already checked where the link came from', () => {
+    const out = sanitizeSpaceHtml('<img src="https://upload.wikimedia.org/a/collie.jpg" alt="pic" width="160">');
+    expect(out).toContain('src="https://upload.wikimedia.org/a/collie.jpg"');
+  });
+
+  it('drops a 0 or 1 pixel <img>, a tracking beacon, even over https', () => {
+    expect(sanitizeSpaceHtml('<img src="https://a.example/p.gif" width="1" height="1">')).not.toContain('<img');
+    expect(sanitizeSpaceHtml('<img src="https://a.example/p.gif" width="0">')).not.toContain('<img');
+    expect(sanitizeSpaceHtml('<img src="https://a.example/p.gif" width="120">')).toContain('<img');
   });
 
   it('keeps an <img> with a data: URI src', () => {
@@ -672,7 +677,7 @@ describe('sanitizeSpaceHtml link and element corpus', () => {
     ['iframe', '<iframe srcdoc="<script>alert(1)</script>"></iframe>', '<iframe'],
     ['object', '<object data="https://evil.example"></object>', '<object'],
     ['embed', '<embed src="https://evil.example">', '<embed'],
-    ['noscript', '<noscript><img src="https://evil.example"></noscript>', 'noscript'],
+    ['noscript', '<noscript><p>x</p><a href="javascript:alert(1)">y</a></noscript>', 'noscript'],
     ['link', '<link rel="stylesheet" href="https://evil.example/x.css">', '<link'],
   ])('removes <%s>', (_label, html, needle) => {
     const out = sanitizeSpaceHtml(html) ?? '';
@@ -740,7 +745,7 @@ describe('sanitizeSpaceHtml reparse stability', () => {
 
     it('still sanitises what an unwrapped element carried', () => {
       const out = sanitizeSpaceHtml(
-        '<label>hello<script>alert(1)</script><img src="https://evil.example/x.png"><a href="javascript:alert(2)">link</a></label>',
+        '<label>hello<script>alert(1)</script><img src="http://evil.example/x.png"><a href="javascript:alert(2)">link</a></label>',
       );
       expect(out).toContain('hello');
       expect(out).toContain('link');
@@ -774,5 +779,29 @@ describe('sanitizeSpaceHtml reparse stability', () => {
     const started = performance.now();
     sanitizeSpaceHtml(`<svg><rect fill="url(#a)${' '.repeat(50_000)}!"/></svg>`);
     expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('sanitizeSpaceHtml unusual URL spellings', () => {
+  it('drops a remote img whose tag and attribute names are upper case or entity-encoded', () => {
+    const upper = sanitizeSpaceHtml('<IMG SRC="http://images.example.net/fox.jpg" ALT="Fox">');
+    expect(upper).not.toContain('fox.jpg');
+    const entity = sanitizeSpaceHtml('<img src="&#x68;ttp://images.example.net/fox.jpg" alt="Fox">');
+    expect(entity).not.toContain('fox.jpg');
+  });
+
+  it('drops a remote URL in any attribute the allow-list does not name, such as poster or action', () => {
+    const out = sanitizeSpaceHtml(
+      '<div poster="https://images.example.net/fox.jpg" data-x="1"><form action="https://x.example.net/">hi</form></div>',
+    );
+    expect(out).not.toContain('fox.jpg');
+    expect(out).not.toContain('x.example.net');
+  });
+
+  it('drops a remote image-set() or url() in a style attribute even when unquoted or escaped', () => {
+    const out = sanitizeSpaceHtml(
+      '<div style="background: \\69mage-set(https://images.example.net/a.jpg 1x)"></div><div style="background:url(https://images.example.net/b.jpg)"></div>',
+    );
+    expect(out).not.toContain('images.example.net');
   });
 });

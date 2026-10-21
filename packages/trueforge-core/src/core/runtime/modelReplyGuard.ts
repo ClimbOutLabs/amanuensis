@@ -29,6 +29,9 @@ export const MAX_TOOL_CALLS_PER_REPLY = 20;
 export const TOO_MANY_TOOL_CALLS_MESSAGE =
   'The model asked for too many tool calls at once, so Aman stopped. Try again.';
 
+/** Shown to the person when a reply hits the output limit, which can leave a tool call half-written. */
+export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran long. Ask it to continue.";
+
 interface ModelReplyGuardOutcome {
   /** The reply with arguments repaired and exact duplicate calls removed. */
   message: RawAssistantMessage;
