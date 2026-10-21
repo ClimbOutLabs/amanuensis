@@ -594,11 +594,16 @@ describe('model providers and the name that come over', () => {
 
       // The seed personas point at test-provider/test-model, which is here now.
       const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
-      expect(personas.map(persona => persona.model_name)).toEqual(['test-provider/test-model', 'test-provider/test-model']);
+      expect(personas.map(persona => persona.model_name)).toEqual([
+        'test-provider/test-model',
+        'test-provider/test-model',
+      ]);
 
       expect(result.summary).toContain('  2 model providers');
       expect(result.summary).toContain('Your model settings came over, but their keys never travel in an export.');
-      expect(result.summary).toContain('Add the key for test-provider in Settings under Models, so its models can answer.');
+      expect(result.summary).toContain(
+        'Add the key for test-provider in Settings under Models, so its models can answer.',
+      );
       expect(result.summary).toContain('Add the key for openai in Settings under Models, so its models can answer.');
       expect(result.summary).not.toContain('was set to a model that is not on this Aman');
     } finally {
@@ -619,7 +624,9 @@ describe('model providers and the name that come over', () => {
       expect(result.summary).toContain(
         'Researcher was set to a model that is not on this Aman, so it now uses openai/gpt-test.',
       );
-      expect(result.summary).toContain('Chef was set to a model that is not on this Aman, so it now uses openai/gpt-test.');
+      expect(result.summary).toContain(
+        'Chef was set to a model that is not on this Aman, so it now uses openai/gpt-test.',
+      );
     } finally {
       await source.close();
       await target.close();
@@ -658,7 +665,10 @@ describe('model providers and the name that come over', () => {
       );
       // No model is here to point at, so the personas keep the names they had.
       const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
-      expect(personas.map(persona => persona.model_name)).toEqual(['test-provider/test-model', 'test-provider/test-model']);
+      expect(personas.map(persona => persona.model_name)).toEqual([
+        'test-provider/test-model',
+        'test-provider/test-model',
+      ]);
     } finally {
       await source.close();
       await target.close();
@@ -733,7 +743,9 @@ describe('model providers and the name that come over', () => {
       const withOne = await withProviders(archive, [testProviderEntry]);
       const result = await runDataImport(importDeps(target), { ...importRequest(withOne), dryRun: true });
       expect(result.summary).toContain('  1 model provider');
-      expect(result.summary).toContain('Add the key for test-provider in Settings under Models, so its models can answer.');
+      expect(result.summary).toContain(
+        'Add the key for test-provider in Settings under Models, so its models can answer.',
+      );
       expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
     } finally {
       await source.close();

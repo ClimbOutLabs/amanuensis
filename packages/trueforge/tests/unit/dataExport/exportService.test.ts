@@ -51,10 +51,11 @@ class CollectingWritable extends Writable {
 async function makeDeps(
   memorySource: MemoryExportSource,
   overrides?: { sessionStore?: DataExportDeps<never>['sessionStore']; personaKnowledgeDir?: string },
-): Promise<{ deps: DataExportDeps<never>; close: () => Promise<void> }> {
+): Promise<{ deps: DataExportDeps<never>; modelProviderStore: SqliteModelProviderStore; close: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), 'tfy-export-service-'));
   const db = createSqliteDb(join(dir, 'test.sqlite'));
   await migrateSqliteToLatest(db);
+  const modelProviderStore = new SqliteModelProviderStore(db);
   const deps: DataExportDeps<never> = {
     sessionStore: overrides?.sessionStore ?? new SqliteSessionStore(db),
     personaStore: new SqlitePersonaStore(db),
@@ -66,13 +67,14 @@ async function makeDeps(
     auditStore: new SentinelAuditStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
-    modelProviderStore: new SqliteModelProviderStore(db),
+    modelProviderStore,
     listAgents: () => Promise.resolve([]),
     memorySource,
     personaKnowledgeDir: overrides?.personaKnowledgeDir ?? join(dir, 'knowledge'),
   };
   return {
     deps,
+    modelProviderStore,
     close: async () => {
       await db.destroy();
       await rm(dir, { recursive: true, force: true });
@@ -297,9 +299,9 @@ describe('runDataExport model providers', () => {
   const PLANTED_KEY = 'FAKE-KEY-planted-in-the-export-test';
 
   it('exports each provider setup without its key', async () => {
-    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
+    const { deps, modelProviderStore, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
     try {
-      await deps.modelProviderStore.upsertProvider({
+      await modelProviderStore.upsertProvider({
         tenant_id: TENANT_ID,
         name: 'openai',
         manifest: {
@@ -309,7 +311,7 @@ describe('runDataExport model providers', () => {
           models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
         },
       });
-      await deps.modelProviderStore.upsertProvider({
+      await modelProviderStore.upsertProvider({
         tenant_id: TENANT_ID,
         name: 'lab-box',
         manifest: {

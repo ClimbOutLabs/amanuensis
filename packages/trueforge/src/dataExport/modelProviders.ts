@@ -6,11 +6,14 @@
  */
 import type { ModelProviderRecord } from '../db/modelProviderStore';
 import type {
-  ConfiguredModel,
   ModelProperties,
+  ModelProviderManifest,
   ModelProviderStreamTimeout,
   ModelProviderType,
 } from '../schemas/modelProvider';
+
+/** One model entry of a provider manifest. */
+type ConfiguredModel = ModelProviderManifest['models'][number];
 
 export interface ExportedModelProvider {
   name: string;

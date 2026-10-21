@@ -3,8 +3,8 @@
  * (type, address, models) can travel and nothing a provider record holds
  * besides that ever reaches the archive.
  */
-import { createExportScrubber } from '../../../src/dataExport/secretScrub';
 import { exportableModelProvider } from '../../../src/dataExport/modelProviders';
+import { createExportScrubber } from '../../../src/dataExport/secretScrub';
 import type { ModelProviderRecord } from '../../../src/db/modelProviderStore';
 
 const PLANTED_KEY = 'FAKE-KEY-planted-in-the-provider-record';
