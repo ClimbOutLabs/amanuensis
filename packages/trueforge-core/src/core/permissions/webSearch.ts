@@ -1,3 +1,6 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResponse } from '../mcp/IMCPServer';
+
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
  * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
@@ -270,6 +273,53 @@ export function recordPrivateReadText(input: { state: WebSearchTurnState; text: 
     return;
   }
   state.privateTexts.push(text);
+}
+
+/** Text a result carries: its text blocks and its structured content. An error result carries none. */
+export function resultTexts(result: CallToolResult): string[] {
+  if (result.isError === true) {
+    return [];
+  }
+  const texts: string[] = [];
+  if (Array.isArray(result.content)) {
+    for (const block of result.content) {
+      if (block.type === 'text') {
+        texts.push(block.text);
+      }
+    }
+  }
+  if (result.structuredContent !== undefined) {
+    texts.push(JSON.stringify(result.structuredContent));
+  }
+  return texts;
+}
+
+/** The text of a mail or calendar call's response, for the checks. A call that returned no result carries none. */
+export function privateReadText(response: CallToolResponse): string {
+  return 'result' in response ? resultTexts(response.result).join('\n') : '';
+}
+
+/**
+ * Runs one mail or calendar call with its mark. The call is marked as it dispatches, and its text is kept when it
+ * has any. A call that fails, throws or returns nothing keeps no text, so the mark stays without one and the next
+ * search asks.
+ */
+export async function runPrivateRead<T>(input: {
+  state: WebSearchTurnState;
+  run: () => Promise<T>;
+  textOf: (response: T) => string;
+}): Promise<T> {
+  markPrivateDataRead(input.state);
+  let response: T | undefined;
+  try {
+    response = await input.run();
+    return response;
+  } finally {
+    const text = response === undefined ? '' : input.textOf(response);
+    if (text !== '') {
+      recordPrivateReadText({ state: input.state, text });
+    }
+  }
 }
 
 /**

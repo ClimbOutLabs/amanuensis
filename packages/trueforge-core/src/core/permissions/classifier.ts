@@ -1617,14 +1617,6 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
 }
 
 /**
- * Whether a decision reason is a mail or calendar read. The tool set marks each such call when it dispatches, not here,
- * because a call is classified before it runs and again at dispatch.
- */
-export function isPrivateReadReason(reason: string | undefined): boolean {
-  return reason === 'gmail_read' || reason === 'calendar_read';
-}
-
-/**
  * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
  * read does not mark the chat as holding a secret.
  */

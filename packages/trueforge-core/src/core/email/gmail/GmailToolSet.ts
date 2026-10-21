@@ -3,16 +3,18 @@ import { z } from 'zod';
 import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
 import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
+import type { ApprovalDecision } from '../../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
 import { errorResult, failureResult, jsonResult as neutralizedJsonResult } from '../../google/toolResults';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
-import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
+import { toolResultResponse, type CallToolResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
 import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
+import { privateReadText, runPrivateRead } from '../../permissions/webSearch';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
@@ -44,6 +46,7 @@ import {
   GET_THREAD_TOOL_NAME,
   GetThreadSchema,
   GMAIL_SERVER_ID,
+  isGmailReadToolName,
   isGmailWriteToolName,
   LIST_DRAFTS_TOOL_NAME,
   LIST_INBOX_THREADS_TOOL_NAME,
@@ -227,6 +230,22 @@ export class GmailToolSet extends LocalToolMCP {
    * holds it for a send (whose hash is remembered so the send can refuse if it changes), the validated call
    * for a new or changed draft. Model prose never reaches the card.
    */
+  /** A read is counted as private data when it dispatches; the text it returns is kept for later checks. */
+  override async callTool(
+    params: CallToolRequest['params'],
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
+    if (!isGmailReadToolName(params.name)) {
+      return super.callTool(params, approvalDecision, context);
+    }
+    return runPrivateRead({
+      state: this.#options.sentinel.web_search,
+      run: () => super.callTool(params, approvalDecision, context),
+      textOf: privateReadText,
+    });
+  }
+
   override async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,

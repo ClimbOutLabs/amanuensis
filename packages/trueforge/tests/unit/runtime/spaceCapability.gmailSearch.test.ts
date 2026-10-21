@@ -19,6 +19,7 @@ import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/run
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { INERT_WEB_SEARCH_TOOL, startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
+import { installRecordedMail, MAIL_SENDER_NAME } from '../../fixtures/recordedMail';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -92,11 +93,19 @@ describe('a web search after the chat read mail', () => {
   let env: SqliteTestDatabase;
   let connections: SqliteGoogleConnectionStore;
 
+  let mailFetch: ReturnType<typeof installRecordedMail>;
+
   beforeAll(async () => {
     inert = await startInertMcpServer({ webSearch: true });
   });
   afterAll(async () => {
     await inert.close();
+  });
+  beforeEach(() => {
+    mailFetch = installRecordedMail();
+  });
+  afterEach(() => {
+    mailFetch.restore();
   });
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
@@ -168,10 +177,12 @@ describe('a web search after the chat read mail', () => {
     return { finder, mail };
   }
 
-  const search = (finder: IToolSet) =>
-    finder.toolCallInfo({ name: INERT_WEB_SEARCH_TOOL, arguments: { query: 'lisbon tapas' } });
+  const search = (finder: IToolSet, query = 'lisbon tapas') =>
+    finder.toolCallInfo({ name: INERT_WEB_SEARCH_TOOL, arguments: { query } });
+  /** A search that copies the sender's name from the mail the chat just read. */
+  const copiedSender = `${MAIL_SENDER_NAME} tapas`;
 
-  it('searches silently until mail is read, then asks', async () => {
+  it('searches silently before a read, then a clean query runs checked and a copied sender name asks', async () => {
     const resolved = await resolver().resolveAgentDefinition({
       spec: spec(),
       ...OWNER,
@@ -181,10 +192,11 @@ describe('a web search after the chat read mail', () => {
     });
     const { finder, mail } = await toolSetsOf(resolved);
     expect((await search(finder)).tier).toBe(1);
-    await mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
-    const after = await search(finder);
-    expect(after.tier).toBe(3);
-    expect(after.is_approval_required).toBe(true);
+    await mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+    expect(await search(finder)).toMatchObject({ tier: 1, tier_reason: 'mcp_search_after_read_checked' });
+    const copied = await search(finder, copiedSender);
+    expect(copied.tier).toBe(3);
+    expect(copied.is_approval_required).toBe(true);
   });
 
   it('keeps asking in a later turn of the same chat, by carrying the flag in the root thread state', async () => {
@@ -198,7 +210,7 @@ describe('a web search after the chat read mail', () => {
     const { mail } = await toolSetsOf(first);
     const capability = (first.extraCapabilities ?? []).find(candidate => candidate.state !== undefined);
     expect(capability?.state?.key).toBe('tfy.private_data_read');
-    await mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
+    await mail.callTool({ name: 'list_inbox_threads', arguments: {} });
     const saved: unknown[] = [];
     for (const processor of capability?.postToolCallProcessors ?? []) {
       for await (const output of processor.processPostToolCall({
@@ -278,12 +290,12 @@ describe('a web search after the chat read mail', () => {
 
     it('asks an attended chat, and holds the search for the owner in a scheduled run', async () => {
       const attended = await resolvedForSource(null);
-      await attended.mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
-      expect((await search(attended.finder)).is_approval_required).toBe(true);
+      await attended.mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+      expect((await search(attended.finder, copiedSender)).is_approval_required).toBe(true);
 
       const scheduled = await resolvedForSource({ type: 'schedule', id: 'sched-1', run_id: 'run-1' });
-      await scheduled.mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
-      const held = await search(scheduled.finder);
+      await scheduled.mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+      const held = await search(scheduled.finder, copiedSender);
       expect(held.is_approval_required).toBe(true);
       expect(held.pre_dispatch_failure).toBeUndefined();
       expect(held.tier).toBe(3);

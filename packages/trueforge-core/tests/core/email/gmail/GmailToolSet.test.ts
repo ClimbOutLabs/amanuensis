@@ -3,7 +3,6 @@ import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { UNTRUSTED_NOTICE } from '../../../../src/core/email/gmail/results';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
-import { ToolSet } from '../../../../src/core/mcp/ToolSet';
 import { createSentinelHostContext } from '../../../../src/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
@@ -521,16 +520,10 @@ describe('GmailToolSet classification', () => {
 
   it('marks the turn as having read private data when the read dispatches, not when it is previewed', async () => {
     const { tools, sentinel } = await build({ routes: [] });
-    const set = new ToolSet({
-      source: tools,
-      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [] },
-      preload: false,
-      sentinel,
-    });
     expect(sentinel.web_search.privateDataRead).toBe(false);
-    await set.toolCallInfo({ name: 'list_inbox_threads', arguments: {} });
+    await tools.toolCallInfo({ name: 'list_inbox_threads', arguments: {} });
     expect(sentinel.web_search.privateDataRead).toBe(false);
-    await set.callTool({ name: 'list_inbox_threads', arguments: {} });
+    await tools.callTool({ name: 'list_inbox_threads', arguments: {} });
     expect(sentinel.web_search.privateDataRead).toBe(true);
   });
 });

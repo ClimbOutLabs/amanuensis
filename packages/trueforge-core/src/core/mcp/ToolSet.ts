@@ -1,4 +1,4 @@
-import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -8,7 +8,6 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
-import { isPrivateReadReason } from '../permissions/classifier';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
@@ -16,10 +15,9 @@ import { isMapsToolName } from '../permissions/mapsToolNames';
 import {
   countSilentFetches,
   isSearchAskReason,
-  markPrivateDataRead,
   namesUrl,
-  recordPrivateReadText,
   recordResultUrls,
+  resultTexts,
   isSilentSearchReason,
   runOneAtATime,
   type SearchProviderGrant,
@@ -115,30 +113,6 @@ export function stampSentinelDecision(input: {
 function searchNotRunText(input: { detail: string; unattended: boolean }): string {
   const next = input.unattended ? 'Continue without it.' : 'Try again; it will be sent for approval.';
   return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
-}
-
-/** Set during admission: whether this call is a mail or calendar read that is about to dispatch. */
-interface CallAdmission {
-  privateRead: boolean;
-}
-
-/** Text a search result carries: its text blocks and its structured content. */
-function resultTexts(result: CallToolResult): string[] {
-  if (result.isError === true) {
-    return [];
-  }
-  const texts: string[] = [];
-  if (Array.isArray(result.content)) {
-    for (const block of result.content) {
-      if (block.type === 'text') {
-        texts.push(block.text);
-      }
-    }
-  }
-  if (result.structuredContent !== undefined) {
-    texts.push(JSON.stringify(result.structuredContent));
-  }
-  return texts;
 }
 
 function autoDenyMessage(decision: TierDecision): string {
@@ -292,7 +266,6 @@ export class ToolSet implements IToolSet {
   ): Promise<CallToolResponse> {
     let listed: ListToolsResponse;
     let tool: AgentToolSchema | undefined;
-    const admission: CallAdmission = { privateRead: false };
     try {
       // Prime the source and surface auth-required before the annotation-based allow/approval checks
       // (which would otherwise see missing annotations and wrongly 403).
@@ -304,7 +277,7 @@ export class ToolSet implements IToolSet {
 
       await this.assertToolAllowed(params.name, tool?.annotations);
 
-      const refusal = await this.admit({ params, tool, decision, admission });
+      const refusal = await this.admit({ params, tool, decision });
       if (refusal !== undefined) {
         return refusal;
       }
@@ -323,14 +296,6 @@ export class ToolSet implements IToolSet {
       params,
       response: await this.source.callTool(params, decision, context),
     });
-    if (admission.privateRead && this.sentinel !== undefined) {
-      // A dispatched mail or calendar call keeps its text, or nothing if it returned no result, so every
-      // mark has a text the later checks compare against.
-      recordPrivateReadText({
-        state: this.sentinel.web_search,
-        text: isCallToolResponseResult(response) ? resultTexts(response.result).join('\n') : '',
-      });
-    }
     if (
       this.pages !== undefined &&
       this.pagesScope !== undefined &&
@@ -374,7 +339,6 @@ export class ToolSet implements IToolSet {
     params: CallToolRequest['params'];
     tool: AgentToolSchema | undefined;
     decision: ApprovalDecision | undefined;
-    admission: CallAdmission;
   }): Promise<CallToolResponse | undefined> {
     const work = () => this.admitNow(input);
     return this.searchProvider && this.sentinel !== undefined
@@ -386,12 +350,10 @@ export class ToolSet implements IToolSet {
     params,
     tool,
     decision,
-    admission,
   }: {
     params: CallToolRequest['params'];
     tool: AgentToolSchema | undefined;
     decision: ApprovalDecision | undefined;
-    admission: CallAdmission;
   }): Promise<CallToolResponse | undefined> {
     const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
     if (tool_info.pre_dispatch_failure !== undefined) {
@@ -433,12 +395,6 @@ export class ToolSet implements IToolSet {
       if (sent !== undefined) {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
       }
-    }
-    // The reason is read from the stamped info, since a source that classifies its own tools leaves no classification here.
-    if (isPrivateReadReason(tool_info.tier_reason) && this.sentinel !== undefined) {
-      // Marked once per call that dispatches; classification alone runs twice for one call, so it does not count.
-      markPrivateDataRead(this.sentinel.web_search);
-      admission.privateRead = true;
     }
     if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
