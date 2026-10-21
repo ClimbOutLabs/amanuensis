@@ -53,7 +53,7 @@ function purpose(value: string): VerifyCommandPurpose {
 }
 
 function proposalSourceKind(value: string): VerifyCommandProposalSourceKind {
-  if (value === 'agents_md' || value === 'package_json') {
+  if (value === 'agents_md' || value === 'makefile' || value === 'package_json' || value === 'pyproject_toml') {
     return value;
   }
   throw new Error(`invalid verification command proposal source: ${value}`);
