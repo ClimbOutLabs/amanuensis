@@ -135,6 +135,9 @@ import {
   type WebSearchTurnState,
 } from './webSearch';
 
+import type { CaldavEventReview } from '../calendar/caldav/eventReview';
+import { classifyCaldavTool } from './caldavTier';
+
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
   tool_name: string;
@@ -152,6 +155,8 @@ export interface SentinelAction {
   mcp_server_host?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
+  /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
+  caldav_event?: CaldavEventReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
@@ -2434,6 +2439,26 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           connector: connectorBindingFor(action),
         }),
       });
+    }
+  }
+
+  if (action.tool_type === 'mcp') {
+    const caldav = await classifyCaldavTool({
+      action,
+      review: action.caldav_event ?? null,
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
+        }),
+    });
+    if (caldav !== undefined) {
+      if (caldav.tier === 1 && caldav.sensitive_read) {
+        markPrivateDataRead(ctx.web_search);
+      }
+      return caldav;
     }
   }
 
