@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
-const PW_ROOT = '/home/user/buildbox-playwright';
+// Optional: set BUILDBOX_PLAYWRIGHT_ROOT to a folder whose node_modules holds playwright; unset uses the normal `playwright` package.
+const PW_ROOT = process.env.BUILDBOX_PLAYWRIGHT_ROOT;
 const TRUEFORGE_DIR = join(REPO_ROOT, 'packages/trueforge');
 
 const args = process.argv.slice(2);
@@ -21,6 +22,10 @@ console.log(`[ui-test] scenario=${scenario} job=${jobId}`);
 
 async function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
+}
+
+async function loadPlaywright() {
+  return PW_ROOT ? import(`${PW_ROOT}/node_modules/playwright/index.mjs`) : import('playwright');
 }
 
 async function waitFor(url, timeoutMs, label) {
@@ -37,7 +42,7 @@ async function waitFor(url, timeoutMs, label) {
 
 async function main() {
   if (scenario === 'smoke') {
-    const pw = await import(`${PW_ROOT}/node_modules/playwright/index.mjs`);
+    const pw = await loadPlaywright();
     const browser = await pw.chromium.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
@@ -147,7 +152,7 @@ async function main() {
 
   // Browser test
   console.log('[ui-test] === Browser test ===');
-  const pw = await import(`${PW_ROOT}/node_modules/playwright/index.mjs`);
+  const pw = await loadPlaywright();
   const browser = await pw.chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
