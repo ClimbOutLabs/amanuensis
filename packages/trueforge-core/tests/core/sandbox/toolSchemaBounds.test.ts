@@ -176,7 +176,7 @@ function requiredFieldsOf(inputSchema: unknown): string[] {
 describe('tools with rewritten descriptions keep the fields the model must send', () => {
   it.each([
     ['exec', ['command', 'intent', 'purpose']],
-    ['run_code', ['code', 'language']],
+    ['run_code', ['language']],
     ['ask_user_question', ['options', 'question']],
     ['create_sub_agent', ['input', 'name']],
   ])('%s', async (name, required) => {

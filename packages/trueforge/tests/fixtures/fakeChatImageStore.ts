@@ -8,7 +8,6 @@ import type {
 
 export class FakeChatImageStore implements IChatImageStore {
   readonly images = new Map<string, ChatImageWithData>();
-  readonly silentAttempts = new Map<string, number>();
 
   putImage(input: PutChatImageInput): Promise<ChatImageRecord> {
     const existing = [...this.images.values()].find(
@@ -54,25 +53,6 @@ export class FakeChatImageStore implements IChatImageStore {
           image.source_key === input.source_key,
       ),
     );
-  }
-
-  countSilentAttempts(input: { tenant_id: string; session_id: string; turn_id: string }): Promise<number> {
-    return Promise.resolve(this.silentAttempts.get(`${input.tenant_id} ${input.session_id} ${input.turn_id}`) ?? 0);
-  }
-
-  reserveSilentAttempt(input: {
-    tenant_id: string;
-    session_id: string;
-    turn_id: string;
-    limit: number;
-  }): Promise<boolean> {
-    const key = `${input.tenant_id} ${input.session_id} ${input.turn_id}`;
-    const taken = this.silentAttempts.get(key) ?? 0;
-    if (taken >= input.limit) {
-      return Promise.resolve(false);
-    }
-    this.silentAttempts.set(key, taken + 1);
-    return Promise.resolve(true);
   }
 
   deleteImagesOlderThan(input: { older_than: string }): Promise<number> {

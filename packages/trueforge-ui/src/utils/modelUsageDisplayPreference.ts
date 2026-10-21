@@ -1,7 +1,7 @@
 import { createBooleanDisplayPreference } from './booleanDisplayPreference.js';
 
 /**
- * Whether the model and cost line is shown under answers. A display preference only: the server
+ * Whether the model and cost line is shown in answer details. A display preference only: the server
  * records usage either way. Kept in this browser like the color theme, and on unless switched off.
  */
 export const MODEL_USAGE_DISPLAY_STORAGE_KEY = 'aman.show_model_usage';

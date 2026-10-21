@@ -54,6 +54,14 @@ The Agent has only the tools listed in this prompt. It cannot generate, edit, or
 `;
 
 /**
+ * Web pages carry banners, logos and adverts. Left to itself a model embeds them in a reply, and the
+ * person sees pictures they never asked for. The chat only shows an image the person asked for.
+ */
+export const WEB_IMAGES_PROMPT = dedent`
+Show a picture in a reply only when the person asked for one or the picture is the answer, such as a map, a chart, or an image they sent or asked about. Never add an image from a web page you searched or read, such as a photo, banner, logo, or advert. Name the page or link in words instead.
+`;
+
+/**
  * A greeting or a statement of intent is not a task. Without this, a model facing a one-line
  * "ready to..." reply and nothing concrete to act on will start guessing: list tools, open a
  * sandbox, try an edit, then reach for an unrelated tool, racking up approval prompts for work

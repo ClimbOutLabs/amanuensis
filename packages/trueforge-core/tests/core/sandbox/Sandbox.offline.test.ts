@@ -1,5 +1,6 @@
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
+import { PACKAGE_UNAVAILABLE_RULE } from '../../../src/core/sandbox/packageMirrors';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -71,6 +72,14 @@ describe('sandbox tool descriptions follow the provider network', () => {
     expect(runCode).not.toContain('beautifulsoup4');
     expect(runCode).toContain('pandas');
     expect(runCode).toContain('If a network call fails, do not retry it through exec or any shell.');
+  });
+
+  it('give run_code and the slot prompt the same rule for a package that cannot be downloaded', () => {
+    const sandbox = makeSandbox(makeProvider({ network: 'none' }));
+    const runCode = toolDescription(sandbox, SANDBOX_RUN_CODE_TOOL_NAME);
+
+    expect(runCode).toContain(`Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`);
+    expect(runCode).not.toContain('instead of installing it');
   });
 
   it('keep the existing wording when the provider may have a network', () => {
