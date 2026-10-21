@@ -12,6 +12,7 @@ describe('sentinelSettingsServices', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: false,
     });
 
     expect(await services.isOffline({ tenant_id: 't1', created_by: 'alice' })).toBe(true);
@@ -22,6 +23,8 @@ describe('sentinelSettingsServices', () => {
     expect(await services.searchWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(true);
     expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(true);
     expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(false);
+    expect(await services.sandboxWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(false);
+    expect(await services.sandboxWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(true);
   });
 
   it('reflects a change on the next read', async () => {
@@ -35,6 +38,7 @@ describe('sentinelSettingsServices', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: undefined,
       maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
     });
     expect((await services.tier2AutoAllow(alice)).has('file_write')).toBe(true);
   });

@@ -25,6 +25,7 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
     tier2_auto_allow: [],
     search_without_asking: true,
     maps_without_asking: false,
+    sandbox_without_asking: true,
     ...patch,
   }));
   const api: SentinelApi = {
@@ -35,6 +36,7 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
@@ -123,6 +125,7 @@ describe('SentinelAuditFeed', () => {
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>
@@ -146,6 +149,7 @@ describe('SentinelAuditFeed', () => {
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>

@@ -207,6 +207,7 @@ export interface SentinelUserSettingsTable {
   tier2_auto_allow: JSONColumnType<Tier2ActionKind[], Tier2ActionKind[] | string, Tier2ActionKind[] | string>;
   search_without_asking: boolean;
   maps_without_asking: boolean;
+  sandbox_without_asking: boolean;
   created_at: Date;
   updated_at: Date;
 }

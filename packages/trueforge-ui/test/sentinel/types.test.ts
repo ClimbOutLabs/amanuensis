@@ -610,6 +610,7 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
@@ -629,6 +630,7 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 
@@ -642,12 +644,19 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
   });
 
+  it('reads the sandbox setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { sandbox_without_asking: false } }).sandbox_without_asking).toBe(false);
+    expect(parseUserSettings({ data: {} }).sandbox_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { sandbox_without_asking: 'no' } }).sandbox_without_asking).toBe(true);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 });

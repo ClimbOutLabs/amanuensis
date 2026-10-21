@@ -7447,6 +7447,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "package_downloads_allowed": {
+            "type": "boolean"
+          },
           "revision": {
             "description": "Optimistic-concurrency revision.",
             "minimum": 0,
@@ -7462,6 +7465,7 @@
           "name",
           "clone_url",
           "default_branch",
+          "package_downloads_allowed",
           "revision",
           "created_at",
           "updated_at"
@@ -8123,8 +8127,16 @@
       },
       "SentinelUserSettings": {
         "properties": {
+          "maps_without_asking": {
+            "description": "While on, map requests run without asking unless private data was read in this chat.",
+            "type": "boolean"
+          },
           "offline_mode": {
             "description": "While on, actions that reach outside this machine are denied automatically.",
+            "type": "boolean"
+          },
+          "sandbox_without_asking": {
+            "description": "While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "search_without_asking": {
@@ -8145,7 +8157,9 @@
         "required": [
           "offline_mode",
           "tier2_auto_allow",
-          "search_without_asking"
+          "search_without_asking",
+          "maps_without_asking",
+          "sandbox_without_asking"
         ],
         "type": "object"
       },
@@ -8915,6 +8929,23 @@
           "schedule"
         ],
         "type": "string"
+      },
+      "SetPackageDownloadsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "description": "Optimistic-concurrency revision.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "type": "object"
       },
       "SetSessionFolderRequest": {
         "additionalProperties": false,
@@ -11931,8 +11962,16 @@
       },
       "UpdateSentinelUserSettingsRequest": {
         "properties": {
+          "maps_without_asking": {
+            "description": "New maps setting; omitted keeps the current value.",
+            "type": "boolean"
+          },
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "sandbox_without_asking": {
+            "description": "New sandbox setting; omitted keeps the current value.",
             "type": "boolean"
           },
           "search_without_asking": {
@@ -16633,6 +16672,85 @@
           "repository-commands"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/repositories/{repository_id}/package-downloads": {
+      "post": {
+        "description": "When allowed, the sandbox may download this repo's packages from the public package sites through download-only mirrors. Nothing can be published back.",
+        "parameters": [
+          {
+            "description": "Stable repository identifier.",
+            "in": "path",
+            "name": "repository_id",
+            "required": true,
+            "schema": {
+              "description": "Stable repository identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPackageDownloadsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetRepositoryResponse"
+                }
+              }
+            },
+            "description": "Repository."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such repository, session, command, or proposal for this user."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Repository name or revision conflict."
+          }
+        },
+        "summary": "Allow or stop package downloads for a repository",
+        "tags": [
+          "Repositories"
+        ],
+        "x-fern-sdk-group-name": [
+          "repositories"
+        ],
+        "x-fern-sdk-method-name": "set_package_downloads"
       }
     },
     "/api/v1/schedules": {
