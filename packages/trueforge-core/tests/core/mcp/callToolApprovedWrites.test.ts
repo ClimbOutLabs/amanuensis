@@ -56,6 +56,7 @@ async function classifyApproveDispatch(input: {
     memoState: createToolCallMemoState(),
     sentinel: {
       services: input.sentinel.services,
+      web_search: input.sentinel.web_search,
       identity: {
         tenant_id: input.sentinel.tenant_id,
         created_by: input.sentinel.created_by,
@@ -149,6 +150,7 @@ describe('an approved send_draft through call_tool', () => {
       memoState: createToolCallMemoState(),
       sentinel: {
         services: sentinel.services,
+        web_search: sentinel.web_search,
         identity: {
           tenant_id: sentinel.tenant_id,
           created_by: sentinel.created_by,
