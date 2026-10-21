@@ -195,4 +195,193 @@ export class SessionRepositoryClient {
 
         return handleNonStatusCodeError(_response.error, _response.rawResponse, "DELETE", "/api/v1/sessions/{session_id}/repository");
     }
+
+    /**
+     * Uses the GitHub connector attached to this chat. Without one, the answer says to connect GitHub.
+     *
+     * @param {string} session_id - Session identifier.
+     * @param {SessionRepositoryClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
+     * @throws {@link TrueForge.BadGatewayError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.sessionRepository.listGithubRepositories("session_id")
+     */
+    public listGithubRepositories(session_id: string, requestOptions?: SessionRepositoryClient.RequestOptions): core.HttpResponsePromise<TrueForge.ListGithubRepositoriesResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__listGithubRepositories(session_id, requestOptions));
+    }
+
+    private async __listGithubRepositories(session_id: string, requestOptions?: SessionRepositoryClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.ListGithubRepositoriesResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/sessions/${core.url.encodePathParam(session_id)}/repository/github-repositories`),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.ListGithubRepositoriesResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 422: throw new TrueForge.UnprocessableEntityError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 502: throw new TrueForge.BadGatewayError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/v1/sessions/{session_id}/repository/github-repositories");
+    }
+
+    /**
+     * Reads one GitHub repo and its branches, using this chat GitHub connector when one is attached.
+     *
+     * @param {string} session_id - Session identifier.
+     * @param {TrueForge.GetGithubRepositorySessionRepositoryRequest} request
+     * @param {SessionRepositoryClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
+     * @throws {@link TrueForge.BadGatewayError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.sessionRepository.getGithubRepository("session_id")
+     */
+    public getGithubRepository(session_id: string, request: TrueForge.GetGithubRepositorySessionRepositoryRequest = {}, requestOptions?: SessionRepositoryClient.RequestOptions): core.HttpResponsePromise<TrueForge.GetGithubRepositoryDetailsResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__getGithubRepository(session_id, request, requestOptions));
+    }
+
+    private async __getGithubRepository(session_id: string, request: TrueForge.GetGithubRepositorySessionRepositoryRequest = {}, requestOptions?: SessionRepositoryClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.GetGithubRepositoryDetailsResponse>> {
+        const { cloneUrl } = request;
+        const _queryParams: Record<string, unknown> = {
+            clone_url: cloneUrl
+        };
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/sessions/${core.url.encodePathParam(session_id)}/repository/github-repository`),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().addMany(_queryParams).mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.GetGithubRepositoryDetailsResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400: throw new TrueForge.BadRequestError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 422: throw new TrueForge.UnprocessableEntityError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 502: throw new TrueForge.BadGatewayError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/v1/sessions/{session_id}/repository/github-repository");
+    }
+
+    /**
+     * Checks the repo size and branch on GitHub, registers the repo, and binds the chat to the checkout path the clone will use.
+     *
+     * @param {string} session_id - Session identifier.
+     * @param {TrueForge.StartRepositoryWorkRequest} request
+     * @param {SessionRepositoryClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
+     * @throws {@link TrueForge.BadGatewayError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.sessionRepository.startWork("session_id", {
+     *         branch: "branch",
+     *         cloneUrl: "clone_url"
+     *     })
+     */
+    public startWork(session_id: string, request: TrueForge.StartRepositoryWorkRequest, requestOptions?: SessionRepositoryClient.RequestOptions): core.HttpResponsePromise<TrueForge.StartRepositoryWorkResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__startWork(session_id, request, requestOptions));
+    }
+
+    private async __startWork(session_id: string, request: TrueForge.StartRepositoryWorkRequest, requestOptions?: SessionRepositoryClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.StartRepositoryWorkResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/sessions/${core.url.encodePathParam(session_id)}/repository/start-work`),
+            method: "POST",
+            headers: _headers,
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(serializers.StartRepositoryWorkRequest.jsonOrThrow(request, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true }), requestOptions?.additionalBodyParameters),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.StartRepositoryWorkResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400: throw new TrueForge.BadRequestError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 409: throw new TrueForge.ConflictError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 422: throw new TrueForge.UnprocessableEntityError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 502: throw new TrueForge.BadGatewayError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "POST", "/api/v1/sessions/{session_id}/repository/start-work");
+    }
 }

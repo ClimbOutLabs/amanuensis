@@ -100,6 +100,13 @@ upgrade_switch() {
   log_event "upgrade to $REL_APP_TAG"
 }
 
+# Runs the doctor so the app's saved report is current when an upgrade finds nothing to change; its own result is not used.
+upgrade_report() {
+  [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ] || return 0
+  [ -x "$(doctor_shim)" ] || return 0
+  AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor --json >/dev/null 2>&1 || true
+}
+
 # The source a branch that tracks nothing would be pulled from: the checkout's only remote, when
 # it has exactly one. With no remote, or several to choose from, there is no safe guess.
 upgrade_fallback_remote() {
@@ -177,6 +184,7 @@ cmd_upgrade() {
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."
+      upgrade_report
       return 0
     fi
     if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
@@ -190,6 +198,7 @@ cmd_upgrade() {
     for name in $(reg_names); do
       instance_up "$name" || exit 1
     done
+    upgrade_report
     return 0
   fi
   if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
@@ -220,6 +229,6 @@ cmd_upgrade() {
     say "Upgraded to $REL_APP_TAG. No backup was needed, since no instance had data yet."
   fi
   if [ -x "$(doctor_shim)" ]; then
-    DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
+    AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
   fi
 }

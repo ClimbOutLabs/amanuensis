@@ -1249,13 +1249,21 @@ export async function classifyUnstampedToolCall(input: {
   ) {
     return info;
   }
+  // A deferred call_tool call is judged on the tool it names, not the wrapper:
+  // when the tool set resolved the underlying tool, the arguments classified
+  // (and the approval token minted over) are the wrapper's inner input, the
+  // same value dispatch verifies against.
+  const effectiveParams =
+    info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(canonical_params) ?? canonical_params)
+      : canonical_params;
   const decision = await classifyHostToolCall({
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
     action: {
       tool_name: info.original_tool_name,
-      canonical_params,
+      canonical_params: effectiveParams,
       tool_type: info.type,
       ...(connector === undefined
         ? {}
@@ -1538,7 +1546,8 @@ export class AgentThread {
     this.currentContextUsage = input.currentContextUsage ?? getEmptyCurrentContextUsage();
     this.agentInfo = input.agentInfo;
     this.preComputedCompletion = input.preComputedCompletion;
-    this.sandbox = input.sandbox;
+    // A read-only definition gets no sandbox at all, so no sandbox tool, staged upload, or repository refresh can run.
+    this.sandbox = this.definition.readOnly ? undefined : input.sandbox;
     this.chatApprovalGrants = input.chatApprovalGrants ?? new Set<string>();
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
@@ -1570,7 +1579,8 @@ export class AgentThread {
       : new Map<string, number>();
 
     const capabilities = input.capabilities ?? [];
-    this.systemToolSets = capabilities.flatMap(c => c.systemToolSets ?? []);
+    // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
+    this.systemToolSets = this.definition.readOnly ? [] : capabilities.flatMap(c => c.systemToolSets ?? []);
     this.preLLMContextProcessors = capabilities.flatMap(c => c.preLLMProcessors ?? []);
     this.preEphemeralLLMContextProcessors = capabilities.flatMap(c => c.preLLMEphemeralProcessors ?? []);
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
@@ -1597,8 +1607,9 @@ export class AgentThread {
       }
     }
 
-    if (this.definition.toolSets?.length) {
-      this.deferredTool = new DeferredTool(this.definition.toolSets, {
+    const connectorToolSets = this.definition.readOnly ? [] : (this.definition.toolSets ?? []);
+    if (connectorToolSets.length) {
+      this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
         // Lets call_tool route a mis-addressed host (built-in) tool name to the real
@@ -1799,6 +1810,7 @@ export class AgentThread {
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
               tool_name: pending.tool_info.original_tool_name,
+              mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }
         }
@@ -2611,7 +2623,7 @@ export class AgentThread {
     if (this.deferredTool) {
       tfyManagedServers.push(this.deferredTool);
     }
-    const userServers = [...(this.definition.toolSets ?? [])];
+    const userServers = this.definition.readOnly ? [] : [...(this.definition.toolSets ?? [])];
 
     const { convertedTools, initializationInfo, authRequirementInfo } = await convertMCPServersToTools({
       tfyManagedServers,
@@ -4370,6 +4382,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };
       yield event;

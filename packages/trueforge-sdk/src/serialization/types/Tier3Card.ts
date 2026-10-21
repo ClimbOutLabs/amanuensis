@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
 import { Tier3Email } from "./Tier3Email.js";
+import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
 
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> = core.serialization.object({
@@ -17,6 +18,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         "outboundText": core.serialization.property("outbound_text", core.serialization.string().nullable()),
         "outboundTruncated": core.serialization.property("outbound_truncated", core.serialization.boolean()),
         "parsedCommand": core.serialization.property("parsed_command", core.serialization.string().nullable()),
+        "persona": Tier3Persona.optionalNullable(),
         "plainWhat": core.serialization.property("plain_what", core.serialization.string()),
         "plainWhy": core.serialization.property("plain_why", core.serialization.string().nullable()),
         "recipient": core.serialization.string().nullable(),
@@ -35,6 +37,7 @@ export declare namespace Tier3Card {
         outbound_text?: string | null;
         outbound_truncated: boolean;
         parsed_command?: string | null;
+        persona?: (Tier3Persona.Raw | null | undefined) | null;
         plain_what: string;
         plain_why?: string | null;
         recipient?: string | null;

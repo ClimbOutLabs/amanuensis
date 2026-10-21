@@ -656,7 +656,7 @@ check_result() {
   local name
   [ -x "$(doctor_shim)" ] || return 0
   # Includes the model and the public https checks, which wait on the network.
-  DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
+  AMAN_REPORT_COMMAND=install DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
   done

@@ -432,6 +432,7 @@ describe('Data export route', () => {
       tier2_auto_allow: undefined,
       search_without_asking: undefined,
       maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
     });
 
     // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.

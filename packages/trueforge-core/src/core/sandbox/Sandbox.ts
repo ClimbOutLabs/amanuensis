@@ -45,7 +45,7 @@ import {
   canonicalWriteTarget,
   classifyContextFor,
   classifyHostToolCall,
-  observeShellCreatedFiles,
+  isNewWriteTarget,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -4917,6 +4917,15 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * The paths a write is about to create, checked before it runs. Tracking records only these, so an edit to
+   * a file that already existed (a repo file) never makes it a file Aman wrote.
+   */
+  private createdWriteTargets(input: { paths: readonly string[]; cwd: string }): string[] {
+    const resolution = this.provider.filesystem;
+    return input.paths.filter(p => isNewWriteTarget({ p, cwd: input.cwd, resolution }));
+  }
+
+  /**
    * Sentinel: record agent-created or agent-modified files as tracked
    * executables, so a later attempt to execute them escalates for approval.
    * Best effort and host-side: paths that do not resolve on the host (for
@@ -4933,6 +4942,7 @@ export class Sandbox extends LocalToolMCP {
     const scope = {
       tenant_id: ctx.tenant_id,
       created_by: ctx.created_by,
+      conversation_id: ctx.conversation_id,
       repository_id: ctx.repository_id,
       workspace_cwd: ctx.workspace_cwd,
     };
@@ -5222,12 +5232,6 @@ export class Sandbox extends LocalToolMCP {
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
       }
-      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
-        this.observeSentinelWrites({
-          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
-          cwd: resolvedInput.cwd,
-        });
-      }
 
       return {
         result: {
@@ -5447,6 +5451,7 @@ export class Sandbox extends LocalToolMCP {
     // failed even though the file was written. Only request the lock when a repository
     // is actually bound; a scratch write has no concurrent-checkout to guard against.
     const workspaceLockRoot = this.boundRepository === undefined ? undefined : workspaceRoot;
+    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
     const observedWrite = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: canonicalScope.cwd,
@@ -5474,7 +5479,7 @@ export class Sandbox extends LocalToolMCP {
     const write = observedWrite.value;
     const succeeded = write.success && write.response.exitCode === 0;
     if (succeeded) {
-      this.observeSentinelWrites({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: scopeResolution.scope.cwd });
     }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed write
@@ -5754,6 +5759,8 @@ export class Sandbox extends LocalToolMCP {
     // again since resolveWorkspaceRoot may have run since then) so precondition observation joins the
     // same root the paths are relative to, rather than the (possibly different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
+    const createdPaths =
+      workspaceRoot === undefined ? [] : this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
     const observedMutation = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -5846,7 +5853,7 @@ export class Sandbox extends LocalToolMCP {
     }
     const succeeded = apply.success && apply.response.exitCode === 0;
     if (succeeded && workspaceRoot !== undefined) {
-      this.observeSentinelWrites({ paths: finalPaths, cwd: workspaceRoot });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: workspaceRoot });
     }
     return {
       result: {
@@ -5939,6 +5946,7 @@ export class Sandbox extends LocalToolMCP {
     // observation joins the same root the paths are relative to, rather than the (possibly
     // different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
+    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
     const observedReplace = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -6038,7 +6046,7 @@ export class Sandbox extends LocalToolMCP {
     const { exec: replace, payloadDigest } = outcome;
     const succeeded = replace.success && replace.response.exitCode === 0;
     if (succeeded) {
-      this.observeSentinelWrites({ paths: [normalizedPath], cwd: input.cwd });
+      this.observeSentinelWrites({ paths: createdPaths, cwd: input.cwd });
     }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed replace
