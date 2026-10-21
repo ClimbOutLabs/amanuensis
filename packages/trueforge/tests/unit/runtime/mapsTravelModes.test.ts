@@ -10,7 +10,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-const CHIADO = { lat: '38.7106', lon: '-9.1426', display_name: 'Rua da Emenda 45, Lisboa' };
+const CHIADO = { lat: '38.7106', lon: '-9.1426', display_name: 'Travessa das Gaivotas 4, Lisboa' };
 const ESTRELA = { lat: '38.7142', lon: '-9.1597', display_name: 'R. de Sao Bernardo 92, Lisboa' };
 
 const ROAD_BODY = {

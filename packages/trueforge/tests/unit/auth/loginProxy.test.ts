@@ -3,7 +3,7 @@ import { createLoginProxy, isProxiableIssuer } from '../../../src/auth/loginProx
 import { LoginAttemptLimiter } from '../../../src/auth/loginRateLimit';
 
 const ISSUER = 'http://127.0.0.1:5556/dex';
-const ORIGINS = ['http://192.168.1.20:8791', 'http://spark.local:8791', 'http://127.0.0.1:8791'];
+const ORIGINS = ['http://192.168.1.20:8791', 'http://host.example.local:8791', 'http://127.0.0.1:8791'];
 
 interface UpstreamCall {
   url: string;
@@ -133,9 +133,9 @@ describe('login proxy', () => {
         status: 303,
         headers: { location: 'http://127.0.0.1:5556/dex/auth/local/login?req=abc', 'set-cookie': 'x=1' },
       });
-    const res = await get('/dex/auth/local', {}, 'spark.local:8791');
+    const res = await get('/dex/auth/local', {}, 'host.example.local:8791');
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('http://spark.local:8791/dex/auth/local/login?req=abc');
+    expect(res.headers.get('location')).toBe('http://host.example.local:8791/dex/auth/local/login?req=abc');
     expect(res.headers.get('set-cookie')).toBeNull();
   });
 
