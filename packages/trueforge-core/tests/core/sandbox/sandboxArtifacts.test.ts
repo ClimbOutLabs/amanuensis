@@ -253,6 +253,8 @@ describe('markers inside other fences', () => {
     '````',
   ].join('\n');
 
+  const EXAMPLE_IN_MARKDOWN_FENCE_CRLF = EXAMPLE_IN_MARKDOWN_FENCE.replaceAll('\n', '\r\n');
+
   it('extracts nothing from a marker quoted as an example in a fence that holds other text', () => {
     expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_MARKDOWN_FENCE)).toEqual([]);
     expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_LONGER_FENCE)).toEqual([]);
@@ -264,6 +266,13 @@ describe('markers inside other fences', () => {
     );
     expect(normalizeSandboxArtifactBlocks({ text: EXAMPLE_IN_LONGER_FENCE, complete: true })).toBe(
       EXAMPLE_IN_LONGER_FENCE,
+    );
+  });
+
+  it('extracts nothing and changes nothing for the quoted example with CRLF line endings', () => {
+    expect(extractSandboxArtifactsFromMessage(EXAMPLE_IN_MARKDOWN_FENCE_CRLF)).toEqual([]);
+    expect(normalizeSandboxArtifactBlocks({ text: EXAMPLE_IN_MARKDOWN_FENCE_CRLF, complete: true })).toBe(
+      EXAMPLE_IN_MARKDOWN_FENCE_CRLF,
     );
   });
 

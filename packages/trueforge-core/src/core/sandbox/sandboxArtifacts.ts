@@ -260,7 +260,9 @@ function findFencedRegions(text: string): FencedRegion[] {
   while (lineStart < text.length) {
     const newlineAt = text.indexOf('\n', lineStart);
     const lineEnd = newlineAt === -1 ? text.length : newlineAt;
-    const match = FENCE_LINE_RE.exec(text.slice(lineStart, lineEnd));
+    // The slice of a CRLF line keeps its carriage return, which the fence pattern cannot match.
+    const line = text.slice(lineStart, lineEnd);
+    const match = FENCE_LINE_RE.exec(line.endsWith('\r') ? line.slice(0, -1) : line);
     if (match) {
       const run = match[1] ?? '';
       const rest = match[2] ?? '';
@@ -275,7 +277,7 @@ function findFencedRegions(text: string): FencedRegion[] {
             contentStart: newlineAt === -1 ? text.length : newlineAt + 1,
           };
         }
-      } else if (run.charAt(0) === open.char && run.length >= open.length && rest.trim().length === 0) {
+      } else if (run.startsWith(open.char) && run.length >= open.length && rest.trim().length === 0) {
         regions.push({ contentStart: open.contentStart, contentEnd: lineStart });
         open = null;
       }
@@ -297,12 +299,7 @@ function findFencedRegions(text: string): FencedRegion[] {
  * declaration in a markdown fence and still declare the file, while a marker shown partway
  * through a sample declares nothing, so the sample is left exactly as written.
  */
-function isInsideAnotherFence(options: {
-  text: string;
-  regions: FencedRegion[];
-  start: number;
-  end: number;
-}): boolean {
+function isInsideAnotherFence(options: { text: string; regions: FencedRegion[]; start: number; end: number }): boolean {
   const region = options.regions.find(
     candidate => candidate.contentStart <= options.start && options.start < candidate.contentEnd,
   );
