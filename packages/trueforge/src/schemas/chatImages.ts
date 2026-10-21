@@ -50,7 +50,7 @@ export type ChatImageSource = z.infer<typeof ChatImageSourceSchema>;
 
 export const CreateTurnImagesRequestSchema = z.object({
   source: ChatImageSourceSchema,
-  /** True after the person chose to show images from the web on the card. */
+  /** True after the person chose Show image or Show images. */
   approved: z.boolean(),
 });
 export type CreateTurnImagesRequest = z.infer<typeof CreateTurnImagesRequestSchema>;
@@ -79,8 +79,10 @@ export const TurnImagesResultSchema = z.discriminatedUnion('status', [
 export type TurnImagesResult = z.infer<typeof TurnImagesResultSchema>;
 
 export const TurnImageListSchema = z.object({
-  /** Stored sandbox and tool images of the turn. */
+  /** Stored sandbox images of the turn, such as charts; shown without asking. */
   artifacts: z.array(z.object({ path: z.string(), name: z.string() })),
+  /** Images a tool returned; shown only after the person asks. */
+  tool_images: z.array(z.object({ path: z.string(), name: z.string() })),
   /** Emails read this turn that link images. */
   emails: z.array(z.object({ tool_call_id: z.string(), count: z.number().int().positive() })),
 });

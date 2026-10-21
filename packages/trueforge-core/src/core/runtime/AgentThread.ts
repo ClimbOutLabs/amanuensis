@@ -190,6 +190,7 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
@@ -1659,6 +1660,7 @@ export class AgentThread {
       createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
+    capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
