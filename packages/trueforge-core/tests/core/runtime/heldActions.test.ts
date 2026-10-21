@@ -666,6 +666,40 @@ describe('approving a held mail send to an address not on the Email list', () =>
     expect(h.callTool).toHaveBeenCalledTimes(1);
   });
 
+  it('a retry waits for the sidecar again once the list shows the address, and sends only when it loads', async () => {
+    // Each add writes the address to the list, as the real server does, before the sidecar has loaded it.
+    const listed = ['dana@example.com'];
+    const { h, context } = await heldSend(listed);
+    const answers: MailAddRecipientsResult[] = ['not_loaded', 'not_loaded', 'loaded'];
+    h.mailAdd.mockImplementation((_ctx, addresses) => {
+      listed.push(...addresses);
+      return Promise.resolve(answers.shift() ?? 'loaded');
+    });
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.mailAdd).toHaveBeenCalledTimes(3);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('an approved send with only known addresses waits for the list, keeps the draft, and sends nothing while it is not loaded', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, args: JSON.stringify({ ...MAIL_SEND_ARGS, recipients: ['dana@example.com'] }) },
+    });
+    h.mailLoaded.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailLoaded).toHaveBeenCalledTimes(1);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the draft with a plain message when the address is refused, and sends nothing', async () => {
     const { h, context } = await heldSend(['dana@example.com']);
     h.mailAdd.mockResolvedValueOnce('refused');
