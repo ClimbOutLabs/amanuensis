@@ -4,8 +4,10 @@
  * allow-list, not a block-list: an element survives only if it is named below, an attribute
  * survives only if it is named for that element (or in the global set), and anything else is
  * removed, elements together with their contents. Links may use only `http`, `https`, `mailto`,
- * or a relative reference, and the only images that survive are `data:` raster images, so no
- * markup that reaches the frame can execute script or fetch anything off-page.
+ * or a relative reference. Pictures are `data:` raster images or `https` links; the server checks
+ * that each `https` picture came from a search or page result before it is saved, and this
+ * sanitiser keeps the frame from loading anything else. No markup that reaches the frame can run
+ * script or fetch anything else off-page.
  *
  * SVG drawing elements are allowed so pages can carry inline charts and icons. Animation and
  * script-bearing SVG (SMIL elements, `foreignObject`, nested documents) are not on the list and
@@ -25,6 +27,7 @@
  * bare number gets a `num` class, so the base stylesheet's `td.num` rule right-aligns it without
  * the model having to remember to mark numeric columns itself.
  */
+import { decodeCssEscapes } from '@truefoundry/trueforge-core/core/spaces/cssEscapes';
 
 /**
  * Browsers strip ASCII whitespace and C0 control characters before scheme-sniffing a URL (so
@@ -58,13 +61,26 @@ function isAllowedLinkUrl(value: string): boolean {
 }
 
 /**
- * The only images that survive are raster `data:` URIs. `data:image/svg+xml` is excluded on
- * purpose: an SVG payload is a document, not a picture, and never reaches the frame as an image.
+ * The raster `data:` URIs a space may embed. `data:image/svg+xml` is excluded on purpose: an SVG
+ * payload is a document, not a picture, and never reaches the frame as an image.
  */
 const DATA_RASTER_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)(?:;|,)/i;
 
 function isAllowedImageSrc(value: string): boolean {
   return DATA_RASTER_IMAGE_RE.test(stripUrlNoise(value));
+}
+
+/** A picture is an embedded raster or an `https` link; the server vets the link before it is saved. */
+function isAllowedPictureSrc(value: string): boolean {
+  return isAllowedImageSrc(value) || /^https:\/\//i.test(stripUrlNoise(value));
+}
+
+/** A 0 or 1 pixel picture is a tracking beacon, never something a person reads, so it is dropped. */
+function isTrackingPixel(element: Element): boolean {
+  return ['width', 'height'].some(name => {
+    const value = element.getAttribute(name);
+    return value !== null && Number.parseFloat(value) <= 1;
+  });
 }
 
 /** A same-document fragment reference such as `#icon`, used by `<use>` and `url(#...)`. */
@@ -86,28 +102,6 @@ function isAllowedUseReference(value: string): boolean {
  */
 function isFragmentUrl(value: string): boolean {
   return /^url\(\s*(['"]?)#[^'"()\s]*\1\s*\)(?:\s+[a-zA-Z0-9#%.,-][a-zA-Z0-9#%.,\s-]*)?$/i.test(value.trim());
-}
-
-/**
- * Decodes CSS escapes so `u\72l(` and `@\69mport` are seen as the browser reads them. Escapes
- * that would yield a backslash, NUL, a surrogate, or an out-of-range code point are dropped or
- * replaced so decoding can never produce a fresh escape.
- */
-function decodeCssEscapes(css: string): string {
-  const decoded = css.replace(
-    /\\(?:([0-9a-fA-F]{1,6})[ \t\n\r\f]?|(\r\n|[\n\r\f])|([\s\S]))/g,
-    (_match, hex: string | undefined, newline: string | undefined, char: string | undefined) => {
-      if (hex !== undefined) {
-        const code = Number.parseInt(hex, 16);
-        if (code === 0x5c) return '';
-        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '�';
-        return String.fromCodePoint(code);
-      }
-      if (newline !== undefined) return '';
-      return char === '\\' ? '' : (char ?? '');
-    },
-  );
-  return decoded.replaceAll('\\', '');
 }
 
 /** Index just past the `)` closing the call whose `(` is at `open`, or the end when unclosed. */
@@ -377,7 +371,7 @@ allowElement('tr', []);
 allowElement('td', ['colspan', 'rowspan', 'headers']);
 allowElement('th', ['colspan', 'rowspan', 'headers', 'scope', 'abbr']);
 
-// Images: raster `data:` URIs only; the element itself is dropped when `src` is anything else.
+// Pictures: raster `data:` URIs or `https` links; the element is dropped when `src` is anything else.
 allowElement('picture', []);
 allowElement('img', ['src', 'alt', 'width', 'height']);
 
@@ -493,11 +487,11 @@ function sanitiseElement(element: Element): void {
     return;
   }
 
-  // An image whose source is not a raster `data:` URI is dropped whole rather than left as a
-  // broken frame; the same rule covers `<image>` inside SVG, through either href spelling.
+  // A picture whose source is neither a raster `data:` URI nor an `https` link is dropped whole
+  // rather than left as a broken frame; the same raster rule covers `<image>` inside SVG.
   if (tag === 'img') {
     const src = element.getAttribute('src');
-    if (src === null || !isAllowedImageSrc(src)) {
+    if (src === null || !isAllowedPictureSrc(src) || isTrackingPixel(element)) {
       element.remove();
       return;
     }

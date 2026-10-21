@@ -19,7 +19,7 @@ test_fresh_install_without_a_model() {
   t_begin "the ending of a fresh install with no model: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
   sandbox_new
   fixture_network 192.168.1.20
-  fixture_hostname spark
+  fixture_hostname host
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
 Checking the result (6 of 6)
@@ -29,8 +29,8 @@ Checking the result (6 of 6)
 Ready. Instance main is running.
 
   + Open      https://192.168.1.20:8443
-              https://spark.local:8443
-              https://spark:8443
+              https://host.local:8443
+              https://host:8443
               http://127.0.0.1:8791
               http://localhost:8791
   + Sign in   owner@example.invalid
@@ -47,7 +47,7 @@ Ready. Instance main is running.
   Your device will show a long code called a fingerprint. It must be
   <fingerprint>.
   If it differs, stop.
-  Bookmark spark.local: it keeps working when this computer's address
+  Bookmark host.local: it keeps working when this computer's address
   changes.
   Open a new terminal window to use the aman command.
   Update later: aman upgrade
@@ -61,7 +61,7 @@ test_fresh_install_without_a_model_over_plain_http() {
   t_begin "the ending with --tls off, over plain http: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
   sandbox_new
   fixture_network 192.168.1.20
-  fixture_hostname spark
+  fixture_hostname host
   INSTALL_EXTRA=(--tls off)
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
@@ -72,8 +72,8 @@ Checking the result (6 of 6)
 Ready. Instance main is running.
 
   + Open      http://192.168.1.20:8791
-              http://spark.local:8791
-              http://spark:8791
+              http://host.local:8791
+              http://host:8791
               http://127.0.0.1:8791
               http://localhost:8791
   + Sign in   owner@example.invalid
@@ -83,7 +83,7 @@ Ready. Instance main is running.
   + Backups   daily, keeps the last 7
   Sign-in on your home network is not encrypted. Use the Tailscale
   address to keep it private.
-  Bookmark spark.local: it keeps working when this computer's address
+  Bookmark host.local: it keeps working when this computer's address
   changes.
   Open a new terminal window to use the aman command.
   Update later: aman upgrade

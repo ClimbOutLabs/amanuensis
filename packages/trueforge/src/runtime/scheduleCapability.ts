@@ -17,6 +17,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/ToolSet';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import {
   CREATE_SCHEDULE_TOOL_NAME,
   DELETE_SCHEDULE_TOOL_NAME,
@@ -50,7 +51,11 @@ const WeekdaySchema = z.enum(WEEKDAYS);
 export const CreateScheduleToolSchema = z
   .object({
     name: NameSchema,
-    task: ScheduleTaskSchema,
+    task: ScheduleTaskSchema.optional(),
+    morning_brief: z
+      .boolean()
+      .optional()
+      .describe('True for a morning brief. The brief instructions are filled in for you, so leave task out.'),
     repeat: z
       .enum(['daily', 'weekdays', 'weekly'])
       .optional()
@@ -280,7 +285,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. It runs as the assistant in this chat. Never say something is scheduled unless this succeeded. If how often or what time is unclear, ask the user first. Times are in the user's time zone. The user approves a card before anything is saved.",
+          "The only way to make a recurring task. It runs as the assistant in this chat. Never say something is scheduled unless this succeeded. If how often or when is unclear, ask first. Times use the user's time zone. For a morning brief, set morning_brief, not task. The user approves a card before anything is saved.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -399,6 +404,19 @@ export class ScheduleToolSet extends LocalToolMCP {
         message: `Nothing was saved because the timing is not clear. Ask the user: ${timing.question}`,
       };
     }
+    if (input.morning_brief === true && input.task !== undefined) {
+      return {
+        ok: false,
+        message: 'Nothing was saved because a morning brief sets its own task. Leave task out and try again.',
+      };
+    }
+    const task = input.morning_brief === true ? MORNING_BRIEF_PROMPT : input.task;
+    if (task === undefined) {
+      return {
+        ok: false,
+        message: 'Nothing was saved because the schedule has no task. Ask the user what it should do.',
+      };
+    }
     const timezone = input.time_zone ?? this.#options.timeZone;
     if (timezone === undefined || !TimezoneSchema.safeParse(timezone).success) {
       return {
@@ -406,7 +424,7 @@ export class ScheduleToolSet extends LocalToolMCP {
         message: 'Nothing was saved because the time zone is not known. Ask the user which time zone they are in.',
       };
     }
-    const manifest = ScheduleManifestSchema.parse({ task: input.task, cron: timing.cron, timezone, status: 'active' });
+    const manifest = ScheduleManifestSchema.parse({ task, cron: timing.cron, timezone, status: 'active' });
     const now = this.#options.now();
     try {
       validateManifest(manifest, now);

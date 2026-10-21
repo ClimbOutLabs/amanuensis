@@ -157,7 +157,7 @@ Enter the new password again (not shown):=>$NEW_PASSWORD" instance password
 
 # The line number of the first docker call containing the text, 0 when there is none.
 log_line() { grep -nF -- "$1" "$STUB_LOG" | head -n 1 | cut -d: -f1 | grep . || echo 0; }
-dex_stopped() { [ -e "$SB_STATE/dex_stopped_aman-${1:-main}" ]; }
+dex_stopped() { [ -e "$SB_STATE/dex_stopped_aman-main" ]; }
 DEX_UP="force-recreate --no-deps --wait --wait-timeout 240 dex"
 APP_UP="force-recreate --no-deps --wait --wait-timeout 240 app"
 

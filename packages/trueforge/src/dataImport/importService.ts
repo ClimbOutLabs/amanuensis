@@ -1593,6 +1593,8 @@ async function importArchive<TTransaction>(
 
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
+        // The installer's name stays where the archive has none, since the app offers it only once.
+        const ownerName = deps.ownerName === '' ? null : deps.ownerName;
         await deps.personalizationStore.upsertProfile(
           {
             tenant_id: tenantId,
@@ -1600,10 +1602,11 @@ async function importArchive<TTransaction>(
             assistant_name: personalization.assistant_name,
             assistant_identity: personalization.assistant_identity,
             voice_guidance: personalization.voice_guidance,
-            user_name: personalization.user_name,
-            address_as: personalization.address_as,
+            user_name: personalization.user_name ?? ownerName,
+            address_as: personalization.address_as ?? ownerName,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
+            help_areas: personalization.help_areas,
             learned_profile: personalization.learned_profile,
             learning_enabled: personalization.learning_enabled,
             updated_by: subjectId,

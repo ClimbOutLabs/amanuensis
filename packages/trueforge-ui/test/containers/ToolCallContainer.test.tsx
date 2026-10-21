@@ -888,6 +888,7 @@ describe('ToolCallContainer', () => {
         email: null,
         calendar_event: null,
         schedule: null,
+        persona: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -957,7 +958,7 @@ describe('ToolCallContainer: held search request', () => {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
-        why: "it contains one of this computer's keys",
+        say: 'This search contains something that looks like a password or key.',
       }),
       plain_why: null,
       cannot_be_undone: null,
@@ -972,6 +973,7 @@ describe('ToolCallContainer: held search request', () => {
       email: null,
       calendar_event: null,
       schedule: null,
+      persona: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {

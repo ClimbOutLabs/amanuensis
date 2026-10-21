@@ -10,7 +10,7 @@ import { afterEach, describe, it } from 'node:test';
 import { ensureCa, info, issueLeaf, LEAF_DAYS, leafIsCurrent, RENEW_BEFORE_DAYS } from '../lib/pki.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
-const NAMES = ['192.168.1.20', '127.0.0.1', 'spark.local', 'localhost'];
+const NAMES = ['192.168.1.20', '127.0.0.1', 'host.local', 'localhost'];
 const hasOpenssl = spawnSync('openssl', ['version']).status === 0;
 
 describe('the local certificate authority', () => {
@@ -146,7 +146,7 @@ describe('the local certificate authority', () => {
     }).stdout;
     assert.match(text, /TLS Web Server Authentication/);
     assert.match(text, /IP Address:192\.168\.1\.20/);
-    assert.match(text, /DNS:spark\.local/);
+    assert.match(text, /DNS:host\.local/);
     assert.match(text, /ecdsa-with-SHA256/);
     assert.match(text, /prime256v1/);
     const rootText = spawnSync('openssl', ['x509', '-in', path.join(caDir, 'root.crt'), '-noout', '-text'], {
@@ -195,7 +195,7 @@ describe('the local certificate authority', () => {
       ]) {
         assert.ok(text.includes('IP:' + range), range);
       }
-      assert.ok(text.includes('DNS:spark.local'));
+      assert.ok(text.includes('DNS:host.local'));
       assert.ok(text.includes('DNS:localhost'));
       for (const suffix of ['DNS:local\n', 'DNS:lan', 'DNS:home.arpa', 'DNS:ts.net']) {
         assert.ok(!text.includes(suffix), `${suffix} is not permitted`);
@@ -279,18 +279,18 @@ describe('the local certificate authority', () => {
     it("accepts this computer's names and private addresses, and nothing else", () => {
       const { caDir } = fresh();
       ensureCa({ caDir, names: NAMES });
-      for (const san of ['DNS:spark.local', 'DNS:localhost', 'IP:192.168.1.77', 'IP:10.1.2.3']) {
+      for (const san of ['DNS:host.local', 'DNS:localhost', 'IP:192.168.1.77', 'IP:10.1.2.3']) {
         const { crt } = signed({ caDir, san });
         assert.ok(accepted({ caDir, leaf: crt }), san);
       }
       for (const san of [
         'DNS:other.local',
-        'DNS:nas.lan',
+        'DNS:files.example.internal',
         'DNS:host.ts.net',
         'DNS:example.com',
         'IP:8.8.8.8',
-        'email:someone@spark.local',
-        'URI:https://spark.local/',
+        'email:someone@host.local',
+        'URI:https://host.local/',
       ]) {
         const { crt } = signed({ caDir, san });
         assert.ok(!accepted({ caDir, leaf: crt }), san);
@@ -323,7 +323,7 @@ describe('the local certificate authority', () => {
         { encoding: 'utf8' },
       );
       assert.equal(sub.status, 0, sub.stderr);
-      writeFileSync(path.join(work, 'e.cnf'), 'subjectAltName=DNS:spark.local\nextendedKeyUsage=serverAuth\n');
+      writeFileSync(path.join(work, 'e.cnf'), 'subjectAltName=DNS:host.local\nextendedKeyUsage=serverAuth\n');
       const leaf = path.join(work, 'leaf.crt');
       const sign = spawnSync(
         'openssl',
@@ -362,7 +362,7 @@ describe('the local certificate authority', () => {
       '172.32.0.1',
       '100.128.0.1',
       'example.com',
-      'spark.local.example.com',
+      'host.local.example.com',
       'evil-local',
       'other.local',
       'a.b.ts.net',
@@ -370,28 +370,28 @@ describe('the local certificate authority', () => {
     ]) {
       assert.throws(() => issueLeaf({ caDir, leafDir, names: ['192.168.1.20', name] }), /may not vouch for/, name);
     }
-    assert.equal(issueLeaf({ caDir, leafDir, names: ['172.31.255.254', '100.127.0.1', 'spark.local'] }).issued, true);
+    assert.equal(issueLeaf({ caDir, leafDir, names: ['172.31.255.254', '100.127.0.1', 'host.local'] }).issued, true);
   });
 
   it('is made again, and says so, when a name asked for is not covered, and then keeps that name', () => {
     const { caDir, leafDir } = fresh();
-    assert.equal(ensureCa({ caDir, names: ['spark.local', '192.168.1.20'] }).rotated, false);
+    assert.equal(ensureCa({ caDir, names: ['host.local', '192.168.1.20'] }).rotated, false);
     const first = readFileSync(path.join(caDir, 'root.crt'), 'utf8');
-    assert.equal(ensureCa({ caDir, names: ['spark.local'] }).created, false);
-    const second = ensureCa({ caDir, names: ['spark', 'spark.local'] });
+    assert.equal(ensureCa({ caDir, names: ['host.local'] }).created, false);
+    const second = ensureCa({ caDir, names: ['host', 'host.local'] });
     assert.equal(second.created, true);
     assert.equal(second.rotated, true);
     assert.notEqual(readFileSync(path.join(caDir, 'root.crt'), 'utf8'), first);
-    assert.equal(issueLeaf({ caDir, leafDir, names: ['spark', 'spark.local', '192.168.1.20'] }).issued, true);
-    assert.equal(ensureCa({ caDir, names: ['spark'] }).created, false);
-    assert.equal(ensureCa({ caDir, names: ['nas', 'spark'] }).rotated, true);
-    assert.equal(ensureCa({ caDir, names: ['spark'] }).created, false, 'a name added once stays permitted');
+    assert.equal(issueLeaf({ caDir, leafDir, names: ['host', 'host.local', '192.168.1.20'] }).issued, true);
+    assert.equal(ensureCa({ caDir, names: ['host'] }).created, false);
+    assert.equal(ensureCa({ caDir, names: ['files', 'host'] }).rotated, true);
+    assert.equal(ensureCa({ caDir, names: ['host'] }).created, false, 'a name added once stays permitted');
   });
 
   it('replaces an authority made under older limits, once', () => {
     const { caDir } = fresh();
     ensureCa({ caDir, names: NAMES });
-    writeFileSync(path.join(caDir, 'root.names'), '["spark.local"]\n');
+    writeFileSync(path.join(caDir, 'root.names'), '["host.local"]\n');
     const result = ensureCa({ caDir, names: NAMES });
     assert.equal(result.rotated, true);
     assert.equal(ensureCa({ caDir, names: NAMES }).created, false);

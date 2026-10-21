@@ -464,6 +464,8 @@ export function checkContainerIsolation(input: {
 
 export class DockerDriver implements IsolationDriver {
   readonly kind = 'docker';
+  // The container runs with no network, so the package gateway is unreachable.
+  readonly packageGatewayCapable = false;
 
   private readonly image: string;
   private readonly cosignPublicKeyPath: string;

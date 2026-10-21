@@ -1,7 +1,7 @@
 import { PersonalizationRevisionConflictError, type IPersonalizationStore } from '../../src/db/personalizationStore';
-import { personalizationDigest } from '../../src/personalization/profile';
+import { personalizationDigest, type PersonalizationProfileContent } from '../../src/personalization/profile';
 
-const CONTENT = {
+const CONTENT: PersonalizationProfileContent = {
   assistant_name: 'Aman',
   assistant_identity: 'A local personal assistant.',
   voice_guidance: 'Be direct and kind.',
@@ -9,6 +9,7 @@ const CONTENT = {
   address_as: null,
   user_profile: 'Prefers concise answers.',
   pinned_preferences: ['Use plain English.', 'Avoid em dashes.'],
+  help_areas: ['family', 'focus'],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -101,6 +102,32 @@ export function runPersonalizationStoreContractSuite(getStore: () => IPersonaliz
       learned_profile: '# Learned\n\n- Prefers plain English.',
     });
     expect(repeated).toEqual(learned);
+  });
+
+  it('keeps help areas in the order chosen, and a reorder is a change even though the digest holds still', async () => {
+    const store = getStore();
+    const created = await store.upsertProfile({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      updated_by: 'user-a',
+      ...CONTENT,
+    });
+    expect(created.help_areas).toEqual(['family', 'focus']);
+
+    const reordered = await store.upsertProfile({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      updated_by: 'user-a',
+      ...CONTENT,
+      help_areas: ['focus', 'family'],
+    });
+    expect(reordered.revision).toBe(2);
+    expect(reordered.digest).toBe(created.digest);
+    expect(reordered.help_areas).toEqual(['focus', 'family']);
+    expect((await store.getProfile({ tenant_id: 'default', created_by: 'user-a' }))?.help_areas).toEqual([
+      'focus',
+      'family',
+    ]);
   });
 
   it('persists a learning toggle that leaves the model-facing digest identical', async () => {

@@ -544,6 +544,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     address_as: null,
     user_profile: 'Lives in two time zones.',
     pinned_preferences: ['Answer concisely.'],
+    help_areas: [],
     learned_profile: null,
     learning_enabled: true,
     updated_by: userId,

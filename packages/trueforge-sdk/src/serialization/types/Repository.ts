@@ -10,6 +10,7 @@ export const Repository: core.serialization.ObjectSchema<serializers.Repository.
         "defaultBranch": core.serialization.property("default_branch", core.serialization.string().nullable()),
         "id": core.serialization.string(),
         "name": core.serialization.string(),
+        "packageDownloadsAllowed": core.serialization.property("package_downloads_allowed", core.serialization.boolean()),
         "revision": core.serialization.number(),
         "updatedAt": core.serialization.property("updated_at", core.serialization.date())
     });
@@ -21,6 +22,7 @@ export declare namespace Repository {
         default_branch?: string | null;
         id: string;
         name: string;
+        package_downloads_allowed: boolean;
         revision: number;
         updated_at: string;
     }

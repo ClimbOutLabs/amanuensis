@@ -28,6 +28,7 @@ import type {
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
 import type { ModelProviderManifest } from '../../schemas/modelProvider';
@@ -257,14 +258,6 @@ export interface ChatImageTable {
   size: number;
   data: Buffer;
   created_at: Date;
-}
-
-/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
-export interface ChatImageTurnAllowanceTable {
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  silent_attempts: number;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -712,6 +705,7 @@ export interface PersonalizationProfileTable {
   address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JSONColumnType<string[], string[] | string, string[] | string>;
+  help_areas: JSONColumnType<HelpAreaId[], HelpAreaId[] | string, HelpAreaId[] | string>;
   /** Host-maintained learned document; null until the learning pass writes one. */
   learned_profile: string | null;
   /** User switch for the learning pass. */
@@ -959,7 +953,6 @@ export interface Database {
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
-  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

@@ -9,10 +9,10 @@ env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | head -n 1; }
 reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | head -n 1; }
 lan() {
   fixture_network 192.168.1.20
-  fixture_hostname spark
+  fixture_hostname host
 }
 compose() { cat "$AMAN_HOME/instances/main/compose.yaml"; }
-HTTPS_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://spark:8443,https://spark.local:8443"
+HTTPS_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://host:8443,https://host.local:8443"
 
 # What the authority script says about the root and the certificate of an instance, run with the host's Node.js.
 pki_info() { "$STUB_REAL_NODE" "$INSTALLER_DIR/lib/pki.mjs" info "$AMAN_HOME/tls/ca" "$AMAN_HOME/tls/leaf/${1:-main}"; }
@@ -76,7 +76,7 @@ test_the_authority_and_the_certificate() {
   assert_mode "$AMAN_HOME/tls/leaf/main/leaf.key" 600
   local info
   info=$(pki_info)
-  assert_contains "$info" '"leaf_names":["127.0.0.1","192.168.1.20","localhost","spark","spark.local"]'
+  assert_contains "$info" '"leaf_names":["127.0.0.1","192.168.1.20","host","host.local","localhost"]'
   assert_contains "$info" '"root_days_left":3'
   local days
   days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\([[:digit:]]*\).*/\1/p')
@@ -149,7 +149,7 @@ test_the_plan_and_the_summary() {
   run_install --dry-run --email owner@example.invalid
   assert_flat_contains "$OUT" "Download the https service"
   assert_flat_contains "$OUT" "Make this computer's root certificate"
-  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, spark, spark.local"
+  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, host, host.local"
   assert_flat_contains "$OUT" "Port 8791 only sends devices to https."
   assert_no_path "$AMAN_HOME"
   RUN_ENV_EXTRA=(CLICOLOR_FORCE=1 LANG=C.UTF-8 TERM=xterm)
@@ -391,7 +391,7 @@ test_the_front_end_is_locked_down() {
   assert_contains "$file" "- /tmp"
   caddyfile=$(cat "$AMAN_HOME/instances/main/tls.Caddyfile")
   assert_contains "$caddyfile" "protocols h1 h2"
-  assert_contains "$caddyfile" "@known host 127.0.0.1 localhost 192.168.1.20 spark spark.local"
+  assert_contains "$caddyfile" "@known host 127.0.0.1 localhost 192.168.1.20 host host.local"
   assert_contains "$caddyfile" 'respond "This address is not one Aman is set up for." 421'
   assert_contains "$caddyfile" "X-Content-Type-Options nosniff"
   assert_contains "$caddyfile" "default-src 'none'"
@@ -427,7 +427,7 @@ test_the_authority_is_limited() {
   info=$(pki_info)
   assert_contains "$info" '"root_constrained":true'
   assert_contains "$info" '"root_covers_leaf":true'
-  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"spark"'
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"host"'
   assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"version":2'
   sandbox_drop
 }
@@ -440,10 +440,10 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   local before
   before=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_not_contains "$OUT" "made again"
-  run_install instance refresh main --address nas
+  run_install instance refresh main --address files
   assert_rc 0
-  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"nas"'
-  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint" | grep -c "$before")" 0 "a new authority"
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"files"'
+  assert_eq "$(grep -c "$before" "$AMAN_HOME/tls/ca/root.fingerprint")" 0 "a new authority"
   assert_flat_contains "$OUT" "root certificate was made again"
   assert_flat_contains "$OUT" "each device must trust it again"
   assert_contains "$(pki_info)" '"root_covers_leaf":true'
@@ -509,7 +509,7 @@ test_an_authority_made_under_older_limits_is_replaced_once() {
   sandbox_new
   lan
   install_machine
-  printf '["spark"]\n' >"$AMAN_HOME/tls/ca/root.names"
+  printf '["host"]\n' >"$AMAN_HOME/tls/ca/root.names"
   run_install --dry-run
   assert_flat_contains "$OUT" "Make this computer's root certificate again"
   assert_flat_contains "$OUT" "is valid for more names than it should be"

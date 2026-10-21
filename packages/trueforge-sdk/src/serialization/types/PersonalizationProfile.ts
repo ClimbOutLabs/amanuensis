@@ -3,6 +3,7 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
+import { PersonalizationProfileHelpAreasItem } from "./PersonalizationProfileHelpAreasItem.js";
 
 export const PersonalizationProfile: core.serialization.ObjectSchema<serializers.PersonalizationProfile.Raw, TrueForge.PersonalizationProfile> = core.serialization.object({
         "addressAs": core.serialization.property("address_as", core.serialization.string().optionalNullable()),
@@ -11,6 +12,7 @@ export const PersonalizationProfile: core.serialization.ObjectSchema<serializers
         "createdAt": core.serialization.property("created_at", core.serialization.date()),
         "createdBy": core.serialization.property("created_by", core.serialization.string()),
         "digest": core.serialization.string(),
+        "helpAreas": core.serialization.property("help_areas", core.serialization.list(PersonalizationProfileHelpAreasItem).optional()),
         "learnedProfile": core.serialization.property("learned_profile", core.serialization.string().optionalNullable()),
         "learningEnabled": core.serialization.property("learning_enabled", core.serialization.boolean()),
         "pinnedPreferences": core.serialization.property("pinned_preferences", core.serialization.list(core.serialization.string())),
@@ -30,6 +32,7 @@ export declare namespace PersonalizationProfile {
         created_at: string;
         created_by: string;
         digest: string;
+        help_areas?: PersonalizationProfileHelpAreasItem.Raw[] | null;
         learned_profile?: (string | null | undefined) | null;
         learning_enabled: boolean;
         pinned_preferences: string[];

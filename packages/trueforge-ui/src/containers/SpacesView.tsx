@@ -151,9 +151,12 @@ export function measureFrameContentHeight(
   return Math.max(documentElementHeight, bodyHeight);
 }
 
-/** Nothing a space page loads or submits may leave the frame; its images are inline `data:` rasters. */
+/**
+ * Nothing a space page loads or submits may leave the frame, except pictures: an embedded `data:`
+ * raster or an `https` link the server already checked against this chat's search results.
+ */
 const SPACE_FRAME_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data: https:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
 
 /** Base styles injected into every space srcdoc, ahead of anything the model authored. */
 const SPACE_FRAME_BASE_STYLE = [

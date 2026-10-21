@@ -3,14 +3,15 @@
  * buildbox/ui-test.mjs - Aman boot + browser journey with diagnostics
  */
 
-import { spawn, execSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
-const PW_ROOT = '/home/opc/buildbox-playwright';
+// Optional: set BUILDBOX_PLAYWRIGHT_ROOT to a folder whose node_modules holds playwright; unset uses the normal `playwright` package.
+const PW_ROOT = process.env.BUILDBOX_PLAYWRIGHT_ROOT;
 const TRUEFORGE_DIR = join(REPO_ROOT, 'packages/trueforge');
 
 const args = process.argv.slice(2);
@@ -19,7 +20,13 @@ const jobId = args[args.indexOf('--job-id') + 1] || 'unknown';
 
 console.log(`[ui-test] scenario=${scenario} job=${jobId}`);
 
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function loadPlaywright() {
+  return PW_ROOT ? import(`${PW_ROOT}/node_modules/playwright/index.mjs`) : import('playwright');
+}
 
 async function waitFor(url, timeoutMs, label) {
   const start = Date.now();
@@ -35,7 +42,7 @@ async function waitFor(url, timeoutMs, label) {
 
 async function main() {
   if (scenario === 'smoke') {
-    const pw = await import(`${PW_ROOT}/node_modules/playwright/index.mjs`);
+    const pw = await loadPlaywright();
     const browser = await pw.chromium.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
@@ -56,11 +63,10 @@ async function main() {
   const envPath = join(TRUEFORGE_DIR, '.env');
   if (!existsSync(envPath)) {
     console.log('[ui-test] No .env found, creating minimal test .env');
-    writeFileSync(envPath, [
-      'NODE_ENV=development',
-      'PORT=8790',
-      '# Minimal test env - add real values as needed',
-    ].join('\n') + '\n');
+    writeFileSync(
+      envPath,
+      ['NODE_ENV=development', 'PORT=8790', '# Minimal test env - add real values as needed'].join('\n') + '\n',
+    );
   } else {
     console.log('[ui-test] .env exists');
   }
@@ -83,19 +89,23 @@ async function main() {
   backend.stdout.on('data', d => {
     const s = d.toString();
     backendOutput += s;
-    try { appendFileSync(backendLog, s); } catch {}
+    try {
+      appendFileSync(backendLog, s);
+    } catch {}
   });
   backend.stderr.on('data', d => {
     const s = d.toString();
     backendOutput += s;
-    try { appendFileSync(backendLog, s); } catch {}
+    try {
+      appendFileSync(backendLog, s);
+    } catch {}
   });
 
-  backend.on('error', (e) => {
+  backend.on('error', e => {
     console.error(`[ui-test] Backend spawn error: ${e.message}`);
   });
 
-  backend.on('exit', (code) => {
+  backend.on('exit', code => {
     console.error(`[ui-test] Backend exited with code ${code}`);
     console.error('[ui-test] Last 2000 chars of backend output:');
     console.error(backendOutput.slice(-2000));
@@ -142,7 +152,7 @@ async function main() {
 
   // Browser test
   console.log('[ui-test] === Browser test ===');
-  const pw = await import(`${PW_ROOT}/node_modules/playwright/index.mjs`);
+  const pw = await loadPlaywright();
   const browser = await pw.chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
@@ -177,7 +187,9 @@ async function main() {
       console.log('[ui-test] JOURNEY PASS');
     } else {
       console.error('[ui-test] JOURNEY FAIL: Page empty or backend errors');
-      console.error(`[ui-test] Body length: ${bodyText.length}, 500 errors: ${errors.filter(e => e.includes('500')).length}`);
+      console.error(
+        `[ui-test] Body length: ${bodyText.length}, 500 errors: ${errors.filter(e => e.includes('500')).length}`,
+      );
       exitCode = 1;
     }
   } catch (e) {
@@ -188,8 +200,12 @@ async function main() {
     backend.kill('SIGTERM');
     frontend.kill('SIGTERM');
     await sleep(2000);
-    try { backend.kill('SIGKILL'); } catch {}
-    try { frontend.kill('SIGKILL'); } catch {}
+    try {
+      backend.kill('SIGKILL');
+    } catch {}
+    try {
+      frontend.kill('SIGKILL');
+    } catch {}
   }
 
   process.exit(exitCode);

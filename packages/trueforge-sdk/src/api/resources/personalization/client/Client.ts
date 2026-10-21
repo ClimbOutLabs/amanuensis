@@ -144,6 +144,7 @@ export class PersonalizationClient {
      *             addressAs: "Sam",
      *             assistantIdentity: "A thoughtful local-first personal assistant.",
      *             assistantName: "Aman",
+     *             helpAreas: ["focus"],
      *             learningEnabled: false,
      *             pinnedPreferences: ["Use short bullet points."],
      *             userName: "Sam Rivera",

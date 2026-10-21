@@ -4,16 +4,11 @@ import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import {
   checkOutboundStrings,
   collectOutboundStrings,
-  createWebSearchTurnState,
   extractBase64,
-  recordResultUrls,
-  remoteImageAskReason,
-  SILENT_SEARCH_LIMIT,
   type OutboundGuardRule,
   type OutboundGuardVerdict,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
-import { PRIVATE_DATA_READ_STATE_KEY } from '@truefoundry/trueforge-core/core/capabilities/builtins/PrivateDataRead';
 
 import type { ChatImageOrigin, ChatImageWithData, IChatImageStore } from '../../db/chatImageStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
@@ -30,6 +25,7 @@ import { CHAT_IMAGE_OUTPUT_MIME } from './imageSniff';
 import { CHAT_IMAGE_USER_MAX_BYTES } from './limits';
 import type { ImageReencoder } from './reencodeInSandbox';
 import { fetchRemoteImage, type RemoteImageFetchDeps } from './remoteImageFetch';
+import { TOOL_IMAGE_PATH_PREFIX } from './toolImagesCapability';
 import { readTurnImageFacts } from './turnImageFacts';
 
 /** The source named in a request does not exist in this turn. */
@@ -56,6 +52,8 @@ const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 const AUDIT_TOOL_NAME = 'show_image';
 const AUDIT_URL_MAX_CHARS = 500;
 const EMAIL_FETCH_BATCH = 4;
+/** Audit tier of an image the person chose to show: the row is a download, so it is never silent. */
+const AUDIT_TIER_APPROVED = 3;
 
 interface Owner {
   tenant_id: string;
@@ -70,10 +68,10 @@ interface TurnRef {
 
 export interface ChatImageServiceDeps {
   store: IChatImageStore;
-  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listTurnEvents' | 'getTurn'>;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listTurnEvents'>;
   turnArtifactStore: Pick<ITurnArtifactStore, 'listArtifacts' | 'getArtifact' | 'getBlob'>;
   reencode: ImageReencoder;
-  sentinel: Pick<SentinelServices, 'audit' | 'isOffline' | 'searchWithoutAsking' | 'outboundSecrets'>;
+  sentinel: Pick<SentinelServices, 'audit' | 'isOffline' | 'outboundSecrets'>;
   fetchDeps: RemoteImageFetchDeps;
 }
 
@@ -93,14 +91,6 @@ function hostOf(url: string): string {
 }
 
 export function createChatImageService(deps: ChatImageServiceDeps) {
-  /** The flag the search classifier saves once a chat has read mail; it carries over from turn to turn. */
-  async function chatReadPrivateData(ref: TurnRef): Promise<boolean> {
-    const turn = await deps.sessionStore.getTurn({ session_id: ref.session_id, turn_id: ref.turn_id });
-    return Object.values(turn?.snapshot.threads ?? {}).some(
-      thread => thread.capability_state?.[PRIVATE_DATA_READ_STATE_KEY] === true,
-    );
-  }
-
   async function storeLocal(input: {
     ref: TurnRef;
     source_key: string;
@@ -142,13 +132,13 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
   async function audit(input: {
     ref: TurnRef;
     description: string;
-    outcome: 'ran' | 'approved' | 'auto_denied';
+    outcome: 'approved' | 'auto_denied';
   }): Promise<void> {
     await deps.sentinel.audit?.record({
       tenant_id: input.ref.owner.tenant_id,
       created_by: input.ref.owner.created_by,
       conversation_id: input.ref.session_id,
-      tier: input.outcome === 'ran' ? 1 : 3,
+      tier: AUDIT_TIER_APPROVED,
       tool_name: AUDIT_TOOL_NAME,
       description: input.description,
       outcome: input.outcome,
@@ -156,13 +146,8 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     });
   }
 
-  /** Fetches, re-encodes and stores one remote image; the audit row is written before anything leaves. */
-  async function showRemote(input: {
-    ref: TurnRef;
-    url: string;
-    source_key: string;
-    origin: 'remote_silent' | 'remote_approved';
-  }): Promise<ChatImageOutcome> {
+  /** Fetches, re-encodes and stores one remote image the person chose to show; the audit row is written before anything leaves. */
+  async function showRemote(input: { ref: TurnRef; url: string; source_key: string }): Promise<ChatImageOutcome> {
     const hit = await cached(input);
     if (hit !== undefined) {
       return hit;
@@ -171,10 +156,10 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
       return { status: 'refused', reason: 'offline' };
     }
     const secrets = await deps.sentinel.outboundSecrets(input.ref.owner);
-    // A silent image passes the whole guard on every hop; an approved one only the secret rules.
+    // The person approved the link, so only the rules that name an actual secret still stop the fetch.
     const allowUrl = (url: URL): boolean => {
       const verdict = guardVerdict({ url: url.toString(), secrets });
-      return verdict.ok || (input.origin === 'remote_approved' && !SECRET_RULES.has(verdict.rule));
+      return verdict.ok || !SECRET_RULES.has(verdict.rule);
     };
     const first = normalizeImageLink(input.url);
     if (first === undefined || !allowUrl(new URL(first))) {
@@ -189,13 +174,18 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     await audit({
       ref: input.ref,
       description: `Downloaded an image: ${input.url.slice(0, AUDIT_URL_MAX_CHARS)}`,
-      outcome: input.origin === 'remote_silent' ? 'ran' : 'approved',
+      outcome: 'approved',
     });
     const fetched = await fetchRemoteImage({ url: input.url, allowUrl, deps: deps.fetchDeps });
     if (!fetched.ok) {
       return { status: 'refused', reason: fetched.reason };
     }
-    return storeLocal({ ref: input.ref, source_key: input.source_key, origin: input.origin, bytes: fetched.bytes });
+    return storeLocal({
+      ref: input.ref,
+      source_key: input.source_key,
+      origin: 'remote_approved',
+      bytes: fetched.bytes,
+    });
   }
 
   async function showLocal(input: {
@@ -258,14 +248,7 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
       const batch = urls.slice(start, start + EMAIL_FETCH_BATCH);
       images.push(
         ...(await Promise.all(
-          batch.map(url =>
-            showRemote({
-              ref: input.ref,
-              url,
-              source_key: `email:${input.tool_call_id}:${url}`,
-              origin: 'remote_approved',
-            }),
-          ),
+          batch.map(url => showRemote({ ref: input.ref, url, source_key: `email:${input.tool_call_id}:${url}` })),
         )),
       );
     }
@@ -285,37 +268,19 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     if (hit !== undefined) {
       return { status: 'done', images: [hit] };
     }
-    if (input.approved) {
-      return {
-        status: 'done',
-        images: [await showRemote({ ref, url, source_key, origin: 'remote_approved' })],
-      };
-    }
-    if (await deps.sentinel.isOffline(ref.owner)) {
-      return { status: 'done', images: [{ status: 'refused', reason: 'offline' }] };
-    }
-    const state = createWebSearchTurnState();
-    recordResultUrls({ state, texts: facts.silentSearchResults });
-    const turnKey = { tenant_id: ref.owner.tenant_id, session_id: ref.session_id, turn_id: ref.turn_id };
-    const askReason = remoteImageAskReason({
-      url,
-      searchWithoutAsking: await deps.sentinel.searchWithoutAsking(ref.owner),
-      guardPassed: guardVerdict({ url, secrets: await deps.sentinel.outboundSecrets(ref.owner) }).ok,
-      privateDataRead: facts.readPrivateData || (await chatReadPrivateData(ref)),
-      silentShown: await deps.store.countSilentAttempts(turnKey),
-      state,
-    });
-    // Attempts, not stored images, use up the allowance, and the slot is taken before anything leaves,
-    // so parallel requests and failed fetches stay within it.
-    if (askReason !== null || !(await deps.store.reserveSilentAttempt({ ...turnKey, limit: SILENT_SEARCH_LIMIT }))) {
+    // A web image in a reply is never fetched until the person asks for it, even one a search returned.
+    if (!input.approved) {
+      if (await deps.sentinel.isOffline(ref.owner)) {
+        return { status: 'done', images: [{ status: 'refused', reason: 'offline' }] };
+      }
       return { status: 'ask', count: 1, host: hostOf(url) };
     }
-    return { status: 'done', images: [await showRemote({ ref, url, source_key, origin: 'remote_silent' })] };
+    return { status: 'done', images: [await showRemote({ ref, url, source_key })] };
   }
 
   return {
     async listTurnImages(ref: TurnRef): Promise<TurnImageList> {
-      const [artifacts, facts] = await Promise.all([
+      const [stored, facts] = await Promise.all([
         deps.turnArtifactStore.listArtifacts({
           tenant_id: ref.owner.tenant_id,
           session_id: ref.session_id,
@@ -323,10 +288,11 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
         }),
         readTurnImageFacts({ sessionStore: deps.sessionStore, ...ref }),
       ]);
+      const images = stored.filter(row => row.status === 'stored' && IMAGE_NAME.test(row.name));
+      const listed = (rows: typeof images) => rows.map(row => ({ path: row.path, name: row.name }));
       return {
-        artifacts: artifacts
-          .filter(row => row.status === 'stored' && IMAGE_NAME.test(row.name))
-          .map(row => ({ path: row.path, name: row.name })),
+        artifacts: listed(images.filter(row => !row.path.startsWith(TOOL_IMAGE_PATH_PREFIX))),
+        tool_images: listed(images.filter(row => row.path.startsWith(TOOL_IMAGE_PATH_PREFIX))),
         emails: [...facts.emailImageLinks].map(([tool_call_id, links]) => ({ tool_call_id, count: links.length })),
       };
     },
