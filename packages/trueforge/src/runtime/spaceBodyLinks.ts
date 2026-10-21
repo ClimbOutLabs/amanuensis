@@ -177,11 +177,10 @@ function collectHtmlLinks(node: HtmlNode, links: BodyLink[]): void {
   }
 }
 
+/** Whether two link lists name the same URLs in the same places. Cleaned values hold no line breaks, so the join is unambiguous. */
 function sameLinks({ first, second }: { first: BodyLink[]; second: BodyLink[] }): boolean {
-  return (
-    first.length === second.length &&
-    first.every((item, index) => item.kind === second[index].kind && item.value === second[index].value)
-  );
+  const keys = (links: BodyLink[]) => links.map(link => `${link.kind}\u0000${link.value}`).join('\n');
+  return keys(first) === keys(second);
 }
 
 /**
