@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { WelcomeScreen } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
@@ -35,6 +35,45 @@ export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
       "Good morning! What do I need to know today? Go through my calendar, email and tasks, and tell me what's coming up, what's due, and anything that looks off.",
   },
   {
+    key: 'clear-head',
+    label: 'Help me clear my head',
+    prompt:
+      "I have too much going on. Ask me what's on my mind, then sort it into today, this week, and later, and keep that list for me.",
+  },
+  {
+    key: 'break-task',
+    label: 'Help me break a task into steps',
+    prompt:
+      'Help me break a task into steps. Ask me what the task is, then split it into small steps I can each do in about 10 minutes, and keep the list so we can tick them off together.',
+  },
+  {
+    key: 'plan-day',
+    label: 'Help me plan my day',
+    prompt:
+      "Help me plan my day. Look at my calendar and my to-do list, put things in a sensible order with times, and find a good place for lunch near where I'll be.",
+  },
+  {
+    key: 'appointment',
+    label: "Help me with doctor's appointments",
+    prompt:
+      "Help me with my doctor's appointments. Find any coming up in my calendar and email, tell me what to bring and what to ask, and remind me of anything I still need to book.",
+    needs: 'calendar',
+  },
+  {
+    key: 'meals',
+    label: "Plan this week's meals",
+    prompt: "Plan this week's meals around what we already have, and make the shopping list.",
+  },
+];
+
+export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
+  {
+    key: 'email',
+    label: 'Handle your email',
+    prompt: 'Go through my unread email and tell me what needs a reply first.',
+    needs: 'email',
+  },
+  {
     key: 'subscriptions',
     label: 'Find forgotten subscriptions',
     prompt:
@@ -45,27 +84,6 @@ export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
     key: 'reply',
     label: 'Reply to an email',
     prompt: 'Help me reply to my most recent email that needs an answer.',
-    needs: 'email',
-  },
-  {
-    key: 'plan-day',
-    label: 'Help me plan my day',
-    prompt:
-      "Help me plan my day. Look at my calendar and my to-do list, put things in a sensible order with times, and find a good place for lunch near where I'll be.",
-  },
-  {
-    key: 'appointment',
-    label: 'Get ready for an appointment',
-    prompt: "What's my next appointment, and what should I bring or do before it?",
-    needs: 'calendar',
-  },
-];
-
-export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
-  {
-    key: 'email',
-    label: 'Handle your email',
-    prompt: 'Go through my unread email and tell me what needs a reply first.',
     needs: 'email',
   },
   { key: 'schedule', label: 'Run things on a schedule', prompt: 'Every weekday at 7:30, send me my morning brief.' },
@@ -121,6 +139,38 @@ export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities:
   return prompts.filter(item => item.needs === undefined || capabilities[item.needs]);
 }
 
+const TOUR_BUTTON_CLASS =
+  'flex h-full w-full cursor-pointer items-center rounded-xl border border-border bg-card-bg px-4 py-3 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg hover:bg-ghost-button-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60';
+
+/** Shows the label only; the full prompt stays hidden and is the button's accessible description. */
+function TourPromptButton({
+  item,
+  disabled,
+  onSend,
+}: {
+  item: TourPrompt;
+  disabled: boolean;
+  onSend: (prompt: string) => void;
+}) {
+  const promptId = useId();
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-describedby={promptId}
+        onClick={() => onSend(item.prompt)}
+        className={TOUR_BUTTON_CLASS}
+      >
+        {item.label}
+      </button>
+      <span id={promptId} hidden>
+        {item.prompt}
+      </span>
+    </li>
+  );
+}
+
 export type AmanTourProps = {
   capabilities: TourCapabilities;
   /** Sends the prompt through the composer, which starts the chat when it is the first message. */
@@ -153,17 +203,7 @@ export function AmanTour({ capabilities, onSend, canSend, onHide, setup }: AmanT
         </div>
         <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-2">
           {dayPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full flex-col items-start gap-1 rounded-xl border border-border bg-card-bg p-4 text-left transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="text-sm font-medium text-text-primary">{item.label}</span>
-                <span className="text-sm text-text-secondary">{item.prompt}</span>
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>
@@ -173,16 +213,7 @@ export function AmanTour({ capabilities, onSend, canSend, onHide, setup }: AmanT
         </h2>
         <ul className="grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2 md:grid-cols-3">
           {capabilityPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full items-center rounded-lg border border-border bg-secondary-bg px-3 py-2 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {item.label}
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>

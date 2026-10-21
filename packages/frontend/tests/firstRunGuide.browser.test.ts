@@ -31,7 +31,7 @@ function findChromiumExecutable(): string {
 
 const RENDER_TIMEOUT_MS = 45_000;
 const VIEWPORTS = [
-  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'desktop', width: 1440, height: 900 },
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;

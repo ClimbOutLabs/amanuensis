@@ -62,11 +62,13 @@ describe('AmanTour', () => {
     expect(onSend).toHaveBeenCalledTimes(TRY_A_DAY_PROMPTS.length);
   });
 
-  it('shows the prompt text on each day card so people see what will be sent', () => {
+  it('shows only the label on each card and gives the full prompt as its accessible description', () => {
     renderTour();
 
-    for (const item of TRY_A_DAY_PROMPTS) {
-      expect(screen.getByRole('button', { name: new RegExp(item.label) })).toHaveTextContent(item.prompt);
+    for (const item of [...TRY_A_DAY_PROMPTS, ...CAPABILITY_PROMPTS]) {
+      const button = screen.getByRole('button', { name: item.label });
+      expect(button).toHaveAccessibleDescription(item.prompt);
+      expect(screen.queryByText(item.prompt)).not.toBeVisible();
     }
   });
 
@@ -84,10 +86,10 @@ describe('AmanTour', () => {
     renderTour({ capabilities: NONE });
     const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
 
-    expect(days.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Reply to an email/ })).not.toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
+    expect(days.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Your morning brief/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Find forgotten subscriptions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reply to an email' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Handle your email' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
@@ -99,9 +101,10 @@ describe('AmanTour', () => {
     renderTour({ capabilities: { ...NONE, email: true } });
 
     expect(screen.getByRole('button', { name: 'Handle your email' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find forgotten subscriptions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reply to an email' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
   });
 
   it('turns the buttons off and says why when no model is set', () => {
@@ -126,6 +129,6 @@ describe('visibleTourPrompts', () => {
   it('keeps the prompts that need nothing, whatever the capabilities', () => {
     const visible = visibleTourPrompts(TRY_A_DAY_PROMPTS, NONE);
 
-    expect(visible.map(item => item.key)).toEqual(['brief', 'plan-day']);
+    expect(visible.map(item => item.key)).toEqual(['brief', 'clear-head', 'break-task', 'plan-day', 'meals']);
   });
 });

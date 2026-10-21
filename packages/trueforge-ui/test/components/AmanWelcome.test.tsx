@@ -136,7 +136,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
     expect(await screen.findByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Get ready for an appointment/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Help me with doctor's appointments/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Keep your calendar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();
   });
