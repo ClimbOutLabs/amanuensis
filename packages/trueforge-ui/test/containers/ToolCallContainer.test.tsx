@@ -888,6 +888,7 @@ describe('ToolCallContainer', () => {
         email: null,
         calendar_event: null,
         schedule: null,
+        persona: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -974,6 +975,7 @@ describe('ToolCallContainer: held search request', () => {
       email: null,
       calendar_event: null,
       schedule: null,
+      persona: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {

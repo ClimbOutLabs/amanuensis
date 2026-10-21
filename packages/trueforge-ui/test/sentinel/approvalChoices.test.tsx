@@ -23,6 +23,7 @@ const card: SentinelApprovalCard = {
   email: null,
   calendar_event: null,
   schedule: null,
+  persona: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
