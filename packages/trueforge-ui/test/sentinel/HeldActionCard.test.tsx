@@ -155,3 +155,19 @@ describe('HeldActionCard', () => {
     expect(screen.getByText('Google will not email the guests about this.')).toBeInTheDocument();
   });
 });
+
+describe('HeldActionCard "Change it"', () => {
+  it('shows Change it only with a handler, and sends the text as the change request', () => {
+    const onChangeRequest = vi.fn();
+    renderCard({ onChangeRequest });
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'shorter please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onChangeRequest).toHaveBeenCalledWith('shorter please');
+  });
+
+  it('shows no Change it without a handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
+  });
+});

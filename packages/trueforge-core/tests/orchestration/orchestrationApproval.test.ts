@@ -1,5 +1,6 @@
 /** Pause on write_note approval, then resume after allow or deny. */
 import { createToolResponseV2, EventType } from '../../src/core/events/schema';
+import { changeRequestReason } from '../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../src/core/runtime/AgentThreadOrchestrator';
@@ -270,9 +271,87 @@ describe('orchestration: pause then resume on tool approval', () => {
       ]);
     });
   });
+
+  describe('change it', () => {
+    const ROOT_FINAL = 'note saved';
+    const CHANGE_TEXT = 'make it shorter';
+    const REVISED_CALL_ID = 'call-write-revised';
+
+    it('never runs the tool and hands the model the words the person asked for', async () => {
+      const { orchestrator, thread, callTool } = makeApprovalHarness(ROOT_FINAL);
+
+      await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      });
+      const resumed = await runTurn({
+        orchestrator,
+        sendBatch: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: ROOT_ID,
+            tool_call_id: WRITE_NOTE_CALL_ID,
+            approval: { status: 'deny', reason: changeRequestReason(CHANGE_TEXT) },
+          },
+        ],
+      });
+
+      expect(callTool).not.toHaveBeenCalled();
+      expect(resumed.result.root_agent_error).toBeUndefined();
+      expect(llmCreateInputs(thread.definition.modelClient)).toContainEqual(
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: 'tool',
+              content: expect.stringContaining(
+                'The person asked for changes before approving: make it shorter. Make the changes and propose it again.',
+              ),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('lets the model propose a revised call that needs its own approval', async () => {
+      const { orchestrator, callTool } = makeApprovalHarness(ROOT_FINAL, REVISED_CALL_ID);
+
+      await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      });
+      await runTurn({
+        orchestrator,
+        sendBatch: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: ROOT_ID,
+            tool_call_id: WRITE_NOTE_CALL_ID,
+            approval: { status: 'deny', reason: changeRequestReason(CHANGE_TEXT) },
+          },
+        ],
+      });
+      // A later message asks the model to try again, so the revised call comes in a new turn.
+      const revised = await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'try again' }],
+      });
+
+      expect(callTool).not.toHaveBeenCalled();
+      expect(revised.result.required_actions).toMatchObject([
+        {
+          type: EventType.TOOL_APPROVAL_REQUIRED,
+          thread_id: ROOT_ID,
+          tool_calls: [{ id: REVISED_CALL_ID }],
+        },
+      ]);
+    });
+  });
 });
 
-function makeApprovalHarness(finalReply: string): {
+function makeApprovalHarness(
+  finalReply: string,
+  revisedCallId?: string,
+): {
   orchestrator: AgentThreadOrchestrator;
   thread: AgentThread;
   callTool: jest.Mock;
@@ -284,6 +363,10 @@ function makeApprovalHarness(finalReply: string): {
         create: jest
           .fn()
           .mockImplementationOnce(() => writeNoteToolCallStream())
+          .mockImplementationOnce(() => textReplyStream(finalReply))
+          .mockImplementationOnce(() =>
+            revisedCallId === undefined ? textReplyStream(finalReply) : writeNoteToolCallStream(revisedCallId),
+          )
           .mockImplementation(() => textReplyStream(finalReply)),
         createNonStream: jest.fn(),
       },

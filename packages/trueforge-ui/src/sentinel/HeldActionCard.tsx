@@ -1,11 +1,12 @@
 'use client';
 
-import type { FC } from 'react';
+import { useRef, useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
+import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
 import type { SentinelApprovalCard } from './types.js';
@@ -34,6 +35,8 @@ export type HeldActionCardProps = {
   onApprove: () => void;
   onAlwaysAllow: () => void;
   onDeny: () => void;
+  /** Only passed for a card with editable content. Gets the text the person typed. */
+  onChangeRequest?: ((text: string) => void) | undefined;
 };
 
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -95,6 +98,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   onApprove,
   onAlwaysAllow,
   onDeny,
+  onChangeRequest,
 }) => {
   const hasDetails =
     card.recipient !== null ||
@@ -103,6 +107,8 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
     card.amount !== null ||
     card.parsed_command !== null;
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
+  const [changing, setChanging] = useState(false);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -182,6 +188,21 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
                 {APPROVAL_CHOICES.alwaysAllow.label}
               </Button>
             )}
+            {onChangeRequest !== undefined && (
+              <Button
+                ref={changeButtonRef}
+                variant="secondary"
+                size="large"
+                title={APPROVAL_CHOICES.changeIt.hint}
+                aria-expanded={changing}
+                onClick={() => {
+                  setChanging(true);
+                }}
+                disabled={disabled}
+              >
+                {APPROVAL_CHOICES.changeIt.label}
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="large"
@@ -193,6 +214,19 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               {APPROVAL_CHOICES.deny.label}
             </Button>
           </div>
+        )}
+        {canAnswer && changing && onChangeRequest !== undefined && (
+          <ChangeRequestBox
+            disabled={disabled}
+            onSend={text => {
+              setChanging(false);
+              onChangeRequest(text);
+            }}
+            onCancel={() => {
+              setChanging(false);
+              changeButtonRef.current?.focus();
+            }}
+          />
         )}
       </div>
     </li>

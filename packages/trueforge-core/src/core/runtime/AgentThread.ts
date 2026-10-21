@@ -115,6 +115,7 @@ import {
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit } from '../permissions/audit';
+import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -1922,6 +1923,16 @@ export class AgentThread {
       if (denied !== undefined) {
         await this.auditHeld({ info: denied.tool_info, outcome: 'denied', note: 'Turned down by the owner' });
       }
+    }
+    const changeRequests = input.approvals.flatMap(approval =>
+      approval.approval.status === 'deny' && isChangeRequestReason(approval.approval.reason)
+        ? [approval.approval.reason]
+        : [],
+    );
+    if (allowedCalls.length === 0 && changeRequests.length > 0) {
+      // The model continues from the person's words, so it proposes a revised call instead of stopping here.
+      const request: LLMUserMessage = { role: 'user', content: changeRequests.join('\n') };
+      return { context: [request], events: [] };
     }
     if (allowedCalls.length === 0) {
       const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };

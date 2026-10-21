@@ -3,10 +3,12 @@
 import type { PartState } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { ROOT_THREAD_ID, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { useState } from 'react';
 
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { hasSessionResync, type HeldActionDecision } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { offersChangeIt } from '../sentinel/approvalChoices.js';
 import { HeldActionCard, type HeldActionStatus } from '../sentinel/HeldActionCard.js';
 import { describeHeldAnswerFailure } from '../sentinel/heldActionErrors.js';
 import { NeedsYourOk, NotSavedNote } from '../sentinel/NeedsYourOk.js';
@@ -49,7 +51,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
       return copy;
     });
 
-  const answer = async (info: SentinelApprovalInfo, decision: HeldActionDecision) => {
+  const answer = async (info: SentinelApprovalInfo, decision: HeldActionDecision, reason?: string) => {
     if (server == null || !hasSessionResync(server) || sessionId == null) return;
     setStatus(info.toolCallId, { kind: 'working' });
     try {
@@ -58,6 +60,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
         threadId: info.threadId ?? ROOT_THREAD_ID,
         toolCallId: info.toolCallId,
         answer: decision,
+        reason,
       });
       sentinel.recordAnswer(info.toolCallId, decision === 'deny' ? 'denied' : 'approved');
       setStatus(info.toolCallId, decision === 'deny' ? undefined : { kind: 'approved', outcome });
@@ -98,6 +101,9 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           onApprove={() => void answer(info, 'approve')}
           onAlwaysAllow={() => void answer(info, 'always_allow')}
           onDeny={() => void answer(info, 'deny')}
+          onChangeRequest={
+            offersChangeIt(info.card) ? text => void answer(info, 'deny', changeRequestReason(text)) : undefined
+          }
         />
       ))}
     </NeedsYourOk>

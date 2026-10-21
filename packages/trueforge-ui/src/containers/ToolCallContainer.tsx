@@ -12,11 +12,13 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { useCallback, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
+import { offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -220,6 +222,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+        onChangeRequest={
+          offersChangeIt(approvalInfo.card)
+            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+            : undefined
+        }
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
