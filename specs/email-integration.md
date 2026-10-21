@@ -84,7 +84,7 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 
 **A send is never repeated blindly.** Requests that create or send are not retried after a failure that may have happened after Gmail acted. If the outcome is unknown, Aman says the send may have gone through and tells the user to check the Sent folder before trying again.
 
-**After reading mail, outbound searches ask.** Once a conversation has read mail, web searches in it ask first, so mail content cannot leave in a query unseen.
+**After reading mail, outbound searches are checked.** Once a conversation has read mail or calendar, a web search or map in it runs without asking only when its text carries nothing copied from that mail or calendar: no sender name, email address, phone number, long number, copied five-word phrase or code-like string. A map may name a street address from the mail. Otherwise it asks, or in a scheduled run it is skipped and the owner is told.
 
 **Scheduled runs read but never write.** The write tools are not offered to a scheduled run and a call is refused.
 

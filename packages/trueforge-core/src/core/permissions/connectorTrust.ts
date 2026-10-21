@@ -5,7 +5,7 @@
  */
 import type { TierDecision } from './tier';
 import { TOOL_GRANT_REASON } from './toolGrants';
-import { SEARCH_SILENT_REASON } from './webSearch';
+import { isSilentSearchReason } from './webSearch';
 
 /** The connector is first-party and the tool declares itself read-only and explicitly closed-world. */
 export const FIRST_PARTY_TOOL_REASON = 'mcp_first_party_read_only';
@@ -15,6 +15,6 @@ export function isStandingTrustDecision(decision: TierDecision): boolean {
     decision.tier === 1 &&
     (decision.reason === FIRST_PARTY_TOOL_REASON ||
       decision.reason === TOOL_GRANT_REASON ||
-      decision.reason === SEARCH_SILENT_REASON)
+      isSilentSearchReason(decision.reason))
   );
 }
