@@ -166,8 +166,6 @@ export type SentinelApprovalPersona = {
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
 export type HeldActionInfo = {
-  /** Whether "Always allow" may be offered; the server refuses it for other tools. */
-  alwaysAllowOffered: boolean;
   /** ISO time after which the held action can no longer be approved, or null when not sent. */
   expiresAt: string | null;
 };
@@ -183,6 +181,8 @@ export type SentinelApprovalInfo = {
   threadId: string | null;
   /** False when the server refuses chat scope for this call; absent from servers that do not say. */
   chatAllowOffered?: boolean | undefined;
+  /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
+  alwaysAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -253,6 +253,8 @@ export type SentinelUserSettings = {
   search_without_asking: boolean;
   /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
   maps_without_asking: boolean;
+  /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
+  sandbox_without_asking: boolean;
 };
 
 /**
@@ -540,7 +542,6 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
 function parseHeldInfo(ref: Record<string, unknown>): HeldActionInfo | undefined {
   if (ref.held !== true) return undefined;
   return {
-    alwaysAllowOffered: ref.can_always_allow === true || ref.canAlwaysAllow === true,
     expiresAt: nullableString(ref, 'expires_at') ?? nullableString(ref, 'expiresAt'),
   };
 }
@@ -561,12 +562,14 @@ function parseApprovalInfo(
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
+  const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
+    ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -710,12 +713,19 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
   if (!isRecord(settings)) {
-    return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true, maps_without_asking: false };
+    return {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    };
   }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }

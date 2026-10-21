@@ -10,6 +10,7 @@ Cut a new release when:
 2. `main` HEAD is verified buildable on the exact head:
    - `pnpm install --frozen-lockfile` succeeds from a fresh checkout
    - `pnpm typecheck` passes
+   - `pnpm guide:build` runs as part of `pnpm build`, so each release ships a fresh Aman guide; commit the regenerated `knowledgePack.generated.ts` if it changed
    - `pnpm test` passes (or the focused suites covering the merged changes)
 
 Do not cut a release on an unverified head. If verification fails, fix `main` first.

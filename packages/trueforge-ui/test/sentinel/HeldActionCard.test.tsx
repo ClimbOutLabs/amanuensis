@@ -74,12 +74,37 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
   });
 
-  it('offers Always allow only when the server said it may', () => {
+  it('offers Always allow this tool only when the server said it may', () => {
+    renderCard({ alwaysAllowOffered: false });
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+  });
+
+  it('asks the owner to confirm Always allow this tool before it records anything', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('calls nothing when the owner cancels the Always allow confirm step', () => {
+    const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('calls the Always allow handler once when the owner confirms', () => {
+    const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
   });
 

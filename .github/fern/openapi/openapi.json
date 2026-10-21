@@ -2654,6 +2654,17 @@
         ],
         "type": "object"
       },
+      "GetHelpHealthCheckResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HelpHealthCheck"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetKnowledgeDocumentResponse": {
         "properties": {
           "data": {
@@ -3543,6 +3554,124 @@
           "redirect_uri"
         ],
         "type": "object"
+      },
+      "HelpHealthCheck": {
+        "properties": {
+          "checked_at": {
+            "description": "When this check ran, in UTC ISO 8601.",
+            "type": "string"
+          },
+          "host_report": {
+            "$ref": "#/components/schemas/HelpHostReport"
+          },
+          "items": {
+            "description": "Every live check with the model first, then failed or warned lines from the last full check.",
+            "items": {
+              "$ref": "#/components/schemas/HelpHealthItem"
+            },
+            "type": "array"
+          },
+          "model_ready": {
+            "description": "Whether the default model answered the test call.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checked_at",
+          "model_ready",
+          "items",
+          "host_report"
+        ],
+        "type": "object"
+      },
+      "HelpHealthItem": {
+        "properties": {
+          "id": {
+            "description": "Stable snake_case id of the check.",
+            "type": "string"
+          },
+          "message": {
+            "description": "One plain sentence on what was found.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Plain name of the check.",
+            "type": "string"
+          },
+          "next_step": {
+            "description": "One plain sentence on what to do next, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/HelpHealthStatus"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "message",
+          "next_step"
+        ],
+        "type": "object"
+      },
+      "HelpHealthStatus": {
+        "description": "Result of one check: pass, warn, fail, or not_set_up when the feature is not configured.",
+        "enum": [
+          "pass",
+          "warn",
+          "fail",
+          "not_set_up"
+        ],
+        "type": "string"
+      },
+      "HelpHostReport": {
+        "properties": {
+          "checked_at": {
+            "description": "When the last full check ran, in UTC ISO 8601, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "description": "One plain sentence when the report needs attention, else null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_step": {
+            "description": "One plain sentence on what to do next, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/HelpHostReportState"
+          }
+        },
+        "required": [
+          "state",
+          "checked_at",
+          "message",
+          "next_step"
+        ],
+        "type": "object"
+      },
+      "HelpHostReportState": {
+        "description": "Whether the last full check from the computer can be read and is recent.",
+        "enum": [
+          "ok",
+          "missing",
+          "invalid",
+          "stale"
+        ],
+        "type": "string"
       },
       "ImplementationPlan": {
         "additionalProperties": false,
@@ -8314,6 +8443,10 @@
             "description": "While on, actions that reach outside this machine are denied automatically.",
             "type": "boolean"
           },
+          "sandbox_without_asking": {
+            "description": "While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.",
+            "type": "boolean"
+          },
           "search_without_asking": {
             "description": "While on, your designated search provider runs web searches without asking. Off asks for each one.",
             "type": "boolean"
@@ -8333,7 +8466,8 @@
           "offline_mode",
           "tier2_auto_allow",
           "search_without_asking",
-          "maps_without_asking"
+          "maps_without_asking",
+          "sandbox_without_asking"
         ],
         "type": "object"
       },
@@ -12260,6 +12394,10 @@
             "description": "New offline mode value; omitted keeps the current value.",
             "type": "boolean"
           },
+          "sandbox_without_asking": {
+            "description": "New sandbox setting; omitted keeps the current value.",
+            "type": "boolean"
+          },
           "search_without_asking": {
             "description": "New search setting; omitted keeps the current value.",
             "type": "boolean"
@@ -14383,6 +14521,41 @@
           "data"
         ],
         "x-fern-sdk-method-name": "import_data"
+      }
+    },
+    "/api/v1/help/health-check": {
+      "get": {
+        "description": "Checks the default model, connectors, sandbox and schedules, and the last full check run on the computer. Each check has one plain sentence and, when needed, one next step.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetHelpHealthCheckResponse"
+                }
+              }
+            },
+            "description": "The health check."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get the help health check",
+        "tags": [
+          "Help"
+        ],
+        "x-fern-sdk-group-name": [
+          "help"
+        ],
+        "x-fern-sdk-method-name": "get_health_check"
       }
     },
     "/api/v1/mcp-servers": {
@@ -23100,6 +23273,9 @@
     },
     {
       "name": "Spaces"
+    },
+    {
+      "name": "Help"
     }
   ],
   "webhooks": {}

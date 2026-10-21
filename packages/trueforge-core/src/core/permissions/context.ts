@@ -32,6 +32,8 @@ export interface SentinelServices {
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Whether the user lets embedded maps run without asking, once the silent-run rules hold. Default off. */
   mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Whether the user lets in-sandbox work (code, commands, workspace files, package installs) run without asking. Default off. */
+  sandboxWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
@@ -90,6 +92,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
     mapsWithoutAsking: () => Promise.resolve(false),
+    sandboxWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
     demoSendAllowlist: null,

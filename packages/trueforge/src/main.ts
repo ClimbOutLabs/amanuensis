@@ -831,6 +831,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authenticator,
     authorizer,
     outboundSecrets,
+    schedulerStatus: () => {
+      if (controller === undefined) {
+        return 'elsewhere';
+      }
+      return controller.isRunning() ? 'running' : 'stopped';
+    },
   });
 
   return {

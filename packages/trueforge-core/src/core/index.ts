@@ -488,7 +488,7 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
-export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
+export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export {
   SILENT_SEARCH_LIMIT,
   createWebSearchTurnState,
