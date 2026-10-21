@@ -10,7 +10,11 @@ import {
   Sessions,
   type AgentSpec,
 } from '@truefoundry/trueforge-core/agent-session';
-import type { ILLM, IToolSet } from '@truefoundry/trueforge-core/core';
+import type { ILLM } from '@truefoundry/trueforge-core/core';
+import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
+import type { IToolSet } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
+import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permissions/context';
+import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
@@ -177,13 +181,57 @@ describe('a web search after the chat read mail', () => {
     return { finder, mail };
   }
 
+  /** Runs a mail read through the dispatch loop, the path every production read takes, so its result is recorded. */
+  async function readMail(input: { mail: IToolSet; turn: WebSearchTurnState }) {
+    const name = 'list_inbox_threads';
+    await executeToolCalls({
+      assistantMessage: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name, arguments: '{}' },
+            tool_info: {
+              type: 'mcp',
+              mcp_server_id: 'gmail',
+              mcp_server_name: 'gmail',
+              is_approval_required: false,
+              tier: 1,
+              original_tool_name: name,
+              read_only_hint: true,
+            },
+          },
+        ],
+      },
+      toolMapping: new Map([[name, { toolSet: input.mail, originalToolName: name }]]),
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState: createToolCallMemoState(),
+      sentinel: {
+        services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        identity: {
+          tenant_id: OWNER.tenant_id,
+          created_by: OWNER.created_by,
+          conversation_id: 's1',
+          repository_id: null,
+          workspace_cwd: null,
+          agent_intent: null,
+        },
+        web_search: input.turn,
+      },
+    });
+  }
+
   const search = (finder: IToolSet, query = 'lisbon tapas') =>
     finder.toolCallInfo({ name: INERT_WEB_SEARCH_TOOL, arguments: { query } });
   /** A search that copies the sender's name from the mail the chat just read. */
   const copiedSender = `${MAIL_SENDER_NAME} tapas`;
 
   it('searches silently before a read, then a clean query runs checked and a copied sender name asks', async () => {
-    const resolved = await resolver().resolveAgentDefinition({
+    const turnResolver = resolver();
+    const resolved = await turnResolver.resolveAgentDefinition({
       spec: spec(),
       ...OWNER,
       session_id: 's1',
@@ -192,7 +240,7 @@ describe('a web search after the chat read mail', () => {
     });
     const { finder, mail } = await toolSetsOf(resolved);
     expect((await search(finder)).tier).toBe(1);
-    await mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+    await readMail({ mail, turn: turnResolver.webSearchTurn });
     expect(await search(finder)).toMatchObject({ tier: 1, tier_reason: 'mcp_search_after_read_checked' });
     const copied = await search(finder, copiedSender);
     expect(copied.tier).toBe(3);
@@ -200,7 +248,8 @@ describe('a web search after the chat read mail', () => {
   });
 
   it('keeps asking in a later turn of the same chat, by carrying the flag in the root thread state', async () => {
-    const first = await resolver().resolveAgentDefinition({
+    const firstResolver = resolver();
+    const first = await firstResolver.resolveAgentDefinition({
       spec: spec(),
       ...OWNER,
       session_id: 's1',
@@ -210,7 +259,7 @@ describe('a web search after the chat read mail', () => {
     const { mail } = await toolSetsOf(first);
     const capability = (first.extraCapabilities ?? []).find(candidate => candidate.state !== undefined);
     expect(capability?.state?.key).toBe('tfy.private_data_read');
-    await mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+    await readMail({ mail, turn: firstResolver.webSearchTurn });
     const saved: unknown[] = [];
     for (const processor of capability?.postToolCallProcessors ?? []) {
       for await (const output of processor.processPostToolCall({
@@ -285,16 +334,16 @@ describe('a web search after the chat read mail', () => {
       if (root === undefined) {
         throw new Error('the turn never resolved a definition');
       }
-      return await toolSetsOf(root);
+      return { ...(await toolSetsOf(root)), turn: inner.webSearchTurn };
     }
 
     it('asks an attended chat, and holds the search for the owner in a scheduled run', async () => {
       const attended = await resolvedForSource(null);
-      await attended.mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+      await readMail({ mail: attended.mail, turn: attended.turn });
       expect((await search(attended.finder, copiedSender)).is_approval_required).toBe(true);
 
       const scheduled = await resolvedForSource({ type: 'schedule', id: 'sched-1', run_id: 'run-1' });
-      await scheduled.mail.callTool({ name: 'list_inbox_threads', arguments: {} });
+      await readMail({ mail: scheduled.mail, turn: scheduled.turn });
       const held = await search(scheduled.finder, copiedSender);
       expect(held.is_approval_required).toBe(true);
       expect(held.pre_dispatch_failure).toBeUndefined();
