@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { WelcomeScreen } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
@@ -28,29 +28,41 @@ export type TourPrompt = {
 };
 
 export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
-  { key: 'brief', label: 'Your morning brief', prompt: 'Good morning! Give me my brief for today.' },
   {
-    key: 'scam-check',
-    label: 'Check for scams',
-    prompt: 'Is anything in my inbox a scam?',
-    needs: 'email',
+    key: 'brief',
+    label: 'Your morning brief',
+    prompt:
+      "Good morning! What do I need to know today? Go through my calendar, email and tasks, and tell me what's coming up, what's due, and anything that looks off.",
   },
   {
-    key: 'reply',
-    label: 'Reply to an email',
-    prompt: 'Help me reply to my most recent email that needs an answer.',
-    needs: 'email',
+    key: 'clear-head',
+    label: 'Help me clear my head',
+    prompt:
+      "I have too much going on. Ask me what's on my mind, then sort it into today, this week, and later, and keep that list for me.",
+  },
+  {
+    key: 'break-task',
+    label: 'Help me break a task into steps',
+    prompt:
+      'Help me break a task into steps. Ask me what the task is, then split it into small steps I can each do in about 10 minutes, and keep the list so we can tick them off together.',
   },
   {
     key: 'plan-day',
-    label: 'Plan my day',
-    prompt: "Plan my day around what's on my list, with lunch somewhere nearby.",
+    label: 'Help me plan my day',
+    prompt:
+      "Help me plan my day. Look at my calendar and my to-do list, put things in a sensible order with times, and find a good place for lunch near where I'll be.",
   },
   {
     key: 'appointment',
-    label: 'Get ready for an appointment',
-    prompt: 'Help me get ready for my next appointment.',
+    label: "Help me with doctor's appointments",
+    prompt:
+      "Help me with my doctor's appointments. Find any coming up in my calendar and email, tell me what to bring and what to ask, and remind me of anything I still need to book.",
     needs: 'calendar',
+  },
+  {
+    key: 'meals',
+    label: "Plan this week's meals",
+    prompt: "Plan this week's meals around what we already have, and make the shopping list.",
   },
 ];
 
@@ -61,7 +73,20 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     prompt: 'Go through my unread email and tell me what needs a reply first.',
     needs: 'email',
   },
-  { key: 'schedule', label: 'Run things on a schedule', prompt: 'Set up a routine that checks my bills every Friday.' },
+  {
+    key: 'subscriptions',
+    label: 'Find forgotten subscriptions',
+    prompt:
+      "Look through my email for subscriptions and renewals. List what I'm paying for, how much and how often, and flag anything I may have forgotten about.",
+    needs: 'email',
+  },
+  {
+    key: 'reply',
+    label: 'Reply to an email',
+    prompt: 'Help me reply to my most recent email that needs an answer.',
+    needs: 'email',
+  },
+  { key: 'schedule', label: 'Run things on a schedule', prompt: 'Every weekday at 7:30, send me my morning brief.' },
   {
     key: 'calendar',
     label: 'Keep your calendar',
@@ -76,35 +101,35 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
     key: 'web',
     label: 'Research the live web',
-    prompt: 'Look up the latest news on a topic I care about and sum it up for me.',
+    prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
   },
   {
     key: 'documents',
     label: 'Keep living documents',
-    prompt: 'Start a living document for my packing list that I can update later.',
+    prompt: 'Start a packing list for a weekend trip that we can keep updating.',
   },
   {
     key: 'specialists',
     label: 'Bring in specialists',
-    prompt: "Create a travel planner specialist for me, then have it plan a long weekend somewhere I've never been.",
+    prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
   },
   {
     key: 'code',
     label: 'Read files and run code',
-    prompt: 'Add up these expenses and show me the total: 12.50, 8, 31.20.',
+    prompt: 'Add up my expenses by category and make a chart: rent 900, groceries 210, transport 45, eating out 80.',
     needs: 'sandbox',
   },
   { key: 'memory', label: 'Remember what matters', prompt: 'What do you remember about me so far?' },
   {
     key: 'skills',
     label: 'Learn new skills',
-    prompt: 'Learn a new skill that turns my receipts into a monthly expense list.',
+    prompt: 'Learn how to turn a photo of a receipt into a line in my expense list.',
     needs: 'sandbox',
   },
   {
     key: 'move',
     label: 'Move with you',
-    prompt: 'What can you do for me when I am away from my desk?',
+    prompt: 'How do I use you from my phone?',
   },
   { key: 'cost', label: 'Show what it costs', prompt: 'Show me what my chats have cost so far this month.' },
 ];
@@ -112,6 +137,38 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
 /** The prompts whose capability this instance has; the rest are left out, not greyed out. */
 export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities: TourCapabilities): TourPrompt[] {
   return prompts.filter(item => item.needs === undefined || capabilities[item.needs]);
+}
+
+const TOUR_BUTTON_CLASS =
+  'flex h-full w-full cursor-pointer items-center rounded-xl border border-border bg-card-bg px-4 py-3 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg hover:bg-ghost-button-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60';
+
+/** Shows the label only; the full prompt stays hidden and is the button's accessible description. */
+function TourPromptButton({
+  item,
+  disabled,
+  onSend,
+}: {
+  item: TourPrompt;
+  disabled: boolean;
+  onSend: (prompt: string) => void;
+}) {
+  const promptId = useId();
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-describedby={promptId}
+        onClick={() => onSend(item.prompt)}
+        className={TOUR_BUTTON_CLASS}
+      >
+        {item.label}
+      </button>
+      <span id={promptId} hidden>
+        {item.prompt}
+      </span>
+    </li>
+  );
 }
 
 export type AmanTourProps = {
@@ -146,17 +203,7 @@ export function AmanTour({ capabilities, onSend, canSend, onHide, setup }: AmanT
         </div>
         <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-2">
           {dayPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full flex-col items-start gap-1 rounded-xl border border-border bg-card-bg p-4 text-left transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="text-sm font-medium text-text-primary">{item.label}</span>
-                <span className="text-sm text-text-secondary">{item.prompt}</span>
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>
@@ -166,16 +213,7 @@ export function AmanTour({ capabilities, onSend, canSend, onHide, setup }: AmanT
         </h2>
         <ul className="grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2 md:grid-cols-3">
           {capabilityPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full items-center rounded-lg border border-border bg-secondary-bg px-3 py-2 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {item.label}
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>

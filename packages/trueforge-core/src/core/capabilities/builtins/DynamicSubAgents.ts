@@ -71,12 +71,11 @@ export class DynamicSubAgents extends LocalToolMCP {
     }
 
     const paragraphs = [
-      `Delegate a well-defined task to a sub-agent. The Agent must not delegate the whole work to the sub-agent.`,
-      `The sub-agent has access to the same tools and the same sandbox environment as the parent Agent. Files created or modified by either agent are shared and remain available to both.`,
-      `A sub-agent cannot gain tools or capabilities that the parent Agent does not have. Do not delegate work that requires an unavailable tool, and do not instruct a sub-agent to invent or simulate one.`,
-      `For delegated coding work, workspace_cwd must be the exact absolute local checkout path already used by the parent. The host binds that path into the child task. Do not delegate coding work until the checkout is known.`,
+      `Delegate a well-defined part of the task to a sub-agent, never the whole work.`,
+      `The sub-agent shares your tools and sandbox, and files either agent creates are visible to both. It cannot gain tools you lack, so do not delegate work that needs an unavailable tool or ask it to simulate one.`,
+      `For coding work, workspace_cwd must be the exact absolute path of the existing checkout the parent uses. Do not delegate coding work until that path is known.`,
       ...(modelSetGuidance ? [modelSetGuidance] : []),
-      `The sub-agent has NO access to the prior conversation or the user's original message. The Agent must provide a clear, self-contained instruction that includes all necessary context, the exact task to perform, any constraints, what outputs are expected, and what work has already been completed so effort is not duplicated.`,
+      `The sub-agent has NO access to the prior conversation or the user's message. Give a self-contained instruction: the context, the exact task, constraints, expected outputs, and work already done.`,
     ];
 
     return paragraphs.join('\n\n').trim();
