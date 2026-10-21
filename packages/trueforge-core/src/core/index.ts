@@ -483,6 +483,7 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
   Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,

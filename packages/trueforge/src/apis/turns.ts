@@ -73,7 +73,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
-import { resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
+import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
@@ -94,6 +94,7 @@ import {
   type TurnModelUsage,
 } from '../runtime/modelUsage';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
+import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
   profileLearningPassConfig,
@@ -363,6 +364,8 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Chat turns that have a model to answer with; absent, no specialist tool mounts. */
+  personas?: PersonaTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -400,6 +403,7 @@ function createTurnResolver(deps: {
     tokenFactoryBudget,
     modelUsage,
     schedules,
+    personas,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -791,6 +795,7 @@ function createTurnResolver(deps: {
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
+      personas,
       logger,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
@@ -2076,6 +2081,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
+      personas:
+        chatRunner === undefined
+          ? undefined
+          : {
+              store: deps.personaStore,
+              modelProviderStore,
+              tenant_id: requestContext.tenant_id,
+              owner_id: userRef,
+              model_name: chatModelName(chatRunner),
+              logger: deps.logger,
+            },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
           ? undefined

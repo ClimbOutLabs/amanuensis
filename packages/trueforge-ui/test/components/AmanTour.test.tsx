@@ -52,6 +52,14 @@ describe('AmanTour', () => {
     expect(screen.getByText('Setup block here')).toBeInTheDocument();
   });
 
+  it('offers the specialist card prompt that creates a travel planner and uses it', () => {
+    const specialists = CAPABILITY_PROMPTS.find(item => item.key === 'specialists');
+    expect(specialists).toMatchObject({
+      label: 'Bring in specialists',
+      prompt: "Create a travel planner specialist for me, then have it plan a long weekend somewhere I've never been.",
+    });
+  });
+
   it('sends each day card its exact prompt', () => {
     const { onSend } = renderTour();
 

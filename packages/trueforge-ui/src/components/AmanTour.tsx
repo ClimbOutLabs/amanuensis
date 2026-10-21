@@ -86,7 +86,7 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
     key: 'specialists',
     label: 'Bring in specialists',
-    prompt: 'Bring in a specialist to help me plan my next trip.',
+    prompt: "Create a travel planner specialist for me, then have it plan a long weekend somewhere I've never been.",
   },
   {
     key: 'code',

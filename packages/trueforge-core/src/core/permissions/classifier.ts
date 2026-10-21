@@ -25,6 +25,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
+import { PERSONA_SERVER_ID } from '../personas/toolContract';
 import {
   isScheduleStatusToolName,
   isScheduleWriteToolName,
@@ -100,6 +101,7 @@ import {
   tier3Decision,
   type Tier2ActionKind,
   type Tier3Card,
+  type Tier3Persona,
   type Tier3Schedule,
   type TierDecision,
   type TrackedExecutionBinding,
@@ -184,6 +186,8 @@ export interface SentinelAction {
   calendar_write?: CalendarWriteReview | undefined;
   /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
   schedule_write?: Tier3Schedule | undefined;
+  /** The specialist a create would add, settled by the persona tool set from the request and the owner's personas. */
+  persona_write?: Tier3Persona | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1963,6 +1967,51 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
   };
 }
 
+/** The approval card for adding a specialist, built from what the host will save. */
+function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  // The description is shown as one sentence, so a trailing full stop is not doubled.
+  const sentence = show(review.description).replace(/[.!?]+$/, '');
+  return {
+    plain_what: `Add a specialist: ${show(review.name)}. ${sentence}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    persona: {
+      name: show(review.name),
+      description: show(review.description),
+      instructions: escapeDisplayText(review.instructions, { keepNewlines: true }),
+      model_name: show(review.model_name),
+    },
+  };
+}
+
+/** Adding a specialist always asks with the full instructions. Any other persona tool name fails closed. */
+async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.persona_write === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The specialist could not be checked, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: personaWriteCard({ review: action.persona_write, agent_intent: ctx.agent_intent }),
+    reason: 'persona_write',
+    reason_detail: 'Adding a specialist always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 /**
  * Schedule tools are the host's own, named by server. Creating or deleting always asks with the schedule in full;
  * listing, pausing and resuming run without asking. Any other name fails closed.
@@ -2336,6 +2385,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === PERSONA_SERVER_ID) {
+    return classifyPersonaTool(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);

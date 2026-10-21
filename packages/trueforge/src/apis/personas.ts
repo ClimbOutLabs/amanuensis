@@ -10,6 +10,7 @@ import { PersonaNameConflictError, type IPersonaStore } from '../db/personaStore
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { closePersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
+import { createPersonaForOwner } from '../personas/createPersona';
 import { buildPersonaContext, type Persona, type PersonaActivation } from '../personas/persona';
 import {
   createPersonaRoute,
@@ -77,21 +78,13 @@ export function createPersonasRouter(deps: PersonasRouterDeps) {
   const createHandler: RouteHandler<typeof createPersonaRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     const { persona } = c.req.valid('json');
-    // A persona whose model does not exist cannot answer, so it is refused at
-    // write time rather than accepted and failed at the first invocation.
-    await assertPersonaModelAvailable({
-      displayName: persona.display_name,
-      modelName: persona.model_name,
-      tenant_id: TENANT_ID,
-      modelProviderStore: deps.resolveModelProviderStore(c),
-    });
     try {
-      const created = await deps.personaStore.createPersona({
+      const created = await createPersonaForOwner({
         tenant_id: TENANT_ID,
-        created_by: requestContext.subject.id,
-        updated_by: requestContext.subject.id,
-        id: ulid().toLowerCase(),
-        ...persona,
+        owner_id: requestContext.subject.id,
+        content: persona,
+        personaStore: deps.personaStore,
+        modelProviderStore: deps.resolveModelProviderStore(c),
       });
       return c.json({ data: toWirePersona(created) }, 201);
     } catch (error) {
