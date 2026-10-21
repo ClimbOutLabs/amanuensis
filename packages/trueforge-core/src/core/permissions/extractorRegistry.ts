@@ -453,6 +453,13 @@ const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
     external_service: true,
     delivers_message: false,
   },
+  {
+    // Without this entry the word `email` in the name would make an archive an external send with no destination.
+    match: nameIncludes('archive_email'),
+    extract: genericExtractor,
+    external_service: false,
+    delivers_message: false,
+  },
 ];
 
 /**
@@ -547,6 +554,8 @@ const CONNECTOR_READ_WORDS = new Set([
   'header',
   'headers',
   'body',
+  'content',
+  'metadata',
   'folder',
   'folders',
   'by',
@@ -592,9 +601,14 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
-    match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
+    match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft', 'save_draft'),
     sends: 'message',
     describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
+  },
+  {
+    // Archiving only moves mail inside the mailbox, so it carries no recipient and is not an external send.
+    match: words => hasPhrase(words, 'archive'),
+    describe: ({ tool_name, where }) => `Archive emails with ${tool_name}${where}.`,
   },
   {
     match: words =>

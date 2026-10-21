@@ -209,6 +209,22 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * Parses `MAIL_EMAIL_MCP_URL`: the Email connector's MCP endpoint, such as the compose sidecar's
+ * `http://mail-email:9557/mcp`. Unset or blank means no mail sidecar, so no Email connector is
+ * registered. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseMailEmailMcpUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`MAIL_EMAIL_MCP_URL must be an http(s) URL such as http://mail-email:9557/mcp, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/**
  * Source reference the running build came from. A Docker `ARG` that the build was
  * never given still reaches the process as an empty string, so blank counts as unset.
  */
@@ -996,6 +1012,11 @@ export interface SharedServerConfiguration {
    * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
+  /**
+   * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
+   * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
+   */
+  MAIL_EMAIL_MCP_URL: string | undefined;
   /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
@@ -1815,6 +1836,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: 30 * 1000,
   }),
   FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+  MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

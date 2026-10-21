@@ -112,6 +112,7 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -655,6 +656,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     mcpServerStore: mcpOAuthStore,
     catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  // Registered at boot when the mail sidecar is configured; a no-op otherwise.
+  await registerMailConnectorAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    mcpServerStore: mcpOAuthStore,
     tenant_id: TENANT_ID,
     logger,
   });
