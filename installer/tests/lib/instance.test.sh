@@ -98,7 +98,6 @@ test_list() {
   assert_contains "$OUT" "second"
   assert_contains "$OUT" "running"
   assert_contains "$OUT" "8792"
-  assert_contains "$OUT" "second@example.invalid"
   assert_contains "$OUT" "PERSON"
   assert_not_contains "$OUT" "OWNER"
   rm -f "$SB_STATE/up/aman-second"

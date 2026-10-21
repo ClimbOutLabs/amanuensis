@@ -1006,7 +1006,7 @@ align_columns() {
 }
 
 cmd_instance_list() {
-  local name state
+  local name state person
   if [ -z "$(reg_names)" ]; then
     say "No instances yet. Run install.sh or install.sh instance add <name>."
     return 0
@@ -1021,8 +1021,10 @@ cmd_instance_list() {
     for name in $(reg_names); do
       state=unknown
       case "$DOCKER_ACCESS" in direct | sg) state=$(instance_state "$name") ;; esac
+      person=$(reg_get "$name" owner_name)
+      [ -n "$person" ] || person=$(reg_get "$name" owner_email)
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_port)" \
-        "$state" "$(doctor_status "$name")" "$(reg_get "$name" owner_email)" "$(reg_get "$name" public_url)"
+        "$state" "$(doctor_status "$name")" "$person" "$(reg_get "$name" public_url)"
     done
   } | align_columns
 }

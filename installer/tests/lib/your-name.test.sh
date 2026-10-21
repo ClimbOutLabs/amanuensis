@@ -167,6 +167,22 @@ test_import_uses_the_recorded_name() {
   sandbox_drop
 }
 
+test_list_shows_the_name_not_the_email() {
+  t_begin "instance list shows the name the person gave in PERSON, and the email only when no name is set"
+  sandbox_new
+  install_yes --your-name "Robin Lee"
+  assert_rc 0
+  run_install instance list
+  assert_rc 0
+  assert_contains "$OUT" "Robin Lee"
+  assert_not_contains "$OUT" "$EMAIL"
+  sed -i '/^owner_name=/d' "$AMAN_HOME/state/instances/main.conf"
+  run_install instance list
+  assert_rc 0
+  assert_contains "$OUT" "$EMAIL"
+  sandbox_drop
+}
+
 test_enter_takes_the_start_of_the_email
 test_a_typed_name_is_used
 test_a_bad_name_is_asked_again
@@ -176,4 +192,5 @@ test_the_flag_is_checked
 test_upgrade_fills_in_an_old_instance
 test_refresh_keeps_a_name_set_by_hand
 test_import_uses_the_recorded_name
+test_list_shows_the_name_not_the_email
 tests_finish
