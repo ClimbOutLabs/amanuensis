@@ -493,6 +493,7 @@ export {
   createWebSearchTurnState,
   recordResultUrls,
   remoteImageAskReason,
+  unreturnedUrls,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';

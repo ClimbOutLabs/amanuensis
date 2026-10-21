@@ -5,6 +5,7 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
@@ -123,7 +124,12 @@ function makeMemoryStore(initial: SpaceRecord[] = [], options: { hasMore?: boole
 }
 
 function makeToolSet(store: SpaceToolStore) {
-  const capability = spaceCapability({ store, authority: AUTHORITY, tracing: NOOP_TRACING });
+  const capability = spaceCapability({
+    store,
+    authority: AUTHORITY,
+    tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
+  });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
     throw new Error('expected space tool set');

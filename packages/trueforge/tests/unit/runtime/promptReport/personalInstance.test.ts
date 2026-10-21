@@ -5,10 +5,10 @@ import {
   type PersonalInstanceName,
 } from '../../../../src/runtime/promptReport/personalInstance';
 
-/** Measured 2026-10-21 (spaces trimmed and name lookup added); the memory provider's tools are not captured yet, so they are not counted. */
+/** Measured 2026-10-21 (spaces trimmed, name lookup added, picture rule shortened); the memory provider's tools are not captured yet, so they are not counted. */
 const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<string, number> }> = {
   personal: {
-    total: 12074,
+    total: 12011,
     rows: {
       'agent-identity': 38,
       'current-date': 36,
@@ -29,7 +29,7 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       'agent-capabilities/sub-agents': 263,
       'agent-capabilities/openui': 159,
       'agent-capabilities/active-speaker-context': 91,
-      'agent-capabilities/spaces': 1099,
+      'agent-capabilities/spaces': 1035,
       'agent-capabilities/schedules': 57,
       ask_user_question: 261,
       get_current_datetime: 100,
@@ -66,7 +66,7 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
     },
   },
   'personal-with-google': {
-    total: 13139,
+    total: 13076,
     rows: {
       'agent-identity': 38,
       'current-date': 36,
@@ -87,7 +87,7 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       'agent-capabilities/sub-agents': 263,
       'agent-capabilities/openui': 159,
       'agent-capabilities/active-speaker-context': 91,
-      'agent-capabilities/spaces': 1099,
+      'agent-capabilities/spaces': 1035,
       'agent-capabilities/schedules': 57,
       ask_user_question: 261,
       get_current_datetime: 100,

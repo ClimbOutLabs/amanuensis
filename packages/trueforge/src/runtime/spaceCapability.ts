@@ -10,7 +10,13 @@
  * user is keeping. Deleting a space is a UI-only action (`DELETE /api/v1/spaces/{space_id}`,
  * exposed from the space's own page), never something a running turn can reach.
  */
-import type { AgentCapability, AgentTracing, InstructionBuilder, Sandbox } from '@truefoundry/trueforge-core/core';
+import type {
+  AgentCapability,
+  AgentTracing,
+  InstructionBuilder,
+  Sandbox,
+  WebSearchTurnState,
+} from '@truefoundry/trueforge-core/core';
 import {
   createSentinelHostContext,
   defineTool,
@@ -53,6 +59,7 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { refuseNewSpaceLinks, SpaceLinkRefusedError } from './spaceLinks';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no
@@ -221,7 +228,7 @@ Pass body as an array of lines, one element per line: each table row is its own 
 
 If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment the host renders, not a bundled app. Author every html space on those classes, as one self-contained document with inline CSS. Never author a space by editing files in the sandbox (apply_patch, replace_text, write_file, or exec): use create_space and update_space only. The host's sanitiser decides what actually renders.
 
-Pictures: remote images do not show in spaces. The host drops any https image and blocks loads from outside, so do not use web image links. Tell the person once, in one line, that spaces cannot show web photos. Use emoji instead (they are plain Unicode text and fine in spaces), or a small raster data: URI (PNG, JPEG, WebP, or GIF) when a picture really matters. A data URI embeds the bytes in the body and eats context, so keep it tiny.
+Pictures: use only picture links that a search or page result in this chat returned, never one you made up; search for a picture first if you need one. The host refuses any other link.
 
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
@@ -384,6 +391,8 @@ export interface SpaceCapabilityOptions {
   sessionId?: string;
   /** Operational log for delta-edit failures: the next burn loop should be visible at failure #2. */
   logger?: Logger;
+  /** This turn's search record: the links a search or page result returned, the only links a space may add. */
+  webSearch: WebSearchTurnState;
 }
 
 /**
@@ -772,6 +781,7 @@ class SpaceTool extends LocalToolMCP {
   }
 
   private async create(input: z.infer<typeof CREATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
+    refuseNewSpaceLinks({ body: input.body, previousBody: '', web_search: this.options.webSearch });
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
       this.options.authority,
@@ -834,6 +844,7 @@ class SpaceTool extends LocalToolMCP {
         throw error;
       }
     }
+    refuseNewSpaceLinks({ body: body ?? '', previousBody: current.body, web_search: this.options.webSearch });
     this.checkShrink(input.space_id, current, body ?? '', input.confirm_shrink);
     const mutation = await this.options.store.updateSpace({
       tenant_id: this.options.authority.tenantId,
@@ -1270,6 +1281,9 @@ class SpaceTool extends LocalToolMCP {
       if (error instanceof SpaceDeltaLockedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
+      if (error instanceof SpaceLinkRefusedError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
       if (error instanceof SpaceRevisionConflictError) {
         return toolResultResponse({
           text: JSON.stringify({ error: error.message, revision: error.actual_revision }),
@@ -1383,7 +1397,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
-        spaceCapability({ ...this.#space, tracing: input.tracing }),
+        spaceCapability({ ...this.#space, tracing: input.tracing, webSearch: this.webSearchTurn }),
         mapsCapability({
           tracing: input.tracing,
           logger: this.#space.logger,

@@ -4,8 +4,10 @@
  * allow-list, not a block-list: an element survives only if it is named below, an attribute
  * survives only if it is named for that element (or in the global set), and anything else is
  * removed, elements together with their contents. Links may use only `http`, `https`, `mailto`,
- * or a relative reference, and the only images that survive are `data:` raster images, so no
- * markup that reaches the frame can execute script or fetch anything off-page.
+ * or a relative reference. Pictures are `data:` raster images or `https` links; the server checks
+ * that each `https` picture came from a search or page result before it is saved, and this
+ * sanitiser keeps the frame from loading anything else. No markup that reaches the frame can run
+ * script or fetch anything else off-page.
  *
  * SVG drawing elements are allowed so pages can carry inline charts and icons. Animation and
  * script-bearing SVG (SMIL elements, `foreignObject`, nested documents) are not on the list and
@@ -58,13 +60,26 @@ function isAllowedLinkUrl(value: string): boolean {
 }
 
 /**
- * The only images that survive are raster `data:` URIs. `data:image/svg+xml` is excluded on
- * purpose: an SVG payload is a document, not a picture, and never reaches the frame as an image.
+ * The raster `data:` URIs a space may embed. `data:image/svg+xml` is excluded on purpose: an SVG
+ * payload is a document, not a picture, and never reaches the frame as an image.
  */
 const DATA_RASTER_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)(?:;|,)/i;
 
 function isAllowedImageSrc(value: string): boolean {
   return DATA_RASTER_IMAGE_RE.test(stripUrlNoise(value));
+}
+
+/** A picture is an embedded raster or an `https` link; the server vets the link before it is saved. */
+function isAllowedPictureSrc(value: string): boolean {
+  return isAllowedImageSrc(value) || /^https:\/\//i.test(stripUrlNoise(value));
+}
+
+/** A 0 or 1 pixel picture is a tracking beacon, never something a person reads, so it is dropped. */
+function isTrackingPixel(element: Element): boolean {
+  return ['width', 'height'].some(name => {
+    const value = element.getAttribute(name);
+    return value !== null && Number.parseFloat(value) <= 1;
+  });
 }
 
 /** A same-document fragment reference such as `#icon`, used by `<use>` and `url(#...)`. */
@@ -377,7 +392,7 @@ allowElement('tr', []);
 allowElement('td', ['colspan', 'rowspan', 'headers']);
 allowElement('th', ['colspan', 'rowspan', 'headers', 'scope', 'abbr']);
 
-// Images: raster `data:` URIs only; the element itself is dropped when `src` is anything else.
+// Pictures: raster `data:` URIs or `https` links; the element is dropped when `src` is anything else.
 allowElement('picture', []);
 allowElement('img', ['src', 'alt', 'width', 'height']);
 
@@ -493,11 +508,11 @@ function sanitiseElement(element: Element): void {
     return;
   }
 
-  // An image whose source is not a raster `data:` URI is dropped whole rather than left as a
-  // broken frame; the same rule covers `<image>` inside SVG, through either href spelling.
+  // A picture whose source is neither a raster `data:` URI nor an `https` link is dropped whole
+  // rather than left as a broken frame; the same raster rule covers `<image>` inside SVG.
   if (tag === 'img') {
     const src = element.getAttribute('src');
-    if (src === null || !isAllowedImageSrc(src)) {
+    if (src === null || !isAllowedPictureSrc(src) || isTrackingPixel(element)) {
       element.remove();
       return;
     }

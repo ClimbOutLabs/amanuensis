@@ -1,3 +1,4 @@
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 /**
  * User journey test for update_space delta edits.
  *
@@ -237,6 +238,7 @@ async function callTool(store: SpaceToolStore, name: string, args: Record<string
     store,
     authority: { tenantId: 'default', userRef: 'user-a' },
     tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
