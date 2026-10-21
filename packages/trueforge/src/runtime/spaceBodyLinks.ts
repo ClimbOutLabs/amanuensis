@@ -60,8 +60,12 @@ function cleanUrl(raw: string): string {
   const value = raw.replace(/[\t\n\r]/g, '');
   let start = 0;
   let end = value.length;
-  while (start < end && value.charCodeAt(start) <= 0x20) start += 1;
-  while (end > start && value.charCodeAt(end - 1) <= 0x20) end -= 1;
+  while (start < end && value.charCodeAt(start) <= 0x20) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) {
+    end -= 1;
+  }
   return value.slice(start, end);
 }
 
@@ -94,11 +98,17 @@ function srcsetLinks(srcset: string): BodyLink[] {
   const links: BodyLink[] = [];
   let index = 0;
   while (index < srcset.length) {
-    while (index < srcset.length && /[\s,]/.test(srcset.charAt(index))) index += 1;
+    while (index < srcset.length && /[\s,]/.test(srcset.charAt(index))) {
+      index += 1;
+    }
     const start = index;
-    while (index < srcset.length && !/\s/.test(srcset.charAt(index))) index += 1;
+    while (index < srcset.length && !/\s/.test(srcset.charAt(index))) {
+      index += 1;
+    }
     const candidate = srcset.slice(start, index);
-    if (candidate === '') break;
+    if (candidate === '') {
+      break;
+    }
     if (candidate.endsWith(',')) {
       links.push(picture(candidate.replace(/,+$/, '')));
       continue;
@@ -108,9 +118,15 @@ function srcsetLinks(srcset: string): BodyLink[] {
     while (index < srcset.length) {
       const char = srcset.charAt(index);
       index += 1;
-      if (char === '(') depth += 1;
-      if (char === ')') depth -= 1;
-      if (char === ',' && depth <= 0) break;
+      if (char === '(') {
+        depth += 1;
+      }
+      if (char === ')') {
+        depth -= 1;
+      }
+      if (char === ',' && depth <= 0) {
+        break;
+      }
     }
   }
   return links;
@@ -122,11 +138,19 @@ function attributeName(attribute: { name: string; prefix?: string }): string {
 
 /** Every URL one attribute of one element could load or follow. */
 function attributeLinks({ tag, name, value }: { tag: string; name: string; value: string }): BodyLink[] {
-  if (name === 'srcset') return srcsetLinks(value);
-  if (name === 'style') return cssLinks(value);
+  if (name === 'srcset') {
+    return srcsetLinks(value);
+  }
+  if (name === 'style') {
+    return cssLinks(value);
+  }
   const navigable = (tag === 'a' || tag === 'area') && (name === 'href' || name === 'xlink:href');
-  if (navigable || NAVIGABLE_ATTRIBUTES.has(name)) return [link(value)];
-  if (LOADED_ATTRIBUTES.has(name)) return [picture(value), ...cssLinks(value)];
+  if (navigable || NAVIGABLE_ATTRIBUTES.has(name)) {
+    return [link(value)];
+  }
+  if (LOADED_ATTRIBUTES.has(name)) {
+    return [picture(value), ...cssLinks(value)];
+  }
   // Any other attribute counts only when its value reads as a URL or carries a CSS url().
   const loads = NAMES_A_WEB_HOST.test(cleanUrl(value)) ? [picture(value)] : [];
   return [...loads, ...cssLinks(value)];
@@ -156,7 +180,7 @@ function collectHtmlLinks(node: HtmlNode, links: BodyLink[]): void {
 function sameLinks({ first, second }: { first: BodyLink[]; second: BodyLink[] }): boolean {
   return (
     first.length === second.length &&
-    first.every((item, index) => item.kind === second[index]?.kind && item.value === second[index]?.value)
+    first.every((item, index) => item.kind === second[index].kind && item.value === second[index].value)
   );
 }
 
@@ -187,7 +211,9 @@ function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
       break;
     case 'html': {
       const inner = htmlLinks(node.value);
-      if (inner === undefined) return false;
+      if (inner === undefined) {
+        return false;
+      }
       links.push(...inner);
       break;
     }
@@ -196,7 +222,9 @@ function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
   }
   if ('children' in node) {
     for (const child of node.children) {
-      if (!collectMarkdownLinks(child, links)) return false;
+      if (!collectMarkdownLinks(child, links)) {
+        return false;
+      }
     }
   }
   return true;

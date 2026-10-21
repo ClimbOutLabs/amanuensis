@@ -10,11 +10,17 @@ export function decodeCssEscapes(css: string): string {
     (_match, hex: string | undefined, newline: string | undefined, char: string | undefined) => {
       if (hex !== undefined) {
         const code = Number.parseInt(hex, 16);
-        if (code === 0x5c) return '';
-        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '�';
+        if (code === 0x5c) {
+          return '';
+        }
+        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+          return '�';
+        }
         return String.fromCodePoint(code);
       }
-      if (newline !== undefined) return '';
+      if (newline !== undefined) {
+        return '';
+      }
       return char === '\\' ? '' : (char ?? '');
     },
   );
