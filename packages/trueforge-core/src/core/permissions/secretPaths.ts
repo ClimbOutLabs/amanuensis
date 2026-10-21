@@ -52,12 +52,17 @@ const WORD_SEPARATOR = /[^\p{L}\p{N}]+/u;
 /** A lowercase letter or digit followed by an uppercase letter, or an acronym followed by a capitalised word. */
 const LOWER_TO_UPPER_HUMP = /([\p{Ll}\p{N}])(\p{Lu})/gu;
 const ACRONYM_TO_WORD_HUMP = /(\p{Lu})(\p{Lu}\p{Ll})/gu;
+/** Letters and digits meet at a boundary, so `token2` is the word `token` and the number `2`. */
+const LETTER_TO_DIGIT = /(\p{L})(\p{N})/gu;
+const DIGIT_TO_LETTER = /(\p{N})(\p{L})/gu;
 
 /** Splits a name into lowercase words. Humps are split before lowercasing, so `apiKey` and `API_KEY` both split. */
 function splitWords(name: string): string[] {
   return name
     .replace(LOWER_TO_UPPER_HUMP, '$1 $2')
     .replace(ACRONYM_TO_WORD_HUMP, '$1 $2')
+    .replace(LETTER_TO_DIGIT, '$1 $2')
+    .replace(DIGIT_TO_LETTER, '$1 $2')
     .split(WORD_SEPARATOR)
     .map(word => word.toLowerCase())
     .filter(word => word.length > 0);
@@ -110,12 +115,13 @@ function segmentsName(text: string): boolean {
 
 /**
  * Whether one string names a secret path, or is itself a secret name. A value with no spaces is
- * checked whole, so a bare `credentials` counts. Inside free text only a word with a path shape is
- * checked, so a search that mentions a secret word is not a read of one.
+ * checked whole, so a bare `credentials` counts, and so does a path with spaces, checked as one path.
+ * Inside other free text only a word with a path shape is checked, so a search that mentions a secret
+ * word is not a read of one.
  */
 export function namesSecretPath(text: string): boolean {
   const whole = stripQuotes(text.trim());
-  if (!/\s/.test(whole) && segmentsName(whole)) {
+  if ((!/\s/.test(whole) || /[/\\]/.test(whole)) && segmentsName(whole)) {
     return true;
   }
   return whole
@@ -124,16 +130,47 @@ export function namesSecretPath(text: string): boolean {
     .some(word => looksLikePathWord(word) && segmentsName(word));
 }
 
-/** Whether any string at any depth of a value names a secret path. Key names are not checked. */
-export function containsSecretPath(value: unknown): boolean {
+/** A drive letter at the start, such as `C:`. */
+const DRIVE_LETTER = /^[A-Za-z]:/;
+/** A file name with an extension: a word character, a dot, then a letter that starts the extension. */
+const FILE_EXTENSION = /[\p{L}\p{N}_-]\.\p{L}[\p{L}\p{N}]{0,9}/u;
+
+/**
+ * Whether a string has a path shape: a slash or backslash, a leading `~` or drive letter, or a word
+ * with a file extension. An email address is not a path. Such a value never gets a standing or chat
+ * grant, even when the secret list does not recognise its name.
+ */
+function isPathLikeText(text: string): boolean {
+  const whole = stripQuotes(text.trim());
+  if (/[/\\]/.test(whole) || whole.startsWith('~') || DRIVE_LETTER.test(whole)) {
+    return true;
+  }
+  return whole
+    .split(/\s+/)
+    .map(stripQuotes)
+    .some(word => !word.includes('@') && FILE_EXTENSION.test(word));
+}
+
+/** Whether any string at any depth of a value passes the test. Key names are not checked. */
+function anyStringIn(value: unknown, test: (text: string) => boolean): boolean {
   if (typeof value === 'string') {
-    return namesSecretPath(value);
+    return test(value);
   }
   if (Array.isArray(value)) {
-    return value.some(containsSecretPath);
+    return value.some(item => anyStringIn(item, test));
   }
   if (typeof value === 'object' && value !== null) {
-    return Object.values(value).some(containsSecretPath);
+    return Object.values(value).some(item => anyStringIn(item, test));
   }
   return false;
+}
+
+/** Whether any string at any depth of a value names a secret path. Key names are not checked. */
+export function containsSecretPath(value: unknown): boolean {
+  return anyStringIn(value, namesSecretPath);
+}
+
+/** Whether any string at any depth of a value has a path shape. Key names are not checked. */
+export function containsPathLikeValue(value: unknown): boolean {
+  return anyStringIn(value, isPathLikeText);
 }

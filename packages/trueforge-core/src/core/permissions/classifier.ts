@@ -90,7 +90,7 @@ import {
   searchHoldCardText,
   withHoldSay,
 } from './searchHoldText';
-import { containsSecretPath, namesSecretPath } from './secretPaths';
+import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
@@ -2076,15 +2076,18 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
+  // Any argument with a path shape is a private read whatever its name, so it never gets a grant.
+  const pathLike = containsPathLikeValue(action.canonical_params);
   // Eligible for "Always allow" like an annotated read-only tool. Only an explicit open-world or
-  // not-read-only claim, the search provider, or a read of a secret path rules it out; the arguments
-  // already ruled out recipients.
+  // not-read-only claim, the search provider, a secret name or a path-like argument rules it out; the
+  // arguments already ruled out recipients.
   const grantableRead =
     extraction.connector_read &&
     action.mcp_hints.open_world_hint !== true &&
     action.mcp_hints.read_only_hint !== false &&
     action.mcp_search_provider !== true &&
-    !containsSecretPath(action.canonical_params);
+    !containsSecretPath(action.canonical_params) &&
+    !pathLike;
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -2233,7 +2236,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     (closedWorldRead || grantableRead) &&
     !extraction.sends &&
-    !containsSecretPath(action.canonical_params)
+    !containsSecretPath(action.canonical_params) &&
+    !pathLike
   ) {
     if (closedWorldRead && action.mcp_first_party === true) {
       return tier1Decision({
@@ -2284,7 +2288,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
     grant_host: action.mcp_server_host ?? null,
-    secret_path_read: containsSecretPath(action.canonical_params),
+    secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,

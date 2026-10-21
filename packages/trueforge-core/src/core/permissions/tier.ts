@@ -208,7 +208,7 @@ export interface TierDecision {
   inspection: boolean;
   /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
   grant_host: string | null;
-  /** True when a call reads a sensitive path. Such a call is never eligible for a standing grant or chat scope. */
+  /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
   secret_path_read: boolean;
 }
 

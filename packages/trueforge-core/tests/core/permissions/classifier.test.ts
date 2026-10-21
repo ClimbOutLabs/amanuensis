@@ -639,14 +639,29 @@ describe('classifyTier connector tools and standing grants', () => {
   });
 
   test.each([
-    ['a file in a folder named secretary', { path: '/work/secretary/notes.md' }],
-    ['a file named tokenizer', { path: '/repo/src/tokenizer.ts' }],
-    ['a file in a folder named keyboard', { path: '/work/keyboard/layout.md' }],
+    ['a search with a secret word in free text', { query: 'my token budget and secret santa plans' }],
+    ['a message id', { id: '18f2a9c0' }],
   ])('a granted tool still runs silently for %s', async (_, canonical_params) => {
     const { services } = grantedServices();
     const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
     expect(decision.tier).toBe(1);
     expect(decision.reason).toBe(TOOL_GRANT_REASON);
+  });
+
+  test.each([
+    ['a file in a folder named secretary', { path: '/work/secretary/notes.md' }],
+    ['a file named tokenizer', { path: '/repo/src/tokenizer.ts' }],
+    ['a file in a folder named keyboard', { path: '/work/keyboard/layout.md' }],
+    ['a file with an extension and no folder', { file: 'layout.md' }],
+    ['a Windows path', { path: 'C:\\Users\\u\\notes\\plan.txt' }],
+  ])('a granted tool asks for a path-like argument, %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.card).not.toBeNull();
+    expect(decision.inspection).toBe(false);
+    expect(decision.secret_path_read).toBe(true);
   });
 
   test('offline mode auto-denies a granted tool', async () => {
@@ -1247,6 +1262,44 @@ describe('connector reads can be always allowed', () => {
       expect(decision.inspection).toBe(false);
     },
   );
+
+  test.each([
+    ['a relative path', { attachment_path: 'notes/todo.md' }],
+    ['a file name with an extension', { attachment: 'todo.md' }],
+    ['a home path', { attachment_path: '~/Documents/plan' }],
+    ['a drive path', { attachment_path: 'D:\\exports\\summary' }],
+    ['a folder name with spaces', { attachment_path: '/home/u/My Notes/plan' }],
+    ['a file name with spaces', { attachment: 'Q3 report final.pdf' }],
+    ['a path nested in a list', { filters: [{ files: ['/srv/exports/2026'] }] }],
+    ['a very long path', { attachment_path: `${'/a'.repeat(4000)}/draft` }],
+  ])('a mail read of %s gets a card every time, even with a grant on it', async (_, args) => {
+    const services = servicesGranting([grantFor('list-messages')]);
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', ...args } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card).not.toBeNull();
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.secret_path_read).toBe(true);
+    expect(decision.inspection).toBe(false);
+  });
+
+  test.each([
+    ['a sender search with an email address', { query: 'invoice from:alice@example.com' }],
+    ['a label and a date', { label: 'INBOX', after: '2026-10-01' }],
+    ['a folder name with a space and no slash', { folder: 'Family photos' }],
+    ['a search with a secret word in free text', { query: 'my token budget and secret santa plans' }],
+  ])('a mail read of %s keeps both offers', async (_, args) => {
+    const decision = await classifyTier(
+      readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', ...args } }),
+      makeCtx({ services: servicesGranting([grantFor('list-messages')]) }),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.inspection).toBe(true);
+    expect(decision.secret_path_read).not.toBe(true);
+  });
 
   test('a grant on one read does not cover another read, or the same read on another connector', async () => {
     const services = servicesGranting([grantFor('list-messages')]);

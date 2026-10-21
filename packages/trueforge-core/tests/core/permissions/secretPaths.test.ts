@@ -1,4 +1,4 @@
-import { containsSecretPath, namesSecretPath } from '../../../src/core/permissions/secretPaths';
+import { containsPathLikeValue, containsSecretPath, namesSecretPath } from '../../../src/core/permissions/secretPaths';
 
 describe('namesSecretPath', () => {
   test.each([
@@ -162,5 +162,60 @@ describe('containsSecretPath', () => {
   test('keeps ordinary arguments, including free text that mentions a secret word', () => {
     expect(containsSecretPath({ attachment_path: '/work/secretary/notes.md' })).toBe(false);
     expect(containsSecretPath({ note: 'my token budget and secret santa plans' })).toBe(false);
+  });
+});
+
+describe('namesSecretPath splits letters from digits', () => {
+  test.each(['/home/u/notes/token2.txt', '/home/u/notes/apikey2.json', 'token2'])('%s is secret', value => {
+    expect(namesSecretPath(value)).toBe(true);
+  });
+
+  test('keeps ordinary names with digits', () => {
+    expect(namesSecretPath('/home/u/notes/keyboard2.md')).toBe(false);
+    expect(namesSecretPath('/home/u/notes/oauth2.md')).toBe(false);
+  });
+});
+
+describe('namesSecretPath checks a path with spaces as one path', () => {
+  test.each(['/home/u/api keys/notes.md', '/work/my tokens/plan.md', 'C:\\Users\\u\\Private Keys\\note.txt'])(
+    '%s is secret',
+    value => {
+      expect(namesSecretPath(value)).toBe(true);
+    },
+  );
+
+  test('keeps an ordinary path with spaces', () => {
+    expect(namesSecretPath('/home/u/My Notes/plan.md')).toBe(false);
+  });
+});
+
+describe('containsPathLikeValue', () => {
+  test.each([
+    ['a slash path', { a: '/work/notes' }],
+    ['a backslash path', { a: 'notes\\plan' }],
+    ['a home path', { a: '~/Documents' }],
+    ['a drive path', { a: 'D:' }],
+    ['a file name with an extension', { file: 'todo.md' }],
+    ['a file name with spaces and an extension', { file: 'Q3 report final.pdf' }],
+    ['a file name with a trailing comma', { file: 'see report.pdf, then reply' }],
+    ['a path nested in a list', { items: [{ files: ['exports/2026.csv'] }] }],
+    ['a very long value with a path', { a: `${'x'.repeat(4000)}/end` }],
+  ])('finds %s at any depth', (_, value) => {
+    expect(containsPathLikeValue(value)).toBe(true);
+  });
+
+  test.each([
+    ['an email address', { to: 'alice@example.com' }],
+    ['a sender search', { query: 'invoice from:alice@example.com' }],
+    ['a message id', { id: '18f2a9c0' }],
+    ['a date and time', { after: '2026-10-01', at: '3.5pm' }],
+    ['a folder name with spaces', { folder: 'Family photos' }],
+    ['a number and a flag', { count: 3, unread: true, nothing: null }],
+  ])('ignores %s', (_, value) => {
+    expect(containsPathLikeValue(value)).toBe(false);
+  });
+
+  test('ignores key names', () => {
+    expect(containsPathLikeValue({ '/work/notes.md': 'hello' })).toBe(false);
   });
 });

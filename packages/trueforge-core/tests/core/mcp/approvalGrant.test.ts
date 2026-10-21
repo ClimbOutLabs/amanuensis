@@ -342,7 +342,7 @@ describe('always-allow grant eligibility', () => {
     expect(allowsChatApproval(info)).toBe(false);
   });
 
-  it('end-to-end: an annotated connector read of an ordinary path stays eligible for a standing grant', async () => {
+  it('end-to-end: an annotated connector read of an ordinary search stays eligible for a standing grant', async () => {
     const toolSet = makeRealToolSet({
       tools: [
         {
@@ -354,7 +354,7 @@ describe('always-allow grant eligibility', () => {
       selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
       classify: true,
     });
-    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { path: '/home/u/notes/todo.md' } });
+    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { query: 'quarterly review' } });
     expect(allowsToolGrant(info)).toBe(true);
     expect(allowsChatApproval(info)).toBe(true);
   });
@@ -692,24 +692,32 @@ describe('secret-path detection covers every argument of an unannotated connecto
     }
   });
 
-  it('still offers chat and always scope for an ordinary read, including free text that mentions a secret word', async () => {
-    const toolSet = attachmentToolSet();
-    const file = await toolSet.toolCallInfo({
-      name: 'get_attachment',
-      arguments: { attachment_path: '/home/u/notes/todo.md' },
-    });
-    const text = await toolSet.toolCallInfo({
-      name: 'get_attachment',
-      arguments: { note: 'my token budget and secret santa plans' },
-    });
-    const similar = await toolSet.toolCallInfo({
-      name: 'get_attachment',
-      arguments: { attachment_path: '/home/u/keyboard/tokenizer/secretary.md' },
-    });
-    for (const info of [file, text, similar]) {
-      expect(info.secret_path_read).not.toBe(true);
-      expect(allowsChatApproval(info)).toBe(true);
-      expect(allowsToolGrant(info)).toBe(true);
-    }
+  it.each([
+    ['a free-text search that mentions a secret word', { query: 'my token budget and secret santa plans' }],
+    ['a sender search with an email address', { query: 'invoice from:alice@example.com' }],
+    ['a message id', { id: '18f2a9c0' }],
+    ['a label and a date', { label: 'INBOX', after: '2026-10-01' }],
+    ['a folder name with a space and no slash', { folder: 'Family photos' }],
+  ])('still offers chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).not.toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it.each([
+    ['a relative file with a slash', { attachment_path: 'notes/todo.md' }],
+    ['a file name with an extension and no folder', { attachment: 'todo.md' }],
+    ['a home path', { attachment_path: '~/Documents/plan' }],
+    ['a Windows drive path', { attachment_path: 'D:\\exports\\summary' }],
+    ['a path with spaces in its folder name', { attachment_path: '/home/u/My Notes/plan.md' }],
+    ['a file name with spaces and an extension', { attachment: 'Q3 report final.pdf' }],
+    ['a path nested in a list', { filters: [{ files: ['/srv/exports/2026.csv'] }] }],
+    ['a very long value with a file extension', { attachment: `${'x'.repeat(3000)} draft.docx` }],
+  ])('refuses chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 });

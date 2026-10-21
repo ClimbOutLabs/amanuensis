@@ -98,8 +98,9 @@ function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * A read of a sensitive path is never covered by a durable grant, whatever its annotations say:
- * the grant would then cover every later read of that path. Shared by the chat and always scopes.
+ * A private read (a sensitive path or a path-like argument) is never covered by a durable grant,
+ * whatever its annotations say: the grant would then cover every later read of that path. Shared by
+ * the chat and always scopes.
  */
 function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
   return info.secret_path_read === true;

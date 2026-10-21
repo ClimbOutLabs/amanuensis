@@ -201,7 +201,7 @@ export const InternalToolCallInfoSchema = z.object({
     .literal(true)
     .optional()
     .describe(
-      'Set when the call reads a sensitive path, which is never eligible for a standing grant. Never model-authored.',
+      'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
     ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
