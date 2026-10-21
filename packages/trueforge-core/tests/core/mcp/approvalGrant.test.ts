@@ -656,6 +656,18 @@ describe('secret-path detection covers every argument of an unannotated connecto
     expect(allowsToolGrant(info)).toBe(false);
   });
 
+  it.each([
+    ['a very long path ending in an SSH key', { attachment_path: `${'/a'.repeat(4000)}/.ssh/id_rsa` }],
+    ['a bare credentials name under a path key', { attachment_path: 'credentials' }],
+    ['a credentials backup under a path key', { attachment_path: 'credentials.backup.json' }],
+    ['a Windows path to an SSH key', { attachment_path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+  ])('refuses chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
   it('refuses chat and always scope for a secret path in other unusual argument names', async () => {
     const toolSet = attachmentToolSet();
     const byLocator = await toolSet.toolCallInfo({

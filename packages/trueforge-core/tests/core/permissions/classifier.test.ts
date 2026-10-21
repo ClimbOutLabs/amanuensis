@@ -620,6 +620,29 @@ describe('classifyTier connector tools and standing grants', () => {
     expect(decision.sensitive_read).toBe(true);
   });
 
+  test.each([
+    ['a very long path ending in an SSH key', { path: `${'/a'.repeat(4000)}/.ssh/id_rsa` }],
+    ['a bare credentials name under a path key', { path: 'credentials' }],
+    ['a credentials backup under a path key', { path: 'credentials.backup.json' }],
+    ['a Windows path to an SSH key', { path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+  ])('a granted tool still asks for %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.sensitive_read).toBe(true);
+    expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
+  });
+
+  test.each([
+    ['a file in a folder named secretary', { path: '/work/secretary/notes.md' }],
+    ['a file named tokenizer', { path: '/repo/src/tokenizer.ts' }],
+  ])('a granted tool still runs silently for %s', async (_, canonical_params) => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+  });
+
   test('offline mode auto-denies a granted tool', async () => {
     const { services } = grantedServices();
     services.isOffline = () => Promise.resolve(true);

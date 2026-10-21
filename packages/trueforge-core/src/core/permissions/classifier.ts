@@ -83,6 +83,7 @@ import {
   searchHoldCardText,
   SERVER_SECRET_REASON,
 } from './searchHoldText';
+import { containsSecretPath, namesSecretPath } from './secretPaths';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
@@ -320,53 +321,6 @@ function mapsPlainWhat(action: SentinelAction): string {
     );
   }
   return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
-}
-
-const SENSITIVE_PATH_PATTERNS = [
-  /(^|\/)\.ssh(\/|$)/,
-  /(^|\/)\.gnupg(\/|$)/,
-  /(^|\/)\.env(\.|$|$)/,
-  /credential/i,
-  /secret/i,
-  /(^|\/)[^/]*\.pem$/,
-  /(^|\/)[^/]*\.key$/,
-  /token/i,
-];
-
-function isSensitivePath(p: string): boolean {
-  return SENSITIVE_PATH_PATTERNS.some(pattern => pattern.test(p));
-}
-
-/** Longest word scanned as a path; a longer one is content, not a file name. */
-const MAX_PATH_WORD_LENGTH = 4096;
-
-/**
- * A word that names a file: it has a separator, a home or dot prefix, or a bare `name.ext` form.
- * Free text without those shapes is never a path, so a search that mentions a secret word is not a read.
- */
-function looksLikeFilePath(word: string): boolean {
-  if (word.length === 0 || word.length > MAX_PATH_WORD_LENGTH) {
-    return false;
-  }
-  return /[/\\]/.test(word) || /^[~.]/.test(word) || /^[\w-]+\.\w{1,10}$/.test(word);
-}
-
-/**
- * Whether any string argument, at any depth, names a sensitive path. Argument names are not
- * checked: a connector can carry a path under any key, and a command line carries it as a word.
- */
-function sensitiveReadHit(value: unknown): boolean {
-  if (typeof value === 'string') {
-    const words = /\s/.test(value) ? splitWordsLenient(value) : [value];
-    return words.some(word => looksLikeFilePath(word) && isSensitivePath(word));
-  }
-  if (Array.isArray(value)) {
-    return value.some(sensitiveReadHit);
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.values(value).some(sensitiveReadHit);
-  }
-  return false;
 }
 
 function stringParam(params: Record<string, unknown>, key: string): string | null {
@@ -1009,7 +963,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       return tier1Decision({
         reason: 'shell_allowlist',
         reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
-        sensitive_read: sensitiveReadHit(action.canonical_params),
+        sensitive_read: containsSecretPath(action.canonical_params),
       });
     }
   }
@@ -1044,7 +998,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     },
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
-    sensitive_read: sensitiveReadHit(action.canonical_params),
+    sensitive_read: containsSecretPath(action.canonical_params),
     shell_binding: binding,
     approval_token_id: token_id,
   });
@@ -1237,7 +1191,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to ${namedWriteTargets(targets.paths)}.`,
-    sensitive_read: targets.paths.some(isSensitivePath),
+    sensitive_read: targets.paths.some(namesSecretPath),
   });
 }
 
@@ -1485,7 +1439,7 @@ async function classifySearchProviderTool(input: {
     extraction.external_service ||
     DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment)) ||
     INSTALL_FRAGMENTS.some(fragment => name.includes(fragment)) ||
-    sensitiveReadHit(action.canonical_params)
+    containsSecretPath(action.canonical_params)
   ) {
     return undefined;
   }
@@ -2071,7 +2025,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
-  const readsPrivateData = extraction.connector_read || sensitiveReadHit(action.canonical_params);
+  const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
   // Eligible for "Always allow" like an annotated read-only tool. Only an explicit open-world or
   // not-read-only claim, the search provider, or a read of a secret path rules it out; the arguments
   // already ruled out recipients.
@@ -2080,7 +2034,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.mcp_hints.open_world_hint !== true &&
     action.mcp_hints.read_only_hint !== false &&
     action.mcp_search_provider !== true &&
-    !sensitiveReadHit(action.canonical_params);
+    !containsSecretPath(action.canonical_params);
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -2209,7 +2163,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       },
       reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
-      sensitive_read: sensitiveReadHit(action.canonical_params),
+      sensitive_read: containsSecretPath(action.canonical_params),
       approval_token_id: await mintPlainToken({
         ctx,
         tool_name: action.tool_name,
@@ -2229,7 +2183,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     (closedWorldRead || grantableRead) &&
     !extraction.sends &&
-    !sensitiveReadHit(action.canonical_params)
+    !containsSecretPath(action.canonical_params)
   ) {
     if (closedWorldRead && action.mcp_first_party === true) {
       return tier1Decision({
@@ -2264,7 +2218,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier1Decision({
       reason: 'local_read_only',
       reason_detail: `Local read-only tool \`${action.tool_name}\`.`,
-      sensitive_read: sensitiveReadHit(action.canonical_params),
+      sensitive_read: containsSecretPath(action.canonical_params),
     });
   }
 
@@ -2280,7 +2234,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
     grant_host: action.mcp_server_host ?? null,
-    secret_path_read: sensitiveReadHit(action.canonical_params),
+    secret_path_read: containsSecretPath(action.canonical_params),
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
