@@ -2098,7 +2098,7 @@ describe('the sandbox row of the plain doctor', () => {
     world.psLine({ id: `s${n}`, name: `aman-slots-sandbox-${n}-1`, state, status, service: `sandbox-${n}` });
   const healthySlots = () => [1, 2, 3, 4].map(n => slot(n, 'running', 'Up 2 minutes (healthy)'));
 
-  it('shows the failing attestation line of an unhealthy slot, with no instance at all', () => {
+  it('shows the failing safety check line of an unhealthy slot, with no instance at all', () => {
     make({ instances: [] });
     const lines = healthySlots();
     lines[1] = slot(2, 'running', 'Up 2 minutes (unhealthy)');
@@ -2111,13 +2111,14 @@ describe('the sandbox row of the plain doctor', () => {
     const check = machine(result, 'sandbox');
     assert.ok(check, 'sandbox check present');
     assert.equal(check.state, 'fail');
-    assert.match(check.detail, /attestation FAILED network: interfaces: eth0 has a route off this computer/);
+    assert.match(check.detail, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(check.detail, /attestation FAILED/);
     assert.equal(check.fix, 'Run aman doctor sandbox --fix');
     const text = world.run();
-    assert.match(text.stdout, /attestation FAILED network: interfaces:/);
+    assert.match(text.stdout, /Safety check network failed: interfaces:/);
   });
 
-  it('shows the attestation line of a slot that never started', () => {
+  it('shows the safety check line of a slot that never started', () => {
     make({ instances: [] });
     const lines = healthySlots();
     lines[0] = slot(1, 'exited', 'Exited (1) 2 minutes ago');
@@ -2127,8 +2128,26 @@ describe('the sandbox row of the plain doctor', () => {
     });
     const check = machine(world.json(), 'sandbox');
     assert.equal(check.state, 'fail');
-    assert.match(check.detail, /attestation FAILED runsc/);
+    assert.match(check.detail, /Safety check runsc failed: the sandbox runtime did not answer/);
     assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+  });
+
+  it('shows the plain failure line, word for word, for an unhealthy slot', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[2] = slot(3, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s3', {
+      out: '2026-10-10 11:58:00 attestation FAILED seccomp: Seccomp is "0"\n',
+    });
+    const check = machine(world.json(), 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.detail, 'A sandbox slot failed: Safety check seccomp failed: Seccomp is "0"');
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+    const text = world.run();
+    assert.match(text.stdout, /Safety check seccomp failed/);
+    assert.doesNotMatch(text.stdout, /attestation FAILED/);
   });
 
   it('is ok when every slot is running and healthy, and absent when there are no slots', () => {

@@ -635,7 +635,7 @@ check_backup() {
 # never installed. Read-only: this never starts or repairs a slot, that is `aman doctor sandbox --fix`.
 check_sandbox() {
   [ "$DOCKER_OK" = 1 ] || return 0
-  local lines id cname state status service total=0 bad="" log failed_line=""
+  local lines id cname state status service total=0 bad="" log failed_line="" shown_line="" failed_rest="" failed_check=""
   lines=$(bounded "$PROBE_SECONDS" docker ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
   while IFS='|' read -r id cname state status service; do
     case "$service" in
@@ -664,7 +664,23 @@ check_sandbox() {
   log=$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$bad" 2>&1)
   failed_line=$(printf '%s\n' "$log" | grep -o 'attestation FAILED.*' | head -n 1)
   if [ -n "$failed_line" ]; then
-    record machine sandbox fail "A sandbox slot failed: ${failed_line}" "Run aman doctor sandbox --fix"
+    # The slot's own line names the check in the slot agent's words; say it in plain words, and keep the
+    # line as it is when it does not read as a check and a reason.
+    shown_line=$failed_line
+    case "$failed_line" in
+      'attestation FAILED '*)
+        failed_rest=${failed_line#'attestation FAILED '}
+        case "$failed_rest" in
+          *': '*)
+            failed_check=${failed_rest%%: *}
+            if [ -n "$failed_check" ]; then
+              shown_line="Safety check ${failed_check} failed: ${failed_rest#*: }"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    record machine sandbox fail "A sandbox slot failed: ${shown_line}" "Run aman doctor sandbox --fix"
   else
     record machine sandbox fail "One of the sandbox slots is not running properly, and its log does not say which check failed." "Run aman doctor sandbox --fix"
   fi

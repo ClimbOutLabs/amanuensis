@@ -152,17 +152,28 @@ function tail(text: string): string {
 
 /**
  * The failing attestation lines in a slot's log, each cut free of the log's own prefixes (the container name
- * and the time it was written): the line itself names the safety check that failed and why.
+ * and the time it was written) and said in plain words: the line itself names the safety check that failed
+ * and why. A line that does not read as a check and a reason is kept as it is.
  */
 export function attestationFailuresOf(text: string): string[] {
   const failures: string[] = [];
   for (const line of text.split('\n')) {
     const at = line.indexOf('attestation FAILED');
     if (at >= 0) {
-      failures.push(line.slice(at).trim());
+      failures.push(plainFailure(line.slice(at).trim()));
     }
   }
   return failures;
+}
+
+/** "attestation FAILED network: interfaces: ..." said plainly: "Safety check network failed: interfaces: ...". */
+function plainFailure(line: string): string {
+  const rest = line.slice('attestation FAILED '.length);
+  const colon = rest.indexOf(': ');
+  if (colon <= 0) {
+    return line;
+  }
+  return `Safety check ${rest.slice(0, colon)} failed: ${rest.slice(colon + 2)}`;
 }
 
 /** True when a slot's healthcheck answer names its failing checks itself: one FAIL line per failed check. */
@@ -245,6 +256,19 @@ class Slots {
    */
   private async slotLogs(services: string[]): Promise<CommandResult> {
     return this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '50', ...services]), echo: true });
+  }
+
+  /**
+   * Reads lines out loud, so they are written to the log file as well: the output of an echoed call is what
+   * reaches the log (see the runner in main.ts), so the plain failure lines are printed through one. Best
+   * effort: the failure itself is already in this run's result, so a line that cannot be read out is not
+   * another failure.
+   */
+  private async sayOutLoud(lines: string[]): Promise<void> {
+    if (lines.length === 0) {
+      return;
+    }
+    await this.run({ command: 'printf', args: ['%s\n', ...lines], echo: true }).catch(() => undefined);
   }
 
   private composeArgs(tail: string[]): string[] {
@@ -670,6 +694,7 @@ class Slots {
     if (up.exitCode !== 0) {
       const logs = await this.slotLogs([]);
       const failures = attestationFailuresOf(`${logs.stdout}\n${logs.stderr}`);
+      await this.sayOutLoud(failures);
       const failed = withDetail({
         sentence: 'The sandboxes did not become healthy',
         detail: failures.length > 0 ? failures.join(' ') : tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
@@ -677,7 +702,7 @@ class Slots {
       throw new StepFailure(
         'start',
         failed.message,
-        `Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
+        `Read the safety check lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
         undefined,
         failed.detail,
       );
@@ -705,6 +730,7 @@ class Slots {
           const failures = attestationFailuresOf(`${logs.stdout}\n${logs.stderr}`);
           if (failures.length > 0) {
             detail = failures.join(' ');
+            await this.sayOutLoud(failures);
           }
         }
         const failed = withDetail({
