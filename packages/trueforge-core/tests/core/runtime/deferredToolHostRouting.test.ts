@@ -60,7 +60,11 @@ describe('DeferredTool call_tool host-tool routing', () => {
 
     expect(isError).toBe(false);
     expect(text).toContain('routed');
-    expect(hostTool.callTool).toHaveBeenCalledWith({ name: 'get_current_datetime', arguments: {} });
+    expect(hostTool.callTool).toHaveBeenCalledWith(
+      { name: 'get_current_datetime', arguments: {} },
+      undefined,
+      undefined,
+    );
     // The original host-tool result is still present as a second content block.
     const response = await deferredTool.callTool({
       name: 'call_tool',
