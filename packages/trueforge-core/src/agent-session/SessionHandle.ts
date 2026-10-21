@@ -173,11 +173,33 @@ function threadsRecordFromMap(threads: Map<string, AgentThread>): Record<string,
 
 // Current-turn thread ids. Main (`MAIN_THREAD_ID`) is always present — first turn
 // synthesizes it; later turns always carry it in the previous snapshot.
-function threadIdsForCurrentTurn<T extends object>(previous: TurnRecord<T> | undefined): string[] {
+export function threadIdsForCurrentTurn(previous: ThreadSelectionTurn | undefined): string[] {
+  if (previous?.state.status === 'running') {
+    return Object.keys(previous.snapshot.threads);
+  }
+  if (previous?.state.status === 'done') {
+    // A turn paused for approval ends as `done` with its pending actions. A sub-agent
+    // that still owes one must be rebuilt, or its answer has no thread to reach. A child
+    // in a terminal snapshot without a pending action never resumes (see below).
+    const waiting = new Set(previous.state.required_actions.flatMap(action => action.thread_id ?? []));
+    return [
+      MAIN_THREAD_ID,
+      ...Object.keys(previous.snapshot.threads).filter(id => id !== MAIN_THREAD_ID && waiting.has(id)),
+    ];
+  }
   // A child that still appears in a terminal snapshot never received a durable
   // THREAD_DONE/removal (for example another replica fenced its cleanup). A
   // later process may retain its snapshot for history, but must not resume it.
-  return previous?.state.status === 'running' ? Object.keys(previous.snapshot.threads) : [MAIN_THREAD_ID];
+  return [MAIN_THREAD_ID];
+}
+
+/** The fields thread selection reads from a stored turn. */
+export interface ThreadSelectionTurn {
+  state:
+    | { status: 'running' }
+    | { status: 'done'; required_actions: readonly { thread_id: string | null }[] }
+    | { status: 'cancelled' | 'error' };
+  snapshot: { threads: Readonly<Record<string, unknown>> };
 }
 
 /**
