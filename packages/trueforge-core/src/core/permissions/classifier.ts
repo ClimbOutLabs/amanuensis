@@ -99,6 +99,7 @@ import {
   searchHoldCardText,
   withHoldSay,
 } from './searchHoldText';
+import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
@@ -345,48 +346,6 @@ function mapsPlainWhat(action: SentinelAction): string {
     );
   }
   return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
-}
-
-const SENSITIVE_PATH_PATTERNS = [
-  /(^|\/)\.ssh(\/|$)/,
-  /(^|\/)\.gnupg(\/|$)/,
-  /(^|\/)\.env(\.|$|$)/,
-  /credential/i,
-  /secret/i,
-  /(^|\/)[^/]*\.pem$/,
-  /(^|\/)[^/]*\.key$/,
-  /token/i,
-];
-
-function isSensitivePath(p: string): boolean {
-  return SENSITIVE_PATH_PATTERNS.some(pattern => pattern.test(p));
-}
-
-/** Collect string param values that look like paths for sensitive-read detection. */
-function sensitiveReadHit(params: Record<string, unknown>): boolean {
-  const keys = ['path', 'paths', 'file', 'files', 'target', 'operand', 'command'];
-  for (const key of keys) {
-    const value = params[key];
-    if (typeof value === 'string') {
-      if (key === 'command') {
-        for (const token of splitWordsLenient(value)) {
-          if (isSensitivePath(token)) {
-            return true;
-          }
-        }
-      } else if (isSensitivePath(value)) {
-        return true;
-      }
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'string' && isSensitivePath(item)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
 }
 
 function stringParam(params: Record<string, unknown>, key: string): string | null {
@@ -1355,7 +1314,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       return tier1Decision({
         reason: run.reason,
         reason_detail: run.reason_detail,
-        sensitive_read: sensitiveReadHit(action.canonical_params),
+        sensitive_read: containsSecretPath(action.canonical_params),
       });
     }
   }
@@ -1390,7 +1349,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     },
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
-    sensitive_read: sensitiveReadHit(action.canonical_params),
+    sensitive_read: containsSecretPath(action.canonical_params),
     shell_binding: binding,
     approval_token_id: token_id,
   });
@@ -1610,7 +1569,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to ${namedWriteTargets(targets.paths)}.`,
-    sensitive_read: targets.paths.some(isSensitivePath),
+    sensitive_read: targets.paths.some(namesSecretPath),
   });
 }
 
@@ -1854,7 +1813,7 @@ async function classifySearchProviderTool(input: {
     extraction.external_service ||
     DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment)) ||
     INSTALL_FRAGMENTS.some(fragment => name.includes(fragment)) ||
-    sensitiveReadHit(action.canonical_params)
+    containsSecretPath(action.canonical_params)
   ) {
     return undefined;
   }
@@ -2562,7 +2521,19 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
-  const readsPrivateData = extraction.connector_read || sensitiveReadHit(action.canonical_params);
+  const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
+  // Any argument with a path shape is a private read whatever its name, so it never gets a grant.
+  const pathLike = containsPathLikeValue(action.canonical_params);
+  // Eligible for "Always allow" like an annotated read-only tool. Only an explicit open-world or
+  // not-read-only claim, the search provider, a secret name or a path-like argument rules it out; the
+  // arguments already ruled out recipients.
+  const grantableRead =
+    extraction.connector_read &&
+    action.mcp_hints.open_world_hint !== true &&
+    action.mcp_hints.read_only_hint !== false &&
+    action.mcp_search_provider !== true &&
+    !containsSecretPath(action.canonical_params) &&
+    !pathLike;
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -2691,7 +2662,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       },
       reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
-      sensitive_read: sensitiveReadHit(action.canonical_params),
+      sensitive_read: containsSecretPath(action.canonical_params),
       approval_token_id: await mintPlainToken({
         ctx,
         tool_name: action.tool_name,
@@ -2704,15 +2675,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
   // tool (the user's standing grant) skips the card, but only after every escalation above, never
   // for a sensitive path, and only while the tool still claims to be read-only and explicitly
-  // closed-world (an absent openWorldHint means open).
+  // closed-world (an absent openWorldHint means open). A connector read that the extractor
+  // recognized is grantable without those hints, since its arguments carry no recipient.
+  const closedWorldRead = readOnlyHint && action.mcp_hints.open_world_hint === false;
   if (
     action.tool_type === 'mcp' &&
-    readOnlyHint &&
-    action.mcp_hints.open_world_hint === false &&
+    (closedWorldRead || grantableRead) &&
     !extraction.sends &&
-    !sensitiveReadHit(action.canonical_params)
+    !containsSecretPath(action.canonical_params)
   ) {
-    if (action.mcp_first_party === true) {
+    if (closedWorldRead && action.mcp_first_party === true) {
       return tier1Decision({
         reason: FIRST_PARTY_TOOL_REASON,
         reason_detail: `First-party read-only tool \`${action.tool_name}\`${
@@ -2721,19 +2693,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: readsPrivateData,
       });
     }
+    // A path-like argument is never admitted by a standing grant; a first-party read is not grant-based.
     if (
       action.mcp_server_name !== undefined &&
+      !pathLike &&
       (await services.tool_grants.hasToolGrant({
         tenant_id: ctx.tenant_id,
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
+        mcp_server_host: action.mcp_server_host ?? null,
       }))
     ) {
       return tier1Decision({
         reason: TOOL_GRANT_REASON,
         reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
         sensitive_read: readsPrivateData,
+        inspection: grantableRead,
       });
     }
   }
@@ -2743,7 +2719,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier1Decision({
       reason: 'local_read_only',
       reason_detail: `Local read-only tool \`${action.tool_name}\`.`,
-      sensitive_read: sensitiveReadHit(action.canonical_params),
+      sensitive_read: containsSecretPath(action.canonical_params),
     });
   }
 
@@ -2757,6 +2733,9 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
+    inspection: grantableRead,
+    grant_host: action.mcp_server_host ?? null,
+    secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,

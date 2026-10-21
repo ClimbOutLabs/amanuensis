@@ -300,7 +300,7 @@ record_source_checkout() {
 
 # The files the aman command is made of: the shim and the helper files it finds at ../lib next to its folder, here and
 # in a checkout alike.
-AMAN_COMMAND_LIBS="ui shared diagnose network schedule"
+AMAN_COMMAND_LIBS="ui shared diagnose network schedule host-report"
 
 aman_command_current() {
   local lib
@@ -930,7 +930,14 @@ cmd_instance_refresh() {
   instance_enforce_single_owner "$name" || true
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate
+  refresh_report "$name"
   print_instance_block "$name"
+}
+
+# Runs the doctor so the app's saved report is current after a refresh; its own result is not used here.
+refresh_report() { # name
+  [ -x "$(doctor_shim)" ] || return 0
+  AMAN_REPORT_COMMAND=refresh DOCTOR_TIMEOUT=180 run_doctor --json --instance "$1" >/dev/null 2>&1 || true
 }
 
 # A name typed for a new instance must also be free; naming an existing one is only for re-running instance add on it.

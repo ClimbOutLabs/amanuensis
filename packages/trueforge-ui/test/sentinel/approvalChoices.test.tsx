@@ -50,7 +50,7 @@ describe('approval choices', () => {
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 
-  it('shows Approve, Always allow, Deny in that order on a held action, and never Always deny', () => {
+  it('shows Approve, Always allow this tool, Deny in that order on a held action, and never Always deny', () => {
     render(
       <HeldActionCard
         card={card}
@@ -61,10 +61,10 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Approve', 'Always allow', 'Deny']);
-    expect(screen.getByRole('button', { name: 'Always allow' })).toHaveAttribute(
+    expect(buttonNames()).toEqual(['Approve', 'Always allow this tool', 'Deny']);
+    expect(screen.getByRole('button', { name: 'Always allow this tool' })).toHaveAttribute(
       'title',
-      'Remember this for every chat.',
+      'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
     );
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });

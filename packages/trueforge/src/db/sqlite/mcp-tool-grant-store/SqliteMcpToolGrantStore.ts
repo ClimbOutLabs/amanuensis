@@ -1,5 +1,5 @@
-import type { ToolGrantKey } from '@truefoundry/trueforge-core/core';
-import type { Kysely, Transaction } from 'kysely';
+import type { ToolGrantIdentity, ToolGrantKey } from '@truefoundry/trueforge-core/core';
+import { sql, type Kysely, type Transaction } from 'kysely';
 
 import type { McpToolGrant } from '../../../schemas/mcpServer';
 import type { IMcpToolGrantStore, ListMcpToolGrantsInput, RevokeServerToolGrantsInput } from '../../mcpToolGrantStore';
@@ -16,20 +16,32 @@ export class SqliteMcpToolGrantStore implements IMcpToolGrantStore<Transaction<D
   async hasToolGrant(key: ToolGrantKey): Promise<boolean> {
     const row = await this.#db
       .selectFrom('mcp_tool_grant')
-      .select('tool_name')
+      .select(['tool_name', 'mcp_server_host'])
       .where('tenant_id', '=', key.tenant_id)
       .where('created_by', '=', key.created_by)
       .where('mcp_server_name', '=', key.mcp_server_name)
       .where('tool_name', '=', key.tool_name)
       .executeTakeFirst();
-    return row !== undefined;
+    // The host is compared here, not in SQL. A missing row reads as undefined, which matches no host.
+    return row?.mcp_server_host === key.mcp_server_host;
   }
 
   async recordToolGrant(key: ToolGrantKey): Promise<void> {
     await this.#db
       .insertInto('mcp_tool_grant')
-      .values({ ...key, created_at: nowIso() })
-      .onConflict(oc => oc.columns(['tenant_id', 'created_by', 'mcp_server_name', 'tool_name']).doNothing())
+      .values({
+        tenant_id: key.tenant_id,
+        created_by: key.created_by,
+        mcp_server_name: key.mcp_server_name,
+        tool_name: key.tool_name,
+        mcp_server_host: key.mcp_server_host,
+        created_at: nowIso(),
+      })
+      .onConflict(oc =>
+        oc
+          .columns(['tenant_id', 'created_by', 'mcp_server_name', 'tool_name'])
+          .doUpdateSet({ mcp_server_host: sql`excluded.mcp_server_host` }),
+      )
       .execute();
   }
 
@@ -45,7 +57,7 @@ export class SqliteMcpToolGrantStore implements IMcpToolGrantStore<Transaction<D
       .execute();
   }
 
-  async revokeToolGrant(key: ToolGrantKey): Promise<void> {
+  async revokeToolGrant(key: ToolGrantIdentity): Promise<void> {
     await this.#db
       .deleteFrom('mcp_tool_grant')
       .where('tenant_id', '=', key.tenant_id)

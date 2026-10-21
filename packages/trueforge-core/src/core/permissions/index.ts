@@ -55,7 +55,7 @@ export {
   tier3Decision,
 } from './tier';
 export type { AutoDenyReason, Tier, Tier2ActionKind, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
-export type { ToolGrantKey, ToolGrantStore } from './toolGrants';
+export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,
   canonicalFileIdentity,
