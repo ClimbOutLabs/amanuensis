@@ -325,13 +325,13 @@ test_a_failed_build_shows_the_log_tail_and_its_path() {
 test_an_unhealthy_instance_gets_a_plain_cause_and_a_saved_log() {
   t_begin "an instance that does not start is explained in one sentence and never by a docker command to run"
   sandbox_new
-  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/trueforge'"
+  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/user'"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "Instance main did not start. The app could not start: it was not allowed to create a folder (/home/trueforge). This is a bug in Aman, not a problem on your computer."
+  assert_flat_contains "$ERR" "Instance main did not start. The app could not start: it was not allowed to create a folder (/home/user). This is a bug in Aman, not a problem on your computer."
   assert_flat_contains "$ERR" "Next: Update Aman and run install.sh again. If it fails the same way, share the saved log below."
   assert_not_contains "$OUT$ERR" "Fix that"
   assert_flat_contains "$ERR" "Last 200 log lines: $AMAN_HOME/state/logs/instance-main.log"

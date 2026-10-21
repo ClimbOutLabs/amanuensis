@@ -76,7 +76,7 @@ describe("validateEmail — display-name recipients", () => {
   });
 
   it("accepts RFC-5322 display-name form (the reported bug)", () => {
-    expect(validateEmail("Vahid Habibi <vahid.habibi@thebluerock.com.au>")).toBe(true);
+    expect(validateEmail("Alex Rivera <alex.rivera@example.org>")).toBe(true);
     expect(validateEmail('"Last, First" <lf@example.com>')).toBe(true);
   });
 
@@ -91,11 +91,11 @@ describe("validateEmail — display-name recipients", () => {
 describe("createEmailMessage — display name preserved in header", () => {
   it("does not reject a Name <addr> recipient and keeps it verbatim in To:", () => {
     const raw = createEmailMessage({
-      to: ["Vahid Habibi <vahid.habibi@thebluerock.com.au>"],
+      to: ["Alex Rivera <alex.rivera@example.org>"],
       subject: "Re: Disclaimer for Ads",
       body: "Sounds good.",
     });
-    expect(getHeader(raw, "To")).toBe("Vahid Habibi <vahid.habibi@thebluerock.com.au>");
+    expect(getHeader(raw, "To")).toBe("Alex Rivera <alex.rivera@example.org>");
   });
 });
 

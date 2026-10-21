@@ -16,8 +16,9 @@ import {
   isFirstRunSetupComplete,
 } from './AmanFirstRunGuide.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
-import { AmanTour, type TourCapabilities } from './AmanTour.js';
+import { AmanTour } from './AmanTour.js';
 import { useOptionalPersonalization } from './PersonalizationContext.js';
+import type { TourCapabilities } from './tourPrompts.js';
 
 const DEFAULT_HEADING = 'How can I help you today?';
 
@@ -43,6 +44,9 @@ function useTourCapabilities(): TourCapabilities {
     email: granted?.includes('gmail_read') === true,
     calendar: granted?.includes('calendar_read') === true,
     sandbox: capabilities?.sandbox.enabled === true,
+    // Maps ships built in with public upstreams and has no off switch, so it is on wherever the
+    // Tour runs. It stays a capability so that a future off switch hides its card without a change here.
+    maps: true,
   };
 }
 
@@ -124,6 +128,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
     return (
       <AmanTour
         capabilities={capabilities}
+        helpAreas={personalization?.profile?.help_areas ?? []}
         canSend={setup === null || setup.modelName !== null}
         onSend={sendPrompt}
         onHide={() => setHidden(true)}

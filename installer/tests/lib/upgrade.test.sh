@@ -157,7 +157,7 @@ test_doctor_failure_blocks_unless_forced() {
 
 # An install whose first start failed leaves an instance that never became healthy: no data, no backup.
 install_that_never_starts() {
-  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/trueforge'"
+  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/user'"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
