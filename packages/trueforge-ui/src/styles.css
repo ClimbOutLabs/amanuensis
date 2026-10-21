@@ -1651,6 +1651,24 @@
   border-top: 0.0625rem dotted var(--border);
 }
 
+/* Brief: display face for stop and chapter titles, receipt face for the stop counts. */
+.aui-brief-display {
+  font-family: var(--font-display);
+}
+
+.aui-brief-mono {
+  font-family: var(--font-receipt);
+}
+
+/* An action in a row is a button; it keeps the look of the link it replaces. */
+.aui-row > button.action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* Phone: the chapter label stacks above its rows and the when column narrows. */
 @media (max-width: 40rem) {
   .aui-chapter {
