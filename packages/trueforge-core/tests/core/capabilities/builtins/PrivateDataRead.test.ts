@@ -55,7 +55,7 @@ describe('privateDataReadCapability', () => {
     const turn = createWebSearchTurnState();
     const [processor] = privateDataReadCapability({ turn, persisted: true }).postToolCallProcessors ?? [];
     expect(await collect(processor?.processPostToolCall(execution([])) ?? [])).toEqual([]);
-    markPrivateDataRead(turn);
+    markPrivateDataRead(turn, 'mail-read');
     expect(await collect(processor?.processPostToolCall(execution([])) ?? [])).toEqual(SAVED);
     expect(await collect(processor?.processPostToolCall(execution([])) ?? [])).toEqual([]);
   });
@@ -108,21 +108,21 @@ describe('privateDataReadCapability', () => {
 
     it('keeps the result of a mail read for the checks', async () => {
       const turn = createWebSearchTurnState();
-      markPrivateDataRead(turn);
+      markPrivateDataRead(turn, 'mail-read');
       await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
       expect(privateTextForChecks(turn)).toEqual([MAIL]);
     });
 
     it('keeps a calendar read result, qualified by its server', async () => {
       const turn = createWebSearchTurnState();
-      markPrivateDataRead(turn);
+      markPrivateDataRead(turn, 'mail-read');
       await postToolCall(turn, [assistantCalling('google_calendar__list_events'), resultOf('{"summary":"Dinner"}')]);
       expect(privateTextForChecks(turn)).toEqual(['{"summary":"Dinner"}']);
     });
 
     it('keeps no text from a tool that is not a mail or calendar read', async () => {
       const turn = createWebSearchTurnState();
-      markPrivateDataRead(turn);
+      markPrivateDataRead(turn, 'mail-read');
       await postToolCall(turn, [assistantCalling('web_search'), resultOf('Lisbon tapas')]);
       expect(privateTextForChecks(turn)).toBeUndefined();
     });
@@ -153,7 +153,7 @@ describe('private read text from a sub-agent and from a read that never returned
     const capability = privateDataReadCapability({ turn, persisted: false });
     expect(capability.state).toBeUndefined();
     const [processor] = capability.postToolCallProcessors ?? [];
-    markPrivateDataRead(turn);
+    markPrivateDataRead(turn, 'mail-read');
     const yielded = await collect(
       processor?.processPostToolCall(execution([assistantCalling('read_email'), resultOf(MAIL)])) ?? [],
     );

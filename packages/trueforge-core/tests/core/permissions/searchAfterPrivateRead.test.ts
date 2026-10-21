@@ -299,11 +299,19 @@ describe('ordinary searches and maps after a mail read run silently', () => {
     });
   });
 
-  it('asks when one of two mail reads left no text to compare', async () => {
+  it('asks when a second mail tool was read and its text was not kept', async () => {
     const ctx = makeCtx();
     await classifyTier(MAIL_READ, ctx);
     recordPrivateReadText({ state: ctx.web_search, text: MAIL });
-    await classifyTier(MAIL_READ, ctx);
+    await classifyTier({ ...MAIL_READ, tool_name: 'list_inbox_threads', canonical_params: {} }, ctx);
     expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
+  });
+
+  it('counts one read once when it is classified twice before its result arrives', async () => {
+    const ctx = makeCtx();
+    await classifyTier(MAIL_READ, ctx);
+    await classifyTier(MAIL_READ, ctx);
+    recordPrivateReadText({ state: ctx.web_search, text: MAIL });
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 1, reason: 'mcp_search_after_read_checked' });
   });
 });

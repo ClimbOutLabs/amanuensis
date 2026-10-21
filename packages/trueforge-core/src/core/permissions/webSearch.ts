@@ -60,8 +60,11 @@ export interface WebSearchTurnState {
   privateDataRead: boolean;
   /** Text of the mail and calendar results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
-  /** Mail and calendar reads marked this turn, by any thread. Each one must have its result kept as text. */
-  privateReadMarks: number;
+  /**
+   * Mail and calendar tools marked this turn, by name. The same read is classified before it runs and again at
+   * dispatch with different arguments, so a count of calls would double. Each marked tool must have a result kept.
+   */
+  privateReadTools: Set<string>;
   /** Mail and calendar results kept as text this turn, by any thread. */
   privateTextsKept: number;
   /** True when the private mark came from saved state or old context, whose text this turn never saw. */
@@ -78,7 +81,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     sentText: '',
     privateDataRead: false,
     privateTexts: [],
-    privateReadMarks: 0,
+    privateReadTools: new Set(),
     privateTextsKept: 0,
     privateTextLost: false,
     admission: Promise.resolve(),
@@ -238,9 +241,9 @@ export function countSilentFetches(input: { values: readonly string[]; state: We
  * The one place that records and answers "has this session read private data". A tool that returns the user's
  * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
  */
-export function markPrivateDataRead(state: WebSearchTurnState): void {
+export function markPrivateDataRead(state: WebSearchTurnState, tool_name: string): void {
   state.privateDataRead = true;
-  state.privateReadMarks += 1;
+  state.privateReadTools.add(tool_name);
 }
 
 /** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
@@ -277,7 +280,7 @@ export function recordPrivateReadText(input: { state: WebSearchTurnState; text: 
  * from earlier history, or some mail or calendar read this turn has no result kept to compare with.
  */
 export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
-  if (state.privateTextLost || state.privateTextsKept < state.privateReadMarks) {
+  if (state.privateTextLost || state.privateTextsKept < state.privateReadTools.size) {
     return undefined;
   }
   return state.privateTexts;

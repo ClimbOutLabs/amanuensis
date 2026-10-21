@@ -1838,7 +1838,7 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     });
   }
   if (isGmailReadToolName(action.tool_name)) {
-    markPrivateDataRead(ctx.web_search);
+    markPrivateDataRead(ctx.web_search, action.tool_name);
     return tier1Decision({
       reason: 'gmail_read',
       reason_detail: 'Read your email.',
@@ -2010,7 +2010,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   if (!isCalendarReadToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
   }
-  markPrivateDataRead(ctx.web_search);
+  markPrivateDataRead(ctx.web_search, action.tool_name);
   return tier1Decision({
     reason: 'calendar_read',
     reason_detail: 'Read your calendar.',
