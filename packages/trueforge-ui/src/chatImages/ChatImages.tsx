@@ -17,7 +17,6 @@ import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT } from './refusalText.js
 type ShowState =
   | { kind: 'loading' }
   | { kind: 'ask'; count: number; host: string | null }
-  | { kind: 'declined' }
   | { kind: 'done'; images: ChatImageOutcome[] }
   | { kind: 'error' };
 
@@ -100,8 +99,7 @@ function useShowImages(input: { scope: ChatImageScopeValue | null; source: ChatI
     );
   }, [scope, source]);
 
-  const decline = useCallback(() => setState({ kind: 'declined' }), []);
-  return { state, approve, decline };
+  return { state, approve };
 }
 
 function Notice({ children, testId }: { children: ReactNode; testId: string }) {
@@ -120,6 +118,28 @@ function Notice({ children, testId }: { children: ReactNode; testId: string }) {
 export function ChatImageNotShown({ alt }: { alt: string }) {
   return (
     <Notice testId="aui-chat-image-not-shown">{alt === '' ? 'Image not shown.' : `${alt} (image not shown)`}</Notice>
+  );
+}
+
+/** A plain line that keeps pictures hidden until the person chooses to see them. */
+function HiddenImages({
+  label,
+  action,
+  testId,
+  onShow,
+}: {
+  label: string;
+  action: string;
+  testId: string;
+  onShow: () => void;
+}) {
+  return (
+    <span className="my-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid={testId}>
+      <span>{label}</span>
+      <Button variant="secondary" size="small" onClick={onShow}>
+        {action}
+      </Button>
+    </span>
   );
 }
 
@@ -156,20 +176,36 @@ export function useUploadImageSrc(input: {
   return src;
 }
 
-/** A re-encoded image from this chat's own image route. `alt` is plain text from the reply or file name. */
+/**
+ * A re-encoded image from this chat's own image route, as a 10rem thumbnail that opens the full image
+ * in a new tab. A picture the browser cannot load leaves nothing behind, not even an empty box.
+ */
 export function SafeImage({ src, alt, width, height }: { src: string; alt: string; width: number; height: number }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return null;
+  }
   return (
-    <img
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      loading="lazy"
-      decoding="async"
-      referrerPolicy="no-referrer"
-      className="aui-chat-image my-2 h-auto max-h-[24rem] w-auto max-w-full rounded border border-border object-contain"
-      data-testid="aui-chat-image"
-    />
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="my-2 inline-block max-w-full rounded"
+      data-testid="aui-chat-image-link"
+    >
+      <img
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="aui-chat-image block h-auto w-40 max-w-full rounded border border-border object-contain"
+        data-testid="aui-chat-image"
+      />
+    </a>
   );
 }
 
@@ -187,36 +223,7 @@ function Outcome({ outcome, alt, scope }: { outcome: ChatImageOutcome; alt: stri
   );
 }
 
-function AskCard(input: {
-  question: string;
-  detail: string;
-  showLabel: string;
-  onShow: () => void;
-  onDecline: () => void;
-  testId: string;
-}) {
-  return (
-    <span
-      className="my-2 flex max-w-[32rem] flex-col gap-2 rounded-lg border border-border bg-primary-bg px-3 py-2"
-      data-testid={input.testId}
-      role="group"
-      aria-label={input.question}
-    >
-      <span className="text-sm font-medium text-text-primary">{input.question}</span>
-      <span className="text-sm text-text-secondary">{input.detail}</span>
-      <span className="flex flex-wrap gap-2">
-        <Button variant="primary" size="large" onClick={input.onShow}>
-          {input.showLabel}
-        </Button>
-        <Button variant="secondary" size="large" onClick={input.onDecline}>
-          Not now
-        </Button>
-      </span>
-    </span>
-  );
-}
-
-/** A stored sandbox or tool image: shown after the sandbox re-encodes it, never asks. */
+/** A stored sandbox image such as a chart: shown after the sandbox re-encodes it, never asks. */
 export function ArtifactChatImage({ path, alt }: { path: string; alt: string }) {
   const source = useMemo<ChatImageSource>(() => ({ kind: 'artifact', path }), [path]);
   const scope = useChatImageScope();
@@ -227,7 +234,6 @@ export function ArtifactChatImage({ path, alt }: { path: string; alt: string }) 
   switch (state.kind) {
     case 'loading':
     case 'ask':
-    case 'declined':
       return <Notice testId="aui-chat-image-loading">Preparing image…</Notice>;
     case 'error':
       return <Notice testId="aui-chat-image-error">{CHAT_IMAGE_ERROR_TEXT}</Notice>;
@@ -243,30 +249,27 @@ export function ArtifactChatImage({ path, alt }: { path: string; alt: string }) 
 }
 
 /**
- * An image link in a reply. Loads without asking only where a web search would; otherwise a card
- * asks first. The link itself is never handed to the browser as an image address.
+ * An image link in a reply. Hidden until the person asks, so a web picture never appears on its own.
+ * The link itself is never handed to the browser as an image address.
  */
 export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
   const scope = useChatImageScope();
   const settled = scope?.settled ?? false;
   const source = useMemo<ChatImageSource>(() => ({ kind: 'reply', url }), [url]);
-  const { state, approve, decline } = useShowImages({ scope, source, enabled: settled });
+  const { state, approve } = useShowImages({ scope, source, enabled: settled });
   if (scope === null || !settled || state.kind === 'loading') {
     return <Notice testId="aui-chat-image-loading">{alt === '' ? 'Image' : alt}</Notice>;
   }
   switch (state.kind) {
     case 'ask':
       return (
-        <AskCard
-          question={`Show this image from ${state.host ?? 'the web'}?`}
-          detail="That site will see that you looked at it."
-          showLabel="Show image"
+        <HiddenImages
+          label={`Image from ${state.host ?? 'the web'} hidden`}
+          action="Show image"
+          testId="aui-chat-image-hidden"
           onShow={approve}
-          onDecline={decline}
-          testId="aui-chat-image-ask"
         />
       );
-    case 'declined':
     case 'error':
       // A link the server does not find in the reply (for example inside a tool result) is not shown.
       return <ChatImageNotShown alt={alt} />;
@@ -281,37 +284,32 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
   }
 }
 
-/** One card per email message: its linked images load only after the person says so. */
+/** One line per email message: its linked images stay hidden until the person chooses Show images. */
 export function EmailImagesCard({ toolCallId, count }: { toolCallId: string; count: number }) {
   const scope = useChatImageScope();
   const source = useMemo<ChatImageSource>(() => ({ kind: 'email', tool_call_id: toolCallId }), [toolCallId]);
-  const { state, approve, decline } = useShowImages({ scope, source, enabled: true });
+  const { state, approve } = useShowImages({ scope, source, enabled: true });
   if (scope === null) {
     return null;
   }
-  const noun = count === 1 ? 'image' : 'images';
+  const single = count === 1;
   switch (state.kind) {
     case 'loading':
+      return <Notice testId="aui-email-images-loading">Loading images…</Notice>;
     case 'ask':
       return (
-        <AskCard
-          question={`Show ${String(count)} ${noun} from this email?`}
-          detail="The sender's servers will see that the email was opened."
-          showLabel={count === 1 ? 'Show image' : 'Show images'}
+        <HiddenImages
+          label={single ? 'Image hidden' : 'Images hidden'}
+          action={single ? 'Show image' : 'Show images'}
+          testId="aui-email-images-hidden"
           onShow={approve}
-          onDecline={decline}
-          testId="aui-email-images-ask"
         />
-      );
-    case 'declined':
-      return (
-        <Notice testId="aui-email-images-declined">{`${String(count)} ${noun} from this email not shown.`}</Notice>
       );
     case 'error':
       return <Notice testId="aui-chat-image-error">{CHAT_IMAGE_ERROR_TEXT}</Notice>;
     case 'done':
       return (
-        <span className="flex flex-wrap gap-2" data-testid="aui-email-images">
+        <span className="flex flex-wrap gap-2 empty:hidden" data-testid="aui-email-images">
           {state.images.map((outcome, index) => (
             <Outcome key={index} outcome={outcome} alt={`Image ${String(index + 1)} from the email`} scope={scope} />
           ))}
@@ -320,7 +318,30 @@ export function EmailImagesCard({ toolCallId, count }: { toolCallId: string; cou
   }
 }
 
-/** Images a turn produced outside its text: sandbox and tool images, and a card per email that links images. */
+/** Images a tool returned stay hidden until the person asks to see them. */
+function ToolImagesCard({ images }: { images: TurnImageList['tool_images'] }) {
+  const [shown, setShown] = useState(false);
+  if (!shown) {
+    const single = images.length === 1;
+    return (
+      <HiddenImages
+        label={single ? 'Image hidden' : 'Images hidden'}
+        action={single ? 'Show image' : 'Show images'}
+        testId="aui-tool-images-hidden"
+        onShow={() => setShown(true)}
+      />
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-2 empty:hidden" data-testid="aui-tool-images">
+      {images.map(image => (
+        <ArtifactChatImage key={image.path} path={image.path} alt={image.name} />
+      ))}
+    </div>
+  );
+}
+
+/** Images a turn produced outside its text: sandbox images, images a tool returned, and a line per email that links images. */
 export function TurnImages() {
   const scope = useChatImageScope();
   const [list, setList] = useState<TurnImageList | null>(null);
@@ -339,21 +360,22 @@ export function TurnImages() {
     };
   }, [scope]);
 
-  if (list === null || (list.artifacts.length === 0 && list.emails.length === 0)) {
+  if (list === null || (list.artifacts.length === 0 && list.tool_images.length === 0 && list.emails.length === 0)) {
     return null;
   }
   return (
-    <div className="aui-turn-images mt-2 flex flex-col gap-2" data-testid="aui-turn-images">
+    <div className="aui-turn-images mt-2 flex flex-col gap-2 empty:hidden" data-testid="aui-turn-images">
       {list.emails.map(email => (
         <EmailImagesCard key={email.tool_call_id} toolCallId={email.tool_call_id} count={email.count} />
       ))}
       {list.artifacts.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 empty:hidden">
           {list.artifacts.map(artifact => (
             <ArtifactChatImage key={artifact.path} path={artifact.path} alt={artifact.name} />
           ))}
         </div>
       )}
+      {list.tool_images.length > 0 && <ToolImagesCard images={list.tool_images} />}
     </div>
   );
 }

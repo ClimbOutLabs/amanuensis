@@ -4,6 +4,7 @@ import { SANDBOX_DISABLED_MESSAGE } from './sandboxDisabledText';
 /** Stands in for a real driver on an installer instance without the sandbox, so every run explains how to turn it on. */
 export class DisabledDriver implements IsolationDriver {
   readonly kind = 'slots';
+  readonly packageGatewayCapable = false;
 
   ensureReady(): Promise<DriverReadiness> {
     return Promise.resolve({

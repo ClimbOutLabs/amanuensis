@@ -1,9 +1,15 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls, type ToolCallResult } from '../../../src/core/mcp/executeToolCalls';
 import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSchemas';
 import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import {
+  type BoundRepository,
   createSandboxRunCodeDescription,
   Sandbox,
   SANDBOX_EXEC_TOOL_NAME,
@@ -11,6 +17,7 @@ import {
 } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
 import { realCommandExec } from './realCommandExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
@@ -53,6 +60,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
 
 function makeRunCodeService(
   runCodeImpl?: (rawInput: unknown, options?: RunCodeCallOptions) => Promise<RunCodeResult>,
+  packageGatewayCapable = false,
 ): {
   service: RunCodeBackend;
   runCode: jest.Mock;
@@ -75,6 +83,7 @@ function makeRunCodeService(
     service: {
       runCode,
       scrubDispatchErrorText: (text: string): string => text,
+      packageGatewayCapable,
     },
     runCode,
   };
@@ -149,7 +158,11 @@ function okRunCodeResult(): RunCodeResult {
 
 describe('Sandbox run_code tool', () => {
   it('words the failure guidance in plain punctuation, with no em dashes', () => {
-    const guidance = createSandboxRunCodeDescription({ offline: false })
+    const guidance = createSandboxRunCodeDescription({
+      offline: false,
+      packageDownloads: false,
+      workspaceDir: '/workspace',
+    })
       .split('\n')
       .find(line => line.startsWith('If run_code fails'));
     expect(guidance).toBeDefined();
@@ -345,5 +358,259 @@ describe('Sandbox exec interpreter guard', () => {
       arguments: execArguments('npm run build', 'execute'),
     });
     expect(exec.mock.calls.some(call => call[0].command === 'npm run build')).toBe(true);
+  });
+});
+
+const DOWNLOAD_BOUND_REPOSITORY: BoundRepository = {
+  repository_id: 'repo-1',
+  revision: 1,
+  workspace_cwd: '/work',
+  commands: [],
+};
+
+/** The run_code description the person's model sees in a chat with these download settings. */
+async function runCodeDescriptionFor(input: {
+  allowed: boolean;
+  packageGatewayCapable: boolean;
+  network: 'none' | undefined;
+}): Promise<string> {
+  const { service } = makeRunCodeService(undefined, input.packageGatewayCapable);
+  const sandbox = new Sandbox({
+    provider: makeProvider({ network: input.network }),
+    boundRepository: DOWNLOAD_BOUND_REPOSITORY,
+    loadBoundRepository: async () => DOWNLOAD_BOUND_REPOSITORY,
+    workspaceVerificationCoordinator: new TestDurableWorkspaceCoordinator(),
+    workspaceLeaseOwnerId: 'test-replica',
+    loadPackageMirrorToken: async () => (input.allowed ? 'mirror-token' : undefined),
+    loadPackageDownloadsAllowed: async () => input.allowed,
+    allowPackageDownloads: async () => undefined,
+    runCodeService: service,
+    blockDestructiveToolsInCodeMode: true,
+    mcpRequestTimeoutMs: 60_000,
+    mcpConnectTimeoutMs: 5_000,
+    logger: makeSilentLogger(),
+    tracing: NOOP_AGENT_TRACING,
+  });
+  const listed = await sandbox.listTools();
+  const description = listed.result.tools.find(tool => tool.name === SANDBOX_RUN_CODE_TOOL_NAME)?.description;
+  if (description === undefined) {
+    throw new Error('Expected run_code in the tool list');
+  }
+  return description;
+}
+
+describe('Sandbox run_code package download sentence', () => {
+  it('says packages cannot be downloaded when the chat has not allowed downloads', async () => {
+    const description = await runCodeDescriptionFor({ allowed: false, packageGatewayCapable: true, network: 'none' });
+    expect(description).toContain('Packages cannot be downloaded here');
+    expect(description).not.toContain('can be downloaded');
+  });
+
+  it('says packages cannot be downloaded on a driver that cannot reach the package gateway, even when allowed', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: false, network: 'none' });
+    expect(description).toContain('Packages cannot be downloaded here');
+    expect(description).not.toContain('can be downloaded');
+  });
+
+  it('says packages can be downloaded when the chat allowed them and the driver reaches the gateway', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: true, network: 'none' });
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('cannot be downloaded');
+  });
+
+  it('says packages can be downloaded on a networked sandbox when the chat allowed them and the driver reaches the gateway', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: true, network: undefined });
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('no installs at runtime');
+  });
+});
+
+describe('Sandbox run_code package downloads wording', () => {
+  it('says packages can be downloaded when downloads are allowed for the chat', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: false,
+      packageDownloads: true,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('cannot be downloaded');
+    expect(description).not.toContain('no installs at runtime');
+  });
+
+  it('says packages cannot be downloaded when the sandbox has no internet access', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: true,
+      packageDownloads: false,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('Packages cannot be downloaded here');
+    expect(description).not.toContain('Packages can be downloaded');
+  });
+
+  it('says packages can be downloaded when the sandbox is offline but downloads are allowed for the chat', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: true,
+      packageDownloads: true,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('has no internet access');
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('cannot be downloaded');
+  });
+
+  it('says there are no installs when the network is up but downloads are not allowed', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: false,
+      packageDownloads: false,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('no installs at runtime');
+    expect(description).not.toContain('can be downloaded');
+  });
+});
+
+/** Runs the real `realpath` and `test` commands the script reader sends, so links are resolved on disk. */
+function localScriptShellExec(params: SandboxExecParams): Promise<ExecResult> {
+  if (!/^(realpath -e -- |test -f )/u.test(params.command)) {
+    return readyExec();
+  }
+  const run = spawnSync('/bin/sh', ['-c', params.command], { encoding: 'utf8' });
+  return Promise.resolve({ success: true, response: { exitCode: run.status ?? 1, result: run.stdout } });
+}
+
+describe('Sandbox run_code script_path', () => {
+  let root: string;
+  let workspace: string;
+  let outside: string;
+
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'run-code-script-')));
+    workspace = join(root, 'workspace');
+    outside = join(root, 'outside');
+    mkdirSync(workspace);
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'secret.py'), 'print("secret")');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** The reader the run hands to the service, built for a sandbox whose workspace is `workspace`. */
+  async function scriptReader(
+    downloadFile: SandboxProvider['downloadFile'],
+  ): Promise<(scriptPath: string) => Promise<Buffer>> {
+    const { service, runCode } = makeRunCodeService(async () => okRunCodeResult());
+    const sandbox = makeSandbox(
+      makeProvider({ exec: localScriptShellExec, getWorkspaceDir: () => workspace, downloadFile }),
+      service,
+    );
+    await executeSingleTool({
+      sandbox,
+      toolName: SANDBOX_RUN_CODE_TOOL_NAME,
+      mappedName: SANDBOX_RUN_CODE_TOOL_NAME,
+      id: 'call-1',
+      arguments: { language: 'python', script_path: 'start.py' },
+    });
+    const readScript = runCode.mock.calls[0]?.[1]?.readScript;
+    if (readScript === undefined) {
+      throw new Error('Expected the run to carry a workspace reader');
+    }
+    return readScript;
+  }
+
+  const readFromDisk: SandboxProvider['downloadFile'] = ({ path }) => Promise.resolve(readFileSync(path));
+
+  it('names script_path and the one-file rule in the run_code description', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: true,
+      packageDownloads: false,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('script_path');
+    expect(description).toContain('/workspace');
+    expect(description).toContain('the run reads a copy of it');
+  });
+
+  it('reads a normal file under the workspace, and a link that stays inside it', async () => {
+    writeFileSync(join(workspace, 'size.py'), 'print(1)');
+    symlinkSync(join(workspace, 'size.py'), join(workspace, 'alias.py'));
+    const readScript = await scriptReader(readFromDisk);
+
+    await expect(readScript('size.py')).resolves.toEqual(Buffer.from('print(1)'));
+    await expect(readScript('alias.py')).resolves.toEqual(Buffer.from('print(1)'));
+  });
+
+  it('refuses a relative or absolute path that leaves the workspace without reading anything', async () => {
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('/etc/passwd')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    await expect(readScript('../outside/secret.py')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a symlink to a file outside the workspace', async () => {
+    symlinkSync(join(outside, 'secret.py'), join(workspace, 'link.py'));
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('link.py')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a symlink chain that ends outside the workspace', async () => {
+    symlinkSync(join(outside, 'secret.py'), join(workspace, 'second.py'));
+    symlinkSync(join(workspace, 'second.py'), join(workspace, 'first.py'));
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('first.py')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a symlink to /proc without reading it', async () => {
+    symlinkSync('/proc/self/status', join(workspace, 'proc.py'));
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('proc.py')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a symlink to a device', async () => {
+    symlinkSync('/dev/zero', join(workspace, 'zero.py'));
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('zero.py')).rejects.toThrow(`script_path must be a file under ${workspace}`);
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a directory without reading it', async () => {
+    mkdirSync(join(workspace, 'folder.py'));
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('folder.py')).rejects.toThrow('script_path "folder.py" could not be read.');
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a fifo without opening it', async () => {
+    execFileSync('mkfifo', [join(workspace, 'pipe.py')]);
+    const downloadFile = jest.fn(readFromDisk);
+    const readScript = await scriptReader(downloadFile);
+
+    await expect(readScript('pipe.py')).rejects.toThrow('script_path "pipe.py" could not be read.');
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('tells the model what to do when the workspace file cannot be read', async () => {
+    writeFileSync(join(workspace, 'present.py'), 'print(1)');
+    const readScript = await scriptReader(() => Promise.reject(new Error('sandbox 404 at /internal/path')));
+
+    const failure = readScript('present.py');
+    await expect(failure).rejects.toThrow('script_path "present.py" could not be read.');
+    await expect(failure).rejects.not.toThrow('/internal/path');
   });
 });

@@ -250,7 +250,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
     const card = info.tier3_card;
     expect(card?.plain_what).toBe(
-      "Web search: debug sy••••••11 now. Held because it contains one of this computer's keys.",
+      "Web search: debug sy••••••11 now. This search contains something that looks like a password or key.",
     );
     expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
     expect(card?.why_asked_again).toBeNull();
@@ -271,7 +271,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier3_card?.plain_what).not.toContain(secret.slice(14));
     expect(info.tier3_card?.outbound_text).not.toContain(secret.slice(14));
-    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+    expect(info.tier3_card?.plain_what).toContain('looks like a password or key');
   });
 
   it('masks the key on the card when searches are set to ask', async () => {
@@ -284,15 +284,15 @@ describe('the outbound guard on the designated provider', () => {
   });
 
   it.each([
-    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.')],
-    ['a card number', 'refund to 4111 1111 1111 1111'],
-    ['a password label', 'password: hunter2hunter2'],
-  ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query) => {
+    ['a signed token', ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c2lnbmF0dXJlMTIzNDU2'].join('.'), 'password or key'],
+    ['a card number', 'refund to 4111 1111 1111 1111', 'payment card number'],
+    ['a password label', 'password: hunter2hunter2', 'password or key'],
+  ])('gives the audit row the rule for %s, while the card keeps the text', async (_label, query, looksLike) => {
     const h = harness({ searchProvider: true });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
     expect(info.tier).toBe(3);
     expect(info.tier3_card?.plain_what).toContain(query);
-    expect(info.audit_description).toContain('Held because');
+    expect(info.audit_description).toContain(`looks like a ${looksLike}`);
     expect(info.audit_description).not.toContain(query);
   });
 
@@ -364,7 +364,7 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
     expect(result.tier).toBe(3);
     expect(result.tier3_card?.outbound_text).toContain(tooLong.trim());
-    expect(result.tier3_card?.plain_what).toContain('Held because it is longer than');
+    expect(result.tier3_card?.plain_what).toContain('This is a long search, so Aman is checking with you first.');
     expect(result.tier3_card?.why_asked_again).toBeNull();
   });
 
@@ -377,7 +377,7 @@ describe('provider plumbing fields on the designated provider', () => {
       model_name: 'invented-model-7',
     });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe(`Web search: ${objective}`);
+    expect(result.tier3_card?.plain_what).toBe(`Web search: ${objective}. Searches are set to ask, so Aman is checking with you first.`);
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -436,12 +436,12 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
     expect(result.tier3_card?.plain_what).toBe(
-      "Web search: loom. Held because it contains one of this computer's keys.",
+      "Web search: loom. This search contains something that looks like a password or key.",
     );
     expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
     expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
-      "Search the web through finder. Held because it contains one of this computer's keys.",
+      "Search the web through finder. This search contains something that looks like a password or key.",
     );
     expect(JSON.stringify(result)).not.toContain(key);
   });
@@ -452,7 +452,7 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: tail, search_queries: [head] });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+    expect(result.tier3_card?.plain_what).toContain('looks like a password or key');
     expect(result.tier3_card?.plain_what).not.toContain(tail);
     expect(result.tier3_card?.outbound_text).not.toContain(tail);
     expect(result.audit_description).not.toContain(tail);
@@ -478,7 +478,7 @@ describe('the loop breaker', () => {
     expect(next.tier).toBe(3);
     expect(next.is_approval_required).toBe(true);
     expect(next.tier3_card?.plain_what).toContain(
-      `Held because this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches`,
+      'Aman has already searched a lot in this reply.',
     );
     expect(next.tier3_card?.why_asked_again).toBeNull();
   });
@@ -651,10 +651,10 @@ describe('links', () => {
     }
     const third = await fetchTier(h, pages[2] ?? '');
     expect(third.tier).toBe(3);
-    expect(third.tier3_card?.plain_what).toContain('Held because this turn already fetched 2 pages from that site');
+    expect(third.tier3_card?.plain_what).toContain('Aman has already opened a lot of pages on this site in this reply.');
     expect(third.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'read_page', arguments: { url: pages[2] } });
-    expect(JSON.stringify(refused)).toContain('already fetched 2 pages from that site');
+    expect(JSON.stringify(refused)).toContain('Aman has already opened a lot of pages on this site in this reply.');
     expect((await fetchTier(h, other)).tier).toBe(1);
   });
 });
@@ -854,7 +854,7 @@ describe('a secret sent in pieces over several searches', () => {
     await runSearch(chat, secret.slice(0, 14));
     const info = await chat.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_what).toContain("contains one of this computer's keys");
+    expect(info.tier3_card?.plain_what).toContain('looks like a password or key');
 
     const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
     await runSearch(scheduled, secret.slice(0, 14));
@@ -964,9 +964,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
-    expect(after.tier3_card?.plain_what).toContain('Held because this chat read something private');
+    expect(after.tier3_card?.plain_what).toContain('This chat has read your private data, so Aman is checking before searching.');
     expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain('read something private, like a key or a secrets file');
+    expect(JSON.stringify(refused)).toContain('This chat has read your private data, so Aman is checking before searching.');
   });
 });

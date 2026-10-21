@@ -9,6 +9,7 @@ import {
   SandboxPathIsDirectoryError,
 } from '../SandboxErrors';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
+import { PACKAGE_UNAVAILABLE_RULE } from '../packageMirrors';
 import {
   executeVerifiedWorkspaceCommit,
   type ExecResult,
@@ -273,7 +274,8 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed.',
-      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; say that plainly instead of retrying, and do not try another tool to get around it.',
+      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; ' +
+        PACKAGE_UNAVAILABLE_RULE,
     ].join('\n');
   }
 
