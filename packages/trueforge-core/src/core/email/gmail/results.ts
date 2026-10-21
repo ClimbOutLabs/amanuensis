@@ -62,7 +62,7 @@ function envelope(context: ResultContext) {
 
 /** Most messages of one thread a result lists, and most attachments it names per message. */
 const MAX_THREAD_MESSAGES = 60;
-const MAX_ATTACHMENTS_LISTED = 20;
+export const MAX_ATTACHMENTS_LISTED = 20;
 
 /** Most labels a row names, and the longest label id kept. */
 const MAX_LABELS_LISTED = 30;
@@ -219,7 +219,7 @@ function cleanSnippet(snippet: string | undefined): string {
 }
 
 function attachmentEntry(file: AttachmentInfo) {
-  return { id: file.id, filename: file.filename, mime_type: file.mimeType, size: file.size };
+  return { handle: file.handle, filename: file.filename, mime_type: file.mimeType, size: file.size };
 }
 
 /** The attachments a message names that fit the budget, and how many of its attachments are not named. */
