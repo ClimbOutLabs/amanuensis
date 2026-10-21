@@ -304,6 +304,7 @@ async function seedProfile<TTransaction>({
       existing.address_as,
       existing.user_profile,
       existing.pinned_preferences,
+      existing.help_areas,
       existing.learning_enabled,
     ];
     const wanted = [
@@ -314,6 +315,7 @@ async function seedProfile<TTransaction>({
       profile.address_as,
       profile.user_profile,
       profile.pinned_preferences,
+      profile.help_areas,
       profile.learning_enabled,
     ];
     if (isSameJson({ left: current, right: wanted })) {

@@ -1450,15 +1450,14 @@ none
     expect(compactionEvent.summary_chars).toBe(0);
   });
 
-  it('falls back to truncation on an over-length conversation-mode summary', async () => {
+  it('falls back to truncation on an over-length conversation-mode summary, after one retry', async () => {
     const overlong = completedConversationSummary('x'.repeat(20_000));
-    const model = makeMockILLM({
-      createNonStream: jest.fn().mockResolvedValue({
-        output: { role: 'assistant', content: overlong },
-        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-        finish_reason: 'stop',
-      }),
+    const createNonStream = jest.fn().mockResolvedValue({
+      output: { role: 'assistant', content: overlong },
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      finish_reason: 'stop',
     });
+    const model = makeMockILLM({ createNonStream });
     const events = await collectProcessPreLLM(
       contextCompaction({
         logger: undefined,
@@ -1473,6 +1472,38 @@ none
       throw new Error('expected a compaction event');
     }
     expect(compactionEvent.outcome).toBe('truncated_fallback');
+    expect(compactionEvent.reason).toBe('over_length');
+    expect(createNonStream).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries an over-length conversation-mode summary once and applies the shorter retry', async () => {
+    const overlong = completedConversationSummary('x'.repeat(20_000));
+    const createNonStream = jest
+      .fn()
+      .mockResolvedValueOnce({
+        output: { role: 'assistant', content: overlong },
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        finish_reason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        output: { role: 'assistant', content: completedConversationSummary('What is the weather like in Kyoto?') },
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        finish_reason: 'stop',
+      });
+    const model = makeMockILLM({ createNonStream });
+    const events = await collectProcessPreLLM(
+      contextCompaction({
+        logger: undefined,
+        definition: { modelId: undefined, configuredModels: undefined, modelClient: model },
+        compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
+      }),
+    );
+    expect(createNonStream).toHaveBeenCalledTimes(2);
+    const compactionEvent = events.find(event => event.type === 'agent.context.compaction');
+    if (compactionEvent === undefined || compactionEvent.type !== 'agent.context.compaction') {
+      throw new Error('expected a compaction event');
+    }
+    expect(compactionEvent.outcome).toBe('applied');
   });
 
   it('emits a skipped_blocked compaction event when the turn is cancelled before compaction can run, and does not overwrite context', async () => {

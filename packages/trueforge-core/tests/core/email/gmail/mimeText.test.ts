@@ -220,9 +220,9 @@ describe('message structure', () => {
         ],
       },
     };
-    expect(readMessage(mail).attachments.map(file => [file.id, file.filename])).toEqual([
-      ['a1', 'attachment'],
-      ['a2', 'attachment'],
+    expect(readMessage(mail).attachments.map(file => [file.handle, file.filename])).toEqual([
+      ['att1', 'attachment'],
+      ['att2', 'attachment'],
     ]);
   });
 });

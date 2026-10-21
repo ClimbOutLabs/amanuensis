@@ -1,6 +1,11 @@
 export const VERIFY_COMMAND_PURPOSES = ['build', 'test', 'verify'] as const;
 export type VerifyCommandPurpose = (typeof VERIFY_COMMAND_PURPOSES)[number];
-export const VERIFY_COMMAND_PROPOSAL_SOURCE_KINDS = ['agents_md', 'package_json'] as const;
+export const VERIFY_COMMAND_PROPOSAL_SOURCE_KINDS = [
+  'agents_md',
+  'makefile',
+  'package_json',
+  'pyproject_toml',
+] as const;
 export type VerifyCommandProposalSourceKind = (typeof VERIFY_COMMAND_PROPOSAL_SOURCE_KINDS)[number];
 
 /** The database constraint and both stores use this same bounded timeout. */

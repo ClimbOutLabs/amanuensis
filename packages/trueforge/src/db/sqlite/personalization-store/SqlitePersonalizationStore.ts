@@ -1,3 +1,4 @@
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ExpressionBuilder, Kysely, Transaction } from 'kysely';
 import {
   isPersonalizationUnchanged,
@@ -27,6 +28,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'personalization_profile'
     'address_as' as const,
     'user_profile' as const,
     jsonText<string[]>(eb.ref('pinned_preferences')).as('pinned_preferences'),
+    jsonText<HelpAreaId[]>(eb.ref('help_areas')).as('help_areas'),
     'learned_profile' as const,
     'learning_enabled' as const,
     'revision' as const,
@@ -101,6 +103,7 @@ export class SqlitePersonalizationStore implements IPersonalizationStore<Transac
           address_as: normalized.address_as,
           user_profile: normalized.user_profile,
           pinned_preferences: jsonbBind(normalized.pinned_preferences),
+          help_areas: jsonbBind(normalized.help_areas),
           learned_profile: normalized.learned_profile,
           learning_enabled: normalized.learning_enabled ? 1 : 0,
           revision: existing.revision + 1,
@@ -134,6 +137,7 @@ export class SqlitePersonalizationStore implements IPersonalizationStore<Transac
       address_as: normalized.address_as,
       user_profile: normalized.user_profile,
       pinned_preferences: jsonbBind(normalized.pinned_preferences),
+      help_areas: jsonbBind(normalized.help_areas),
       learned_profile: normalized.learned_profile,
       learning_enabled: normalized.learning_enabled ? 1 : 0,
       revision: 1,

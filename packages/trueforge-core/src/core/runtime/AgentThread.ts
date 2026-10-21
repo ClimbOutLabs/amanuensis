@@ -49,7 +49,7 @@ import {
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
-import { InstructionBuilder, ROOT_AGENT_IDENTITY } from '../InstructionBuilder';
+import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
   type CompletionUsage,
@@ -67,7 +67,6 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -115,6 +114,7 @@ import {
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit } from '../permissions/audit';
+import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -125,6 +125,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import { keepSubAgentAnswerText } from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -158,6 +159,7 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -190,6 +192,7 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
@@ -198,6 +201,7 @@ import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThread
 import {
   collectKnownEventIds,
   guardModelReply,
+  LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
@@ -625,6 +629,12 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
+}
+
+function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
+  const rest = { ...message };
+  delete rest.tool_calls;
+  return rest;
 }
 
 /**
@@ -1601,7 +1611,7 @@ export class AgentThread {
   }
 
   private buildInstruction(userInstruction?: string): string {
-    const identity = this.parent ? SUB_AGENT_IDENTITY : ROOT_AGENT_IDENTITY;
+    const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
     // Ambient, not a tool: a model that must remember to ask for the date will
     // instead assume one from training and reason years into the past, which a
@@ -1659,7 +1669,9 @@ export class AgentThread {
       createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
+    capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
+    capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
     if (this.sandbox) {
@@ -1920,6 +1932,18 @@ export class AgentThread {
       if (denied !== undefined) {
         await this.auditHeld({ info: denied.tool_info, outcome: 'denied', note: 'Turned down by the owner' });
       }
+    }
+    const changeRequests = input.approvals.flatMap(approval =>
+      approval.approval.status === 'deny' &&
+      approval.approval.reason !== undefined &&
+      isChangeRequestReason(approval.approval.reason)
+        ? [approval.approval.reason]
+        : [],
+    );
+    if (allowedCalls.length === 0 && changeRequests.length > 0) {
+      // The model continues from the person's words, so it proposes a revised call instead of stopping here.
+      const request: LLMUserMessage = { role: 'user', content: changeRequests.join('\n') };
+      return { context: [request], events: [] };
     }
     if (allowedCalls.length === 0) {
       const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };
@@ -3143,13 +3167,6 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
-    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
-    if (result.value.tool_markup === 'broken') {
-      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
-      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-    }
-
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
     // per-reply call cap stops the turn before anything in it is classified or run. An
@@ -3247,6 +3264,11 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
+    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
+    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    if (finishReason === 'length') {
+      assistantMessage = withoutToolCalls(assistantMessage);
+    }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
     // model is still silent.
@@ -3359,6 +3381,9 @@ export class AgentThread {
         };
       } else if (!hasToolCalls(assistantMessage)) {
         const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
+        if (this.sentinel !== undefined) {
+          keepSubAgentAnswerText({ state: this.sentinel.web_search, text: content });
+        }
         completion = {
           type: 'done',
           output: agentAssistantMessage,
@@ -3379,7 +3404,7 @@ export class AgentThread {
     });
 
     if (finishReason === 'length') {
-      const errorContent = completion?.error_message ?? 'max_tokens breached';
+      const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }

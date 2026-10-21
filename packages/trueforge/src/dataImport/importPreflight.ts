@@ -36,6 +36,8 @@ export interface PreflightDeps<TTransaction> {
   /** Tells the web search connector every new instance is given apart from the owner's own. */
   mcpCatalog: McpCatalog;
   memoryTarget: MemoryImportTarget;
+  /** The name the installer gave the owner, '' when none; a profile holding only that name still counts as fresh. */
+  ownerName: string;
 }
 
 const MEMORY_LIST_TIMEOUT_MS = 120_000;
@@ -50,26 +52,38 @@ function joinPlain(items: readonly string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1] ?? ''}`;
 }
 
-/** Whether the personalization profile still holds only its defaults, as when the app created it on first sign-in. */
-function isPristineProfile(profile: {
-  assistant_name: string | null;
-  assistant_identity: string | null;
-  voice_guidance: string | null;
-  user_name: string | null;
-  address_as: string | null;
-  user_profile: string | null;
-  pinned_preferences: readonly string[];
-  learned_profile: string | null;
+/**
+ * Whether the personalization profile still holds only its defaults, as when the app created it on first sign-in,
+ * apart from the installer's name for the owner, which the app fills in at boot.
+ */
+function isPristineProfile({
+  profile,
+  ownerName,
+}: {
+  profile: {
+    assistant_name: string | null;
+    assistant_identity: string | null;
+    voice_guidance: string | null;
+    user_name: string | null;
+    address_as: string | null;
+    user_profile: string | null;
+    pinned_preferences: readonly string[];
+    help_areas: readonly string[];
+    learned_profile: string | null;
+  };
+  ownerName: string;
 }): boolean {
+  const unsetOrOwnerName = (value: string | null) => value === null || (ownerName !== '' && value === ownerName);
   return (
     profile.assistant_name === null &&
     profile.assistant_identity === null &&
     profile.voice_guidance === null &&
-    profile.user_name === null &&
-    profile.address_as === null &&
+    unsetOrOwnerName(profile.user_name) &&
+    unsetOrOwnerName(profile.address_as) &&
     profile.user_profile === null &&
     profile.learned_profile === null &&
-    profile.pinned_preferences.length === 0
+    profile.pinned_preferences.length === 0 &&
+    profile.help_areas.length === 0
   );
 }
 
@@ -148,7 +162,7 @@ async function markdownMemoryHasContent(input: {
 /**
  * Every kind of data the instance already holds, leaving out the items in
  * `ignoring`. A personalization profile the app created on first sign-in
- * (nothing filled in) does not count; the import replaces it. The default web
+ * (nothing filled in but the installer's name) does not count; the import replaces it. The default web
  * search connector, untouched, does not count; the import keeps it. Global and
  * permission settings do not count either: the import only fills settings the
  * instance has not set.
@@ -199,7 +213,7 @@ export async function findInstanceData<TTransaction>(
     found.push('personas');
   }
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
-  if (profile !== undefined && !isPristineProfile(profile)) {
+  if (profile !== undefined && !isPristineProfile({ profile, ownerName: deps.ownerName })) {
     found.push('a personalization profile');
   }
   const spaceList = await deps.spaceStore.listSpaces({

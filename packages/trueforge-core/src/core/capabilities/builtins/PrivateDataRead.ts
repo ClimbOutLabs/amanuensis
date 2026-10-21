@@ -1,17 +1,13 @@
-import { CALENDAR_READ_TOOL_NAMES } from '../../calendar/toolContract';
-import { GMAIL_READ_TOOL_NAMES } from '../../email/gmail/toolContract';
-import { hasReadPrivateData, markPrivateDataRead, type WebSearchTurnState } from '../../permissions/webSearch';
+import { isPrivateReadToolName } from '../../permissions/privateReadTools';
+import {
+  hasReadPrivateData,
+  markPrivateDataReadFromHistory,
+  type WebSearchTurnState,
+} from '../../permissions/webSearch';
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
-
-const PRIVATE_READ_TOOL_NAMES = [...GMAIL_READ_TOOL_NAMES, ...CALENDAR_READ_TOOL_NAMES];
-
-/** Whether a tool reads the user's private data (mail or calendar), so later web requests ask first. */
-export function isPrivateReadToolName(tool_name: string): boolean {
-  return PRIVATE_READ_TOOL_NAMES.some(name => tool_name.endsWith(name));
-}
 
 export const PRIVATE_DATA_READ_STATE_KEY = 'tfy.private_data_read';
 
@@ -30,8 +26,9 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
 }
 
 /**
- * Keeps "this chat read private data" for the life of the session. The turn's search state starts clean every
- * turn, so the flag is saved once it is set and put back at the start of the next turn.
+ * The root thread's private-read state: the flag for the chat, saved so the next turn starts with it, and a mark
+ * restored from the context when a forked or cut-off thread still holds a private read. Each result's text is recorded
+ * by the dispatch loop before the model sees it, on every thread, so this capability only ever runs on the root thread.
  */
 export function privateDataReadCapability(input: { turn: WebSearchTurnState }): AgentCapability {
   let saved = false;
@@ -49,7 +46,7 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
       load: state => {
         if (state === true) {
           saved = true;
-          markPrivateDataRead(input.turn);
+          markPrivateDataReadFromHistory(input.turn);
         }
       },
     },
@@ -57,12 +54,16 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
       {
         processPreLLM: execution => {
           if (!hasReadPrivateData(input.turn) && contextReadPrivateData(execution.context)) {
-            markPrivateDataRead(input.turn);
+            markPrivateDataReadFromHistory(input.turn);
           }
           return saveWhenSet();
         },
       },
     ],
-    postToolCallProcessors: [{ processPostToolCall: () => saveWhenSet() }],
+    postToolCallProcessors: [
+      {
+        processPostToolCall: () => saveWhenSet(),
+      },
+    ],
   };
 }

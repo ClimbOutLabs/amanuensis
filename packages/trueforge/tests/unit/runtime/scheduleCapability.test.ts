@@ -10,6 +10,7 @@ import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/s
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -91,6 +92,7 @@ async function setup(
       address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: false,
     });
@@ -173,6 +175,7 @@ async function dispatch(input: {
     memoState: createToolCallMemoState(),
     sentinel: {
       services: sentinel.services,
+      web_search: sentinel.web_search,
       identity: {
         tenant_id: sentinel.tenant_id,
         created_by: sentinel.created_by,
@@ -397,6 +400,37 @@ describe('create_schedule', () => {
     expect((await built.listAll())[0]?.manifest).toMatchObject({ cron: '30 21 * * 1,3', timezone: 'Asia/Tokyo' });
   });
 
+  it('saves a morning brief with the canonical prompt, whatever the model would have written', async () => {
+    const built = await setup();
+    const brief = { name: 'morning-brief', morning_brief: true, repeat: 'weekdays', time: '08:00' };
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: brief });
+    expect(info.tier3_card?.schedule).toMatchObject({ task: MORNING_BRIEF_PROMPT });
+
+    await dispatch({ built, name: 'create_schedule', args: brief, decision: { status: 'allow' } });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ task: MORNING_BRIEF_PROMPT, cron: '0 8 * * 1-5' });
+  });
+
+  it('refuses a morning brief that also names its own task', async () => {
+    const built = await setup();
+    const args = { ...MORNING_BRIEF, morning_brief: true };
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: args });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain('Leave task out');
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('refuses a schedule with neither a task nor a morning brief', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({
+      name: 'create_schedule',
+      arguments: { name: 'morning-brief', repeat: 'weekdays', time: '08:00' },
+    });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain('has no task');
+    expect(await built.listAll()).toEqual([]);
+  });
+
   it.each([
     ['a cron field', { ...MORNING_BRIEF, cron: '*/5 * * * *' }, 'not valid'],
     ['cron as the time', { ...MORNING_BRIEF, time: '*/5 * * * *' }, 'What time of day should it run?'],
@@ -442,6 +476,7 @@ describe('create_schedule', () => {
       memoState: createToolCallMemoState(),
       sentinel: {
         services: built.sentinel.services,
+        web_search: built.sentinel.web_search,
         identity: {
           tenant_id: 'default',
           created_by: OWNER.subject_id,

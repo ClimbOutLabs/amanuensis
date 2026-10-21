@@ -138,15 +138,23 @@ describe('CompactionStatusLine compaction outcomes', () => {
     render(<CompactionStatusLine />);
     // The saved number mixed a provider count with a text estimate; the line
     // now shows just the age.
-    expect(screen.getByText('Compacted 30m ago')).toBeDefined();
+    expect(screen.getByText('Compacted history 30m ago')).toBeDefined();
     expect(screen.queryByText(/saved/)).toBeNull();
   });
 
-  it('shows shortened history for a truncated fallback, not a failure', () => {
+  it('shows compacted history for a truncated fallback, with the trimming explained in a tooltip', () => {
     stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'truncated_fallback' } });
     render(<CompactionStatusLine />);
-    expect(screen.getByText('Shortened history 30m ago to fit')).toBeDefined();
+    const line = screen.getByText('Compacted history 30m ago');
+    expect(line.getAttribute('title')).toBe('Older messages were trimmed because a summary could not be made.');
+    expect(screen.queryByText(/Shortened/)).toBeNull();
     expect(screen.queryByText(/failed/i)).toBeNull();
+  });
+
+  it('keeps the tooltip off an applied compaction', () => {
+    stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'applied' } });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('Compacted history 30m ago').getAttribute('title')).toBeNull();
   });
 
   it('shows a failure for skipped outcomes', () => {

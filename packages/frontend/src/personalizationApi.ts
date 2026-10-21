@@ -1,3 +1,4 @@
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { PersonalizationApi, PersonalizationProfile } from '@truefoundry/trueforge-ui';
 
@@ -8,6 +9,10 @@ interface ProfileResponse {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isHelpAreaId(value: unknown): value is HelpAreaId {
+  return HELP_AREA_IDS.some(id => id === value);
 }
 
 function parseProfile(data: unknown): PersonalizationProfile | null {
@@ -37,7 +42,9 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     !isNullableString(learnedProfile) ||
     (learningEnabled !== undefined && typeof learningEnabled !== 'boolean') ||
     !Array.isArray(profile.pinned_preferences) ||
-    !profile.pinned_preferences.every(item => typeof item === 'string')
+    !profile.pinned_preferences.every(item => typeof item === 'string') ||
+    !Array.isArray(profile.help_areas) ||
+    !profile.help_areas.every(isHelpAreaId)
   ) {
     throw new Error('The personalization response was invalid.');
   }
@@ -50,6 +57,7 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     address_as: addressAs,
     user_profile: profile.user_profile,
     pinned_preferences: profile.pinned_preferences,
+    help_areas: profile.help_areas,
     learned_profile: learnedProfile,
     ...(learningEnabled === undefined ? {} : { learning_enabled: learningEnabled }),
   };

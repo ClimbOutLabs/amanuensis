@@ -156,7 +156,7 @@ network_hostname() {
   if [[ $name =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then printf '%s' "$name"; fi
 }
 
-# This computer's own MagicDNS name when Tailscale is running (for example spark.example.ts.net): the DNSName of
+# This computer's own MagicDNS name when Tailscale is running (for example host.example.ts.net): the DNSName of
 # "Self", never one of the other machines on the tailnet.
 network_tailscale_name() {
   local name='' LC_ALL=C
@@ -201,15 +201,15 @@ address_problem() {
   local host LC_ALL=C
   host=$(lowercase "$1")
   if [ -z "$host" ]; then
-    echo "An address is needed. Example: --address 192.168.1.20 or --address spark.local"
+    echo "An address is needed. Example: --address 192.168.1.20 or --address host.local"
   elif ! valid_ipv4 "$host" && ! { [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && [[ $host != *..* ]] && [[ ! $host =~ ^[0-9.]+$ ]] && ! has_numeric_label "$host"; }; then
-    echo "$1 is not an address or a name. Examples: 192.168.1.20, spark.local"
+    echo "$1 is not an address or a name. Examples: 192.168.1.20, host.local"
   elif ! private_host "$host"; then
     echo "$1 is a public address, and signing in over plain http from the internet is not safe. For the internet, use --tls caddy with --public-url and --login-url."
   fi
 }
 
-# The host of an origin: http://spark.local:8791 gives spark.local.
+# The host of an origin: http://host.local:8791 gives host.local.
 origin_host() {
   local host=${1#*://}
   printf '%s' "${host%%[:/]*}"

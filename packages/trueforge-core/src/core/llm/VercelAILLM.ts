@@ -26,7 +26,7 @@ import type {
   ToolSet,
   UserContent,
 } from 'ai';
-import { APICallError, jsonSchema, Output, streamText } from 'ai';
+import { APICallError, jsonSchema, Output, streamText, wrapLanguageModel } from 'ai';
 import type {
   ChatCompletionContentPart,
   ChatCompletionCreateParamsStreaming,
@@ -46,7 +46,8 @@ import {
   type ThinkingBlock,
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
-import { ToolMarkupGuard } from './toolMarkup';
+import { reasoningTagMiddleware } from './reasoningTags';
+import { BROKEN_TOOL_MARKUP_MESSAGE, ToolMarkupGuard, type ToolMarkupOutcome } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -174,7 +175,33 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
   return client(model.id);
 }
 
-export function buildLanguageModel(config: VercelAIProviderConfig): LanguageModelV4 {
+/**
+ * The text that ends a reply whose markup could not be rebuilt: the garbled-reply line, set off
+ * from whatever answer text came before it. Nothing else of the broken markup is shown.
+ */
+function garbledTail({
+  markupOutcome,
+  accumulatedText,
+}: {
+  markupOutcome: ToolMarkupOutcome;
+  accumulatedText: string;
+}): string {
+  if (markupOutcome.status !== 'broken') {
+    return '';
+  }
+  const separator = accumulatedText === '' || accumulatedText.endsWith('\n') ? '' : '\n\n';
+  return `${separator}${BROKEN_TOOL_MARKUP_MESSAGE}`;
+}
+
+/**
+ * `reasoningRequested` is set when the request asks for reasoning. Only then can a reply start with
+ * reasoning that ends at a bare `</think>` (the opening tag sat in the prompt), and that case holds
+ * the answer text until the reply shows which it is.
+ */
+export function buildLanguageModel(
+  config: VercelAIProviderConfig,
+  { reasoningRequested = false }: { reasoningRequested?: boolean } = {},
+): LanguageModelV4 {
   const { provider, model, baseUrl, apiKey, headers } = config;
   const extraHeaders = Object.keys(headers).length > 0 ? headers : undefined;
 
@@ -234,7 +261,11 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
       // Token Factory is OpenAI-compatible. A provider record may override the base
       // URL (for example the regional endpoint); otherwise the default applies.
       const baseUrl = config.baseUrl ?? TOKEN_FACTORY_DEFAULT_BASE_URL;
-      return compatibleModel({ ...config, baseUrl });
+      // Some served models write their reasoning into the answer text between think tags.
+      return wrapLanguageModel({
+        model: compatibleModel({ ...config, baseUrl }),
+        middleware: reasoningTagMiddleware({ bareClose: reasoningRequested }),
+      });
     }
     default: {
       const _exhaustive: never = provider.type;
@@ -1446,7 +1477,7 @@ export async function* mapStreamToChunks({
   let nextToolIndex = 0;
   let accumulatedText = '';
   // Leaked tool-call markup in the answer text is held back and never streamed; at the end of the
-  // reply it is either rebuilt into real tool calls or reported through tool_markup as broken.
+  // reply it is either rebuilt into real tool calls or replaced by the garbled-reply line.
   const markupGuard = new ToolMarkupGuard();
   const textRepetition = new StreamingRepetitionGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
@@ -1713,11 +1744,12 @@ export async function* mapStreamToChunks({
   }
 
   // Settle the markup guard: a clean reply releases its held tail so the final text matches what
-  // was streamed; recovered markup joins the reply's tool calls; broken markup is flagged so the
-  // runtime stops the answer instead of trusting anything in it.
+  // was streamed; recovered markup joins the reply's tool calls; broken markup is never run or
+  // shown, and the garbled line stands in for it, so nothing in it is saved as calls either.
   const markupOutcome = markupGuard.finish();
-  if (markupOutcome.status === 'clean' && markupGuard.heldText !== '') {
-    const tail = markupGuard.heldText;
+  const tail =
+    markupOutcome.status === 'clean' ? markupGuard.heldText : garbledTail({ markupOutcome, accumulatedText });
+  if (tail !== '') {
     accumulatedText += tail;
     yield {
       ...makeBase(),
@@ -1763,7 +1795,7 @@ export async function* mapStreamToChunks({
     usage: finalUsage,
     output,
     finish_reason: finalFinishReason,
-    ...(markupOutcome.status === 'clean' ? {} : { tool_markup: markupOutcome.status }),
+    ...(markupOutcome.status === 'recovered' ? { tool_markup: markupOutcome.status } : {}),
   };
 }
 
@@ -1797,12 +1829,17 @@ export class VercelAILLM implements ILLM {
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
     const { providerConfig, fallbackProviderConfig, onFallback } = this.config;
-    const primaryModel = buildLanguageModel(providerConfig);
+    // reasoning_effort is injected by AgentThread via Object.assign; not in the SDK type.
+    const rawReasoningEffort: unknown = Reflect.get(body, 'reasoning_effort');
+    const reasoningEffort = typeof rawReasoningEffort === 'string' ? rawReasoningEffort : undefined;
+    const reasoning = toReasoningLevel(reasoningEffort);
+    const reasoningRequested = reasoning !== undefined && reasoning !== 'none';
+    const primaryModel = buildLanguageModel(providerConfig, { reasoningRequested });
     const languageModel =
       fallbackProviderConfig !== undefined
         ? withFailover({
             primary: primaryModel,
-            secondary: buildLanguageModel(fallbackProviderConfig),
+            secondary: buildLanguageModel(fallbackProviderConfig, { reasoningRequested }),
             logger: this.logger,
             onFallback,
           })
@@ -1835,16 +1872,12 @@ export class VercelAILLM implements ILLM {
     const structuredOutputSpec = toStructuredOutputSpec(body.response_format);
     const output = buildOutput(structuredOutputSpec);
 
-    // reasoning_effort is injected by AgentThread via Object.assign; not in the SDK type.
-    const rawReasoningEffort: unknown = Reflect.get(body, 'reasoning_effort');
-    const reasoningEffort = typeof rawReasoningEffort === 'string' ? rawReasoningEffort : undefined;
     const providerOptions = buildProviderOptions({
       config: providerConfig,
       reasoningEffort,
       structuredOutputSpec,
       rawBody: body,
     });
-    const reasoning = toReasoningLevel(reasoningEffort);
 
     // top_k is injected by AgentThread via Object.assign; not in the SDK type.
     const rawTopK: unknown = Reflect.get(body, 'top_k');

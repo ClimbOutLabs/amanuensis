@@ -19,6 +19,8 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
+import { isChangeRequestReason } from '../core/permissions/changeRequest';
+import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
@@ -239,13 +241,14 @@ export class SessionHandle<
    * come from the authoritative session record. Services are the session's
    * shared instance so grants and tokens are visible across threads.
    */
-  private createSentinelContext(services: SentinelServices): SentinelHostContext {
+  private createSentinelContext(services: SentinelServices, webSearch: WebSearchTurnState): SentinelHostContext {
     return createSentinelHostContext({
       services,
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
       workspace_cwd: this.session.workspace_cwd ?? null,
+      web_search: webSearch,
     });
   }
 
@@ -349,7 +352,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
-        sentinel: this.createSentinelContext(sentinelServices),
+        sentinel: this.createSentinelContext(sentinelServices, input.resolver.webSearchTurn),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -657,7 +660,8 @@ export class SessionHandle<
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
       return false;
     }
-    if (!items.every(item => item.approval.status === 'deny')) {
+    // A "Change it" denial hands the model the person's words, so the turn continues to a model call.
+    if (!items.every(item => item.approval.status === 'deny' && !isChangeRequestReason(item.approval.reason))) {
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
@@ -889,7 +893,7 @@ export class SessionHandle<
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
-      sentinel: this.createSentinelContext(input.sentinelServices),
+      sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
 
@@ -980,7 +984,7 @@ export class SessionHandle<
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
-        sentinel: this.createSentinelContext(input.sentinelServices),
+        sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });
     };
   }

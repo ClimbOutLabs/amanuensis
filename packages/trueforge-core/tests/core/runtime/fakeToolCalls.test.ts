@@ -12,7 +12,6 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../../../src/core/llm/toolMarkup';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
@@ -108,7 +107,7 @@ function rawCall(spec: CallSpec): RawToolCall {
 async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
-  toolMarkup?: 'recovered' | 'broken';
+  toolMarkup?: 'recovered';
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls = (input.calls ?? []).map(rawCall);
   if (input.text !== undefined) {
@@ -201,30 +200,6 @@ function callToolNames(toolSet: ReturnType<typeof makeToolSet>): string[] {
 }
 
 describe('leaked markup', () => {
-  it('stops the turn on broken markup: nothing runs and the claim is never saved', async () => {
-    const toolSet = makeToolSet();
-    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
-      replyStream({
-        text: 'Let me add that for you. ',
-        toolMarkup: 'broken',
-      }),
-    );
-    const thread = makeThread({ toolSet, create });
-    const events = await drain(thread);
-
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error: BROKEN_TOOL_MARKUP_MESSAGE,
-      }),
-    );
-    expect(toolSet.callTool).not.toHaveBeenCalled();
-    // The reply was not saved at all: the context still holds only the person's message.
-    expect(thread.toSnapshot().context).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain('added the appointment');
-  });
-
   it('runs a call recovered from markup through the normal path', async () => {
     const toolSet = makeToolSet();
     let round = 0;

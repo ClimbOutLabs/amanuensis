@@ -29,7 +29,7 @@ describe('routeHelperModel', () => {
   });
 
   it('leaves a local-only turn on its own model', () => {
-    expect(routeHelperModel({ modelFqn: 'spark/qwen', helperFqn })).toBe('spark/qwen');
+    expect(routeHelperModel({ modelFqn: 'host/qwen', helperFqn })).toBe('host/qwen');
   });
 
   it('leaves the turn model alone when there is no helper model', () => {
