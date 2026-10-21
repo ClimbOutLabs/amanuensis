@@ -101,6 +101,7 @@ function servicesWithGrants(toolNames: string[]): SentinelServices {
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
+      mcp_server_host: 'mcp.example.com',
     });
   }
   return services;
