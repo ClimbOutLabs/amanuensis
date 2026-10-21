@@ -6,14 +6,13 @@ import { AmanTour } from '@/components/AmanTour.js';
 import {
   CAPABILITY_PROMPTS,
   GENERAL_DAY_PROMPTS,
-  tryADayPrompts,
+  MORNING_BRIEF,
   visibleTourPrompts,
   type TourCapabilities,
 } from '@/components/tourPrompts.js';
 
 const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps: true };
 const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false, maps: false };
-const GENERAL_CARDS = tryADayPrompts({ helpAreas: [], capabilities: ALL });
 
 function renderTour(overrides: Partial<ComponentProps<typeof AmanTour>> = {}) {
   const props = {
@@ -30,7 +29,7 @@ function renderTour(overrides: Partial<ComponentProps<typeof AmanTour>> = {}) {
 }
 
 describe('AmanTour', () => {
-  it('leads with the headline, then the day cards and the capability chips', () => {
+  it('leads with the headline, then the morning brief, the day cards and the capability chips', () => {
     renderTour();
 
     expect(
@@ -55,42 +54,42 @@ describe('AmanTour', () => {
     expect(screen.getByText('Setup block here')).toBeInTheDocument();
   });
 
-  it('sends each day card its exact prompt', () => {
-    const { onSend } = renderTour();
+  it('features the morning brief above the six day cards', () => {
+    renderTour();
+    const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
+    const brief = within(screen.getByRole('region', { name: 'Your morning brief' }));
 
-    for (const item of GENERAL_CARDS) {
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(item.label) }));
-      expect(onSend).toHaveBeenLastCalledWith(item.prompt);
-    }
-    expect(onSend).toHaveBeenCalledTimes(GENERAL_CARDS.length);
+    expect(brief.getByRole('button', { name: MORNING_BRIEF.label })).toBeInTheDocument();
+    expect(days.getAllByRole('button')).toHaveLength(GENERAL_DAY_PROMPTS.length + 1);
   });
 
-  it('shows the morning brief first and the general set when no area is chosen', () => {
+  it('sends each day card and the brief their exact prompt', () => {
+    const { onSend } = renderTour();
+
+    for (const item of [MORNING_BRIEF, ...GENERAL_DAY_PROMPTS]) {
+      fireEvent.click(screen.getByRole('button', { name: item.label }));
+      expect(onSend).toHaveBeenLastCalledWith(item.prompt);
+    }
+    expect(onSend).toHaveBeenCalledTimes(GENERAL_DAY_PROMPTS.length + 1);
+  });
+
+  it('shows only the label on each card and gives the full prompt as its accessible description', () => {
     renderTour();
 
-    const labels = screen.getAllByRole('button').map(button => button.textContent ?? '');
-    const dayStart = labels.findIndex(label => label.startsWith('Your morning brief'));
-    expect(dayStart).toBeGreaterThanOrEqual(0);
-    expect(labels[dayStart + 1]).toMatch(/^Check for scams/);
-    expect(GENERAL_CARDS).toHaveLength(6);
+    for (const item of [MORNING_BRIEF, ...GENERAL_DAY_PROMPTS, ...CAPABILITY_PROMPTS]) {
+      const button = screen.getByRole('button', { name: item.label });
+      expect(button).toHaveAccessibleDescription(item.prompt);
+      expect(screen.queryByText(item.prompt)).not.toBeVisible();
+    }
   });
 
   it('builds the day cards from the chosen areas, in the order chosen', () => {
     renderTour({ helpAreas: ['focus'] });
     const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
 
-    expect(days.getByRole('button', { name: /Help me clear my head/ })).toBeInTheDocument();
-    expect(days.getByRole('button', { name: /Help me get started/ })).toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
-    expect(days.getAllByRole('button')).toHaveLength(6);
-  });
-
-  it('shows the prompt text on each day card so people see what will be sent', () => {
-    renderTour();
-
-    for (const item of GENERAL_CARDS) {
-      expect(screen.getByRole('button', { name: new RegExp(item.label) })).toHaveTextContent(item.prompt);
-    }
+    expect(days.getByRole('button', { name: 'Help me clear my head' })).toBeInTheDocument();
+    expect(days.getByRole('button', { name: 'Help me get started' })).toBeInTheDocument();
+    expect(days.getByRole('button', { name: 'What did I forget?' })).toBeInTheDocument();
   });
 
   it('sends each capability chip its exact prompt', () => {
@@ -107,11 +106,10 @@ describe('AmanTour', () => {
     renderTour({ capabilities: NONE });
     const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
 
-    expect(days.queryByRole('button', { name: /Check for scams/ })).not.toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Reply to an email/ })).not.toBeInTheDocument();
     expect(days.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Your morning brief/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Find forgotten subscriptions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reply to an email' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Handle your email' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
@@ -123,7 +121,8 @@ describe('AmanTour', () => {
     renderTour({ capabilities: { ...NONE, email: true } });
 
     expect(screen.getByRole('button', { name: 'Handle your email' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Check for scams/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find forgotten subscriptions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reply to an email' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
   });
@@ -147,9 +146,9 @@ describe('AmanTour', () => {
 });
 
 describe('visibleTourPrompts', () => {
-  it('keeps the prompts that need nothing, whatever the capabilities', () => {
+  it('keeps the general prompts that need nothing, whatever the capabilities', () => {
     const visible = visibleTourPrompts(GENERAL_DAY_PROMPTS, NONE);
 
-    expect(visible.map(item => item.key)).toEqual(['plan-day']);
+    expect(visible.map(item => item.key)).toEqual(['clear-head', 'break-task', 'plan-day', 'meals']);
   });
 });

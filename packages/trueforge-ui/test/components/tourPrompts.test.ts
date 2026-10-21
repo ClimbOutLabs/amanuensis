@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
-import { tryADayPrompts, type TourCapabilities } from '@/components/tourPrompts.js';
+import {
+  GENERAL_DAY_PROMPTS,
+  MORNING_BRIEF,
+  tryADayPrompts,
+  visibleTourPrompts,
+  type TourCapabilities,
+} from '@/components/tourPrompts.js';
 
 const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps: true };
 const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false, maps: false };
@@ -12,88 +18,109 @@ function keysFor({ helpAreas, capabilities }: { helpAreas: HelpAreaId[]; capabil
 }
 
 describe('tryADayPrompts', () => {
-  it('shows the general set with the morning brief first when no area is chosen', () => {
+  it('shows the general set when no area is chosen', () => {
     expect(keysFor({ helpAreas: [], capabilities: ALL })).toEqual([
-      'brief',
-      'scam-check',
-      'reply',
+      'clear-head',
+      'break-task',
       'plan-day',
-      'doctor-appointment',
-      'subscriptions',
+      'appointment',
+      'meals',
     ]);
   });
 
   it('keeps only the general cards this instance can run when no area is chosen', () => {
-    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual(['brief', 'plan-day']);
+    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual(['clear-head', 'break-task', 'plan-day', 'meals']);
   });
 
-  it('fills the five cards from one area, then from the general set', () => {
+  it('fills the row from one area, then from the general set', () => {
     expect(keysFor({ helpAreas: ['focus'], capabilities: ALL })).toEqual([
-      'brief',
       'clear-head',
       'break-task',
       'get-started',
       'forgot',
-      'scam-check',
+      'plan-day',
+      'appointment',
     ]);
   });
 
-  it('spreads the five cards evenly across several areas and shows a shared card once', () => {
+  it('spreads the row evenly across several areas and shows a shared card once', () => {
     expect(keysFor({ helpAreas: ['family', 'caring'], capabilities: ALL })).toEqual([
-      'brief',
       'family-week',
       'care-track',
       'meals',
-      'doctor-appointment',
+      'appointment',
       'care-visit',
+      'owe-reply',
     ]);
   });
 
   it('follows the order the areas were chosen in', () => {
     expect(keysFor({ helpAreas: ['caring', 'family'], capabilities: ALL })).toEqual([
-      'brief',
       'care-track',
       'family-week',
-      'doctor-appointment',
+      'appointment',
       'meals',
       'care-visit',
+      'owe-reply',
     ]);
   });
 
   it('leaves out an area card whose capability is missing and fills from the general set', () => {
     expect(keysFor({ helpAreas: ['focus'], capabilities: NONE })).toEqual([
-      'brief',
       'clear-head',
       'break-task',
       'get-started',
       'plan-day',
+      'meals',
     ]);
   });
 
   it('shows the maps card only when maps is available', () => {
     expect(keysFor({ helpAreas: ['new_country'], capabilities: { ...ALL, maps: false } })).toEqual([
-      'brief',
       'settle',
       'letter',
-      'scam-check',
-      'reply',
+      'clear-head',
+      'break-task',
       'plan-day',
+      'appointment',
     ]);
     expect(keysFor({ helpAreas: ['new_country'], capabilities: ALL })).toEqual([
-      'brief',
       'settle',
       'letter',
       'family-doctor',
-      'scam-check',
-      'reply',
+      'clear-head',
+      'break-task',
+      'plan-day',
     ]);
   });
 
-  it('keeps the morning brief first whatever the areas', () => {
+  it('builds a row of six cards from several areas, never the morning brief', () => {
     const areas: HelpAreaId[] = ['work_money', 'focus', 'family', 'caring', 'new_country'];
-    const cards = tryADayPrompts({ helpAreas: areas, capabilities: ALL });
+    const keys = keysFor({ helpAreas: areas, capabilities: ALL });
 
-    expect(cards[0]?.key).toBe('brief');
-    expect(cards).toHaveLength(6);
+    expect(keys).toHaveLength(6);
+    expect(keys).not.toContain(MORNING_BRIEF.key);
+  });
+
+  it('spreads the work and money cards with the general set', () => {
+    expect(keysFor({ helpAreas: ['work_money'], capabilities: ALL })).toEqual([
+      'subscriptions',
+      'invoices',
+      'plan-day',
+      'clear-head',
+      'break-task',
+      'appointment',
+    ]);
+  });
+});
+
+describe('visibleTourPrompts', () => {
+  it('keeps the general prompts that need nothing, whatever the capabilities', () => {
+    expect(visibleTourPrompts(GENERAL_DAY_PROMPTS, NONE).map(item => item.key)).toEqual([
+      'clear-head',
+      'break-task',
+      'plan-day',
+      'meals',
+    ]);
   });
 });

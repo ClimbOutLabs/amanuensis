@@ -5,10 +5,11 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
-import { InstructionBuilder } from '@truefoundry/trueforge-core/core';
+import { InstructionBuilder, isAuthRequired } from '@truefoundry/trueforge-core/core';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   UPDATE_SPACE_TOOL_NAME,
@@ -886,5 +887,52 @@ describe('space capability', () => {
     expect(updateSpace).toHaveBeenCalledWith(expect.objectContaining({ body: 'a' }));
     const parsed = JSON.parse(resultText(response)) as { space: { body: string } };
     expect(parsed.space.body).toBe('a');
+  });
+});
+
+/** The model-facing schemas of the space tools, read the way the model receives them. */
+describe('space tool model-facing schemas', () => {
+  async function listedSpaceTools(): Promise<Map<string, { required: string[]; properties: string[] }>> {
+    const capability = spaceCapability({
+      store: makeStore(),
+      authority: { tenantId: 'default', userRef: 'user-a' },
+      tracing: NOOP_TRACING,
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const listed = await toolSet.listTools();
+    if (isAuthRequired(listed)) {
+      throw new Error('space tools should not require auth');
+    }
+    return new Map(
+      listed.result.tools.map(tool => [
+        tool.name,
+        {
+          required: tool.inputSchema.required ?? [],
+          properties: Object.keys(tool.inputSchema.properties ?? {}),
+        },
+      ]),
+    );
+  }
+
+  it.each([
+    [LIST_SPACES_TOOL_NAME, []],
+    [GET_SPACE_TOOL_NAME, ['space_id']],
+    [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
+    [UPDATE_SPACE_TOOL_NAME, ['space_id']],
+    [REVERT_SPACE_TOOL_NAME, ['revision', 'space_id']],
+    [LIST_BLOCKS_TOOL_NAME, ['space_id']],
+  ])('%s keeps the required fields the model must send', async (name, required) => {
+    const tools = await listedSpaceTools();
+    expect([...(tools.get(name)?.required ?? [])].sort()).toEqual(required);
+  });
+
+  it('update_space still offers all three ways to change a body', async () => {
+    const tools = await listedSpaceTools();
+    expect(tools.get(UPDATE_SPACE_TOOL_NAME)?.properties).toEqual(
+      expect.arrayContaining(['body', 'edits', 'block_edits', 'confirm_shrink', 'expected_revision']),
+    );
   });
 });

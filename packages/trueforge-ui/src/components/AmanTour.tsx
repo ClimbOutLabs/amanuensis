@@ -1,16 +1,56 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+
 import { WelcomeScreen } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
 
-import { CAPABILITY_PROMPTS, tryADayPrompts, visibleTourPrompts, type TourCapabilities } from './tourPrompts.js';
+import {
+  CAPABILITY_PROMPTS,
+  MORNING_BRIEF,
+  tryADayPrompts,
+  visibleTourPrompts,
+  type TourCapabilities,
+  type TourPrompt,
+} from './tourPrompts.js';
 
 export const TOUR_HEADLINE = 'Aman is your chief of staff.';
 export const TOUR_SUBLINE =
   'It keeps track of your life and checks with you before taking important actions. It runs on your own computer.';
+
+const TOUR_BUTTON_CLASS =
+  'flex h-full w-full cursor-pointer items-center rounded-xl border border-border bg-card-bg px-4 py-3 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg hover:bg-ghost-button-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60';
+
+/** Shows the label only; the full prompt stays hidden and is the button's accessible description. */
+function TourPromptButton({
+  item,
+  disabled,
+  onSend,
+}: {
+  item: TourPrompt;
+  disabled: boolean;
+  onSend: (prompt: string) => void;
+}) {
+  const promptId = useId();
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-describedby={promptId}
+        onClick={() => onSend(item.prompt)}
+        className={TOUR_BUTTON_CLASS}
+      >
+        {item.label}
+      </button>
+      <span id={promptId} hidden>
+        {item.prompt}
+      </span>
+    </li>
+  );
+}
 
 export type AmanTourProps = {
   capabilities: TourCapabilities;
@@ -44,19 +84,14 @@ export function AmanTour({ capabilities, helpAreas, onSend, canSend, onHide, set
           </h2>
           <p className="text-sm text-text-secondary">Tap a card and Aman starts a chat with that message.</p>
         </div>
+        <section aria-label="Your morning brief">
+          <ul className="grid list-none grid-cols-1 gap-3 p-0">
+            <TourPromptButton item={MORNING_BRIEF} disabled={!canSend} onSend={onSend} />
+          </ul>
+        </section>
         <ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-2">
           {dayPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full flex-col items-start gap-1 rounded-xl border border-border bg-card-bg p-4 text-left transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="text-sm font-medium text-text-primary">{item.label}</span>
-                <span className="text-sm text-text-secondary">{item.prompt}</span>
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>
@@ -66,16 +101,7 @@ export function AmanTour({ capabilities, helpAreas, onSend, canSend, onHide, set
         </h2>
         <ul className="grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2 md:grid-cols-3">
           {capabilityPrompts.map(item => (
-            <li key={item.key}>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => onSend(item.prompt)}
-                className="flex h-full w-full items-center rounded-lg border border-border bg-secondary-bg px-3 py-2 text-left text-sm text-text-primary transition-colors hover:border-primary-button-bg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {item.label}
-              </button>
-            </li>
+            <TourPromptButton key={item.key} item={item} disabled={!canSend} onSend={onSend} />
           ))}
         </ul>
       </section>

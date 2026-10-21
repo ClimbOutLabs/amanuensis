@@ -121,7 +121,9 @@ test('first-run screens render in light and dark at desktop and phone width', { 
 
         // Every capability granted: the full prompt set is on screen.
         await open('connected');
-        await page.getByRole('button', { name: /Check for scams/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page
+          .getByRole('button', { name: /Find forgotten subscriptions/ })
+          .waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.ok(await page.getByRole('button', { name: 'Handle your email' }).isVisible());
         assert.ok(await page.getByRole('button', { name: 'Read files and run code' }).isVisible());
         await shoot('connected');
@@ -133,8 +135,8 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         await shoot('tour-focus');
         // Nothing chosen: the general set, with the morning brief first.
         await open('tour-none');
-        await page.getByRole('button', { name: /Check for scams/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-        assert.equal(await page.getByRole('button', { name: /Help me clear my head/ }).count(), 0);
+        await page.getByRole('button', { name: /Help me plan my day/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.getByRole('button', { name: /What did I forget/ }).count(), 0);
         assert.ok(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isVisible());
         assert.ok(!(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isChecked()));
         await shoot('tour-none');

@@ -105,7 +105,9 @@ describe('AmanWelcome on an ordinary new chat', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
 
-    expect(composer.setText).toHaveBeenCalledWith('Good morning! Give me my brief for today.');
+    expect(composer.setText).toHaveBeenCalledWith(
+      "Good morning! What do I need to know today? Go through my calendar, email and tasks, and tell me what's coming up, what's due, and anything that looks off.",
+    );
     expect(composer.send).toHaveBeenCalledTimes(1);
     expect(composer.setText.mock.invocationCallOrder[0]).toBeLessThan(composer.send.mock.invocationCallOrder[0] ?? 0);
   });
@@ -115,7 +117,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Run things on a schedule' }));
 
-    expect(composer.setText).toHaveBeenCalledWith('Set up a routine that checks my bills every Friday.');
+    expect(composer.setText).toHaveBeenCalledWith('Every weekday at 7:30, send me my morning brief.');
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
@@ -123,7 +125,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
     await screen.findByRole('heading', { name: TOUR_HEADING });
 
-    expect(screen.queryByRole('button', { name: /Check for scams/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
   });
@@ -133,7 +135,7 @@ describe('AmanWelcome on an ordinary new chat', () => {
     server.sandboxEnabled = true;
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
-    expect(await screen.findByRole('button', { name: /Check for scams/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Help me with doctor's appointments/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Keep your calendar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();

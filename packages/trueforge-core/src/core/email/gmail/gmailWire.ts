@@ -48,3 +48,8 @@ export const DraftListSchema = z.object({
 });
 
 export const AttachmentBodySchema = z.object({ size: z.number().optional(), data: z.string().optional() });
+
+/** The bytes of Gmail's base64url body data, as an inline part or an attachment fetch returns them. */
+export function decodeAttachmentData(data: string): Buffer {
+  return Buffer.from(data, 'base64url');
+}
