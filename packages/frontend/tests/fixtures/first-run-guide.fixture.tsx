@@ -1,6 +1,7 @@
 import {
   AmanFirstRunGuide,
   AmanSetupProvider,
+  AmanTour,
   AmanWelcome,
   PersonalizationPanel,
   PersonalizationProvider,
@@ -17,8 +18,18 @@ import { createRoot } from 'react-dom/client';
  * the checklist fresh, half done and done, the quiet name line after dismissal, the checklist as
  * Settings shows it, and the Personalization page. Everything on screen is invented.
  */
-export type FixtureState = 'fresh' | 'half' | 'done' | 'line' | 'settings' | 'panel';
-export const FIXTURE_STATES: readonly FixtureState[] = ['fresh', 'half', 'done', 'line', 'settings', 'panel'];
+export type FixtureState = 'fresh' | 'half' | 'done' | 'line' | 'settings' | 'panel' | 'connected' | 'hidden';
+export const FIXTURE_STATES: readonly FixtureState[] = [
+  'fresh',
+  'half',
+  'done',
+  'line',
+  'settings',
+  'panel',
+  'connected',
+  'hidden',
+];
+const TOUR_HIDDEN_STORAGE_KEY = 'aman.hide_tour';
 
 function isFixtureState(value: string | null): value is FixtureState {
   return FIXTURE_STATES.some(state => state === value);
@@ -54,7 +65,10 @@ function setupFor(state: FixtureState): AmanSetupState {
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
     case 'done':
     case 'line':
+    case 'connected':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: true };
+    case 'hidden':
+      return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
   }
 }
 
@@ -81,6 +95,20 @@ function Screen({ state }: { state: FixtureState }) {
       </div>
     );
   }
+  if (state === 'connected') {
+    // Every capability granted: the full set of prompts an instance with email, calendar and a sandbox shows.
+    return (
+      <div className="flex min-h-screen flex-col justify-center py-8">
+        <AmanTour
+          capabilities={{ email: true, calendar: true, sandbox: true }}
+          canSend
+          onSend={() => {}}
+          onHide={() => {}}
+          setup={null}
+        />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-screen flex-col justify-center py-8">
       <AmanWelcome />
@@ -92,6 +120,12 @@ const params = new URLSearchParams(window.location.search);
 const stateParam = params.get('state');
 const state: FixtureState = isFixtureState(stateParam) ? stateParam : 'fresh';
 const mode = params.get('theme') === 'dark' ? 'dark' : 'light';
+// Local storage outlives a page load, so every state sets or clears the tour switch it needs.
+if (state === 'hidden') {
+  window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
+} else {
+  window.localStorage.removeItem(TOUR_HIDDEN_STORAGE_KEY);
+}
 
 const rootElement = document.getElementById('root');
 if (rootElement == null) throw new Error('Missing fixture root');

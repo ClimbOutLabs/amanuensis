@@ -220,6 +220,7 @@ export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
 export type { AmanSetupState, FirstRunGuideState, MemoryBankStatus } from './components/AmanSetupContext.js';
+export { AmanTour, type AmanTourProps, type TourCapabilities } from './components/AmanTour.js';
 export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
@@ -276,6 +277,20 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export {
+  RepositoryWorkProvider,
+  useOptionalRepositoryWork,
+  useRepositoryWork,
+} from './components/RepositoryWorkContext.js';
+export type {
+  GithubRepositoryDetails,
+  GithubRepositoryOption,
+  RepositoryCommandProposal,
+  RepositorySummary,
+  RepositoryWorkApi,
+  SessionRepositoryBinding,
+  StartRepositoryWorkResult,
+} from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
@@ -332,6 +347,8 @@ export { TrueFoundryChatProvider } from './containers/TrueFoundryChatProvider.js
 export type { TrueFoundryChatProviderProps } from './containers/TrueFoundryChatProvider.js';
 export { UserEditComposerContainer } from './containers/UserEditComposerContainer.js';
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
+export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkOnRepoControls.js';
+export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
 export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';

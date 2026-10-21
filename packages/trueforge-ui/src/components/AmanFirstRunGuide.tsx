@@ -68,6 +68,11 @@ export function amanFirstRunItems(input: {
   return items;
 }
 
+/** Whether every checklist line is done; the tour stops showing the checklist once it is. */
+export function isFirstRunSetupComplete(input: Parameters<typeof amanFirstRunItems>[0]): boolean {
+  return amanFirstRunItems(input).every(item => item.done);
+}
+
 /** Whether the card is on screen: the host either has not wired dismissal, or the owner has not used it. */
 export function isFirstRunGuideVisible(setup: AmanSetupState | null): boolean {
   return setup !== null && setup.firstRunGuide?.dismissed !== true;
@@ -114,12 +119,14 @@ export const FirstRunLink: FC<{ target: FirstRunTarget; settingsHref: string | u
 /**
  * The first-run card: what to set up and where, ticking itself off from real state. It renders
  * only inside an `AmanSetupProvider`, hides once the owner dismisses it, and never nags again:
- * the dismissal lives on the server, not in this browser.
+ * the dismissal lives on the server, not in this browser. `hideWhenComplete` drops it once every
+ * line is done, for screens that only need it while setup is still open.
  */
-export const AmanFirstRunGuide: FC<{ placement: FirstRunPlacement; className?: string }> = ({
-  placement,
-  className,
-}) => {
+export const AmanFirstRunGuide: FC<{
+  placement: FirstRunPlacement;
+  className?: string;
+  hideWhenComplete?: boolean;
+}> = ({ placement, className, hideWhenComplete = false }) => {
   const setup = useOptionalAmanSetup();
   const personalization = useOptionalPersonalization();
   if (!isFirstRunGuideVisible(setup) || setup === null) {
@@ -137,6 +144,9 @@ export const AmanFirstRunGuide: FC<{ placement: FirstRunPlacement; className?: s
   });
   const doneCount = items.filter(item => item.done).length;
   const allDone = doneCount === items.length;
+  if (hideWhenComplete && allDone) {
+    return null;
+  }
   const dismiss = setup.firstRunGuide?.dismiss;
   return (
     <section
@@ -148,7 +158,7 @@ export const AmanFirstRunGuide: FC<{ placement: FirstRunPlacement; className?: s
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="aman-first-run-heading" className="text-base font-semibold tracking-tight">
-            {allDone ? 'You are all set' : 'Welcome to Aman'}
+            {allDone ? 'You are all set' : placement === 'chat' ? 'Get set up' : 'Welcome to Aman'}
           </h2>
           <p className="mt-0.5 text-sm text-text-secondary" data-testid="aman-first-run-progress">
             {allDone

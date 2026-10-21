@@ -158,6 +158,7 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -1668,6 +1669,7 @@ export class AgentThread {
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
+    capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
     if (this.sandbox) {
