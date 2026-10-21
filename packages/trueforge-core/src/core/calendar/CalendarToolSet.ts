@@ -1,19 +1,17 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from 'winston';
 import type { z } from 'zod';
-import type { ApprovalDecision } from '../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../google/errors';
 import type { GoogleFeature } from '../google/scopes';
 import { errorResult, failureResult, jsonResult } from '../google/toolResults';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
-import type { CallToolResponse, ToolInvocationContext } from '../mcp/IMCPServer';
+import type { ToolInvocationContext } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import { stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
-import { privateReadText, runPrivateRead } from '../permissions/webSearch';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { FALLBACK_TIMEZONE, isValidTimezone } from '../util/clientTimezone';
 import { extractErrorLogFields } from '../util/errorLogFields';
@@ -37,7 +35,6 @@ import {
   CreateEventSchema,
   GET_EVENT_TOOL_NAME,
   GetEventSchema,
-  isCalendarReadToolName,
   isCalendarWriteToolName,
   LIST_EVENTS_TOOL_NAME,
   ListEventsSchema,
@@ -89,22 +86,6 @@ export class CalendarToolSet extends LocalToolMCP {
     super({ tracing: options.tracing });
     this.#options = options;
     this.#tools = this.#buildTools();
-  }
-
-  /** A read is counted as private data when it dispatches; the text it returns is kept for later checks. */
-  override async callTool(
-    params: CallToolRequest['params'],
-    approvalDecision?: ApprovalDecision,
-    context?: ToolInvocationContext,
-  ): Promise<CallToolResponse> {
-    if (!isCalendarReadToolName(params.name)) {
-      return super.callTool(params, approvalDecision, context);
-    }
-    return runPrivateRead({
-      state: this.#options.sentinel.web_search,
-      run: () => super.callTool(params, approvalDecision, context),
-      textOf: privateReadText,
-    });
   }
 
   protected getTools(): ToolDefinition[] {

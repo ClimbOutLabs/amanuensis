@@ -30,9 +30,11 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import type { SentinelDispatchContext } from '../permissions/context';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText } from '../permissions/audit';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
+import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
@@ -1093,12 +1095,7 @@ export async function executeToolCalls({
    * approved Tier 3 calls are re-verified byte-for-byte immediately before
    * invocation, and Tier 3 approved/denied outcomes are audit-logged.
    */
-  sentinel?:
-    | {
-        services: SentinelServices;
-        identity: SentinelCallIdentity;
-      }
-    | undefined;
+  sentinel?: SentinelDispatchContext | undefined;
 }): Promise<ExecuteToolCallsResult> {
   const toolMessages: ToolCallResult[] = [];
   const initializationInfo: MCPServerInitInfo[] = [];
@@ -1960,6 +1957,14 @@ export async function executeToolCalls({
     }
 
     const { result, wasInitialized } = response;
+    // Every result the model sees passes here, so a private read is recorded whichever tool it came from.
+    if (sentinel !== undefined) {
+      recordPrivateToolResult({
+        state: sentinel.web_search,
+        tool_name: toolCall.tool_info.original_tool_name,
+        result,
+      });
+    }
 
     let content: string;
     let isStructuredContent = false;

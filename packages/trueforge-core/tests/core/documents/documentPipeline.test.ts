@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
   DocumentTools,
-  EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
 } from '../../../src/core/capabilities/builtins/DocumentTools';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -26,6 +25,7 @@ import {
   summarizeNetWorth,
   type NetWorthObservationInput,
 } from '../../../src/documents/netWorthReport';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../src/documents/toolContract';
 import { makeStubPublicSandbox } from '../harnessMocks';
 import { syntheticPdf, syntheticPng } from './syntheticFiles';
 

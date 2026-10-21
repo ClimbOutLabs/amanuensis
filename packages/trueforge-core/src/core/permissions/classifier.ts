@@ -1541,7 +1541,7 @@ async function classifySearchProviderTool(input: {
     if (texts === undefined || strings === undefined) {
       return held(
         'mcp_search_after_private_read',
-        'this chat read your email or calendar, and a search could carry it out',
+        'this chat read your email, calendar or documents, and a search could carry it out',
       );
     }
     const leak = privateTextLeak({
@@ -1553,7 +1553,10 @@ async function classifySearchProviderTool(input: {
     if (leak !== null) {
       return ctx.services.unattended
         ? privateTextSkipped(leak)
-        : held('mcp_search_after_private_read', `it would share ${leakWords(leak)} from your email or calendar`);
+        : held(
+            'mcp_search_after_private_read',
+            `it would share ${leakWords(leak)} from your email, calendar or documents`,
+          );
     }
   }
   // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.

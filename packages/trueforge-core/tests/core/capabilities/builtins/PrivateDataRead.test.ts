@@ -8,7 +8,7 @@ import {
   markPrivateDataRead,
   privateTextForChecks,
   recordPrivateReadText,
-  runPrivateRead,
+  recordPrivateToolResult,
 } from '../../../../src/core/permissions/webSearch';
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
@@ -121,14 +121,24 @@ describe('privateDataReadCapability', () => {
       expect(privateTextForChecks(turn)).toEqual([MAIL, '{"summary":"Dinner"}']);
     });
 
-    it('keeps no text from a read that returns nothing or throws, so the next search asks', async () => {
+    it('keeps no text from a read that returns nothing, errors or returns a block it cannot scan, so the next search asks', () => {
       const turn = createWebSearchTurnState();
-      await runPrivateRead({ state: turn, run: () => Promise.resolve(''), textOf: text => text });
+      recordPrivateToolResult({ state: turn, tool_name: 'read_email', result: { content: [] } });
       expect(privateTextForChecks(turn)).toBeUndefined();
-      await expect(
-        runPrivateRead({ state: turn, run: () => Promise.reject(new Error('down')), textOf: () => MAIL }),
-      ).rejects.toThrow('down');
-      expect(privateTextForChecks(turn)).toBeUndefined();
+      const failed = createWebSearchTurnState();
+      recordPrivateToolResult({
+        state: failed,
+        tool_name: 'read_email',
+        result: { isError: true, content: [{ type: 'text', text: MAIL }] },
+      });
+      expect(privateTextForChecks(failed)).toBeUndefined();
+      const image = createWebSearchTurnState();
+      recordPrivateToolResult({
+        state: image,
+        tool_name: 'read_email',
+        result: { content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] },
+      });
+      expect(privateTextForChecks(image)).toBeUndefined();
     });
 
     it('asks when a second dispatched call has no text kept, even under the same tool name', () => {
