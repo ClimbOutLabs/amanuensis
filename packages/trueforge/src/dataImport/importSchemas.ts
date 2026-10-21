@@ -42,6 +42,7 @@ import {
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
+import { addressCarriesStrippedParts } from '../dataExport/secretScrub';
 import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
@@ -555,14 +556,30 @@ export const ImportConnectorRecordSchema = z.object({
 export type ImportConnectorRecord = z.infer<typeof ImportConnectorRecordSchema>;
 export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 
+/** The one next step each refusal of a provider setup in an export carries. */
+const EXPORT_AGAIN_NEXT_STEP = 'Export again from this Aman, then import the new file.';
+
 /**
  * A provider setup from an export: the manifest a provider is restored from.
  * An export never carries a key, so one written into the file means the file
- * is not an export this Aman made, and the section is refused whole.
+ * is not an export this Aman made, and the section is refused whole. A key
+ * can also hide in the address itself (in its user name or password, its
+ * query or its fragment); an export strips those parts before writing, so
+ * an address still carrying them is refused the same way.
  */
 const ImportModelProviderManifestSchema = ModelProviderManifestSchema.superRefine((manifest, ctx) => {
   if (manifest.auth !== undefined) {
-    ctx.addIssue({ code: 'custom', message: 'A model provider in an export never carries a key.' });
+    ctx.addIssue({
+      code: 'custom',
+      message: `A model provider in an export never carries a key. ${EXPORT_AGAIN_NEXT_STEP}`,
+    });
+  }
+  if (addressCarriesStrippedParts(manifest.base_url)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `A model provider address in an export never carries a user name, a password, a query or a fragment. ${EXPORT_AGAIN_NEXT_STEP}`,
+      path: ['base_url'],
+    });
   }
 });
 
@@ -571,11 +588,12 @@ export const ImportModelProviderRecordSchema = z
     name: NameSchema,
     manifest: ImportModelProviderManifestSchema,
   })
+  .strict()
   .superRefine((record, ctx) => {
     if (modelProviderName(record.manifest) !== record.name) {
       ctx.addIssue({
         code: 'custom',
-        message: 'A model provider entry is named differently from its own setup.',
+        message: `A model provider entry is named differently from its own setup. ${EXPORT_AGAIN_NEXT_STEP}`,
         path: ['name'],
       });
     }

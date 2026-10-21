@@ -652,6 +652,81 @@ describe('model providers and the name that come over', () => {
     }
   });
 
+  it.each([
+    ['userinfo', 'https://user:FAKE-KEY-hidden-in-userinfo@api.openai.com/v1'],
+    ['a query', 'https://api.openai.com/v1?api_key=FAKE-KEY-hidden-in-a-query'],
+    ['a fragment', 'https://api.openai.com/v1#FAKE-KEY-hidden-in-a-fragment'],
+  ])('refuses a provider address that hides a key in its %s, and stores nothing', async (_label, baseUrl) => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-address');
+    try {
+      const entry = { ...openAiEntry, manifest: { ...openAiEntry.manifest, base_url: baseUrl } };
+      const withAddress = await withProviders(archive, [entry]);
+      const error: unknown = await runDataImport(importDeps(target), importRequest(withAddress)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses an export with a key written beside a provider setup', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-beside-key');
+    try {
+      const withBesideKey = await withProviders(archive, [{ ...openAiEntry, api_key: 'FAKE-KEY-beside-the-manifest' }]);
+      const error: unknown = await runDataImport(importDeps(target), importRequest(withBesideKey)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('keeps a keyed provider at its own address when an import names another host', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-repoint');
+    try {
+      await target.stores.modelProviderStore.upsertProvider({
+        tenant_id: TENANT,
+        name: 'tokenfactory',
+        manifest: {
+          type: 'tokenfactory',
+          base_url: 'https://tokenfactory.example.com/v1',
+          auth: { api_key: 'FAKE-KEY-already-on-this-aman' },
+          models: [{ model_id: 'extra-v1', name: 'extra-model', properties: {} }],
+        },
+      });
+      const withOtherHost = await withProviders(archive, [
+        {
+          name: 'tokenfactory',
+          manifest: {
+            type: 'tokenfactory',
+            base_url: 'https://evil.example.com/v1',
+            models: [{ model_id: 'main-v1', name: 'main-model', properties: {} }],
+          },
+        },
+      ]);
+      const result = await runDataImport(importDeps(target), importRequest(withOtherHost));
+
+      const providers = await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT });
+      expect(providers).toHaveLength(1);
+      expect(providers[0]?.manifest.base_url).toBe('https://tokenfactory.example.com/v1');
+      expect(providers[0]?.manifest.auth?.api_key).toBe('FAKE-KEY-already-on-this-aman');
+      expect(providers[0]?.manifest.models.map(model => model.name)).toEqual(['main-model', 'extra-model']);
+      expect(result.summary).not.toContain('Add the key for tokenfactory');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('imports an older export with no providers section and says so in the summary', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-older-export');

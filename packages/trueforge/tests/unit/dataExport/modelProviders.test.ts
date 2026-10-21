@@ -20,7 +20,7 @@ function record(manifest: ModelProviderRecord['manifest'], name: string): ModelP
   };
 }
 
-const scrubUrl = createExportScrubber([]).url;
+const scrub = createExportScrubber([]);
 
 describe('exportableModelProvider', () => {
   it('carries the setup of a well-known provider and drops its key', () => {
@@ -41,7 +41,7 @@ describe('exportableModelProvider', () => {
         },
         'openai',
       ),
-      scrubUrl,
+      scrub,
     );
     expect(exported).toEqual({
       name: 'openai',
@@ -74,7 +74,7 @@ describe('exportableModelProvider', () => {
         },
         'lab-box',
       ),
-      scrubUrl,
+      scrub,
     );
     expect(exported.name).toBe('lab-box');
     expect(exported.manifest).toEqual({
@@ -97,7 +97,7 @@ describe('exportableModelProvider', () => {
         },
         'lab-box',
       ),
-      scrubUrl,
+      scrub,
     );
     expect(exported.manifest.base_url).toBe('https://llm.internal.example.com/v1');
     expect(JSON.stringify(exported)).not.toContain(PLANTED_PASSWORD);
@@ -114,11 +114,53 @@ describe('exportableModelProvider', () => {
         },
         'anthropic',
       ),
-      scrubUrl,
+      scrub,
     );
     expect(exported.manifest.models).toEqual([
       { model_id: 'claude-test', name: 'claude-test', properties: { vision: false } },
     ]);
     expect('stream_timeout' in exported.manifest).toBe(false);
+  });
+
+  it('scrubs a key pasted into the provider name and a model id', () => {
+    const knowingScrub = createExportScrubber([PLANTED_KEY]);
+    const exported = exportableModelProvider(
+      record(
+        {
+          type: 'custom',
+          name: PLANTED_KEY,
+          base_url: 'https://llm.internal.example.com/v1',
+          auth: { api_key: PLANTED_KEY },
+          models: [{ model_id: PLANTED_KEY, name: 'local-1', properties: {} }],
+        },
+        PLANTED_KEY,
+      ),
+      knowingScrub,
+    );
+    expect(exported.name).toBe('[redacted]');
+    expect(exported.manifest).toEqual({
+      type: 'custom',
+      name: '[redacted]',
+      base_url: 'https://llm.internal.example.com/v1',
+      models: [{ model_id: '[redacted]', name: 'local-1', properties: {} }],
+    });
+    expect(JSON.stringify(exported)).not.toContain(PLANTED_KEY);
+  });
+
+  it('scrubs a credential-shaped model id even when it is not a stored key', () => {
+    const shapedKey = 'sk-plantedplantedplanted12';
+    const exported = exportableModelProvider(
+      record(
+        {
+          type: 'openai',
+          base_url: 'https://api.openai.com/v1',
+          models: [{ model_id: shapedKey, name: 'gpt-test', properties: {} }],
+        },
+        'openai',
+      ),
+      scrub,
+    );
+    expect(exported.manifest.models[0]?.model_id).toBe('[redacted]');
+    expect(JSON.stringify(exported)).not.toContain(shapedKey);
   });
 });

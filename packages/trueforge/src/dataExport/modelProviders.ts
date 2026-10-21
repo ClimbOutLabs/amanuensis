@@ -4,30 +4,38 @@
  * and anything else a provider record may hold never reach the archive, so
  * an imported provider comes back set up and waiting for its key.
  */
+import { z } from 'zod';
+
 import type { ModelProviderRecord } from '../db/modelProviderStore';
-import type {
-  ModelProperties,
-  ModelProviderManifest,
-  ModelProviderStreamTimeout,
-  ModelProviderType,
+import { NameSchema } from '../schemas/common';
+import {
+  ConfiguredModelSchema,
+  ModelProviderStreamTimeoutSchema,
+  ModelProviderTypeSchema,
+  type ModelProperties,
+  type ModelProviderStreamTimeout,
 } from '../schemas/modelProvider';
+import type { ExportScrubber } from './secretScrub';
+
+/** The one owner of an exported provider setup's shape; the type below is derived from it. */
+export const ExportedModelProviderManifestSchema = z.object({
+  type: ModelProviderTypeSchema,
+  base_url: z.string(),
+  models: z.array(ConfiguredModelSchema),
+  stream_timeout: ModelProviderStreamTimeoutSchema.optional(),
+  /** Only a custom provider carries a name of its own. */
+  name: NameSchema.optional(),
+});
+export type ExportedModelProviderManifest = z.infer<typeof ExportedModelProviderManifestSchema>;
+
+export const ExportedModelProviderSchema = z.object({
+  name: NameSchema,
+  manifest: ExportedModelProviderManifestSchema,
+});
+export type ExportedModelProvider = z.infer<typeof ExportedModelProviderSchema>;
 
 /** One model entry of a provider manifest. */
-type ConfiguredModel = ModelProviderManifest['models'][number];
-
-export interface ExportedModelProvider {
-  name: string;
-  manifest: ExportedModelProviderManifest;
-}
-
-export interface ExportedModelProviderManifest {
-  type: ModelProviderType;
-  base_url: string;
-  models: ConfiguredModel[];
-  stream_timeout?: ModelProviderStreamTimeout;
-  /** Only a custom provider carries a name of its own. */
-  name?: string;
-}
+type ConfiguredModel = z.infer<typeof ConfiguredModelSchema>;
 
 function exportableProperties(properties: ModelProperties): ModelProperties {
   return {
@@ -38,8 +46,8 @@ function exportableProperties(properties: ModelProperties): ModelProperties {
   };
 }
 
-function exportableModel(model: ConfiguredModel): ConfiguredModel {
-  return { model_id: model.model_id, name: model.name, properties: exportableProperties(model.properties) };
+function exportableModel(model: ConfiguredModel, scrubText: (text: string) => string): ConfiguredModel {
+  return { model_id: scrubText(model.model_id), name: model.name, properties: exportableProperties(model.properties) };
 }
 
 function exportableStreamTimeout(streamTimeout: ModelProviderStreamTimeout): ModelProviderStreamTimeout {
@@ -49,19 +57,21 @@ function exportableStreamTimeout(streamTimeout: ModelProviderStreamTimeout): Mod
   };
 }
 
-/** `scrubUrl` removes any credentials embedded in the address before it is written. */
-export function exportableModelProvider(
-  record: ModelProviderRecord,
-  scrubUrl: (url: string) => string,
-): ExportedModelProvider {
+/**
+ * Builds one provider's export entry. The scrubber's JSON pass never rewrites
+ * identity fields (ids and names), so the provider's name and each model id
+ * are scrubbed here, in the projection: a key pasted into either would
+ * otherwise travel verbatim.
+ */
+export function exportableModelProvider(record: ModelProviderRecord, scrub: ExportScrubber): ExportedModelProvider {
   const { manifest } = record;
   return {
-    name: record.name,
+    name: scrub.text(record.name),
     manifest: {
       type: manifest.type,
-      base_url: scrubUrl(manifest.base_url),
-      models: manifest.models.map(exportableModel),
-      ...(manifest.type === 'custom' ? { name: manifest.name } : {}),
+      base_url: scrub.url(manifest.base_url),
+      models: manifest.models.map(model => exportableModel(model, text => scrub.text(text))),
+      ...(manifest.type === 'custom' ? { name: scrub.text(manifest.name) } : {}),
       ...(manifest.stream_timeout === undefined
         ? {}
         : { stream_timeout: exportableStreamTimeout(manifest.stream_timeout) }),

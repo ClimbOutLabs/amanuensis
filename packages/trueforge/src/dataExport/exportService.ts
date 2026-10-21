@@ -497,7 +497,7 @@ export async function runDataExport<TTransaction>(
   async function* providerEntries(): AsyncIterable<unknown> {
     const providers = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
     for (const provider of providers) {
-      yield exportableModelProvider(provider, url => scrub.url(url));
+      yield exportableModelProvider(provider, scrub);
     }
   }
   await writeJsonArrayEntry(context, 'model_providers.json', providerEntries());

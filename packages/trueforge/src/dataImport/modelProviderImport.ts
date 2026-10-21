@@ -39,6 +39,10 @@ export interface PersonaModelSwitch {
  * The setup an imported provider lands with: the imported setup wins, a key
  * already here is kept (an export never carries one), and models already
  * here stay listed unless the import names the same model or upstream id.
+ * One limit on the win: a provider that already holds a key keeps the kind
+ * and address the key belongs to, and only its models and stream timeout
+ * come over. Letting an import move a keyed provider to another host or
+ * another kind would send the person's key to a server it was not given to.
  */
 export function mergeImportedProvider(input: {
   imported: ModelProviderManifest;
@@ -52,7 +56,14 @@ export function mergeImportedProvider(input: {
   const importedIds = new Set(imported.models.map(model => model.model_id));
   const kept = existing.models.filter(model => !importedNames.has(model.name) && !importedIds.has(model.model_id));
   const models = [...imported.models, ...kept];
-  return existing.auth === undefined ? { ...imported, models } : { ...imported, models, auth: existing.auth };
+  if (existing.auth === undefined) {
+    return { ...imported, models };
+  }
+  return {
+    ...existing,
+    models,
+    ...(imported.stream_timeout === undefined ? {} : { stream_timeout: imported.stream_timeout }),
+  };
 }
 
 export function planModelProviderImport(input: {

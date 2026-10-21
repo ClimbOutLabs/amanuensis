@@ -360,7 +360,9 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('POST create with a redacted api_key returns 400', async () => {
@@ -373,7 +375,9 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('PUT rejects a missing api_key at the Zod layer', async () => {
@@ -387,7 +391,9 @@ describe('model-provider secret redaction and strict PUT', () => {
     const { auth: _auth, ...keyless } = anthropicBody;
     const response = await settingsRouter.request('/model-providers', postInit(keyless));
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('PUT create without a key returns 400 for a provider that needs one', async () => {
@@ -395,7 +401,9 @@ describe('model-provider secret redaction and strict PUT', () => {
     const { auth: _auth, ...keyless } = anthropicBody;
     const response = await settingsRouter.request('/model-providers', putInit(keyless));
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('PUT without a key keeps the stored key', async () => {

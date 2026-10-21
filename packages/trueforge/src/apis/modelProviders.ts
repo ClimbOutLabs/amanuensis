@@ -33,6 +33,9 @@ export interface ModelProvidersRouterDeps<TTransaction> {
 /** Machine-readable `error.code` when a write targets an environment-managed provider. */
 export const ENV_MANAGED_PROVIDER_CODE = 'env_managed_provider';
 
+/** What a person is told when a provider that needs a key is saved without one. */
+const API_KEY_REQUIRED_MESSAGE = 'API key is required. Add an API key for this provider, then save again.';
+
 function envManagedConflict(name: string) {
   return {
     error: {
@@ -131,7 +134,7 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
       return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 201);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
-        return c.json({ error: { message: 'API key is required' } }, 400);
+        return c.json({ error: { message: API_KEY_REQUIRED_MESSAGE } }, 400);
       }
       if (error instanceof ModelProviderNameConflictError) {
         return c.json({ error: { message: error.message } }, 409);
@@ -163,7 +166,7 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
       return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 200);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
-        return c.json({ error: { message: 'API key is required' } }, 400);
+        return c.json({ error: { message: API_KEY_REQUIRED_MESSAGE } }, 400);
       }
       throw error;
     }
