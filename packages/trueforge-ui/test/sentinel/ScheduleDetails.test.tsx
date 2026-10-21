@@ -21,6 +21,7 @@ const MORNING_BRIEF_CARD = {
   outbound_truncated: false,
   email: null,
   calendar_event: null,
+  persona: null,
   schedule: {
     action: 'create',
     name: 'Morning brief',

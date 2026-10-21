@@ -74,14 +74,17 @@ export function CompactionStatusLine({ className }: { className?: string }) {
     parts.push(`${formatTokenCount(liveTokens)} tokens in context`);
   }
 
+  let compactionDetail: string | undefined;
   if (lastCompaction != null) {
     const when = formatRelativeTime(lastCompaction.createdAt);
     if (lastCompaction.outcome === 'applied') {
       // The saved-tokens number is dropped: tokensBefore is a provider count
       // and tokensAfter is a text estimate, so their difference overstates.
-      parts.push(`Compacted ${when}`);
+      parts.push(`Compacted history ${when}`);
     } else if (lastCompaction.outcome === 'truncated_fallback') {
-      parts.push(`Shortened history ${when} to fit`);
+      // Same headline as a summary: the tooltip says how the older messages were dropped.
+      parts.push(`Compacted history ${when}`);
+      compactionDetail = 'Older messages were trimmed because a summary could not be made.';
     } else if (lastCompaction.outcome !== 'skipped_blocked') {
       // skipped_blocked means the user cancelled the turn, which is not a failure.
       parts.push(`Compaction failed ${when}`);
@@ -95,7 +98,7 @@ export function CompactionStatusLine({ className }: { className?: string }) {
       data-slot="aui_compaction-status"
       className={cn('px-1 pt-1 text-[0.6875rem] leading-tight text-text-secondary/70', className)}
     >
-      <div>{parts.join(' · ')}</div>
+      <div title={compactionDetail}>{parts.join(' · ')}</div>
       {budget != null && (
         <div
           className="mt-1 h-1 overflow-hidden rounded-full bg-secondary-bg"
