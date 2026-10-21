@@ -186,6 +186,31 @@ describe('ThemeProvider', () => {
     expect(root.style.getPropertyValue('--primary-button-bg')).toBe('#e11d48');
   });
 
+  it('moves data-day to the next band while the app stays open', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(2026, 9, 21, 10, 59, 0));
+      const { container } = render(
+        <ThemeProvider>
+          <span>child</span>
+        </ThemeProvider>,
+      );
+      expect(getThemeRoot(container).getAttribute('data-day')).toBe('morning');
+
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(getThemeRoot(container).getAttribute('data-day')).toBe('midday');
+
+      act(() => {
+        vi.advanceTimersByTime(6 * 60 * 60_000);
+      });
+      expect(getThemeRoot(container).getAttribute('data-day')).toBe('evening');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('applies every preset palette', () => {
     const cases: Array<{
       name: string;
@@ -483,7 +508,7 @@ describe('ThemeProvider', () => {
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).toHaveClass('fill-current');
+    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
     claude.unmount();
 
     const gemini = render(
@@ -495,7 +520,7 @@ describe('ThemeProvider', () => {
       'font-normal',
       'duration-300',
     );
-    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).toBeInTheDocument();
+    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).not.toBeInTheDocument();
     gemini.unmount();
   });
 });

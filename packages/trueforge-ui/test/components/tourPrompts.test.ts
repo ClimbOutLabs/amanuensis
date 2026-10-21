@@ -4,9 +4,10 @@ import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/sche
 
 import {
   CAPABILITY_PROMPTS,
-  GENERAL_DAY_PROMPTS,
+  FIRST_FRAME_CARD_SLOTS,
   MORNING_BRIEF,
-  tryADayPrompts,
+  TOUR_ILLUSTRATION_KEYS,
+  firstFrameCardPrompts,
   visibleTourPrompts,
   type TourCapabilities,
 } from '@/components/tourPrompts.js';
@@ -15,164 +16,59 @@ const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps
 const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false, maps: false };
 
 function keysFor({ helpAreas, capabilities }: { helpAreas: HelpAreaId[]; capabilities: TourCapabilities }): string[] {
-  return tryADayPrompts({ helpAreas, capabilities }).map(item => item.key);
+  return firstFrameCardPrompts({ helpAreas, capabilities }).map(item => item.key);
 }
 
-describe('tryADayPrompts', () => {
-  it('shows the general set when no area is chosen', () => {
-    expect(keysFor({ helpAreas: [], capabilities: ALL })).toEqual([
-      'clear-head',
-      'break-task',
-      'plan-day',
-      'appointment',
-      'meals',
-      'self-care',
-    ]);
+describe('firstFrameCardPrompts', () => {
+  it('shows the first capability prompts when no area is chosen', () => {
+    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual(['get-to-know', 'schedule', 'places', 'web']);
+    expect(keysFor({ helpAreas: [], capabilities: ALL })).toEqual(['get-to-know', 'email', 'subscriptions', 'reply']);
   });
 
-  it('fills the general row to six cards without mail or calendar, from another area', () => {
-    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual([
-      'clear-head',
-      'break-task',
-      'plan-day',
-      'meals',
-      'self-care',
-      'get-started',
-    ]);
-  });
-
-  it('fills the row from one area with all six of its cards', () => {
+  it('leads with the cards of the chosen areas, in the order chosen', () => {
     expect(keysFor({ helpAreas: ['focus'], capabilities: ALL })).toEqual([
       'clear-head',
       'break-task',
       'get-started',
       'forgot',
-      'calm-day',
-      'routine',
+    ]);
+    expect(keysFor({ helpAreas: ['work_money', 'focus'], capabilities: ALL })).toEqual([
+      'subscriptions',
+      'clear-head',
+      'invoices',
+      'break-task',
     ]);
   });
 
-  it('spreads the row evenly across several areas and shows a shared card once', () => {
-    expect(keysFor({ helpAreas: ['family', 'caring'], capabilities: ALL })).toEqual([
-      'family-week',
-      'care-track',
-      'meals',
-      'care-visit',
-      'appointment',
-      'owe-reply',
-    ]);
+  it('never returns more than the slots, and never a card twice', () => {
+    const repeated: HelpAreaId[] = ['focus', 'focus'];
+    for (const helpAreas of [[...HELP_AREA_IDS], repeated]) {
+      const keys = keysFor({ helpAreas, capabilities: ALL });
+      expect(keys).toHaveLength(FIRST_FRAME_CARD_SLOTS);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
   });
 
-  it('follows the order the areas were chosen in', () => {
-    expect(keysFor({ helpAreas: ['caring', 'family'], capabilities: ALL })).toEqual([
-      'care-track',
-      'family-week',
-      'care-visit',
-      'meals',
-      'appointment',
-      'medicine',
-    ]);
-  });
-
-  it('leaves out an area card whose capability is missing and fills from the general set', () => {
+  it('keeps a card whose capability is missing out of the tickets', () => {
     expect(keysFor({ helpAreas: ['focus'], capabilities: NONE })).toEqual([
       'clear-head',
       'break-task',
       'get-started',
       'calm-day',
-      'routine',
-      'plan-day',
     ]);
   });
 
-  it('fills a shortfall from the other chosen area before the general set', () => {
-    expect(keysFor({ helpAreas: ['focus', 'work_money'], capabilities: NONE })).toEqual([
-      'clear-head',
-      'plan-day',
-      'break-task',
-      'budget',
-      'get-started',
-      'tricky-email',
-    ]);
-  });
-
-  it('shows the doctor appointments card when either calendar or email is available', () => {
-    expect(keysFor({ helpAreas: ['family'], capabilities: { ...NONE, email: true } })).toContain('appointment');
-    expect(keysFor({ helpAreas: ['family'], capabilities: { ...NONE, calendar: true } })).toContain('appointment');
-  });
-
-  it('shows the maps card only when maps is available', () => {
-    expect(keysFor({ helpAreas: ['new_country'], capabilities: { ...ALL, maps: false } })).toEqual([
-      'settle',
-      'letter',
-      'newcomers',
-      'language',
-      'neighborhood',
-      'clear-head',
-    ]);
-    expect(keysFor({ helpAreas: ['new_country'], capabilities: ALL })).toEqual([
-      'settle',
-      'letter',
-      'family-doctor',
-      'newcomers',
-      'language',
-      'neighborhood',
-    ]);
-  });
-
-  it('builds a row of six cards from several areas, never the morning brief', () => {
-    const areas: HelpAreaId[] = ['work_money', 'focus', 'family', 'caring', 'new_country'];
-    const keys = keysFor({ helpAreas: areas, capabilities: ALL });
-
-    expect(keys).toHaveLength(6);
-    expect(keys).not.toContain(MORNING_BRIEF.key);
-  });
-
-  it('shows the six work and money cards in order', () => {
-    expect(keysFor({ helpAreas: ['work_money'], capabilities: ALL })).toEqual([
-      'subscriptions',
-      'invoices',
-      'plan-day',
-      'budget',
-      'meeting',
-      'tricky-email',
-    ]);
-  });
-
-  it('keeps the general row full with calendar but no email, and with email but no calendar', () => {
-    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, calendar: true } })).toContain('appointment');
-    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, email: true } })).toContain('appointment');
-    expect(keysFor({ helpAreas: [], capabilities: { ...NONE, email: true } })).toHaveLength(6);
-  });
-
-  it.each(HELP_AREA_IDS.map(id => [id]))('always fills six distinct cards for %s without mail or calendar', id => {
-    const keys = keysFor({ helpAreas: [id], capabilities: NONE });
-
-    expect(keys).toHaveLength(6);
-    expect(new Set(keys).size).toBe(6);
-  });
-
-  it('fills the work and money row from the general set when calendar and email are missing', () => {
-    expect(keysFor({ helpAreas: ['work_money'], capabilities: NONE })).toEqual([
-      'plan-day',
-      'budget',
-      'tricky-email',
-      'clear-head',
-      'break-task',
-      'meals',
-    ]);
+  it('never offers the morning brief as one of the four, since it has its own ticket', () => {
+    for (const helpAreas of HELP_AREA_IDS.map(id => [id])) {
+      expect(keysFor({ helpAreas, capabilities: ALL })).not.toContain(MORNING_BRIEF.key);
+    }
   });
 });
 
 describe('visibleTourPrompts', () => {
-  it('keeps the general prompts that need nothing, whatever the capabilities', () => {
-    expect(visibleTourPrompts(GENERAL_DAY_PROMPTS, NONE).map(item => item.key)).toEqual([
-      'clear-head',
-      'break-task',
-      'plan-day',
-      'meals',
-      'self-care',
-    ]);
+  it('keeps the prompts that need nothing, and the ones whose capability is granted', () => {
+    expect(visibleTourPrompts(CAPABILITY_PROMPTS, NONE).map(item => item.key)).not.toContain('email');
+    expect(visibleTourPrompts(CAPABILITY_PROMPTS, { ...NONE, email: true }).map(item => item.key)).toContain('email');
   });
 });
 
@@ -185,5 +81,14 @@ describe('CAPABILITY_PROMPTS', () => {
     expect(spaces[0]?.needs).toBeUndefined();
     expect(CAPABILITY_PROMPTS.map(item => item.key)).not.toContain('documents');
     expect(visibleTourPrompts(CAPABILITY_PROMPTS, NONE).map(item => item.key)).toContain('spaces');
+  });
+
+  it('gives each of the twelve illustrations to exactly one capability prompt', () => {
+    const illustrated = CAPABILITY_PROMPTS.flatMap(item =>
+      item.illustration === undefined ? [] : [item.illustration],
+    );
+
+    expect(illustrated.sort()).toEqual([...TOUR_ILLUSTRATION_KEYS].sort());
+    expect(TOUR_ILLUSTRATION_KEYS).toHaveLength(12);
   });
 });

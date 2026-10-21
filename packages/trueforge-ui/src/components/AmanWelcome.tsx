@@ -1,23 +1,21 @@
 'use client';
 
 import { useAui } from '@assistant-ui/react';
-import { useCallback } from 'react';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { useCallback, useEffect, useState } from 'react';
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
-import { useServerCapabilities } from '../server/ServerContext.js';
+import { useOptionalScheduleServer, useServerCapabilities } from '../server/ServerContext.js';
 import { useTourHidden } from '../utils/tourDisplayPreference.js';
-import {
-  AmanFirstRunGuide,
-  FirstRunLink,
-  isFirstRunGuideVisible,
-  isFirstRunSetupComplete,
-} from './AmanFirstRunGuide.js';
+import { AmanFirstRunGuide, AmanFirstRunSummary, FirstRunLink, isFirstRunGuideVisible } from './AmanFirstRunGuide.js';
+import { useOptionalAmanPandaSrc } from './AmanPanda.js';
 import { useOptionalAmanSetup } from './AmanSetupContext.js';
 import { AmanTour } from './AmanTour.js';
-import { useOptionalPersonalization } from './PersonalizationContext.js';
+import { useTourWaiting } from './AmanTourWaiting.js';
+import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import type { TourCapabilities } from './tourPrompts.js';
 
 const DEFAULT_HEADING = 'How can I help you today?';
@@ -50,6 +48,31 @@ function useTourCapabilities(): TourCapabilities {
   };
 }
 
+/**
+ * How many scheduled runs the person has set up, read from the first page of the schedules list.
+ * A failed read keeps the last count, so the stub never blanks out because the schedules server is slow.
+ */
+function useScheduleCount(): number {
+  const schedules = useOptionalScheduleServer();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (schedules === null) return;
+    let cancelled = false;
+    schedules
+      .listSchedules()
+      .then(page => {
+        if (!cancelled) setCount(page.data.length);
+      })
+      .catch(() => {
+        /* Keep the last count; the day ticket reads fine without it. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schedules]);
+  return count;
+}
+
 /** Puts a prompt in the composer and sends it, through the same busy-state wrapper the send button uses. */
 function useSendPrompt(): (prompt: string) => void {
   const aui = useAui();
@@ -69,44 +92,56 @@ function useSendPrompt(): (prompt: string) => void {
 }
 
 /**
- * The setup block both welcome screens share: the checklist while the owner has not put it away,
- * else one quiet line while the name is unset. The tour drops the checklist once every line is done.
+ * Asks for the owner's name while it is unset. It waits for the profile to load, so it never
+ * flashes up for a person who already has one.
  */
-function AmanSetupBlock({ hideWhenComplete }: { hideWhenComplete: boolean }) {
+function AmanNameLine() {
   const personalization = useOptionalPersonalization();
+  const setup = useOptionalAmanSetup();
+  const nameMissing =
+    personalization !== null && !personalization.loading && !personalization.profile?.user_name?.trim();
+  if (setup === null || !nameMissing) {
+    return null;
+  }
+  return (
+    <p className="text-center text-sm text-text-secondary" data-testid="aman-name-prompt">
+      Aman does not know your name yet.{' '}
+      <FirstRunLink target={{ kind: 'settings', section: 'personalization' }} settingsHref={setup.settingsHref}>
+        Add it in Personalization
+      </FirstRunLink>
+      .
+    </p>
+  );
+}
+
+/** The tour's line under "Quietly watching": the setup count while the guide is open, else the name line. */
+function TourSetupLine() {
+  const setup = useOptionalAmanSetup();
+  if (setup !== null && isFirstRunGuideVisible(setup)) {
+    return <AmanFirstRunSummary placement="chat" />;
+  }
+  return <AmanNameLine />;
+}
+
+/**
+ * The setup block the plain greeting shows: the checklist while the owner has not put it away,
+ * else one quiet line while the name is unset. The tour keeps only its compact summary line.
+ */
+function AmanSetupBlock() {
   const setup = useOptionalAmanSetup();
   if (setup === null) {
     return null;
   }
-  const userName = personalization?.profile?.user_name;
-  const complete = isFirstRunSetupComplete({
-    modelName: setup.modelName,
-    userName,
-    hasChatted: setup.hasChatted,
-    placement: 'chat',
-  });
-  const showGuide = isFirstRunGuideVisible(setup) && !(hideWhenComplete && complete);
-  if (showGuide) {
+  if (isFirstRunGuideVisible(setup)) {
     return (
       <div className="mb-6 flex w-full flex-col items-center px-4">
-        <AmanFirstRunGuide placement="chat" hideWhenComplete={hideWhenComplete} />
+        <AmanFirstRunGuide placement="chat" />
       </div>
     );
   }
-  // The profile is still on its way: the name line waits for it rather than flashing up.
-  const nameMissing = personalization !== null && !personalization.loading && !userName?.trim();
-  if (!nameMissing) {
-    return null;
-  }
   return (
     <div className="mb-6 flex w-full flex-col items-center px-4">
-      <p className="text-center text-sm text-text-secondary" data-testid="aman-name-prompt">
-        Aman does not know your name yet.{' '}
-        <FirstRunLink target={{ kind: 'settings', section: 'personalization' }} settingsHref={setup.settingsHref}>
-          Add it in Personalization
-        </FirstRunLink>
-        .
-      </p>
+      <AmanNameLine />
     </div>
   );
 }
@@ -122,17 +157,30 @@ export function AmanWelcome(props: WelcomeScreenProps) {
   const { hidden, setHidden } = useTourHidden();
   const capabilities = useTourCapabilities();
   const sendPrompt = useSendPrompt();
+  const waiting = useTourWaiting();
+  const scheduleCount = useScheduleCount();
+  const pandaSrc = useOptionalAmanPandaSrc();
   const ordinaryChat = props.heading === undefined;
 
   if (ordinaryChat && !hidden) {
+    const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
+    const saveHelpAreas = (next: HelpAreaId[]) => {
+      // The chooser reads the saved profile, so a failed save leaves it as it was.
+      void personalization?.updateProfile({ ...profile, help_areas: next }).catch(() => {});
+    };
     return (
       <AmanTour
         capabilities={capabilities}
-        helpAreas={personalization?.profile?.help_areas ?? []}
+        helpAreas={profile.help_areas}
+        onHelpAreasChange={saveHelpAreas}
+        userName={profile.user_name}
+        waiting={waiting}
+        scheduleCount={scheduleCount}
         canSend={setup === null || setup.modelName !== null}
         onSend={sendPrompt}
         onHide={() => setHidden(true)}
-        setup={<AmanSetupBlock hideWhenComplete />}
+        setup={<TourSetupLine />}
+        pandaSrc={pandaSrc}
       />
     );
   }
@@ -141,7 +189,7 @@ export function AmanWelcome(props: WelcomeScreenProps) {
   return (
     <>
       <WelcomeScreen {...props} heading={heading} />
-      <AmanSetupBlock hideWhenComplete={false} />
+      <AmanSetupBlock />
       {ordinaryChat ? (
         <div className="mb-6 flex justify-center">
           <Button type="button" variant="ghost" size="small" onClick={() => setHidden(false)}>

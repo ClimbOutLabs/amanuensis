@@ -5,14 +5,15 @@ import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { ThemeProvider } from '@/theme/ThemeProvider.js';
 
 describe('WelcomeScreen', () => {
-  it('renders the default heading and brand icon outside a provider', () => {
+  it('renders the default heading with no icon outside a provider', () => {
     const { container } = render(<WelcomeScreen className="host-welcome" />);
 
     const heading = screen.getByRole('heading', { level: 1, name: 'How can I help you today?' });
     const root = container.querySelector('[data-preset="trueforge"]');
     expect(root).toHaveClass('aui-thread-welcome-root', 'host-welcome');
-    expect(root?.querySelector('svg[role="img"]')).toBeInTheDocument();
-    expect(heading).toHaveClass('font-semibold', 'delay-75');
+    expect(root?.querySelector('svg')).not.toBeInTheDocument();
+    expect(heading).toHaveClass('font-semibold');
+    expect(heading).not.toHaveClass('delay-75');
   });
 
   it('renders a custom heading and icon', () => {
@@ -31,7 +32,7 @@ describe('WelcomeScreen', () => {
   });
 
   // The provider's preset is initial state, so each preset gets its own mount.
-  it('uses preset-specific icon behavior', () => {
+  it('draws no sparkle or halo on any preset', () => {
     const chatgpt = render(
       <ThemeProvider theme={{ preset: 'chatgpt', mode: 'light' }}>
         <WelcomeScreen />
@@ -46,7 +47,7 @@ describe('WelcomeScreen', () => {
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).toHaveClass('fill-current');
+    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
     claude.unmount();
 
     const gemini = render(
@@ -55,6 +56,6 @@ describe('WelcomeScreen', () => {
       </ThemeProvider>,
     );
     expect(gemini.container.querySelector('.aui-thread-welcome-root')).toHaveClass('py-8');
-    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).toBeInTheDocument();
+    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).not.toBeInTheDocument();
   });
 });

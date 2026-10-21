@@ -69,7 +69,8 @@ function renderWelcome(input: RenderInput = {}) {
 
 const dismissed = { dismissed: true, dismiss: () => {} };
 const notDismissed = { dismissed: false, dismiss: () => {} };
-const TOUR_HEADING = 'Try a day with Aman';
+/** The tour's greeting, which depends on the hour the test runs at. */
+const TOUR_HEADING = /^Good (morning|afternoon|evening)/;
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -101,10 +102,10 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(screen.queryByRole('button', { name: 'Hide the tour' })).not.toBeInTheDocument();
   });
 
-  it('sends a day card through the composer and then sends it', async () => {
+  it('sends the brief ticket through the composer and then sends it', async () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Your brief is ready/ }));
 
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
     expect(composer.send).toHaveBeenCalledTimes(1);
@@ -129,15 +130,14 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
   });
 
-  it('shows the prompts an instance has the capability for', async () => {
+  it('shows the capability tickets an instance has the capability for', async () => {
     server.grantedFeatures = ['gmail_read', 'calendar_read'];
     server.sandboxEnabled = true;
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
-    expect(await screen.findByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Help me with doctor's appointments/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Keep your calendar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Handle your email/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reply to an email/ })).toBeInTheDocument();
   });
 
   it('hides the Google prompts when the host has no Google port at all', async () => {
@@ -146,8 +146,8 @@ describe('AmanWelcome on an ordinary new chat', () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
     await screen.findByRole('heading', { name: TOUR_HEADING });
 
-    expect(screen.queryByRole('button', { name: 'Handle your email' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Handle your email/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run things on a schedule/ })).toBeInTheDocument();
   });
 
   it('turns the cards off and says why when no model is set', async () => {
@@ -155,41 +155,39 @@ describe('AmanWelcome on an ordinary new chat', () => {
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('button', { name: /Your morning brief/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /Your brief is ready/ })).toBeDisabled();
     expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
   });
 });
 
-describe('the setup block in the tour', () => {
-  it('shows the Get set up checklist at the top while setup is incomplete', async () => {
+describe('the setup line in the tour', () => {
+  it('shows how many lines are set up, linking to the first open one', async () => {
     renderWelcome({
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Setup checklist' })).toHaveTextContent('Add a model');
-    expect(screen.getByRole('link', { name: 'Choose a model' })).toHaveAttribute('href', '/settings');
+    expect(await screen.findByRole('link', { name: '0 of 3 set up →' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
   });
 
-  it('drops the checklist once every line is done', async () => {
+  it('drops the line once every line is done', async () => {
     renderWelcome({
       userName: 'Sam',
       setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: notDismissed },
     });
 
     expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'You are all set' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
   });
 
-  it('shows the name line instead of the checklist once the owner has put the checklist away', async () => {
+  it('asks for the name in that line once the owner has put the guide away', async () => {
     renderWelcome({
       userName: null,
       setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: dismissed, settingsHref: '/settings' },
     });
 
     expect(await screen.findByTestId('aman-name-prompt')).toHaveTextContent('Aman does not know your name yet.');
-    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
   });
 });
 

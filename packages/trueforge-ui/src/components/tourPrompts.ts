@@ -1,5 +1,5 @@
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the tour only offers prompts that will work here. */
 export type TourCapabilities = {
@@ -13,12 +13,31 @@ export type TourCapabilities = {
   maps: boolean;
 };
 
+/** The pictures a capability ticket can carry; a prompt without one shows as a plain ticket. */
+export const TOUR_ILLUSTRATION_KEYS = [
+  'email',
+  'subscriptions',
+  'reply',
+  'schedule',
+  'calendar',
+  'places',
+  'web',
+  'spaces',
+  'specialists',
+  'code',
+  'memory',
+  'skills',
+] as const;
+
+export type TourIllustrationKey = (typeof TOUR_ILLUSTRATION_KEYS)[number];
+
 export type TourPrompt = {
   key: string;
   label: string;
   prompt: string;
   /** Capabilities that unlock the prompt; it shows when any one of them is present. Absent when it works on any instance. */
   needs?: readonly (keyof TourCapabilities)[];
+  illustration?: TourIllustrationKey;
 };
 
 /** The prompts whose capability this instance has; the rest are left out, not greyed out. */
@@ -26,8 +45,8 @@ export function visibleTourPrompts(prompts: readonly TourPrompt[], capabilities:
   return prompts.filter(item => item.needs === undefined || item.needs.some(name => capabilities[name]));
 }
 
-/** How many cards the Try a day row shows, under the morning brief. */
-const DAY_CARD_SLOTS = 6;
+/** How many capability tickets the first frame shows. */
+export const FIRST_FRAME_CARD_SLOTS = 4;
 
 /** The featured card above the Try a day row. It needs no capability, so it always shows. */
 export const MORNING_BRIEF: TourPrompt = {
@@ -84,17 +103,8 @@ const FORGOTTEN_SUBSCRIPTIONS: TourPrompt = {
   prompt:
     "Look through my email for subscriptions and renewals. List what I'm paying for, how much and how often, and flag anything I may have forgotten about.",
   needs: ['email'],
+  illustration: 'subscriptions',
 };
-
-/** The general set: what every person sees when no area is chosen. */
-export const GENERAL_DAY_PROMPTS: readonly TourPrompt[] = [
-  CLEAR_HEAD,
-  BREAK_TASK,
-  PLAN_DAY,
-  APPOINTMENT,
-  MEALS,
-  SELF_CARE,
-];
 
 /** The cards each help area offers, in the order they are tried. */
 export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly TourPrompt[] }> = {
@@ -262,6 +272,21 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
   },
 };
 
+/** The first frame's "Quietly watching" ticket: what Aman has noticed, asked in plain words. */
+export const WATCHING_PROMPT: TourPrompt = {
+  key: 'watching',
+  label: 'Quietly watching',
+  prompt: 'What have you noticed for me lately that I should know about? Keep it short.',
+};
+
+/** The first frame's "Needs you" ticket: the answer the person owes right now. */
+export const WAITING_PROMPT: TourPrompt = {
+  key: 'waiting',
+  label: 'Needs you',
+  prompt:
+    'What is waiting for my answer right now? List each thing, and tell me which one matters most so I can start there.',
+};
+
 /** The "What Aman can do" list: one card per capability, each a tap away from a chat. */
 export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
@@ -275,6 +300,7 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     label: 'Handle your email',
     prompt: 'Go through my unread email and tell me what needs a reply first.',
     needs: ['email'],
+    illustration: 'email',
   },
   FORGOTTEN_SUBSCRIPTIONS,
   {
@@ -282,47 +308,65 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     label: 'Reply to an email',
     prompt: 'Help me reply to my most recent email that needs an answer.',
     needs: ['email'],
+    illustration: 'reply',
   },
-  { key: 'schedule', label: 'Run things on a schedule', prompt: 'Every weekday at 7:30, send me my morning brief.' },
+  {
+    key: 'schedule',
+    label: 'Run things on a schedule',
+    prompt: 'Every weekday at 7:30, send me my morning brief.',
+    illustration: 'schedule',
+  },
   {
     key: 'calendar',
     label: 'Keep your calendar',
     prompt: 'What is on my calendar this week?',
     needs: ['calendar'],
+    illustration: 'calendar',
   },
   {
     key: 'places',
     label: 'Find places and plan routes',
     prompt: 'Find a quiet coffee shop near me and plan the walk there.',
+    illustration: 'places',
   },
   {
     key: 'web',
     label: 'Research the live web',
     prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
+    illustration: 'web',
   },
   {
     key: 'spaces',
     label: 'Keep pages in Spaces',
     prompt:
       'Make a space called Dog breeds. It\'s a page I can come back to while I pick a dog. For each breed show: size, energy level, grooming, how it does with kids and other pets, apartment-friendly or not, common health issues, and typical lifespan. Start with 8 popular family breeds as cards I can compare at a glance. Add a "My shortlist" section at the top that stays empty until I tell you which ones I like. Keep it up to date as we talk. Then tell me where to find it.',
+    illustration: 'spaces',
   },
   {
     key: 'specialists',
     label: 'Bring in specialists',
     prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
+    illustration: 'specialists',
   },
   {
     key: 'code',
     label: 'Read files and run code',
     prompt: 'Add up my expenses by category and make a chart: rent 900, groceries 210, transport 45, eating out 80.',
     needs: ['sandbox'],
+    illustration: 'code',
   },
-  { key: 'memory', label: 'Remember what matters', prompt: 'What do you remember about me so far?' },
+  {
+    key: 'memory',
+    label: 'Remember what matters',
+    prompt: 'What do you remember about me so far?',
+    illustration: 'memory',
+  },
   {
     key: 'skills',
     label: 'Learn new skills',
     prompt: 'Learn how to turn a photo of a receipt into a line in my expense list.',
     needs: ['sandbox'],
+    illustration: 'skills',
   },
   {
     key: 'move',
@@ -360,11 +404,10 @@ function interleave(queues: readonly (readonly TourPrompt[])[]): TourPrompt[] {
 }
 
 /**
- * The six Try a day cards, under the morning brief. Areas share the cards evenly in the order
- * chosen. A shortfall, such as a card whose capability is missing, is filled first from the
- * general set, then from the areas not chosen, so the row is always full.
+ * The first frame's capability tickets. The cards of the areas the person chose come first, in the
+ * order chosen, so the chooser shapes what is offered; the capability list fills the rest.
  */
-export function tryADayPrompts({
+export function firstFrameCardPrompts({
   helpAreas,
   capabilities,
 }: {
@@ -372,9 +415,8 @@ export function tryADayPrompts({
   capabilities: TourCapabilities;
 }): TourPrompt[] {
   const areaQueues = helpAreas.map(id => visibleTourPrompts(HELP_AREAS[id].cards, capabilities));
-  const general = visibleTourPrompts(GENERAL_DAY_PROMPTS, capabilities);
-  const otherAreas = HELP_AREA_IDS.filter(id => !helpAreas.includes(id)).flatMap(id =>
-    visibleTourPrompts(HELP_AREAS[id].cards, capabilities),
+  return uniqueByKey([...interleave(areaQueues), ...visibleTourPrompts(CAPABILITY_PROMPTS, capabilities)]).slice(
+    0,
+    FIRST_FRAME_CARD_SLOTS,
   );
-  return uniqueByKey([...interleave(areaQueues), ...general, ...otherAreas]).slice(0, DAY_CARD_SLOTS);
 }

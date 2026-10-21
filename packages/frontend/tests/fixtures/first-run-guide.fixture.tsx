@@ -1,5 +1,6 @@
 import {
   AmanFirstRunGuide,
+  AmanFirstRunSummary,
   AmanSetupProvider,
   AmanTour,
   AmanWelcome,
@@ -111,6 +112,9 @@ function Screen({ state }: { state: FixtureState }) {
         <AmanTour
           capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
           helpAreas={[]}
+          onHelpAreasChange={() => {}}
+          waiting={{ count: 0, firstId: null }}
+          scheduleCount={0}
           canSend
           onSend={() => {}}
           onHide={() => {}}
@@ -126,10 +130,15 @@ function Screen({ state }: { state: FixtureState }) {
         <AmanTour
           capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
           helpAreas={profileFor(state).help_areas}
+          onHelpAreasChange={() => {}}
+          userName="Sam"
+          waiting={{ count: 2, firstId: 'fixture-approval' }}
+          scheduleCount={1}
           canSend
           onSend={() => {}}
           onHide={() => {}}
-          setup={<AmanFirstRunGuide placement="chat" />}
+          setup={<AmanFirstRunSummary placement="chat" />}
+          pandaSrc="/aman-avatar.png"
         />
       </div>
     );
