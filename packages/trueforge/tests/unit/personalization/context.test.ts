@@ -21,6 +21,7 @@ const profile: PersonalizationProfile = {
   address_as: null,
   user_profile: 'Values privacy.',
   pinned_preferences: ['Use plain English.'],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
   revision: 2,
@@ -137,6 +138,22 @@ describe('personalization context', () => {
     ).toBe(false);
     expect(buildPersonalizationContext({ ...enabled, digest: personalizationDigest(enabled) }).injected_context).toBe(
       buildPersonalizationContext({ ...profile, digest: personalizationDigest(profile) }).injected_context,
+    );
+  });
+
+  it('keeps help areas out of the digest and the injected context, but a reorder still counts as a change', () => {
+    // The areas only shape the Tour's cards. The stores compare their order beside the digest so a
+    // reorder persists, the same way the learning switch does.
+    const withAreas: PersonalizationProfile = { ...profile, help_areas: ['focus', 'family'] };
+    expect(personalizationDigest(withAreas)).toBe(personalizationDigest(profile));
+    expect(buildPersonalizationContext({ ...withAreas, digest: personalizationDigest(profile) }).injected_context).toBe(
+      buildPersonalizationContext({ ...profile, digest: personalizationDigest(profile) }).injected_context,
+    );
+
+    const existing = { ...withAreas, digest: personalizationDigest(withAreas) };
+    expect(isPersonalizationUnchanged({ existing, next: withAreas })).toBe(true);
+    expect(isPersonalizationUnchanged({ existing, next: { ...withAreas, help_areas: ['family', 'focus'] } })).toBe(
+      false,
     );
   });
 
