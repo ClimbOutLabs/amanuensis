@@ -403,6 +403,7 @@ plan_build() {
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."
   fi
+  calendar_plan_row
   plan_backups
   plan_edge
 }
@@ -538,6 +539,7 @@ cmd_install() {
     ui_skip "Instance $(reg_names | tr '\n' ' ')is already set up; nothing to ask"
     tf_rotation_collect
   fi
+  calendar_collect install
   backups_collect
   plan_build
   print_plan
@@ -630,6 +632,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"

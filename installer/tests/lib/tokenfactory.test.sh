@@ -114,6 +114,7 @@ test_no_model_prompts_on_a_terminal() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
