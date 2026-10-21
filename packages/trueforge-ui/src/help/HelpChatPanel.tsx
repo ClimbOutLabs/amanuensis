@@ -122,7 +122,11 @@ function ItemRow({ item }: { item: HelpHealthItem }) {
         <span className="font-normal">({ITEM_WORD[item.status]})</span>
       </div>
       <p className="text-sm text-text-primary">{item.message}</p>
-      {item.next_step === null ? null : <p className="text-sm text-text-secondary">{item.next_step}</p>}
+      {item.next_step === null ? null : (
+        <p className={cn('text-sm', item.status === 'fail' ? 'text-danger' : 'text-text-secondary')}>
+          {item.next_step}
+        </p>
+      )}
     </li>
   );
 }
@@ -137,9 +141,12 @@ function HostReportLine({ help }: { help: HelpContextValue }) {
     return <p className="text-sm text-text-secondary">Last full check: {formatLastFullCheck(report.checked_at)}</p>;
   }
   return (
-    <p className="text-sm text-danger">
-      {report.message}
-      {report.next_step === null ? null : ` ${report.next_step}`}
+    <p className="flex items-start gap-2 text-sm text-danger">
+      <Icon name={ITEM_ICON.fail} aria-hidden />
+      <span>
+        {report.message}
+        {report.next_step === null ? null : ` ${report.next_step}`}
+      </span>
     </p>
   );
 }
