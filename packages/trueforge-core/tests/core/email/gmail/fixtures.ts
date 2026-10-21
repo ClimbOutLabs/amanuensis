@@ -13,7 +13,15 @@ export function message(input: {
   body?: string;
   html?: string;
   labelIds?: string[];
-  attachments?: { id: string; filename: string; mimeType: string; size: number }[];
+  /** `id` is Gmail's attachmentId; `partId` defaults to the part's position; `inlineData` makes Gmail return the bytes in the part. */
+  attachments?: {
+    id: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+    partId?: string;
+    inlineData?: string;
+  }[];
   extraHeaders?: { name: string; value: string }[];
   internalDate?: string;
 }): GmailMessage {
@@ -35,10 +43,14 @@ export function message(input: {
       parts: [
         ...(input.body === undefined ? [] : [{ mimeType: 'text/plain', body: { data: b64url(input.body) } }]),
         ...(input.html === undefined ? [] : [{ mimeType: 'text/html', body: { data: b64url(input.html) } }]),
-        ...(input.attachments ?? []).map(file => ({
+        ...(input.attachments ?? []).map((file, index) => ({
+          partId: file.partId ?? String(index + 2),
           mimeType: file.mimeType,
           filename: file.filename,
-          body: { attachmentId: file.id, size: file.size },
+          body:
+            file.inlineData === undefined
+              ? { attachmentId: file.id, size: file.size }
+              : { data: b64url(file.inlineData), size: file.size },
         })),
       ],
     },
