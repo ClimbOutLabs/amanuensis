@@ -502,7 +502,7 @@ function sandboxImplementationPlanScope(input: {
   return parsed.success ? parsed.data : undefined;
 }
 
-export type RepositoryCommandSourceKind = 'agents_md' | 'package_json';
+export type RepositoryCommandSourceKind = 'agents_md' | 'makefile' | 'package_json' | 'pyproject_toml';
 
 export interface RepositoryCommandSource {
   source_kind: RepositoryCommandSourceKind;
@@ -883,6 +883,8 @@ const REPOSITORY_COMMAND_SOURCE_FILES: readonly {
 }[] = [
   { source_kind: 'agents_md', source_path: 'AGENTS.md' },
   { source_kind: 'package_json', source_path: 'package.json' },
+  { source_kind: 'pyproject_toml', source_path: 'pyproject.toml' },
+  { source_kind: 'makefile', source_path: 'Makefile' },
 ];
 
 function repositorySourceAbsolutePath(workspaceCwd: string, sourcePath: string): string {

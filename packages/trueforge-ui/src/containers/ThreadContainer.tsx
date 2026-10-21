@@ -24,6 +24,7 @@ import { ResumeUnavailableContainer } from './ResumeUnavailableContainer.js';
 import { TerminalErrorContainer } from './TerminalErrorContainer.js';
 import { UserEditComposerContainer } from './UserEditComposerContainer.js';
 import { UserMessageContainer } from './UserMessageContainer.js';
+import { ThreadWorkOnRepoControls } from './WorkOnRepoControls.js';
 
 export { isNewChatView } from '../utils/isNewChatView.js';
 
@@ -120,7 +121,12 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                       <ThreadViewportShell isEmpty={isEmpty}>
                         {helpHere ? <HelpChatPanel /> : null}
                         {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
-                        {isEmpty && !isLoading && composer}
+                        {isEmpty && !isLoading && (
+                          <>
+                            {helpHere ? null : <ThreadWorkOnRepoControls />}
+                            {composer}
+                          </>
+                        )}
                         {isLoading ? (
                           <MessageListSkeleton />
                         ) : (
@@ -154,6 +160,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                           <ScrollToBottomButton />
                         </ThreadPrimitive.ScrollToBottom>
                         <ThreadImplementationPlanGrantControls />
+                        <ThreadWorkOnRepoControls />
                         {composer}
                       </ThreadComposerAreaShell>
                     )}

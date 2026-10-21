@@ -1643,6 +1643,46 @@ describe('Sandbox provider-owned paths', () => {
     expect(prompt).not.toContain('jest');
   });
 
+  it('observes pyproject.toml and Makefile as repository command sources', async () => {
+    const exec = jest.fn((params: SandboxExecParams): Promise<ExecResult> => {
+      const result = params.command === BOUND_REPOSITORY_STATE_COMMAND ? '/repo\nmain\nabcdef\n' : 'ok';
+      return Promise.resolve({ success: true, response: { exitCode: 0, result } });
+    });
+    const downloadFile = jest.fn(({ path }: { sandboxId: string; path: string }): Promise<Buffer> => {
+      if (path.endsWith('pyproject.toml')) {
+        return Promise.resolve(Buffer.from('[tool.pytest.ini_options]'));
+      }
+      if (path.endsWith('Makefile')) {
+        return Promise.resolve(Buffer.from('test:\n\tpytest\n'));
+      }
+      return Promise.reject(new Error('missing'));
+    });
+    const onRepositorySources = jest.fn(() => Promise.resolve());
+    const sandbox = makeSandbox(makeProvider({ exec, downloadFile }), {
+      boundRepository,
+      onRepositorySources,
+    });
+
+    await sandbox.refreshBoundRepositoryState();
+
+    expect(onRepositorySources).toHaveBeenCalledTimes(1);
+    expect(onRepositorySources).toHaveBeenCalledWith({
+      sources: [
+        expect.objectContaining({
+          source_kind: 'pyproject_toml',
+          source_path: 'pyproject.toml',
+          content: '[tool.pytest.ini_options]',
+        }),
+        expect.objectContaining({
+          source_kind: 'makefile',
+          source_path: 'Makefile',
+          content: 'test:\n\tpytest\n',
+        }),
+      ],
+      signal: undefined,
+    });
+  });
+
   it('cancels a blocked sandbox creation at the provider boundary', async () => {
     const createSandbox = jest.fn(
       (_options?: { signal?: AbortSignal | undefined }): Promise<{ sandboxId: string }> => new Promise(() => undefined),

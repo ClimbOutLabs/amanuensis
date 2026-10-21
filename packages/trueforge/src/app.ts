@@ -100,7 +100,7 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
-import type { resolveSandboxProvider } from './runtime/sessionResources';
+import { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
@@ -912,6 +912,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
         resolveRequestContext,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveWorkspaceDir: async ({ c, session_id }) => {
+          const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+          const provider = await resolver({
+            tenant_id: TENANT_ID,
+            store: deps.resolveSandboxProviderStore(c),
+            logger: deps.logger,
+            sessionId: session_id,
+          });
+          return provider?.getWorkspaceDir();
+        },
       }),
       authMiddleware,
     ),
