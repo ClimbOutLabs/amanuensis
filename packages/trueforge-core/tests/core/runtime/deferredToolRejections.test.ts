@@ -58,7 +58,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(error).toBe(
-      "call_tool rejected the mcp_server: received 'not-a-server'; expected the name of a configured MCP server. Configured servers: parallel-web.",
+      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, not through list_tools.",
     );
   });
 
@@ -197,7 +197,7 @@ describe('DeferredTool get_tool_info rejections', () => {
     });
 
     expect(error).toBe(
-      "get_tool_info rejected the mcp_server: received 'not-a-server'; expected the name of a configured MCP server. Configured servers: parallel-web.",
+      "No server named 'not-a-server'. Servers: parallel-web. Built-in tools are called directly by name, not through list_tools.",
     );
   });
 

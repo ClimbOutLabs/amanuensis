@@ -339,6 +339,26 @@ describe('call_tool naming something that does not exist', () => {
     expect(stamped.tier3_card?.plain_what).not.toContain('call_tool');
   });
 
+  it('keeps list_tools for an unknown server at Tier 1 and runs nothing', async () => {
+    const maps = new MapLikeTools();
+    const deferred = makeDeferred([maps]);
+    const params = { name: 'list_tools', arguments: { mcp_server: 'gmail' } };
+
+    const info = await deferred.toolCallInfo(params);
+    const stamped = await stamp({
+      sentinel: makeSentinel(),
+      info,
+      canonical_params: params.arguments,
+      connector: undefined,
+    });
+
+    expect(stamped.tier).toBe(1);
+    expect(stamped.tier3_card).toBeNull();
+    const response = await deferred.callTool(params);
+    expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
+    expect(JSON.stringify(response)).toContain("No server named 'gmail'.");
+  });
+
   it('fails closed without a card when the named server exists nowhere', async () => {
     const maps = new MapLikeTools();
     const deferred = makeDeferred([maps]);
@@ -355,7 +375,7 @@ describe('call_tool naming something that does not exist', () => {
 
     const { text, isError } = await callToolText(deferred, wrapper);
     expect(isError).toBe(true);
-    expect(text).toContain('expected the name of a configured MCP server');
+    expect(text).toContain("No server named 'nope'.");
   });
 
   it('fails closed without a card when the wrapper itself does not parse', async () => {
