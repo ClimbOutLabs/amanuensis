@@ -957,7 +957,7 @@ describe('ToolCallContainer: held search request', () => {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
-        why: "it contains one of this computer's keys",
+        say: 'This search contains something that looks like a password or key.',
       }),
       plain_why: null,
       cannot_be_undone: null,
