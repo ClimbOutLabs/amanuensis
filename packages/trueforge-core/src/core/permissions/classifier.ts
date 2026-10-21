@@ -1698,7 +1698,7 @@ const HIDDEN_QUERY = '(hidden)';
 /** Most characters of query text an approval card shows. */
 const SEARCH_CARD_TEXT_MAX = 1000;
 
-/** The query texts joined for one line. The provider's plumbing is left out of what a person reads. */
+/** The query texts joined for one line. Callers pass only what a person reads, never provider plumbing. */
 function searchQueryText(texts: readonly string[]): string {
   return texts
     .map(value => value.trim())
@@ -1820,8 +1820,7 @@ async function classifySearchProviderTool(input: {
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
-  const queryText = strings === undefined ? '' : searchQueryText([...strings.values, ...strings.plumbing]);
-  const shownQueryText = strings === undefined ? '' : searchQueryText(strings.values);
+  const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
     holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
@@ -1898,7 +1897,7 @@ async function classifySearchProviderTool(input: {
   }
   return tier1Decision({
     reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
-    reason_detail: `Searched: ${shownQueryText}`,
+    reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
@@ -2505,6 +2504,24 @@ function spaceWriteLine(action: SentinelAction): string {
   return 'Restored a space to an earlier version.';
 }
 
+/**
+ * The arguments a card shows: any server key the computer holds is masked, so no card carries it raw. The
+ * approval token still binds the call's own arguments, so only the display changes.
+ */
+async function cardArguments(action: SentinelAction, ctx: ClassifyContext): Promise<Record<string, unknown>> {
+  const secrets = await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  if (secrets.length === 0) {
+    return action.canonical_params;
+  }
+  const masked = maskServerSecrets({
+    params: action.canonical_params,
+    secrets,
+    earlier: ctx.web_search.sentText,
+    plumbingFields: action.mcp_search_plumbing_fields,
+  });
+  return masked ?? { details: HIDDEN_QUERY };
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -2514,7 +2531,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
   const extraction = extractCardFields({
     tool_name: action.tool_name,
-    canonical_params: action.canonical_params,
+    canonical_params: await cardArguments(action, ctx),
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
