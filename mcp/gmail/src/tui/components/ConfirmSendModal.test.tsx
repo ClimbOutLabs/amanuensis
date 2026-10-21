@@ -11,7 +11,7 @@ describe("ConfirmSendModal", () => {
   it("shows recipients and subject in the preview", () => {
     const { lastFrame } = render(
       <ConfirmSendModal
-        to={["Vahid Habibi <vahid@example.test>", "a@b.test"]}
+        to={["Alex Rivera <alex@example.com>", "a@b.test"]}
         cc={["c@d.test"]}
         bcc={[]}
         subject="Re: Disclaimer for Ads"
@@ -20,7 +20,7 @@ describe("ConfirmSendModal", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Vahid Habibi <vahid@example.test>");
+    expect(frame).toContain("Alex Rivera <alex@example.com>");
     expect(frame).toContain("a@b.test");
     expect(frame).toContain("Cc:");
     expect(frame).toContain("c@d.test");

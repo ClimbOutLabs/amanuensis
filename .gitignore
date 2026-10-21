@@ -104,3 +104,6 @@ packages/trueforge-sdk/NOTICE
 ops/sandbox-slot/packs/archives/*
 !ops/sandbox-slot/packs/archives/.gitkeep
 ops/sandbox-slot/packs/selected.json
+
+# Local person-specific patterns for scripts/private-data-scan.py (never commit)
+scripts/private-data-patterns.local.txt
