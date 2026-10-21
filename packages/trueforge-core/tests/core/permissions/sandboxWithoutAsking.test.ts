@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { recordClassificationAudit, type AuditRecordInput } from '../../../src/core/permissions/audit';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
@@ -117,10 +118,9 @@ describe('in-sandbox work with the switch on runs without a card', () => {
   );
 
   test.each([
-    ['npm install humanize', 'sandbox_package_install'],
-    ['pip install humanize', 'sandbox_package_install'],
-    ['pip install "humanize==4.9.0"', 'sandbox_package_install'],
-    ['python3 -m pip install humanize', 'sandbox_package_install'],
+    ['npm install --ignore-scripts humanize', 'sandbox_package_install'],
+    ['pnpm add --ignore-scripts humanize', 'sandbox_package_install'],
+    ['yarn add --ignore-scripts humanize', 'sandbox_package_install'],
   ])('%s runs without a card', (command, reason) =>
     withWorkspace(async workspace => {
       const decision = await classifyTier(
@@ -145,6 +145,98 @@ describe('in-sandbox work with the switch on runs without a card', () => {
       );
       expect(decision.tier).toBe(1);
       expect(decision.auto_deny).toBeNull();
+    }),
+  );
+});
+
+describe('a package install runs silently only when it runs no install scripts', () => {
+  test.each([
+    ['a pip install', 'pip install humanize'],
+    ['a pip3 install', 'pip3 install humanize'],
+    ['a python -m pip install', 'python3 -m pip install humanize'],
+    ['a uv pip install', 'uv pip install humanize'],
+    ['a poetry install', 'poetry install'],
+    ['an npm install without the ignore flag', 'npm install humanize'],
+    ['a pnpm add without the ignore flag', 'pnpm add humanize'],
+    ['a yarn add without the ignore flag', 'yarn add humanize'],
+    ['an npm install with a flag that is not on the list', 'npm install --save-exact --ignore-scripts humanize'],
+  ])('%s keeps its card with the switch on', (_label, command) =>
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+    })(),
+  );
+
+  test(
+    'an npm install with the ignore flag keeps its card when the repo declares lifecycle scripts',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'package.json'), JSON.stringify({ scripts: { postinstall: 'node setup.js' } }));
+      const decision = await classifyTier(
+        action('exec', { command: 'npm install humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test.each(['.pnpmfile.cjs', '.npmrc', '.yarnrc'])('an install keeps its card when the workspace has %s', name =>
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, name), 'ignore-scripts=false\n');
+      const decision = await classifyTier(
+        action('exec', { command: 'pnpm add --ignore-scripts humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    })(),
+  );
+
+  test(
+    'a script-free install asks with the switch off',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'npm install --ignore-scripts humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test(
+    'a silent install is written to the activity list as a run in the sandbox',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      const written: AuditRecordInput[] = [];
+      services.audit = {
+        record: input => {
+          written.push(input);
+          return Promise.resolve();
+        },
+      };
+      const command = 'pnpm add --ignore-scripts humanize';
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      await recordClassificationAudit({
+        services,
+        identity: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: null,
+          workspace_cwd: workspace,
+          agent_intent: null,
+        },
+        tool_name: 'exec',
+        decision,
+      });
+      expect(written).toEqual([
+        expect.objectContaining({ outcome: 'logged', description: `Ran in the sandbox: ${command}` }),
+      ]);
     }),
   );
 });

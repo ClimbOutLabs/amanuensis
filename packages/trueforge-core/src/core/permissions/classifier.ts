@@ -102,6 +102,8 @@ import {
 import {
   autoDenyDecision,
   failClosedDecision,
+  SANDBOX_COMMAND_REASON,
+  SANDBOX_PACKAGE_INSTALL_REASON,
   tier1Decision,
   tier2Decision,
   tier3Decision,
@@ -827,20 +829,68 @@ function isPackageInstallArgv(input: readonly string[]): boolean {
     : ['install', 'add', 'i'].includes(subcommand);
 }
 
-/** True when the install names only plain packages, so every download goes through the package gateway. */
+/**
+ * Installers whose install scripts run the package's own code, and so run code from the repository on a
+ * local path. Their silent installs must pass IGNORE_SCRIPTS_FLAG. pip always runs build hooks and .pth
+ * files, so every pip install keeps its card.
+ */
+const SCRIPT_RUNNING_INSTALLERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn']);
+const IGNORE_SCRIPTS_FLAG = '--ignore-scripts';
+
+/**
+ * Files in the install's folder that can turn install scripts or install hooks back on. Any one of them
+ * present means the install asks.
+ */
+const INSTALL_HOOK_FILES: readonly string[] = ['.pnpmfile.cjs', '.npmrc', '.yarnrc'];
+
+/**
+ * True when the install names only plain packages, so every download goes through the package gateway,
+ * and it runs no install scripts. Any pip install, and any npm, pnpm or yarn install without the ignore flag, asks.
+ */
 function isPlainPackageInstall(input: readonly string[]): boolean {
   if (!isPackageInstallArgv(input)) {
     return false;
   }
   const argv = pipEquivalentArgv(input);
+  const [program] = argv;
+  if (program === undefined || !SCRIPT_RUNNING_INSTALLERS.has(program)) {
+    return false;
+  }
   const operands = argv.slice(2);
   const packages = operands.filter(word => !word.startsWith('-'));
   const flags = operands.filter(word => word.startsWith('-'));
   return (
     packages.length > 0 &&
     packages.every(spec => PLAIN_PACKAGE_SPEC.test(spec)) &&
-    flags.every(flag => SAFE_INSTALL_FLAGS.has(flag))
+    flags.includes(IGNORE_SCRIPTS_FLAG) &&
+    flags.every(flag => flag === IGNORE_SCRIPTS_FLAG || SAFE_INSTALL_FLAGS.has(flag))
   );
+}
+
+/** Whether a file that can re-enable install scripts or hooks sits next to where the install runs. */
+async function installHooksPresent({ ctx, cwd }: { ctx: ClassifyContext; cwd: string | null }): Promise<boolean> {
+  // A remote sandbox with no file reader cannot rule the hook files out, so the install asks.
+  if (ctx.path_resolution === 'remote' && ctx.file_digest === undefined) {
+    return true;
+  }
+  const base = resolveIdentityCwd(ctx, cwd);
+  for (const name of INSTALL_HOOK_FILES) {
+    // The file may not exist, so its folder is resolved and the name appended, not the whole path.
+    const identity = canonicalWriteTarget({ p: name, cwd: base, resolution: ctx.path_resolution });
+    if (identity === null) {
+      return true;
+    }
+    const digest = await contentDigest({ identity, resolution: ctx.path_resolution, digest: ctx.file_digest });
+    if (digest !== null) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The plain line the activity list shows for a silent run. */
+function sandboxRunDetail(command: string): string {
+  return `Ran in the sandbox: ${escapeDisplayText(command)}`;
 }
 
 /**
@@ -877,15 +927,17 @@ function silentRunScript(argv: readonly string[]): string | undefined {
  * wrote in this conversation. A script run of any other file (a repo file, a download, an unknown file) keeps
  * its card, and so does a test runner, which runs code it finds in the repo.
  */
-function sandboxRunPlacement({
+async function sandboxRunPlacement({
+  command,
   parsed,
   ctx,
   cwd,
 }: {
+  command: string;
   parsed: ParsedSimpleCommand | undefined;
   ctx: ClassifyContext;
   cwd: string | null;
-}): { reason: string; reason_detail: string } | null {
+}): Promise<{ reason: string; reason_detail: string } | null> {
   if (parsed === undefined) {
     return null;
   }
@@ -895,9 +947,10 @@ function sandboxRunPlacement({
   }
   // An install that is not plain (index URL, path, web address, requirements file) asks, whatever its program.
   if (isPackageInstallArgv(parsed.argv)) {
-    return isPlainPackageInstall(parsed.argv)
-      ? { reason: 'sandbox_package_install', reason_detail: 'Installed packages through the package gateway.' }
-      : null;
+    if (!isPlainPackageInstall(parsed.argv) || (await installHooksPresent({ ctx, cwd }))) {
+      return null;
+    }
+    return { reason: SANDBOX_PACKAGE_INSTALL_REASON, reason_detail: sandboxRunDetail(command) };
   }
   const script = silentRunScript(parsed.argv);
   if (script === undefined) {
@@ -925,10 +978,7 @@ function sandboxRunPlacement({
   ) {
     return null;
   }
-  return {
-    reason: 'sandbox_command',
-    reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
-  };
+  return { reason: SANDBOX_COMMAND_REASON, reason_detail: sandboxRunDetail(command) };
 }
 
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -989,7 +1039,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   // With the user's switch on, a run of a script Aman wrote in this conversation is placed here and skips
   // the card. The containment checks below still apply to it.
   const parsed = parseSimpleCommand(command);
-  const silentRun = sandboxSilent ? sandboxRunPlacement({ parsed, ctx, cwd }) : null;
+  const silentRun = sandboxSilent ? await sandboxRunPlacement({ command, parsed, ctx, cwd }) : null;
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
   // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden
