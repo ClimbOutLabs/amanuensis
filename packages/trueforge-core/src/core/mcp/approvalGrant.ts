@@ -96,13 +96,16 @@ function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
 
 /**
  * Server-owned eligibility for a standing "Always allow this tool" grant: only a connector tool
- * that is read-only inspection, for the same argument-blindness reason as a chat grant.
+ * that is read-only inspection, for the same argument-blindness reason as a chat grant. A read of
+ * a sensitive path is refused even when the server's annotations say inspection, because the grant
+ * would then cover every later read of that path.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
   return (
     info.type === 'mcp' &&
     info.effect === 'inspect' &&
+    info.secret_path_read !== true &&
     !tierBarsDurableGrant(info) &&
     info.implementation_plan_grant === undefined &&
     info.search_provider_call !== true

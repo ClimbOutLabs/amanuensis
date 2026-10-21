@@ -2275,6 +2275,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
     grant_host: action.mcp_server_host ?? null,
+    secret_path_read: sensitiveReadHit(action.canonical_params),
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,

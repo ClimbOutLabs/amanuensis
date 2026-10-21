@@ -525,6 +525,21 @@ describe('approving a held action later', () => {
     expect(h.audit.at(-1)).toMatchObject({ outcome: 'approved' });
   });
 
+  it('does not offer or accept Always allow for an annotated read of a secret path', async () => {
+    const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', held: true, can_always_allow: false }],
+    });
+
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-secret', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
   it('does not offer a chat-wide approval on a held action', async () => {
     const h = makeHarness([() => toolCallsStream([sendNoteCall])]);
     const context = await heldBrief(h);

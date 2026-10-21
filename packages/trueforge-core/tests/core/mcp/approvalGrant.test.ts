@@ -15,8 +15,9 @@ import {
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
-import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
+import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions';
 import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -32,8 +33,15 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = connectRemoteMcp as jest.MockedFunction<typeof connectRemoteMcp>;
 const noopLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } as unknown as Logger;
 
-/** Installs a fake connection serving exactly `tools`, and returns a ToolSet backed by it. */
-function makeRealToolSet(params: { tools: ToolSchema[]; selectors: ToolSelectorConfig }): ToolSet {
+/**
+ * Installs a fake connection serving exactly `tools`, and returns a ToolSet backed by it. With
+ * `classify`, the ToolSet runs the Sentinel classifier as it does in a live thread.
+ */
+function makeRealToolSet(params: {
+  tools: ToolSchema[];
+  selectors: ToolSelectorConfig;
+  classify?: boolean | undefined;
+}): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
@@ -54,7 +62,16 @@ function makeRealToolSet(params: { tools: ToolSchema[]; selectors: ToolSelectorC
     connectTimeoutMs: 5_000,
     signal: new AbortController().signal,
   });
-  return new ToolSet({ source: remote, selectors: params.selectors, preload: false });
+  const sentinel =
+    params.classify === true
+      ? createSentinelHostContext({
+          tenant_id: 'tenant-a',
+          created_by: 'user-a',
+          conversation_id: 'conversation-a',
+          services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        })
+      : undefined;
+  return new ToolSet({ source: remote, selectors: params.selectors, preload: false, sentinel });
 }
 
 function toolInfo(serverId: string, name: string): InternalToolCallInfo {
@@ -304,6 +321,40 @@ describe('always-allow grant eligibility', () => {
     const info = await toolSet.toolCallInfo({ name: 'peek_thing', arguments: {} });
     expect(allowsToolGrant(info)).toBe(false);
     expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('end-to-end: an annotated connector read of a secret path is never eligible for a standing grant', async () => {
+    const toolSet = makeRealToolSet({
+      tools: [
+        {
+          name: 'get-file',
+          inputSchema: { type: 'object' },
+          annotations: { readOnlyHint: true, openWorldHint: false },
+        },
+      ],
+      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
+      classify: true,
+    });
+    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { path: '/home/u/.ssh/id_rsa' } });
+    // The server's annotations alone would make this inspection; the secret path must still block the grant.
+    expect(info.effect).toBe('inspect');
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('end-to-end: an annotated connector read of an ordinary path stays eligible for a standing grant', async () => {
+    const toolSet = makeRealToolSet({
+      tools: [
+        {
+          name: 'get-file',
+          inputSchema: { type: 'object' },
+          annotations: { readOnlyHint: true, openWorldHint: false },
+        },
+      ],
+      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
+      classify: true,
+    });
+    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { path: '/home/u/notes/todo.md' } });
+    expect(allowsToolGrant(info)).toBe(true);
   });
 });
 

@@ -197,6 +197,12 @@ export const InternalToolCallInfoSchema = z.object({
     .literal(true)
     .optional()
     .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
+  secret_path_read: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call reads a sensitive path, which is never eligible for a standing grant. Never model-authored.',
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

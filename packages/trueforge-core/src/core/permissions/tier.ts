@@ -194,6 +194,8 @@ export interface TierDecision {
   inspection: boolean;
   /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
   grant_host: string | null;
+  /** True when a call reads a sensitive path. Such a call is never eligible for a standing grant or chat scope. */
+  secret_path_read: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -230,6 +232,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    secret_path_read: false,
   };
 }
 
@@ -248,6 +251,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    secret_path_read: false,
   };
 }
 
@@ -307,6 +311,7 @@ export function tier3Decision(input: {
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
   grant_host?: string | null | undefined;
+  secret_path_read?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -322,6 +327,7 @@ export function tier3Decision(input: {
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
     grant_host: input.grant_host ?? null,
+    secret_path_read: input.secret_path_read === true,
   };
 }
 
