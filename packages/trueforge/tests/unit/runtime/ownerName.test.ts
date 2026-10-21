@@ -36,6 +36,7 @@ async function createFixture() {
         voice_guidance: null,
         user_profile: 'Likes short answers.',
         pinned_preferences: ['Use bullet points.'],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         ...names,

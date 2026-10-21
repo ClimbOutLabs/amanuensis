@@ -68,6 +68,7 @@ function isPristineProfile({
     address_as: string | null;
     user_profile: string | null;
     pinned_preferences: readonly string[];
+    help_areas: readonly string[];
     learned_profile: string | null;
   };
   ownerName: string;
@@ -81,7 +82,8 @@ function isPristineProfile({
     unsetOrOwnerName(profile.address_as) &&
     profile.user_profile === null &&
     profile.learned_profile === null &&
-    profile.pinned_preferences.length === 0
+    profile.pinned_preferences.length === 0 &&
+    profile.help_areas.length === 0
   );
 }
 

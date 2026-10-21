@@ -398,7 +398,7 @@ export interface RawAssistantMessageWithUsage {
    * 'broken' means the markup could not be rebuilt and the runtime must stop the answer without
    * running or trusting anything in it. Absent when the reply had no markup.
    */
-  tool_markup?: 'recovered' | 'broken';
+  tool_markup?: 'recovered';
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

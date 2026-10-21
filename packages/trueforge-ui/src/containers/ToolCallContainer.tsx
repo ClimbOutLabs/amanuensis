@@ -12,6 +12,7 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
@@ -19,7 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
-import { ALWAYS_ALLOW_TOOL_OPTION_ID } from '../sentinel/approvalChoices.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -234,6 +235,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+        onChangeRequest={
+          offersChangeIt(approvalInfo.card)
+            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+            : undefined
+        }
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
@@ -333,7 +340,24 @@ function RequestResponseSlots({
   };
 }
 
+/**
+ * A "Change it" answer shows the person's words as their own message right after the call, so the
+ * history reads in order. The call itself stays declined.
+ */
 export const ToolCallContainer: ToolCallMessagePartComponent = part => {
+  const UserMessageBubble = useSlot('UserMessageBubble');
+  const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
+  const approval = stateApproval ?? part.approval;
+  const changeText = approval?.approved === false ? changeRequestText(approval.reason) : undefined;
+  return (
+    <>
+      <ToolCallPart {...part} />
+      {changeText === undefined ? null : <UserMessageBubble text={changeText} />}
+    </>
+  );
+};
+
+function ToolCallPart(part: ToolCallMessagePartProps) {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
@@ -566,4 +590,4 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-};
+}

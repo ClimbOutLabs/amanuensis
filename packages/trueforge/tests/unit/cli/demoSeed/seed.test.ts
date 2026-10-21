@@ -270,6 +270,7 @@ describe('demo seed against the real stores', () => {
       address_as: null,
       user_profile: 'My own words.',
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: false,
     });
@@ -486,6 +487,7 @@ describe('demo seed against the real stores', () => {
         address_as: null,
         user_profile: 'My own words.',
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: false,
       });

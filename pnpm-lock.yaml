@@ -436,6 +436,9 @@ importers:
       openid-client:
         specifier: ^6.8.7
         version: 6.8.8
+      parse5:
+        specifier: ^7.3.0
+        version: 7.3.0
       pdfjs-dist:
         specifier: ^4.10.38
         version: 4.10.38
@@ -445,6 +448,15 @@ importers:
       redis:
         specifier: ^5.12.1
         version: 5.12.1(@opentelemetry/api@1.9.1)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1(supports-color@8.1.1)
+      remark-math:
+        specifier: ^6.0.0
+        version: 6.0.0(supports-color@8.1.1)
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0(supports-color@8.1.1)
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
@@ -454,6 +466,9 @@ importers:
       undici:
         specifier: 7.29.1
         version: 7.29.1
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       winston:
         specifier: ^3.19.0
         version: 3.19.0
@@ -476,6 +491,9 @@ importers:
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3

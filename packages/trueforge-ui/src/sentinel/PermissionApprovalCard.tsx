@@ -1,13 +1,14 @@
 'use client';
 
 import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
-import { useState, type FC } from 'react';
+import { useRef, useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
+import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PERSONA_BADGE, PersonaDetails } from './PersonaDetails.js';
 import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
 import type {
@@ -44,6 +45,8 @@ export type PermissionApprovalCardProps = {
    */
   onApproveAlways?: (() => void) | undefined;
   onDeny: () => void;
+  /** Only passed for a card with editable content. Gets the text the person typed. */
+  onChangeRequest?: ((text: string) => void) | undefined;
   /**
    * Approves every pending Tier 2 call in one step. Only the container passes it, and
    * only for a Tier 2 card with other Tier 2 calls waiting; Tier 3 never gets it.
@@ -173,10 +176,13 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApproveForChat,
   onApproveAlways,
   onDeny,
+  onChangeRequest,
   onApproveAll,
   batchSize,
   disabled = false,
 }) => {
+  const [changing, setChanging] = useState(false);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
   const hasDetails =
     card.destination !== null ||
     card.recipient !== null ||
@@ -285,6 +291,22 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               onConfirm={onApproveAlways}
             />
           )}
+          {onChangeRequest !== undefined && (
+            <Button
+              ref={changeButtonRef}
+              variant="secondary"
+              size="small"
+              title={APPROVAL_CHOICES.changeIt.hint}
+              aria-expanded={changing}
+              onClick={() => {
+                setChanging(true);
+              }}
+              disabled={disabled}
+              className="flex-1"
+            >
+              {APPROVAL_CHOICES.changeIt.label}
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="small"
@@ -296,6 +318,19 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {APPROVAL_CHOICES.deny.label}
           </Button>
         </div>
+        {changing && onChangeRequest !== undefined && (
+          <ChangeRequestBox
+            disabled={disabled}
+            onSend={text => {
+              setChanging(false);
+              onChangeRequest(text);
+            }}
+            onCancel={() => {
+              setChanging(false);
+              changeButtonRef.current?.focus();
+            }}
+          />
+        )}
         {onApproveAll !== undefined && (
           <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
             {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}

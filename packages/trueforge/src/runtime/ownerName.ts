@@ -19,6 +19,7 @@ const EMPTY_PROFILE_CONTENT: PersonalizationProfileContent = {
   address_as: null,
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -61,6 +62,7 @@ export async function seedOwnerName({
           address_as: existing.address_as,
           user_profile: existing.user_profile,
           pinned_preferences: existing.pinned_preferences,
+          help_areas: existing.help_areas,
           learned_profile: existing.learned_profile,
           learning_enabled: existing.learning_enabled,
         };
