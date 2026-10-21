@@ -45,7 +45,6 @@ import {
   canonicalWriteTarget,
   classifyContextFor,
   classifyHostToolCall,
-  observeShellCreatedFiles,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -4784,6 +4783,7 @@ export class Sandbox extends LocalToolMCP {
     const scope = {
       tenant_id: ctx.tenant_id,
       created_by: ctx.created_by,
+      conversation_id: ctx.conversation_id,
       repository_id: ctx.repository_id,
       workspace_cwd: ctx.workspace_cwd,
     };
@@ -5071,12 +5071,6 @@ export class Sandbox extends LocalToolMCP {
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
-      }
-      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
-        this.observeSentinelWrites({
-          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
-          cwd: resolvedInput.cwd,
-        });
       }
 
       return {

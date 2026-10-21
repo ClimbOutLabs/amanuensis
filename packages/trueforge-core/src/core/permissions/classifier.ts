@@ -402,6 +402,7 @@ function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
   return {
     tenant_id: ctx.tenant_id,
     created_by: ctx.created_by,
+    conversation_id: ctx.conversation_id,
     repository_id: ctx.repository_id,
     workspace_cwd: ctx.workspace_cwd,
   };
@@ -841,34 +842,48 @@ function isPlainPackageInstall(input: readonly string[]): boolean {
 }
 
 /**
- * True for a run this classifier places silently: a script run by path (`python3 demo.py`, `node run.js`),
- * a test run (`pytest`, `python -m pytest`, `npm test`). Inline code (`-c`, `-e`, stdin) is not a run: it
- * can reach anywhere the shell can, so it keeps its card.
+ * Interpreters a silent run may start. Shells are left out: the shell parser rejects `sh` and `bash` as
+ * wrappers, so a shell script keeps its card.
  */
-function isSandboxScriptOrTestRun(argv: readonly string[]): boolean {
-  const [program, subcommand] = argv;
-  if (program === undefined) {
-    return false;
+const IMAGE_RUNTIMES: ReadonlySet<string> = new Set(['python', 'python3', 'node']);
+
+/** Options an interpreter may take before its script. None of them starts code other than that script. */
+const SILENT_RUNTIME_OPTIONS: ReadonlySet<string> = new Set(['-u', '-B', '-E', '-I', '-O']);
+
+/**
+ * The script a silent run would execute: an image runtime, safe options, then a script path. Inline code
+ * (`-c`, `-e`), a module (`-m`), stdin (`-`), and any other program have no such script and return undefined.
+ */
+function silentRunScript(argv: readonly string[]): string | undefined {
+  const [program, ...rest] = argv;
+  if (program === undefined || !IMAGE_RUNTIMES.has(program)) {
+    return undefined;
   }
-  if (program === 'pytest') {
-    return true;
+  let index = 0;
+  while (index < rest.length && SILENT_RUNTIME_OPTIONS.has(rest[index] ?? '')) {
+    index += 1;
   }
-  if (program === 'python' || program === 'python3') {
-    if (subcommand === '-m') {
-      return argv[2] === 'pytest';
-    }
-    return subcommand !== undefined && !subcommand.startsWith('-');
+  const script = rest[index];
+  if (script === undefined || script.startsWith('-')) {
+    return undefined;
   }
-  if (program === 'node') {
-    return subcommand !== undefined && !subcommand.startsWith('-');
-  }
-  return PACKAGE_MANAGER_COMMANDS.has(program) && subcommand === 'test';
+  return script;
 }
 
-/** Whether a plain command is an in-sandbox run this classifier can place: a script or test run, or a plain package install. */
-function sandboxRunPlacement(
-  parsed: ParsedSimpleCommand | undefined,
-): { reason: string; reason_detail: string } | null {
+/**
+ * The silent run a command gets with the switch on: a plain package install, or a script run of a file Aman
+ * wrote in this conversation. A script run of any other file (a repo file, a download, an unknown file) keeps
+ * its card, and so does a test runner, which runs code it finds in the repo.
+ */
+function sandboxRunPlacement({
+  parsed,
+  ctx,
+  cwd,
+}: {
+  parsed: ParsedSimpleCommand | undefined;
+  ctx: ClassifyContext;
+  cwd: string | null;
+}): { reason: string; reason_detail: string } | null {
   if (parsed === undefined) {
     return null;
   }
@@ -882,13 +897,25 @@ function sandboxRunPlacement(
       ? { reason: 'sandbox_package_install', reason_detail: 'Installed packages through the package gateway.' }
       : null;
   }
-  if (isSandboxScriptOrTestRun(parsed.argv)) {
-    return {
-      reason: 'sandbox_command',
-      reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
-    };
+  const script = silentRunScript(parsed.argv);
+  if (script === undefined) {
+    return null;
   }
-  return null;
+  const identity = canonicalFileIdentity({
+    p: script,
+    cwd: resolveIdentityCwd(ctx, cwd),
+    resolution: ctx.path_resolution,
+  });
+  if (
+    identity === null ||
+    !ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
+  ) {
+    return null;
+  }
+  return {
+    reason: 'sandbox_command',
+    reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
+  };
 }
 
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -946,10 +973,10 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     // An allowed offline command continues to the same containment checks as online.
   }
 
-  // With the user's switch on, an in-sandbox run is placed here and skips the card. The containment
-  // checks below still apply to it.
+  // With the user's switch on, a run of a script Aman wrote in this conversation is placed here and skips
+  // the card. The containment checks below still apply to it.
   const parsed = parseSimpleCommand(command);
-  const silentRun = sandboxSilent ? sandboxRunPlacement(parsed) : null;
+  const silentRun = sandboxSilent ? sandboxRunPlacement({ parsed, ctx, cwd }) : null;
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
   // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden

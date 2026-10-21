@@ -403,7 +403,13 @@ describe('classifyTier tracked executables', () => {
       writeFileSync(script, '#!/bin/sh\necho hi\n');
       const ctx = makeCtx({ workspace_cwd: dir });
       ctx.services.tracked_store.track({
-        scope: { tenant_id: 't1', created_by: 'u1', repository_id: 'r1', workspace_cwd: dir },
+        scope: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: 'r1',
+          workspace_cwd: dir,
+        },
         file_identity: script,
       });
       const decision = await classifyTier(action('exec', { command: 'sh tool.sh', cwd: dir }), ctx);

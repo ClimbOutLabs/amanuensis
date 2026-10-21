@@ -2,12 +2,10 @@
  * Server-side tracked set of agent-written executables for Sentinel's
  * write-then-execute escalation.
  *
- * Entries are keyed by (tenant_id, created_by, workspace). There is no
- * first-class workspace identity in the session model; the session's
- * (repository_id, workspace_cwd) pair is the closest server-side identity
- * (implementation-plan grants bind the same pair), so the tracked set keys on
- * it and documents the choice here. Entries persist across conversations in
- * server-side storage, never in per-turn sandbox state.
+ * Entries are keyed by (tenant_id, created_by, conversation, workspace). The workspace is the session's
+ * (repository_id, workspace_cwd) pair. A conversation's entries are its own: a script Aman wrote in another
+ * chat is not trusted here. Only files the agent's file tools wrote are tracked, so a file copied or
+ * redirected from elsewhere stays untracked.
  *
  * File identity is the canonical absolute path with all symlinks resolved
  * (realpath), normalized against the resolved working directory. The tracked
@@ -20,10 +18,11 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
-/** Scope key for tracked entries: the session's (repository_id, workspace_cwd) pair. */
+/** Scope key for tracked entries: one conversation's view of the session's (repository_id, workspace_cwd) pair. */
 export interface TrackedExecutableScope {
   tenant_id: string;
   created_by: string;
+  conversation_id: string;
   repository_id: string | null;
   workspace_cwd: string | null;
 }
@@ -33,7 +32,7 @@ export function workspaceKey(input: { repository_id: string | null; workspace_cw
 }
 
 function scopeKey(scope: TrackedExecutableScope): string {
-  return `${scope.tenant_id}\n${scope.created_by}\n${workspaceKey(scope)}`;
+  return `${scope.tenant_id}\n${scope.created_by}\n${scope.conversation_id}\n${workspaceKey(scope)}`;
 }
 
 export interface TrackApprovalGrantInput {
@@ -44,7 +43,7 @@ export interface TrackApprovalGrantInput {
 }
 
 export interface TrackedExecutableStore {
-  /** Record an agent-created or agent-modified file by identity. */
+  /** Record a file the agent's file tools created or modified, by identity. */
   track(input: { scope: TrackedExecutableScope; file_identity: string }): void;
   /** Remove the entry when its file is deleted (delete-path hook). */
   untrack(input: { scope: TrackedExecutableScope; file_identity: string }): void;
@@ -589,68 +588,4 @@ export function splitCompoundSegments(command: string): string[] {
   }
   pushSegment();
   return segments;
-}
-
-const FILE_CREATION_COMMANDS: Record<string, 'all_operands' | 'last_operand'> = {
-  touch: 'all_operands',
-  cp: 'last_operand',
-  mv: 'last_operand',
-  ln: 'last_operand',
-  install: 'last_operand',
-};
-
-/**
- * Best-effort observation of files an agent shell command may have created or
- * modified: redirect targets (`>`/`>>`) and creation-verb operands
- * (touch/cp/mv/ln/install; `ln` hardlink counts as creation). Covers the
- * workspace; the caller resolves each candidate against the cwd.
- */
-export function observeShellCreatedFiles(input: { command: string }): string[] {
-  const words = splitWordsLenient(input.command);
-  const created: string[] = [];
-  for (let i = 0; i < words.length; i += 1) {
-    const word = words[i];
-    if (word === undefined) {
-      continue;
-    }
-    if ((word === '>' || word === '>>') && i + 1 < words.length) {
-      const target = words[i + 1];
-      if (target !== undefined && target !== '/dev/null') {
-        created.push(target);
-      }
-      i += 1;
-      continue;
-    }
-    const base = path.basename(word);
-    const mode = FILE_CREATION_COMMANDS[base];
-    if (mode === undefined) {
-      continue;
-    }
-    // Collect the operand run until the next shell operator or command word.
-    const operands: string[] = [];
-    let seenDoubleDash = false;
-    for (let j = i + 1; j < words.length; j += 1) {
-      const token = words[j];
-      if (token === undefined || ['|', '&&', '||', ';', '>', '>>', '<'].includes(token)) {
-        break;
-      }
-      if (!seenDoubleDash && token === '--') {
-        seenDoubleDash = true;
-        continue;
-      }
-      if (!seenDoubleDash && token.startsWith('-') && token !== '-') {
-        continue;
-      }
-      operands.push(token);
-    }
-    if (mode === 'all_operands') {
-      created.push(...operands);
-    } else if (operands.length > 0) {
-      const last = operands[operands.length - 1];
-      if (last !== undefined) {
-        created.push(last);
-      }
-    }
-  }
-  return created;
 }

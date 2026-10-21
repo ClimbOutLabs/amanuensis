@@ -151,7 +151,6 @@ describe('in-sandbox work with the switch on runs without a card', () => {
 const AUTHORED_SILENT_RUNS: readonly { command: string; file: string }[] = [
   { command: 'python3 agent_tool.py', file: 'agent_tool.py' },
   { command: 'python3 -u agent_tool.py --flag', file: 'agent_tool.py' },
-  { command: 'bash agent_tool.sh', file: 'agent_tool.sh' },
   { command: 'node agent_tool.js', file: 'agent_tool.js' },
 ];
 
@@ -159,6 +158,7 @@ const AUTHORED_SILENT_RUNS: readonly { command: string; file: string }[] = [
 const CARDED_RUNS: readonly { command: string; file: string | null }[] = [
   { command: 'python3 repo_tool.py', file: 'repo_tool.py' },
   { command: 'bash repo_tool.sh', file: 'repo_tool.sh' },
+  { command: 'bash agent_tool.sh', file: 'agent_tool.sh' },
   { command: 'node repo_tool.js', file: 'repo_tool.js' },
   { command: 'sh -c "./repo_tool.sh"', file: 'repo_tool.sh' },
   { command: 'sh -c "./agent_tool.sh"', file: 'agent_tool.sh' },
