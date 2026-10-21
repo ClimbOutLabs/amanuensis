@@ -108,6 +108,7 @@ import { mailboxText, type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
+  canonicalWriteIdentity,
   canonicalWriteTarget,
   contentDigest,
   extractExecutedFileOperand,
@@ -774,9 +775,6 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
   return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
 }
 
-/** Code runners and test entry points the agent runs inside the sandbox without a card. */
-const SANDBOX_RUNNER_COMMANDS: ReadonlySet<string> = new Set(['python', 'python3', 'node', 'pytest']);
-
 /** Package managers whose installs go through the sandbox package gateway. */
 const PACKAGE_MANAGER_COMMANDS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'pip', 'pip3']);
 
@@ -797,7 +795,17 @@ const SAFE_INSTALL_FLAGS: ReadonlySet<string> = new Set([
 const PLAIN_PACKAGE_SPEC =
   /^(?!\.+$)(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(\[[A-Za-z0-9,._-]+\])?([=<>!~^@]{1,2}[A-Za-z0-9.*_+-]+)?$/u;
 
-function isPackageInstallArgv(argv: readonly string[]): boolean {
+/** `python -m pip` runs the same pip, so its argv is classified as pip's. */
+function pipEquivalentArgv(argv: readonly string[]): readonly string[] {
+  const [program, flag, module] = argv;
+  if ((program === 'python' || program === 'python3') && flag === '-m' && module === 'pip') {
+    return ['pip', ...argv.slice(3)];
+  }
+  return argv;
+}
+
+function isPackageInstallArgv(input: readonly string[]): boolean {
+  const argv = pipEquivalentArgv(input);
   const [program, subcommand] = argv;
   if (program === undefined || subcommand === undefined || !PACKAGE_MANAGER_COMMANDS.has(program)) {
     return false;
@@ -808,10 +816,11 @@ function isPackageInstallArgv(argv: readonly string[]): boolean {
 }
 
 /** True when the install names only plain packages, so every download goes through the package gateway. */
-function isPlainPackageInstall(argv: readonly string[]): boolean {
-  if (!isPackageInstallArgv(argv)) {
+function isPlainPackageInstall(input: readonly string[]): boolean {
+  if (!isPackageInstallArgv(input)) {
     return false;
   }
+  const argv = pipEquivalentArgv(input);
   const operands = argv.slice(2);
   const packages = operands.filter(word => !word.startsWith('-'));
   const flags = operands.filter(word => word.startsWith('-'));
@@ -822,23 +831,49 @@ function isPlainPackageInstall(argv: readonly string[]): boolean {
   );
 }
 
-/** Whether a plain command is an in-sandbox run this classifier can place: a code runner, a test run, or a plain package install. */
+/**
+ * True for a run this classifier places silently: a script run by path (`python3 demo.py`, `node run.js`),
+ * a test run (`pytest`, `python -m pytest`, `npm test`). Inline code (`-c`, `-e`, stdin) is not a run: it
+ * can reach anywhere the shell can, so it keeps its card.
+ */
+function isSandboxScriptOrTestRun(argv: readonly string[]): boolean {
+  const [program, subcommand] = argv;
+  if (program === undefined) {
+    return false;
+  }
+  if (program === 'pytest') {
+    return true;
+  }
+  if (program === 'python' || program === 'python3') {
+    if (subcommand === '-m') {
+      return argv[2] === 'pytest';
+    }
+    return subcommand !== undefined && !subcommand.startsWith('-');
+  }
+  if (program === 'node') {
+    return subcommand !== undefined && !subcommand.startsWith('-');
+  }
+  return PACKAGE_MANAGER_COMMANDS.has(program) && subcommand === 'test';
+}
+
+/** Whether a plain command is an in-sandbox run this classifier can place: a script or test run, or a plain package install. */
 function sandboxRunPlacement(
   parsed: ParsedSimpleCommand | undefined,
 ): { reason: string; reason_detail: string } | null {
   if (parsed === undefined) {
     return null;
   }
-  const [program, subcommand] = parsed.argv;
+  const program = parsed.argv[0];
   if (program === undefined) {
     return null;
   }
-  if (isPlainPackageInstall(parsed.argv)) {
-    return { reason: 'sandbox_package_install', reason_detail: 'Installed packages through the package gateway.' };
+  // An install that is not plain (index URL, path, web address, requirements file) asks, whatever its program.
+  if (isPackageInstallArgv(parsed.argv)) {
+    return isPlainPackageInstall(parsed.argv)
+      ? { reason: 'sandbox_package_install', reason_detail: 'Installed packages through the package gateway.' }
+      : null;
   }
-  const isTestRun =
-    PACKAGE_MANAGER_COMMANDS.has(program) && !isPackageInstallArgv(parsed.argv) && subcommand === 'test';
-  if (SANDBOX_RUNNER_COMMANDS.has(program) || isTestRun) {
+  if (isSandboxScriptOrTestRun(parsed.argv)) {
     return {
       reason: 'sandbox_command',
       reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
@@ -1236,11 +1271,10 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       ? absolutePatchTarget({ workspace_root: workspaceRoot, relative_path: target, resolution: ctx.path_resolution })
       : target,
   );
-  // Resolve each write target via its parent directory: the target itself may
-  // not exist yet, and resolving it directly would misread every new-file
-  // write as outside the workspace.
+  // A new file resolves through its parent directory; an existing one, or a link, through its own
+  // symlinks, so a link whose destination is outside the workspace is seen where it lands.
   const insideWorkspace = (target: string): boolean => {
-    const identity = canonicalWriteTarget({ p: target, cwd: targets.cwd, resolution: ctx.path_resolution });
+    const identity = canonicalWriteIdentity({ p: target, cwd: targets.cwd, resolution: ctx.path_resolution });
     if (identity === null) {
       return false;
     }

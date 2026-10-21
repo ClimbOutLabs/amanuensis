@@ -176,6 +176,25 @@ export function canonicalWriteTarget(input: {
   }
 }
 
+/**
+ * Where a write lands: an existing final component is resolved through its own symlinks, so a link that
+ * points outside is seen at its destination; a missing one resolves through its parent. A dangling symlink
+ * has no known destination, so it is null and callers fail closed.
+ */
+export function canonicalWriteIdentity(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): string | null {
+  if (input.resolution === 'remote') {
+    return lexicalPath(input);
+  }
+  if (isDanglingSymlink(input)) {
+    return null;
+  }
+  return canonicalFileIdentity(input) ?? canonicalWriteTarget(input);
+}
+
 const GIT_CONTROL_FILE_NAMES = new Set(['.gitattributes', '.gitmodules']);
 
 /**
