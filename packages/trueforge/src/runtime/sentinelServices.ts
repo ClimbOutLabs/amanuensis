@@ -7,6 +7,7 @@ import {
   type ToolGrantStore,
 } from '@truefoundry/trueforge-core/core';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
+import { readAllowedRecipientsFile } from './mailAllowedRecipients';
 import { sentinelSettingsServices } from './sentinelSettingsServices';
 
 /**
@@ -24,6 +25,8 @@ export function createSentinelServices(stores: {
   demoMode: boolean;
   /** The only addresses a demo instance may send mail to. */
   demoSendAllowlist: readonly string[];
+  /** The Email send list the server writes; unset when no sidecar is configured, so nothing is listed. */
+  mailPolicyPath: string | undefined;
 }): SentinelServices {
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
@@ -32,6 +35,10 @@ export function createSentinelServices(stores: {
     tool_grants: stores.toolGrants,
     outboundSecrets: stores.outboundSecrets,
     demoSendAllowlist: stores.demoMode ? stores.demoSendAllowlist : null,
+    mail_listed_addresses: () =>
+      stores.mailPolicyPath === undefined
+        ? Promise.resolve([])
+        : readAllowedRecipientsFile({ path: stores.mailPolicyPath }),
     ...sentinelSettingsServices(stores.settings),
   };
 }

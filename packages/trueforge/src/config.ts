@@ -209,6 +209,34 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
+ * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
+ * the one in `.env`.
+ */
+export function withMailSidecarOrigin({
+  origins,
+  mailUrl,
+}: {
+  origins: string[];
+  mailUrl: string | undefined;
+}): string[] {
+  if (mailUrl === undefined) {
+    return origins;
+  }
+  const mailOrigin = normalizedOrigin(mailUrl);
+  if (mailOrigin === undefined || origins.includes(mailOrigin)) {
+    return origins;
+  }
+  return [...origins, mailOrigin];
+}
+
+/** A path from the environment; unset or blank means none. */
+function parseOptionalPath(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim() ?? '';
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
  * Parses `MAIL_EMAIL_MCP_URL`: the Email connector's MCP endpoint, such as the compose sidecar's
  * `http://mail-email:9557/mcp`. Unset or blank means no mail sidecar, so no Email connector is
  * registered. Anything else that is not an http(s) URL fails the boot.
@@ -1017,6 +1045,16 @@ export interface SharedServerConfiguration {
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
    */
   MAIL_EMAIL_MCP_URL: string | undefined;
+  /**
+   * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
+   * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
+   */
+  MAIL_POLICY_FILE: string | undefined;
+  /**
+   * Where the sidecar's wrapper records the hash of the send list it loaded. The server waits on it after a
+   * change. Env: `MAIL_POLICY_STATUS_FILE`. Default unset.
+   */
+  MAIL_POLICY_STATUS_FILE: string | undefined;
   /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
@@ -1835,8 +1873,13 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
-  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+  FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
+    origins: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+    mailUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  }),
   MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
+  MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

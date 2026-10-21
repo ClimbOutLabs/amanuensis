@@ -25,7 +25,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { MAIL_CONNECTOR_NAME, MAIL_SEND_TOOL_NAMES } from '../email/mailConnector/toolContract';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME, MAIL_SEND_TOOL_NAMES } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -1731,8 +1731,11 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The reason a silent Email read is recorded with. */
+const MAIL_READ_REASON = 'mail_read';
+
 /** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
-function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): string[] {
+async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
   if (
     action.tool_type !== 'mcp' ||
@@ -1742,7 +1745,7 @@ function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext
     return [];
   }
   return mailRecipientsNotListed({
-    listed: ctx.services.mail_listed_addresses ?? [],
+    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
     params: action.canonical_params,
   });
 }
@@ -1768,6 +1771,27 @@ function demoRefusesConnector(input: {
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
  */
+/**
+ * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
+ * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
+ * connector that happens to be named Email.
+ */
+async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Email needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: MAIL_READ_REASON,
+    reason_detail: `Read your email with \`${action.tool_name}\`.`,
+    sensitive_read: true,
+  });
+}
+
 async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
     return autoDenyDecision({
@@ -2208,7 +2232,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
-  const newMailRecipients = mailNewRecipients({ action, ctx });
+  const newMailRecipients = await mailNewRecipients({ action, ctx });
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
     const sentence = externalServiceWhat({
@@ -2457,6 +2481,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
+  }
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    action.mcp_first_party === true &&
+    isMailReadToolName(action.tool_name)
+  ) {
+    return classifyMailRead(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);

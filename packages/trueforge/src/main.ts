@@ -112,7 +112,7 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
-import { registerMailConnectorAtBoot } from './runtime/mailConnector';
+import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -666,6 +666,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tenant_id: TENANT_ID,
     logger,
   });
+  await prepareMailPolicyAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    policyPath: configuration.MAIL_POLICY_FILE,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -705,6 +710,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    mailPolicyPath: configuration.MAIL_POLICY_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({

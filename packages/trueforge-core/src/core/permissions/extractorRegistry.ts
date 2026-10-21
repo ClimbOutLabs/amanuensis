@@ -793,23 +793,26 @@ function addressStrings(value: unknown): string[] {
     .flatMap(([, field]) => addressStrings(field));
 }
 
-/** True when the top-level `to` resolves to at least one visible address. */
+/** True when the top-level `to` or `recipients` resolves to at least one visible address. */
 function namesToRecipient(params: Record<string, unknown>): boolean {
-  return Object.entries(params).some(([key, value]) => normalizeKey(key) === 'to' && addressStrings(value).length > 0);
+  return Object.entries(params).some(
+    ([key, value]) => ['to', 'recipients'].includes(normalizeKey(key)) && addressStrings(value).length > 0,
+  );
 }
 
 const REPLY_WORDS = ['reply', 'respond', 'answer', 'forward'];
 const MAIL_WORDS = ['mail', 'email', 'gmail', 'outlook', 'inbox'];
 
 /**
- * A reply or forward through a mail connector goes to its default recipients when `to` is empty, so `to`
- * must name them. Other reply tools (comments, threads in chat apps) have no `to` and are not mail-shaped.
+ * A reply or forward through a mail connector goes to its default recipients when no recipient is named, so
+ * `to` or `recipients` must name them. Other reply tools (comments, threads in chat apps) have neither and are
+ * not mail-shaped.
  */
 function isMailReply({ words, params }: { words: string; params: Record<string, unknown> }): boolean {
   return (
     hasPhrase(words, ...REPLY_WORDS) &&
     (hasPhrase(words, ...MAIL_WORDS) ||
-      Object.keys(params).some(key => ['to', 'cc', 'bcc'].includes(normalizeKey(key))))
+      Object.keys(params).some(key => ['to', 'recipients', 'cc', 'bcc'].includes(normalizeKey(key))))
   );
 }
 

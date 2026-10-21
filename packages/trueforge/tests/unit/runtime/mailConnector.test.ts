@@ -30,7 +30,7 @@ describe('Email connector registration', () => {
         url: URL,
         description: 'Reads, drafts and sends email from the mail accounts set up for this instance.',
       },
-      first_party: false,
+      first_party: true,
     });
   });
 

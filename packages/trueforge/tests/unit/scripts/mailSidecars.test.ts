@@ -54,11 +54,35 @@ describe('mail and calendar sidecars', () => {
     expect(serviceNamed('mail-email').environment?.['MCP_ALLOWED_HOSTS']).toBe('mail-email');
   });
 
-  it('mail-email never reads the OS keyring and keeps its config and index on its own volume', () => {
+  it('mail-email never reads the OS keyring and keeps its index on its own volume', () => {
     const service = serviceNamed('mail-email');
     expect(service.environment?.['MCP_EMAIL_SERVER_CREDENTIAL_STORAGE']).toBe('plaintext');
-    expect(service.environment?.['MCP_EMAIL_SERVER_CONFIG_PATH']).toBe('/data/config.toml');
-    expect(service.volumes).toEqual(['mail-email-data:/data']);
+    expect(service.volumes).toContain('mail-email-data:/data');
+  });
+
+  it('mail-email reads its send list read-only and never writes it', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.environment?.['MCP_EMAIL_SERVER_CONFIG_PATH']).toBe('/policy/allowed_recipients.toml');
+    expect(service.volumes).toContain('mail-policy:/policy:ro');
+    expect(service.volumes?.some(volume => volume.startsWith('mail-policy:') && !volume.endsWith(':ro'))).toBe(false);
+  });
+
+  it('mail-email starts through the wrapper that restarts it on a new send list', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.entrypoint).toEqual(['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']);
+    expect(service.volumes).toContain('./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro');
+    expect(service.environment?.['AMAN_MAIL_STATUS_FILE']).toBe('/mail-status/loaded.sha256');
+  });
+
+  it('mail-email reads attachment content for the agent as data', () => {
+    expect(serviceNamed('mail-email').environment?.['MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT']).toBe('true');
+  });
+
+  it('the server writes the send list and reads the sidecar status, and nothing else holds the list', () => {
+    const service = serviceNamed('server');
+    expect(service.volumes).toContain('mail-policy:/data/mail-policy');
+    expect(service.volumes).toContain('mail-policy-status:/data/mail-policy-status:ro');
+    expect(service.environment?.['MAIL_POLICY_FILE']).toBe('/data/mail-policy/allowed_recipients.toml');
   });
 
   it('mail-email reads account secrets from an optional git-ignored file only', () => {
