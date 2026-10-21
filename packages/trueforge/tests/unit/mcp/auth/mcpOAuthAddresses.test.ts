@@ -4,7 +4,7 @@ import { listedOriginMiddleware } from '../../../../src/auth/listedOriginContext
 import configuration from '../../../../src/config';
 import { mcpOAuthCallbackUrl, mcpOAuthRedirectUris } from '../../../../src/mcp/auth/mcpOAuthHelpers';
 
-const ORIGINS = ['http://127.0.0.1:8790', 'http://192.168.1.20:8790', 'http://spark.local:8790'];
+const ORIGINS = ['http://127.0.0.1:8790', 'http://192.168.1.20:8790', 'http://host.example.local:8790'];
 const ProbeSchema = z.object({ callback: z.string(), registered: z.array(z.string()) });
 const CALLBACK = '/api/v1/mcp-servers/oauth/callback';
 

@@ -66,6 +66,8 @@ export interface HarnessChatServerExtensions {
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
+    /** Sent with a deny: the text the agent reads as the reason. */
+    reason?: string | undefined;
   }): Promise<HeldActionOutcome>;
   /**
    * Read the most recent context compaction event for a session.
@@ -211,15 +213,17 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     threadId,
     toolCallId,
     answer,
+    reason,
   }: {
     sessionId: string;
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
+    reason?: string | undefined;
   }): Promise<HeldActionOutcome> {
     const approval: TrueForgeApi.ApprovalDecision =
       answer === 'deny'
-        ? { status: 'deny' }
+        ? { status: 'deny', ...(reason === undefined ? {} : { reason }) }
         : { status: 'allow', scope: answer === 'always_allow' ? 'always' : 'once' };
     const stream = await client.sessions.createTurnStream(sessionId, {
       input: [{ type: 'user.tool_approval', threadId, toolCallId, approval }],

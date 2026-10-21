@@ -3,6 +3,7 @@ import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import type { TurnCustom } from '../db/sessionCustom';
 import {
   buildPersonalizationContext,
+  rootIdentityNames,
   type PersonalizationContext,
   type PersonalizationProfile,
   type PersonalizationSpeaker,
@@ -66,13 +67,12 @@ export class PersonalizationTurnResourceResolver extends TurnResourceResolver<Tu
     if (input.agent_info !== undefined) {
       return resolved;
     }
+    // Every root thread gets its identity, even with no profile yet; the names come from the profile.
     // Sub-agent threads are handled above, so the render here always serves the root thread.
     const personalizationCapabilities = personalizationCapabilitiesForTurn(this.personalizationContext(), false);
-    if (personalizationCapabilities.length === 0) {
-      return resolved;
-    }
     return {
       ...resolved,
+      definition: { ...resolved.definition, identity: rootIdentityNames(this.#profile) },
       extraCapabilities: [...(resolved.extraCapabilities ?? []), ...personalizationCapabilities],
     };
   }

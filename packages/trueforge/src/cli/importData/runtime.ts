@@ -141,6 +141,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),
           memoryTarget: { kind: 'markdown', markdownDir: configuration.MEMORY_MARKDOWN_DIR },
+          ownerName: configuration.OWNER_NAME,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
           // The one-off container has no network: a model that is not on disk is "not ready", never fetched.
           knowledgeEmbedder: {

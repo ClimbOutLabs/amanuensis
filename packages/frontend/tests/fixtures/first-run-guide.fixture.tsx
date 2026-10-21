@@ -18,7 +18,8 @@ import { createRoot } from 'react-dom/client';
  * the checklist fresh, half done and done, the quiet name line after dismissal, the checklist as
  * Settings shows it, and the Personalization page. Everything on screen is invented.
  */
-export type FixtureState = 'fresh' | 'half' | 'done' | 'line' | 'settings' | 'panel' | 'connected' | 'hidden';
+export type FixtureState =
+  'fresh' | 'half' | 'done' | 'line' | 'settings' | 'panel' | 'connected' | 'hidden' | 'tour-focus' | 'tour-none';
 export const FIXTURE_STATES: readonly FixtureState[] = [
   'fresh',
   'half',
@@ -28,6 +29,8 @@ export const FIXTURE_STATES: readonly FixtureState[] = [
   'panel',
   'connected',
   'hidden',
+  'tour-focus',
+  'tour-none',
 ];
 const TOUR_HIDDEN_STORAGE_KEY = 'aman.hide_tour';
 
@@ -43,6 +46,7 @@ const EMPTY_PROFILE: PersonalizationProfile = {
   address_as: null,
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -50,6 +54,9 @@ const EMPTY_PROFILE: PersonalizationProfile = {
 function profileFor(state: FixtureState): PersonalizationProfile {
   if (state === 'half' || state === 'done' || state === 'settings') {
     return { ...EMPTY_PROFILE, assistant_name: 'Aman', user_name: 'Sam Rivera', address_as: 'Sam' };
+  }
+  if (state === 'tour-focus') {
+    return { ...EMPTY_PROFILE, help_areas: ['focus'] };
   }
   return EMPTY_PROFILE;
 }
@@ -68,6 +75,8 @@ function setupFor(state: FixtureState): AmanSetupState {
     case 'connected':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: true };
     case 'hidden':
+    case 'tour-focus':
+    case 'tour-none':
       return { ...base, modelName: 'local/qwen3-8b', hasChatted: false };
   }
 }
@@ -100,11 +109,27 @@ function Screen({ state }: { state: FixtureState }) {
     return (
       <div className="flex min-h-screen flex-col justify-center py-8">
         <AmanTour
-          capabilities={{ email: true, calendar: true, sandbox: true }}
+          capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
+          helpAreas={[]}
           canSend
           onSend={() => {}}
           onHide={() => {}}
           setup={null}
+        />
+      </div>
+    );
+  }
+  if (state === 'tour-focus' || state === 'tour-none') {
+    // Every capability granted, with the setup card open, so the chosen areas show in full.
+    return (
+      <div className="flex min-h-screen flex-col justify-center py-8">
+        <AmanTour
+          capabilities={{ email: true, calendar: true, sandbox: true, maps: true }}
+          helpAreas={profileFor(state).help_areas}
+          canSend
+          onSend={() => {}}
+          onHide={() => {}}
+          setup={<AmanFirstRunGuide placement="chat" />}
         />
       </div>
     );

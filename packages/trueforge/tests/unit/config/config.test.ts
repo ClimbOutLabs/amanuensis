@@ -413,23 +413,22 @@ describe('parseAllowedOrigins', () => {
   it('keeps plain http for this computer and private networks, and https for anything', () => {
     expect(
       parseAllowedOrigins(
-        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark.local:8791,https://aman.example.com',
+        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://host.example.local:8791,https://aman.example.com',
       ),
     ).toEqual([
       'http://127.0.0.1:8791',
       'http://localhost:8791',
       'http://192.168.1.20:8791',
       'http://100.101.102.103:8791',
-      'http://spark.local:8791',
+      'http://host.example.local:8791',
       'https://aman.example.com',
     ]);
   });
 
   it('normalises and removes duplicates', () => {
-    expect(parseAllowedOrigins('HTTP://Spark.Local:8791,http://spark.local:8791,https://a.example.com:443')).toEqual([
-      'http://spark.local:8791',
-      'https://a.example.com',
-    ]);
+    expect(
+      parseAllowedOrigins('HTTP://Host.Example.Local:8791,http://host.example.local:8791,https://a.example.com:443'),
+    ).toEqual(['http://host.example.local:8791', 'https://a.example.com']);
   });
 
   it.each(['http://203.0.113.9:8791', 'http://aman.example.com', 'http://8.8.8.8'])(
@@ -440,11 +439,11 @@ describe('parseAllowedOrigins', () => {
   );
 
   it.each([
-    'ftp://spark:8791',
-    'http://spark:8791/app',
-    'http://user@spark:8791',
-    'http://spark:8791?x=1',
-    'spark',
+    'ftp://host:8791',
+    'http://host:8791/app',
+    'http://user@host:8791',
+    'http://host:8791?x=1',
+    'host',
     'http://',
   ])('refuses %s', entry => {
     expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);

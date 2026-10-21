@@ -1,5 +1,6 @@
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
+import type { RunCodeBackend } from '../../../src/core/sandbox/driver/RunCodeService';
 import { PACKAGE_GIT_DEPENDENCY_MESSAGE } from '../../../src/core/sandbox/packageMirrors';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, type BoundRepository } from '../../../src/core/sandbox/Sandbox';
@@ -13,6 +14,13 @@ const BOUND_REPOSITORY: BoundRepository = {
   revision: 1,
   workspace_cwd: '/work',
   commands: [],
+};
+
+/** A run_code driver that can reach the package gateway, so an install can reach the approval card. */
+const PACKAGE_GATEWAY_RUN_CODE_SERVICE: RunCodeBackend = {
+  packageGatewayCapable: true,
+  runCode: () => Promise.reject(new Error('run_code is not used in these tests')),
+  scrubDispatchErrorText: text => text,
 };
 
 const PACKAGE_CARD_WHAT = "Aman wants to download this project's packages from the public package sites (PyPI).";
@@ -78,6 +86,7 @@ function makeSandbox(input: {
     loadPackageMirrorToken: async () => (input.allowed() ? 'mirror-token' : undefined),
     loadPackageDownloadsAllowed: async () => input.allowed(),
     allowPackageDownloads: input.allowPackageDownloads,
+    runCodeService: PACKAGE_GATEWAY_RUN_CODE_SERVICE,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -123,14 +132,32 @@ describe('the first package download in a repo', () => {
     expect(info.tier3_card?.plain_what).not.toContain('public package sites');
   });
 
-  it('shows the ordinary card wording when no repository is bound', async () => {
+  it.each([
+    ['pip install requests', 'pip'],
+    ['npm install left-pad', 'npm'],
+  ])('refuses %s before any card when no repository is bound, and never runs it', async (command, label) => {
+    const execCalls: SandboxExecParams[] = [];
     const sandbox = makeSandbox({
-      execCalls: [],
+      execCalls,
       allowed: () => false,
       allowPackageDownloads: async () => undefined,
     });
-    const info = await sandbox.toolCallInfo(PIP_CALL);
-    expect(info.tier3_card?.plain_what).not.toContain('public package sites');
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Install packages', purpose: 'execute', command },
+    };
+    const info = await sandbox.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(false);
+    expect(info.tier3_card).toBeUndefined();
+
+    const response = await sandbox.callTool(call);
+    if (!isCallToolResponseResult(response)) throw new Error(`Expected a ${label} refusal result`);
+    expect(response.result.isError).toBe(true);
+    const content = response.result.content[0];
+    if (content?.type !== 'text') throw new Error('Expected a text tool result');
+    expect(content.text).toContain('Packages cannot be downloaded in this chat, so this install was not run.');
+    expect(content.text).toContain('open this work on a repository that allows downloads');
+    expect(execCalls.some(params => params.command === command)).toBe(false);
   });
 
   it('is refused with the card while unapproved: nothing runs and nothing is recorded', async () => {

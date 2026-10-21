@@ -114,6 +114,7 @@ import { seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
+import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -655,6 +656,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     mcpServerStore: mcpOAuthStore,
     catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await seedOwnerNameAtBoot({
+    owner_name: configuration.OWNER_NAME,
+    oidc: configuration.OIDC,
+    globalSettingsStore,
+    personalizationStore,
     tenant_id: TENANT_ID,
     logger,
   });

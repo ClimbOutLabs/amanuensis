@@ -165,6 +165,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           mcpCatalog: deps.mcpCatalog,
           withTransaction: deps.withTransaction,
           memoryTarget,
+          ownerName: configuration.OWNER_NAME,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
           knowledgeEmbedder,
           logger: deps.logger,
