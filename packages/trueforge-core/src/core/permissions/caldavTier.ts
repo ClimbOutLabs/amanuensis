@@ -86,6 +86,10 @@ function cardFor({
   if (written === undefined) {
     return null;
   }
+  // A change or cancellation names every guest it may email, so a list too long to name gives the generic card.
+  if ((tool === 'update_event' || tool === 'delete_event') && guestListTooLong(review)) {
+    return null;
+  }
   // The confirm token is the approval itself, not something the call writes, so it is not listed.
   const args = Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'confirm_token'));
   if (Object.keys(args).some(key => !written.includes(key))) {
@@ -126,12 +130,20 @@ function plainWhatFor({
     };
   }
   if (tool === 'update_event') {
-    return { text: `Change ${existing.text}.`, cannot_be_undone: null };
+    return {
+      text: `Change ${existing.text}.${emailedGuestsText({ review, lead: 'Changing this' })}`,
+      cannot_be_undone: null,
+    };
   }
   if (tool === 'delete_event') {
+    // A cancellation is sent to every guest, or might be when the guest list cannot be read.
+    const guests = review?.attendees ?? null;
+    const mayEmailGuests = guests === null || guests.length > 0;
     return {
-      text: `Delete ${existing.text}.`,
-      cannot_be_undone: "This removes the event from the calendar. It can't be restored from here.",
+      text: `Delete ${existing.text}.${emailedGuestsText({ review, lead: 'Deleting this' })}`,
+      cannot_be_undone: mayEmailGuests
+        ? "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent."
+        : "This removes the event from the calendar. It can't be restored from here.",
     };
   }
   // respond_to_event: only the organizer is sent the reply, so only the organizer is named.
@@ -145,6 +157,27 @@ function plainWhatFor({
     text: `${verb} ${existing.text}. ${organizerText}`,
     cannot_be_undone: "The reply to the organizer can't be unsent.",
   };
+}
+
+/** Longest guest list the card names in full. A longer one gives the generic card. */
+const MAX_NAMED_GUESTS = 20;
+
+/** The sentence that names the guests a change would email. Empty when the event has no guests. */
+function emailedGuestsText({ review, lead }: { review: CaldavEventReview | null; lead: string }): string {
+  const guests = review?.attendees ?? null;
+  if (guests === null) {
+    return ' The guest list could not be read, so anyone invited may be emailed.';
+  }
+  if (guests.length === 0) {
+    return '';
+  }
+  return ` ${lead} will email: ${guests.map(shown).join(', ')}.`;
+}
+
+/** True when the guest list is too long to name in full on the card. */
+function guestListTooLong(review: CaldavEventReview | null): boolean {
+  const guests = review?.attendees ?? [];
+  return guests.length > MAX_NAMED_GUESTS || guests.join(', ').length > SEND_VALUE_MAX_CHARS;
 }
 
 /** The title and time the card names. A failed lookup is said plainly, with the event id. */

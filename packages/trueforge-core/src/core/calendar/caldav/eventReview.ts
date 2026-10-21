@@ -9,7 +9,14 @@ export interface CaldavEventReview {
   when: string | null;
   /** Who organizes the event, by name or address; null when neither can be read. */
   organizer: string | null;
+  /** Who is invited, by name or address, in the order the event lists them. Null when the list cannot be read. */
+  attendees: string[] | null;
 }
+
+const GuestSchema = z.looseObject({
+  name: z.string().optional(),
+  email: z.string().optional(),
+});
 
 const TimeValueSchema = z.object({
   value: z.string(),
@@ -24,12 +31,8 @@ const GetEventResultSchema = z.object({
   event: z.looseObject({
     summary: z.string().optional(),
     start: TimeValueSchema.optional(),
-    organizer: z
-      .looseObject({
-        name: z.string().optional(),
-        email: z.string().optional(),
-      })
-      .optional(),
+    organizer: GuestSchema.optional(),
+    attendees: z.array(GuestSchema).optional(),
   }),
 });
 
@@ -68,21 +71,31 @@ export function formatCaldavWhen(start: CaldavTimeValue): string | null {
 export function caldavEventReviewFrom({ id, result }: { id: string; result: unknown }): CaldavEventReview {
   const parsed = GetEventResultSchema.safeParse(result);
   if (!parsed.success) {
-    return { id, title: null, when: null, organizer: null };
+    return { id, title: null, when: null, organizer: null, attendees: null };
   }
-  const { summary, start, organizer } = parsed.data.event;
+  const { summary, start, organizer, attendees } = parsed.data.event;
   const title = summary === undefined || summary.trim() === '' ? null : summary;
   return {
     id,
     title,
     when: start === undefined ? null : formatCaldavWhen(start),
     organizer: organizerName(organizer),
+    attendees: attendees === undefined ? null : attendees.map(guestName),
   };
 }
 
-function organizerName(
-  organizer: { name?: string | undefined; email?: string | undefined } | undefined,
-): string | null {
-  const name = [organizer?.name, organizer?.email].find(text => text !== undefined && text.trim() !== '');
+function organizerName(guest: z.infer<typeof GuestSchema> | undefined): string | null {
+  return guest === undefined ? null : readableGuest(guest);
+}
+
+/** Shown for an invited entry with no readable name or address, so it is still counted. */
+const UNNAMED_GUEST = 'a guest with no name or address';
+
+function guestName(guest: z.infer<typeof GuestSchema>): string {
+  return readableGuest(guest) ?? UNNAMED_GUEST;
+}
+
+function readableGuest(guest: z.infer<typeof GuestSchema>): string | null {
+  const name = [guest.name, guest.email].find(text => text !== undefined && text.trim() !== '');
   return name ?? null;
 }

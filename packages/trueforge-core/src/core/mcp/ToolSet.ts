@@ -1,4 +1,4 @@
-import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';

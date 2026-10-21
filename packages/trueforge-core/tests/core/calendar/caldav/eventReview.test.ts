@@ -23,7 +23,32 @@ describe('caldavEventReviewFrom', () => {
         id: 'ev1',
         result: { event: { summary: 'Dentist', start: { value: '2026-10-22T14:00:00+02:00', all_day: false } } },
       }),
-    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null });
+    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null, attendees: null });
+  });
+
+  it('lists the guests by name, or by address when there is no name, in the order given', () => {
+    const start = { value: '2026-10-22T14:00:00+02:00', all_day: false };
+    const review = caldavEventReviewFrom({
+      id: 'ev1',
+      result: {
+        event: {
+          summary: 'Dentist',
+          start,
+          attendees: [{ name: 'Sam Lee' }, { email: 'dana@example.com' }, {}],
+        },
+      },
+    });
+    expect(review.attendees).toEqual(['Sam Lee', 'dana@example.com', 'a guest with no name or address']);
+  });
+
+  it('gives an empty guest list for an event with no guests, and null when the guests are unreadable', () => {
+    const start = { value: '2026-10-22T14:00:00+02:00', all_day: false };
+    expect(
+      caldavEventReviewFrom({ id: 'ev1', result: { event: { summary: 'Dentist', start, attendees: [] } } }).attendees,
+    ).toEqual([]);
+    expect(
+      caldavEventReviewFrom({ id: 'ev1', result: { event: { summary: 'Dentist', attendees: 'Sam' } } }).attendees,
+    ).toBeNull();
   });
 
   it('names the organizer by name, or by address when there is no name', () => {
@@ -54,6 +79,7 @@ describe('caldavEventReviewFrom', () => {
       title: null,
       when: null,
       organizer: null,
+      attendees: null,
     });
   });
 });

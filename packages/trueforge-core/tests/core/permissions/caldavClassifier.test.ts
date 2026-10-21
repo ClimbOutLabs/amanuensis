@@ -38,6 +38,7 @@ const DENTIST: CaldavEventReview = {
   title: 'Dentist',
   when: '22 Oct 2026, 14:00 (Europe/Berlin)',
   organizer: 'Office Admin',
+  attendees: [],
 };
 const EVENT_ID = { id: 'ev1' };
 
@@ -245,6 +246,54 @@ describe('CalDAV changes', () => {
     expect(decision.card?.plain_what).not.toMatch(/^Add /);
   });
 
+  it('names the guests an update would email, so the person sees who is told', async () => {
+    const decision = await classifyTier(
+      caldavAction(
+        'update_event',
+        { ...EVENT_ID, summary: 'Moved' },
+        { caldav_event: { ...DENTIST, attendees: ['Sam Lee', 'dana@example.com'] } },
+      ),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toBe(
+      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Changing this will email: Sam Lee, dana@example.com.',
+    );
+  });
+
+  it('says anyone invited may be emailed when the guest list could not be read', async () => {
+    const decision = await classifyTier(
+      caldavAction(
+        'update_event',
+        { ...EVENT_ID, summary: 'Moved' },
+        { caldav_event: { ...DENTIST, attendees: null } },
+      ),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toContain('The guest list could not be read, so anyone invited may be emailed.');
+  });
+
+  it('gives the generic card when a change would email more guests than the card can name', async () => {
+    const attendees = Array.from({ length: 21 }, (_, index) => `guest${String(index)}@example.com`);
+    const decision = await classifyTier(
+      caldavAction('update_event', { ...EVENT_ID, summary: 'Moved' }, { caldav_event: { ...DENTIST, attendees } }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).not.toMatch(/^Change /);
+  });
+
+  it('shows a delete card that names the guests and says a cancellation cannot be unsent', async () => {
+    const decision = await classifyTier(
+      caldavAction('delete_event', EVENT_ID, { caldav_event: { ...DENTIST, attendees: ['Sam Lee'] } }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toBe(
+      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Deleting this will email: Sam Lee.',
+    );
+    expect(decision.card?.cannot_be_undone).toBe(
+      "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent.",
+    );
+  });
+
   it('shows a delete card with a warning that it cannot be restored from here', async () => {
     const decision = await classifyTier(caldavAction('delete_event', EVENT_ID, { caldav_event: DENTIST }), makeCtx());
     expect(decision.tier).toBe(3);
@@ -257,7 +306,7 @@ describe('CalDAV changes', () => {
   it('escapes a title that carries hidden characters or quotes', async () => {
     const decision = await classifyTier(
       caldavAction('delete_event', EVENT_ID, {
-        caldav_event: { id: 'ev1', title: 'Say "hi"', when: null, organizer: null },
+        caldav_event: { id: 'ev1', title: 'Say "hi"', when: null, organizer: null, attendees: [] },
       }),
       makeCtx(),
     );
