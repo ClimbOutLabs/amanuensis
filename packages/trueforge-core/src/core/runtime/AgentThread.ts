@@ -72,10 +72,13 @@ import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
+  allowsSearchChatGrant,
   allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  offersChatApproval,
+  SEARCH_CHAT_GRANT_KEY,
 } from '../mcp/approvalGrant';
 import { convertMCPServersToTools, type ConvertToolsResult, type MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -890,7 +893,7 @@ function validateApprovalMessage({
   if (
     message.approval.status === 'allow' &&
     message.approval.scope === 'chat' &&
-    !allowsChatApproval(pending.tool_info)
+    !offersChatApproval(pending.tool_info)
   ) {
     throw new InvalidAgentSendInputError(
       `messages[${String(index)}] chat-scoped approval is not available for tool_call_id '${message.tool_call_id}'`,
@@ -1799,6 +1802,8 @@ export class AgentThread {
             allowsChatApproval(pending.tool_info)
           ) {
             this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+          } else if (approval.approval.scope === 'chat' && allowsSearchChatGrant(pending.tool_info)) {
+            this.chatApprovalGrants.add(SEARCH_CHAT_GRANT_KEY);
           }
           if (
             approval.approval.scope === 'always' &&
@@ -4381,7 +4386,7 @@ export class AgentThread {
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
-          can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          can_chat_allow: offersChatApproval(toolCall.tool_info),
           can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };

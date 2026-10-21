@@ -1,5 +1,6 @@
 'use client';
 
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useRef, useState, type FC } from 'react';
 
@@ -147,6 +148,36 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
   );
 }
 
+/** The search service's own fields: kept out of the way, but still listed, behind a closed disclosure. */
+function PlumbingDetails({ text }: { text: string }) {
+  return (
+    <details className="rounded border border-border bg-primary-bg px-3 py-2">
+      <summary className="cursor-pointer text-sm text-text-secondary">Details</summary>
+      <p className="mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        Also sent by the search service
+      </p>
+      <FoldedText
+        text={text}
+        as="pre"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+      />
+    </details>
+  );
+}
+
+/**
+ * The main block of "Exactly what will be sent": every line except the search service's own, which the
+ * Details disclosure lists. Lines are matched exactly, so nothing is dropped from the full list.
+ */
+function visibleOutboundText(text: string, plumbing: string | null): string {
+  if (plumbing === null) return text;
+  const folded = new Set(plumbing.split('\n'));
+  return text
+    .split('\n')
+    .filter(line => !folded.has(line))
+    .join('\n');
+}
+
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
@@ -201,6 +232,13 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           : persona !== null
             ? PERSONA_BADGE
             : null;
+  // A held search's chat choice only lifts its private-read check, so it says what it lets through.
+  const chatChoice = isSearchHoldCardText(card.plain_what)
+    ? APPROVAL_CHOICES.allowSearchesForChat
+    : APPROVAL_CHOICES.approveForChat;
+  const plumbingText = card.outbound_plumbing_text ?? null;
+  const outboundShown =
+    card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
   return (
     <div className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
@@ -257,7 +295,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {persona !== null && <PersonaDetails persona={persona} />}
 
-        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
+        {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
+        {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
 
         <div className="flex flex-wrap gap-2">
           <Button
@@ -274,12 +313,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             <Button
               variant="secondary"
               size="small"
-              title={APPROVAL_CHOICES.approveForChat.hint}
+              title={chatChoice.hint}
               onClick={onApproveForChat}
               disabled={disabled}
               className="flex-1"
             >
-              {APPROVAL_CHOICES.approveForChat.label}
+              {chatChoice.label}
             </Button>
           )}
           {onApproveAlways !== undefined && (

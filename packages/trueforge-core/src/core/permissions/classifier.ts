@@ -151,7 +151,9 @@ import {
   hasReadPrivateData,
   namesHostAtFetchLimit,
   privateTextForChecks,
+  SEARCH_AFTER_PRIVATE_READ_REASON,
   SEARCH_AFTER_READ_SILENT_REASON,
+  SEARCH_CHAT_GRANTED_SILENT_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1731,6 +1733,27 @@ async function outboundGuard(input: {
 }
 
 /**
+ * The search service's own plumbing lines of a held search's card. The card's "Exactly what will be sent" still
+ * lists every argument; these lines are also named here so the card can fold them behind a Details disclosure.
+ */
+function searchPlumbingText(input: {
+  params: Record<string, unknown> | undefined;
+  plumbingFields: readonly string[];
+}): string | null {
+  if (input.params === undefined) {
+    return null;
+  }
+  const plumbing = new Set(input.plumbingFields);
+  const hidden: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input.params)) {
+    if (plumbing.has(key)) {
+      hidden[key] = value;
+    }
+  }
+  return renderOutboundArguments(hidden).text;
+}
+
+/**
  * A designated-provider call that stops for approval. The card shows the exact text the call would
  * send. An unattended run holds it for the owner like any other call that asks.
  */
@@ -1774,6 +1797,10 @@ async function holdSearchCall(input: {
       amount: null,
       parsed_command: null,
       outbound_text: fields.outbound_text,
+      outbound_plumbing_text: searchPlumbingText({
+        params: input.params,
+        plumbingFields: action.mcp_search_plumbing_fields ?? [],
+      }),
       destination_host: fields.destination_host,
       outbound_truncated: fields.outbound_truncated,
     },
@@ -1879,8 +1906,11 @@ async function classifySearchProviderTool(input: {
     }
   }
   // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
-  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
-    return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+  // A chat grant skips only this hold. The checks above ran already, and the checks below still hold.
+  const privateReadHeld = ctx.services.private_reads.hasPrivateDataRead(ctx);
+  const chatGranted = privateReadHeld && ctx.web_search.searchChatGranted;
+  if (privateReadHeld && !chatGranted) {
+    return held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', HOLD_SAY.search_limit);
@@ -1895,7 +1925,11 @@ async function classifySearchProviderTool(input: {
     return held('mcp_search_host_limit', HOLD_SAY.site_limit);
   }
   return tier1Decision({
-    reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
+    reason: chatGranted
+      ? SEARCH_CHAT_GRANTED_SILENT_REASON
+      : readMode
+        ? SEARCH_AFTER_READ_SILENT_REASON
+        : SEARCH_SILENT_REASON,
     reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,

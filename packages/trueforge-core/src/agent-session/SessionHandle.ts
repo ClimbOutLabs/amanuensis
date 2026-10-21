@@ -5,6 +5,7 @@ import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/Re
 import type { ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
+import { SEARCH_CHAT_GRANT_KEY } from '../core/mcp/approvalGrant';
 import {
   isSerializedImplementationPlanGrant,
   serializeImplementationPlanGrant,
@@ -414,6 +415,8 @@ export class SessionHandle<
       const chatApprovalGrants = new Set(
         this.session.approval_grants.filter(value => !isSerializedImplementationPlanGrant(value)),
       );
+      // Read from the saved session, so a grant from another chat never reaches this one.
+      input.resolver.webSearchTurn.searchChatGranted = chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not

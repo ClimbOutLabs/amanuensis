@@ -8477,7 +8477,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived exact-tool grants created by \"Approve for this chat\" (server:tool pairs).",
+            "description": "Server-derived grants created by \"Approve for this chat\" (server:tool pairs) and \"Allow searches in this chat\".",
             "items": {
               "type": "string"
             },
@@ -9995,6 +9995,13 @@
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
+          },
+          "outbound_plumbing_text": {
+            "description": "Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "outbound_text": {
             "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",

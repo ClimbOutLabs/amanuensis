@@ -23,9 +23,19 @@ export const SEARCH_SILENT_REASON = 'mcp_search_provider';
 /** Reason code for a search that ran without asking after a private read, because its text was checked. */
 export const SEARCH_AFTER_READ_SILENT_REASON = 'mcp_search_after_read_checked';
 
+/** Reason code for a search that ran without asking under "Allow searches in this chat". */
+export const SEARCH_CHAT_GRANTED_SILENT_REASON = 'mcp_search_chat_granted';
+
+/** Reason code for a search held because the chat has read private data. */
+export const SEARCH_AFTER_PRIVATE_READ_REASON = 'mcp_search_after_private_read';
+
 /** Whether a decision reason is a search that ran without asking, after a private read or not. */
 export function isSilentSearchReason(reason: string): boolean {
-  return reason === SEARCH_SILENT_REASON || reason === SEARCH_AFTER_READ_SILENT_REASON;
+  return (
+    reason === SEARCH_SILENT_REASON ||
+    reason === SEARCH_AFTER_READ_SILENT_REASON ||
+    reason === SEARCH_CHAT_GRANTED_SILENT_REASON
+  );
 }
 
 /** Reason codes for a designated-provider call that stops for approval, and why. */
@@ -35,7 +45,7 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_limit',
   'mcp_search_unreturned_url',
   'mcp_search_host_limit',
-  'mcp_search_after_private_read',
+  SEARCH_AFTER_PRIVATE_READ_REASON,
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
@@ -62,6 +72,8 @@ export interface WebSearchTurnState {
   sentText: string;
   /** True once the session read private data (mail, calendar or a secret), after which a search is checked or asks. */
   privateDataRead: boolean;
+  /** True when the chat's saved "Allow searches in this chat" grant is in force for this turn. */
+  searchChatGranted: boolean;
   /** Text of the private reads' results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
   /** Private reads this turn that reached the model, by any thread. Each must have its result kept as text. */
@@ -81,6 +93,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     fetchesByHost: new Map(),
     sentText: '',
     privateDataRead: false,
+    searchChatGranted: false,
     privateTexts: [],
     privateReadCalls: 0,
     privateTextsKept: 0,
