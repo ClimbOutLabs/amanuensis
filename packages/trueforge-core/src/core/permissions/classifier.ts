@@ -24,6 +24,8 @@ import {
   SEND_DRAFT_TOOL_NAME,
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
+import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
+import { MAIL_CONNECTOR_NAME, MAIL_SEND_TOOL_NAMES } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isScheduleStatusToolName,
@@ -1725,6 +1727,22 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): string[] {
+  const { action, ctx } = input;
+  if (
+    action.tool_type !== 'mcp' ||
+    action.mcp_server_name !== MAIL_CONNECTOR_NAME ||
+    !MAIL_SEND_TOOL_NAMES.some(name => name === action.tool_name)
+  ) {
+    return [];
+  }
+  return mailRecipientsNotListed({
+    listed: ctx.services.mail_listed_addresses ?? [],
+    params: action.canonical_params,
+  });
+}
+
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
@@ -2122,6 +2140,42 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
   if (demoRefusesConnector({ action, ctx, extraction })) {
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
+  }
+
+  // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  const newMailRecipients = mailNewRecipients({ action, ctx });
+  if (newMailRecipients.length > 0) {
+    const { fields } = extraction;
+    const sentence = externalServiceWhat({
+      tool_name: action.tool_name,
+      destination: fields.destination,
+      recipient: fields.recipient,
+      amount: fields.amount,
+    });
+    return tier3Decision({
+      card: {
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} ${sentence}`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
+      },
+      reason: 'mail_new_recipient',
+      reason_detail: 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.

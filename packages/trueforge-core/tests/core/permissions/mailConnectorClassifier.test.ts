@@ -122,6 +122,81 @@ describe('Email connector classifier', () => {
     });
   });
 
+  describe('new recipients', () => {
+    const LISTED = 'dana@example.com';
+    const STRANGER = 'stranger@example.com';
+    const NEW_RECIPIENT_LINE = `New recipient. You have never emailed ${STRANGER}.`;
+
+    function ctxWithList(mail_listed_addresses: readonly string[] | null): ClassifyContext {
+      const ctx = makeCtx();
+      return { ...ctx, services: { ...ctx.services, mail_listed_addresses } };
+    }
+
+    it('a send to a listed address keeps the plain send card', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { to: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.reason).not.toBe('mail_new_recipient');
+      expect(decision.card?.plain_what).not.toContain('New recipient');
+    });
+
+    it('a send to an address not on the list asks with the new-recipient card', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { to: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+      expect(decision.card?.outbound_text).toContain(SUBJECT);
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('one unlisted address among listed ones is still a new recipient', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { to: [LISTED], cc: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+      expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+    });
+
+    it('matches the list ignoring case and edge space', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { to: [' DANA@Example.com '], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).not.toBe('mail_new_recipient');
+    });
+
+    it('with no list at all, every recipient is new', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { to: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList(null),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+    });
+
+    it('forward_email to an address not on the list asks with the new-recipient card', async () => {
+      const decision = await classifyTier(
+        mailCall('forward_email', { email_id: 'e1', to: [STRANGER], subject: SUBJECT }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, reason: 'mail_new_recipient' });
+      expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+    });
+
+    it('save_draft is not a send, so it never asks about new recipients', async () => {
+      const decision = await classifyTier(
+        mailCall('save_draft', { to: [STRANGER], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('connector_send');
+      expect(decision.card?.plain_what).not.toContain('New recipient');
+    });
+  });
+
   describe('unknown tools', () => {
     it('a tool the Email connector does not offer with a mail word in its name is never silent', async () => {
       const decision = await classifyTier(mailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
