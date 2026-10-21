@@ -24,7 +24,7 @@ import { ShellActions } from '../atoms/ShellActions.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
-import { useChatHeaderContentVisible } from '../hooks/useChatChromeActionsVisible.js';
+import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode, type ShellMode } from '../server/ShellModeContext.js';
 import { resolveBrandChrome } from '../theme/brand.js';
@@ -259,7 +259,6 @@ export function SidebarLayout({ className }: { className?: string }) {
     () => shell?.setHistoryCollapsed(!historyCollapsed),
     [shell, historyCollapsed],
   );
-  const hasChatHeaderContent = useChatHeaderContentVisible();
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -287,6 +286,7 @@ export function SidebarLayout({ className }: { className?: string }) {
 
   return (
     <div className={cn('relative flex h-full min-h-0 w-full min-w-0', className)}>
+      <HelpNewChatBridge />
       <SidebarRail
         className="hidden md:flex"
         showHistoryToggle={recentHistoryAvailable}
@@ -309,12 +309,13 @@ export function SidebarLayout({ className }: { className?: string }) {
             when visually hidden on small screens so host action-slot state persists).
             Mobile reaches theme/settings via the nav drawer rail. */}
         <PageHeader
+          helpAction={!overlayOpen}
           className={cn(
             'bg-topbar-bg',
             // Desktop: hide when settings/idle or the thread header has nothing to show
             // (empty untitled draft). Mobile still needs the menu button.
             // Builder mode keeps New Agent and its actions beside the persistent config.
-            (overlayOpen || isIdle || !hasChatHeaderContent) && 'md:hidden',
+            overlayOpen && 'md:hidden',
           )}
           start={
             !overlayOpen ? (
