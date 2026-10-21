@@ -1385,7 +1385,11 @@ function runCodeEnvironmentSentences({
   packageDownloads: boolean;
 }): string {
   if (offline) {
-    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
+    // The package gateway is separate from the sandbox network, so an offline sandbox can still download.
+    const packages = packageDownloads
+      ? 'Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again.'
+      : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }
   if (packageDownloads) {
     return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again. Never use the network to fetch web content.';

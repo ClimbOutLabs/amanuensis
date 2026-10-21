@@ -379,6 +379,17 @@ describe('Sandbox run_code package downloads wording', () => {
     expect(description).not.toContain('Packages can be downloaded');
   });
 
+  it('says packages can be downloaded when the sandbox is offline but downloads are allowed for the chat', () => {
+    const description = createSandboxRunCodeDescription({
+      offline: true,
+      packageDownloads: true,
+      workspaceDir: '/workspace',
+    });
+    expect(description).toContain('has no internet access');
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('cannot be downloaded');
+  });
+
   it('says there are no installs when the network is up but downloads are not allowed', () => {
     const description = createSandboxRunCodeDescription({
       offline: false,
