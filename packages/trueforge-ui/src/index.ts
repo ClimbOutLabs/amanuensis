@@ -71,6 +71,8 @@ export type {
   TableRowProps,
   TableTokenPaginationProps,
 } from './atoms/primitives/Table.js';
+export { AllClear, GoldTick, HandNote, Highlight, StubTear } from './atoms/Reward.js';
+export type { AllClearProps, HandNoteProps, RewardPlayProps, StubTearProps } from './atoms/Reward.js';
 export { ScheduleFormDrawer } from './atoms/schedules/ScheduleFormDrawer.js';
 export type { ScheduleFormDrawerProps } from './atoms/schedules/ScheduleFormDrawer.js';
 export { ScheduleFormFields } from './atoms/schedules/ScheduleFormFields.js';
@@ -84,6 +86,8 @@ export { TestScheduleScreen } from './atoms/schedules/TestScheduleScreen.js';
 export type { ScheduleMcpMount, TestScheduleScreenProps } from './atoms/schedules/TestScheduleScreen.js';
 export { SchedulesButton } from './atoms/SchedulesButton.js';
 export type { SchedulesButtonProps } from './atoms/SchedulesButton.js';
+export { useHighlightedCard, useRewardLedger } from './hooks/useRewardLedger.js';
+export type { HighlightCandidates, RewardContext, RewardRequest } from './hooks/useRewardLedger.js';
 export { Icon } from './icons/Icon.js';
 export type { IconProps } from './icons/Icon.js';
 
