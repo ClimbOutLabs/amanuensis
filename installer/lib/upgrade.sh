@@ -100,6 +100,27 @@ upgrade_switch() {
   log_event "upgrade to $REL_APP_TAG"
 }
 
+# The source a branch that tracks nothing would be pulled from: the checkout's only remote, when
+# it has exactly one. With no remote, or several to choose from, there is no safe guess.
+upgrade_fallback_remote() {
+  local remotes
+  remotes=$(git -C "$REPO_ROOT" remote 2>/dev/null) || remotes=
+  if [ "$(printf '%s\n' "$remotes" | grep -c . || true)" = 1 ]; then
+    printf '%s' "$remotes"
+  fi
+}
+
+# The checkout path wrapped in double quotes, with the few characters that stay special inside
+# double quotes escaped, so a printed command still runs when the path has spaces or the like.
+upgrade_quoted_path() {
+  local path=$1
+  path=${path//\\/\\\\}
+  path=${path//\"/\\\"}
+  path=${path//\$/\\$}
+  path=${path//\`/\\\`}
+  printf '"%s"' "$path"
+}
+
 # Whether the checkout is missing commits that its source has. The tags an upgrade compares come
 # from this checkout alone, so a checkout that fell behind its source looks current until the
 # source is asked. Fetching just the branch the checkout is on is enough to tell; nothing is
@@ -116,7 +137,8 @@ upgrade_checkout_behind() {
     source_ref=${tracked#*/}
     UPGRADE_PULL_ARGS=
   elif [ -n "$branch" ]; then
-    remote=origin
+    remote=$(upgrade_fallback_remote)
+    [ -n "$remote" ] || return 1
     source_ref=$branch
     UPGRADE_PULL_ARGS=" $remote $source_ref"
   else
@@ -147,8 +169,7 @@ cmd_upgrade() {
   if upgrade_checkout_behind; then
     say "A newer version of Aman is available."
     say "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
-    say "To get the newer version, run: git -C $REPO_ROOT pull$UPGRADE_PULL_ARGS"
-    say "Then run: aman upgrade"
+    say "To get the newer version, run: git -C $(upgrade_quoted_path "$REPO_ROOT") pull$UPGRADE_PULL_ARGS && aman upgrade"
     return 0
   fi
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
