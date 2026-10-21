@@ -11,6 +11,7 @@ import {
   ModelUsageProvider,
   PersonalizationProvider,
   PersonaProvider,
+  RepositoryWorkProvider,
   RunCodeStatusProvider,
   SentinelApiProvider,
   SentinelAuditFeed,
@@ -54,6 +55,7 @@ import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
+import { createRepositoryWorkApi } from './repositoryWorkApi';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
@@ -444,6 +446,7 @@ export function App() {
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
+  const repositoryWorkApi = useMemo(() => createRepositoryWorkApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
   const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
@@ -514,39 +517,41 @@ export function App() {
         <SentinelApiProvider api={sentinelApi}>
           <PersonalizationProvider api={personalizationApi}>
             <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-              <BugReportProvider api={bugReportApi}>
-                <VoiceInputProvider api={voiceInputApi}>
-                  <RunCodeStatusProvider api={runCodeStatusApi}>
-                    <MemoryRecallProvider api={memoryRecallApi}>
-                      <ModelUsageProvider api={modelUsageApi}>
-                        <PersonaProvider api={personaApi}>
-                          <AmanSetupProvider
-                            value={{
-                              modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                              hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                              firstRunGuide,
-                              settingsHref: '/settings',
-                            }}
-                          >
-                            <ComposerDraftScopeProvider scope={draftScope}>
-                              <AmanShell
-                                defaultAgentSpec={boot.defaultAgentSpec}
-                                openSettings={boot.openSettings}
-                                displayName={session.displayName}
-                                overrides={overrides}
-                                modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                                memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                                version={boot.build?.version}
-                                buildRef={boot.build?.ref}
-                              />
-                            </ComposerDraftScopeProvider>
-                          </AmanSetupProvider>
-                        </PersonaProvider>
-                      </ModelUsageProvider>
-                    </MemoryRecallProvider>
-                  </RunCodeStatusProvider>
-                </VoiceInputProvider>
-              </BugReportProvider>
+              <RepositoryWorkProvider api={repositoryWorkApi}>
+                <BugReportProvider api={bugReportApi}>
+                  <VoiceInputProvider api={voiceInputApi}>
+                    <RunCodeStatusProvider api={runCodeStatusApi}>
+                      <MemoryRecallProvider api={memoryRecallApi}>
+                        <ModelUsageProvider api={modelUsageApi}>
+                          <PersonaProvider api={personaApi}>
+                            <AmanSetupProvider
+                              value={{
+                                modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                firstRunGuide,
+                                settingsHref: '/settings',
+                              }}
+                            >
+                              <ComposerDraftScopeProvider scope={draftScope}>
+                                <AmanShell
+                                  defaultAgentSpec={boot.defaultAgentSpec}
+                                  openSettings={boot.openSettings}
+                                  displayName={session.displayName}
+                                  overrides={overrides}
+                                  modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                                  memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                                  version={boot.build?.version}
+                                  buildRef={boot.build?.ref}
+                                />
+                              </ComposerDraftScopeProvider>
+                            </AmanSetupProvider>
+                          </PersonaProvider>
+                        </ModelUsageProvider>
+                      </MemoryRecallProvider>
+                    </RunCodeStatusProvider>
+                  </VoiceInputProvider>
+                </BugReportProvider>
+              </RepositoryWorkProvider>
             </ImplementationPlanGrantProvider>
           </PersonalizationProvider>
         </SentinelApiProvider>

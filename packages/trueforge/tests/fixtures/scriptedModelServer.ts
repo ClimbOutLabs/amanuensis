@@ -11,7 +11,7 @@
  * a tool that takes one (default `inert`).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
+import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -19,6 +19,8 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
+export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
 /** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
@@ -26,6 +28,12 @@ export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
 export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
 /** Searches with Tavily, reads two result pages, then pins the places it found, then answers. */
 export const FIND_PLACES_DIRECTIVE = 'find_places';
+/**
+ * Lists the inbox, then runs one web search for the text after `search:` (to the end of the line),
+ * then maps the address the inbox names, then answers. Built for scheduled runs, which have no one to ask.
+ */
+export const BRIEF_DIRECTIVE = 'brief';
+export const SEARCH_DIRECTIVE_PREFIX = 'search:';
 /** Calls the unannotated connector tool three times in one model message, then answers. */
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
@@ -120,6 +128,13 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
   return undefined;
 }
 
+/** The text of the last tool result in the conversation, if a tool has answered. */
+function lastToolResultText(messages: ChatMessage[]): string | undefined {
+  const results = messages.filter(message => message.role === 'tool');
+  const last = results[results.length - 1];
+  return last === undefined ? undefined : messageText(last.content);
+}
+
 /** The `run:<tool>` directive still awaiting a tool result, or undefined when none is open. */
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
@@ -180,6 +195,9 @@ function argumentsJsonForTool({
   if (name === 'call_tool') {
     return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
   }
+  if (name === 'usage_summary') {
+    return '{}';
+  }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }
 
@@ -208,6 +226,25 @@ function callToolServer(messages: ChatMessage[]): string {
     }
   }
   return server;
+}
+
+/** The text after the latest `search:` directive, up to the end of its line; empty when none is given. */
+function searchDirectiveText(messages: ChatMessage[]): string {
+  let text = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(messageText(message.content))?.[1]?.trim() ?? '';
+    }
+  }
+  return text;
+}
+
+function briefSteps(messages: ChatMessage[]): { match: string; argumentsJson: string }[] {
+  return [
+    { match: 'list_inbox_threads', argumentsJson: JSON.stringify({ query: 'in:inbox' }) },
+    { match: 'tavily_search', argumentsJson: JSON.stringify({ query: searchDirectiveText(messages) }) },
+    { match: 'render_map', argumentsJson: JSON.stringify({ place_name: HARBOUR_ADDRESS }) },
+  ];
 }
 
 function sandboxArgumentsJson(purpose: 'verify' | 'commit'): string {
@@ -353,6 +390,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
       ];
       requestedTool = steps[progress.toolResults];
+    } else if (progress.directive === BRIEF_DIRECTIVE) {
+      requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }
@@ -393,7 +432,12 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const rejectingJudge =
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
-    const replyText = rejectingJudge ? '{"helpful":[]}' : FINAL_TEXT;
+    const quoteToolResult = parsed.messages.some(message =>
+      messageText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+    );
+    const replyText = rejectingJudge
+      ? '{"helpful":[]}'
+      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ?? FINAL_TEXT);
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });

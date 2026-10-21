@@ -11,7 +11,7 @@ import { useOptionalSentinelApiState } from './SentinelApiContext.js';
  * switch. While offline mode is on, actions outside this device are auto-denied without an approval
  * card, and the persistent offline indicator shows in the app shell. The search switch decides whether
  * the connector you designated as your search provider asks before each search. The maps switch
- * decides whether maps ask first, unless this chat has read private data.
+ * decides whether maps ask first. After this chat reads mail or calendar, a map is checked against that text first.
  */
 export const SentinelSettings: FC = () => {
   const sentinel = useOptionalSentinelApiState();
@@ -147,7 +147,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Maps</p>
           <p className="mt-1 text-sm text-text-secondary">
             {mapsWithoutAsking
-              ? 'Maps run without asking, except that after this chat has read private things like email, they ask again.'
+              ? 'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.'
               : 'Maps ask before each one.'}
           </p>
           {mapsError !== null && (

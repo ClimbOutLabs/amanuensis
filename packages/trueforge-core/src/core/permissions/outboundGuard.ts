@@ -4,11 +4,11 @@
  * give the same verdict. Search uses it first; maps and URL fetch are meant to reuse it.
  *
  * It is a tripwire for accidental or injected leaks, not a proof of absence: text is normalized,
- * percent-decoded once, and read together with the turn's earlier searches, but a secret the model
- * encodes some other way past every rule below is outside what a deterministic scan can see.
+ * percent-decoded until it stops changing, and read together with the turn's earlier searches, but a
+ * secret the model encodes some other way past every rule below is outside what a deterministic scan can see.
  */
 
-import { SERVER_SECRET_REASON } from './searchHoldText';
+import { SERVER_SECRET_REASON } from './searchHoldText.js';
 
 /** Most characters one string of the arguments (a query, an objective) may carry in a silent call. */
 export const OUTBOUND_MAX_CHARS = 200;
@@ -156,9 +156,23 @@ const CONFUSABLES: Readonly<Record<string, string>> = {
 const CONFUSABLE_CHARS = new RegExp(`[${Object.keys(CONFUSABLES).join('')}]`, 'g');
 
 /**
- * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width digits,
- * ligatures), combining marks, format characters (zero-width joiners, bidi controls, tag characters)
- * that split a token invisibly, and a few look-alike letters.
+ * The value of a decimal digit in any script. Unicode lists each script's digits as ten in a row from
+ * zero, so the distance from the first digit of its contiguous range, mod ten, is the value. The range is
+ * found in the code space, not in the text, because the text may hold only part of it.
+ */
+function decimalDigitValue(digit: string): number {
+  const code = digit.codePointAt(0) ?? 0;
+  let start = code;
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) {
+    start -= 1;
+  }
+  return (code - start) % 10;
+}
+
+/**
+ * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width letters, ligatures),
+ * digits from any script, combining marks, format characters (zero-width joiners, bidi controls, tag
+ * characters) that split a token invisibly, and a few look-alike letters.
  */
 function normalizeForScan(text: string): string {
   return text
@@ -166,16 +180,45 @@ function normalizeForScan(text: string): string {
     .replace(/\p{M}/gu, '')
     .normalize('NFKC')
     .replace(/\p{Cf}/gu, '')
-    .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
+    .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char)
+    .replace(/\p{Nd}/gu, digit => String(decimalDigitValue(digit)));
 }
 
-/** Percent-escapes decoded once; an escape that does not decode (a stray `%`) stays as written. */
+/** The form every scan compares: look-alikes and digits folded, then percent escapes decoded until stable. */
+export function scanForm(text: string): string {
+  return decodeUntilStable(normalizeForScan(text));
+}
+
+/**
+ * Decodes percent escapes again and again until nothing changes, so an escape wrapped in another (`%2540`)
+ * reads as the character it finally stands for. Each pass shortens the text, so this always ends.
+ */
+function decodeUntilStable(text: string): string {
+  let current = text;
+  let next = decodeOnce(current);
+  while (next !== current) {
+    current = next;
+    next = decodeOnce(current);
+  }
+  return current;
+}
+
+/**
+ * Percent-escapes decoded once. A run that is not valid UTF-8 is decoded escape by escape, so one bad
+ * escape does not hide the good ones beside it; an escape that does not decode (a stray `%`) stays as written.
+ */
 function decodeOnce(text: string): string {
   return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
     try {
       return decodeURIComponent(run);
     } catch {
-      return run;
+      return run.replace(/%[0-9A-Fa-f]{2}/g, escape => {
+        try {
+          return decodeURIComponent(escape);
+        } catch {
+          return escape;
+        }
+      });
     }
   });
 }
@@ -186,7 +229,7 @@ function withoutUrlOrigin(text: string): string {
 }
 
 /** Letters and digits only, lower-cased: spacing, punctuation and case cannot hide a secret. */
-function compactForm(text: string): string {
+export function compactForm(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
@@ -272,7 +315,7 @@ function lowerToUpperTransitions(word: string): number {
 }
 
 /** A long run of letters only: a word or an identifier (`internationalization`, `IllegalArgumentException`). */
-function looksLikeWord(run: string): boolean {
+export function looksLikeWord(run: string): boolean {
   return /^[A-Za-z]+$/.test(run) && lowerToUpperTransitions(run) <= Math.floor(run.length / 6);
 }
 
@@ -421,7 +464,7 @@ export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
 /** User text first, then plumbing values, so `userCount` splits the two. */
 function scannedValues(strings: OutboundStrings): { raw: string[]; decoded: string[]; userCount: number } {
   const raw = [...strings.values, ...strings.scalars, ...strings.plumbing].map(normalizeForScan);
-  return { raw, decoded: raw.map(decodeOnce), userCount: strings.values.length + strings.scalars.length };
+  return { raw, decoded: raw.map(decodeUntilStable), userCount: strings.values.length + strings.scalars.length };
 }
 
 /**
@@ -442,7 +485,7 @@ export function appendOutboundTrace(input: { earlier: string; strings: OutboundS
  * (provider keys, OAuth tokens and client secrets, the API key, other configured secrets); a query
  * containing one is blocked. `earlier` is the text of the calls that already went out this turn
  * without asking: a secret that straddles the boundary is still seen. Everything else is pattern
- * based. Text is normalized and percent-decoded once before the rules run; the original spelling is
+ * based. Text is normalized and percent-decoded until stable before the rules run; the original spelling is
  * scanned as well. A short identifier-shaped plumbing value skips the encoded-run rule only.
  */
 export function checkOutboundStrings(input: {
@@ -452,7 +495,7 @@ export function checkOutboundStrings(input: {
 }): OutboundGuardVerdict {
   const { raw, decoded, userCount } = scannedValues(input.strings);
   const keys = input.strings.keys.map(normalizeForScan);
-  const keyTexts = [...keys, ...keys.map(decodeOnce)];
+  const keyTexts = [...keys, ...keys.map(decodeUntilStable)];
   const text = [...raw, ...decoded, ...keyTexts].join('\n');
   // A plumbing value shaped like a short identifier (a session id) is expected to look random, so only
   // the encoded-run rule skips it. The model writes these fields, so a longer value, or one with

@@ -51,11 +51,10 @@ describe('Gmail read classification', () => {
     expect(decision.reason_detail).not.toContain('wipe_everything');
   });
 
-  it('marks the turn as having read private data', async () => {
+  it('does not mark the turn on classification alone; the tool set marks a dispatched read', async () => {
     const ctx = makeCtx();
-    expect(ctx.web_search.privateDataRead).toBe(false);
     await classifyTier(gmailAction('read_email', { messageId: 'm1' }), ctx);
-    expect(ctx.web_search.privateDataRead).toBe(true);
+    expect(ctx.web_search.privateDataRead).toBe(false);
   });
 
   it('is denied while offline, because Gmail needs the network', async () => {

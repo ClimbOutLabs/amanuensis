@@ -222,7 +222,7 @@ describe('SpacesView space page', () => {
     expect(screen.queryAllByRole('heading', { name: 'Launch tracker' })).toHaveLength(1);
   });
 
-  it('opens the srcdoc head with a strict CSP so nothing in a space can reach the network', async () => {
+  it('opens the srcdoc head with a strict CSP: only pictures may load from the network', async () => {
     render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
 
     await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
@@ -232,9 +232,10 @@ describe('SpacesView space page', () => {
     expect(first?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
     const policy = first?.getAttribute('content') ?? '';
     expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain('img-src data:;');
+    expect(policy).toContain('img-src data: https:;');
     expect(policy).toContain("form-action 'none'");
-    expect(policy).not.toMatch(/https?:|\*|'self'|blob:/);
+    expect(policy).not.toMatch(/\*|'self'|blob:/);
+    expect(policy).not.toMatch(/https?:\/\/|http:/);
   });
 
   it('gives the iframe no scrollbar of its own, so the outer page owns scrolling', async () => {

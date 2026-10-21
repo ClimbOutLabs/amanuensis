@@ -1131,7 +1131,7 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     });
   });
 
-  it('flags an invented function_results block as broken and streams none of it', async () => {
+  it('shows the garbled line in place of an invented function_results block and streams none of it', async () => {
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-start', id: 't1' },
       { type: 'text-delta', id: 't1', text: 'Adding it now. ' },
@@ -1143,10 +1143,11 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     const { chunks, final } = await drainStream(
       mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
     );
-    expect(chunkText(chunks)).toBe('Adding it now. ');
-    expect(final.tool_markup).toBe('broken');
+    const garbled = "The model's reply came back garbled. Try again, or pick another model in the model picker.";
+    expect(chunkText(chunks)).toBe(`Adding it now. \n\n${garbled}`);
+    expect(final.tool_markup).toBeUndefined();
     expect(final.output.tool_calls).toBeUndefined();
-    expect(final.output.content).toBe('Adding it now. ');
+    expect(final.output.content).toBe(`Adding it now. \n\n${garbled}`);
   });
 
   it('streams a reply whose text merely ends near an opener in full', async () => {

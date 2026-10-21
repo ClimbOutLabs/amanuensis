@@ -85,7 +85,7 @@ export async function* createSubAgentStream() {
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-export async function* writeNoteToolCallStream() {
+export async function* writeNoteToolCallStream(callId: string = WRITE_NOTE_CALL_ID) {
   yield {
     id: 'chunk-write-note',
     object: 'chat.completion.chunk',
@@ -99,7 +99,7 @@ export async function* writeNoteToolCallStream() {
           tool_calls: [
             {
               index: 0,
-              id: WRITE_NOTE_CALL_ID,
+              id: callId,
               type: 'function',
               function: {
                 name: WRITE_NOTE_TOOL_NAME,
@@ -119,7 +119,7 @@ export async function* writeNoteToolCallStream() {
       content: null,
       tool_calls: [
         {
-          id: WRITE_NOTE_CALL_ID,
+          id: callId,
           type: 'function',
           function: {
             name: WRITE_NOTE_TOOL_NAME,
