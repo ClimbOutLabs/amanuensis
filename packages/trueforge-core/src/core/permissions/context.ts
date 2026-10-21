@@ -38,6 +38,8 @@ export interface SentinelServices {
   unattended: boolean;
   /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
   demoSendAllowlist: readonly string[] | null;
+  /** Addresses the owner has mailed, lowercased, that the Email connector may send to without a new-recipient card. Null means none are listed yet. */
+  mail_listed_addresses: readonly string[] | null;
 }
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
@@ -72,6 +74,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
     demoSendAllowlist: null,
+    mail_listed_addresses: null,
   };
 }
 
