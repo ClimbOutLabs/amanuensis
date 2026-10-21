@@ -12,6 +12,7 @@ import {
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
+import { personDisplayName } from './personDisplayName.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -31,7 +32,10 @@ export type AmanRuntimeRailProps = {
    */
   activity?: AmanAvatarActivity;
   modelName?: string;
-  /** Who the browser is signed in as. Without it the account row is left out. */
+  /**
+   * The sign-in name, used only when the person has not chosen one in Personalization. With
+   * neither, the account row is left out.
+   */
   userName?: string | undefined;
   /** The persona or agent answering right now, when the host tracks one. */
   personaName?: string | undefined;
@@ -171,7 +175,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   // Collapsed, and at phone width where the full status row is hidden, this one string is the
   // only place the connection state and the active model stay readable.
   const compactSummary = `${statusLabel} · ${modelName}`;
-  const trimmedUserName = userName?.trim();
+  const personName = personDisplayName({ profile, signInName: userName });
   const trimmedPersonaName = personaName?.trim();
 
   const toggleCollapsed = useCallback(() => {
@@ -243,17 +247,17 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
           </div>
 
-          {trimmedUserName === undefined || trimmedUserName === '' ? null : (
+          {personName === undefined ? null : (
             <section
               className="aman-runtime-rail__section"
               data-section="account"
               aria-labelledby="aman-runtime-rail-account-label"
             >
               <h3 id="aman-runtime-rail-account-label" className="aman-runtime-rail__section-label">
-                Signed in
+                You
               </h3>
-              <div className="aman-runtime-rail__section-value" title={trimmedUserName}>
-                {trimmedUserName}
+              <div className="aman-runtime-rail__section-value" title={personName}>
+                {personName}
               </div>
             </section>
           )}
