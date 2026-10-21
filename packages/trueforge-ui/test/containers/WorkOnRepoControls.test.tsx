@@ -117,7 +117,7 @@ describe('WorkOnRepoControls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Start work' }));
     expect(sendMessage).toHaveBeenCalledWith(
-      'Clone https://github.com/octo-example/demo-repo.git into a new folder named demo-repo in the workspace, then check out the main branch.',
+      'Clone https://github.com/octo-example/demo-repo.git into a new folder named demo-repo in the workspace, then check out the main branch. Run the clone yourself in this chat as one plain command: git clone https://github.com/octo-example/demo-repo.git demo-repo. Then run git -C demo-repo checkout main. Do not hand this to a sub-agent.',
     );
     expect(api.startRepositoryWork).not.toHaveBeenCalled();
 
