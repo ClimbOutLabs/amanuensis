@@ -149,7 +149,7 @@ function okRunCodeResult(): RunCodeResult {
 
 describe('Sandbox run_code tool', () => {
   it('words the failure guidance in plain punctuation, with no em dashes', () => {
-    const guidance = createSandboxRunCodeDescription({ offline: false })
+    const guidance = createSandboxRunCodeDescription({ offline: false, workspaceDir: '/workspace' })
       .split('\n')
       .find(line => line.startsWith('If run_code fails'));
     expect(guidance).toBeDefined();
@@ -345,5 +345,76 @@ describe('Sandbox exec interpreter guard', () => {
       arguments: execArguments('npm run build', 'execute'),
     });
     expect(exec.mock.calls.some(call => call[0].command === 'npm run build')).toBe(true);
+  });
+});
+
+describe('Sandbox run_code script_path', () => {
+  it('names script_path and the one-file rule in the run_code description', () => {
+    const description = createSandboxRunCodeDescription({ offline: true, workspaceDir: '/workspace' });
+    expect(description).toContain('script_path');
+    expect(description).toContain('/workspace/size.py');
+    expect(description).toContain('which is never changed');
+  });
+
+  it('reads a relative script_path from /workspace and hands the reader to the run service', async () => {
+    const downloadFile = jest.fn().mockResolvedValue(Buffer.from('print(1)'));
+    const { service, runCode } = makeRunCodeService(async () => okRunCodeResult());
+    const sandbox = makeSandbox(makeProvider({ downloadFile }), service);
+
+    const result = await executeSingleTool({
+      sandbox,
+      toolName: SANDBOX_RUN_CODE_TOOL_NAME,
+      mappedName: SANDBOX_RUN_CODE_TOOL_NAME,
+      id: 'call-1',
+      arguments: { language: 'python', script_path: 'size.py' },
+    });
+
+    expect(result.disposition).toBe('executed_ok');
+    const readScript = runCode.mock.calls[0]?.[1]?.readScript;
+    if (readScript === undefined) {
+      throw new Error('Expected the run to carry a workspace reader');
+    }
+    await expect(readScript('size.py')).resolves.toEqual(Buffer.from('print(1)'));
+    expect(downloadFile).toHaveBeenCalledWith(expect.objectContaining({ path: '/workspace/size.py' }));
+  });
+
+  it('refuses a script_path that leaves /workspace without reading anything', async () => {
+    const downloadFile = jest.fn().mockResolvedValue(Buffer.from('x'));
+    const { service, runCode } = makeRunCodeService(async () => okRunCodeResult());
+    const sandbox = makeSandbox(makeProvider({ downloadFile }), service);
+    await executeSingleTool({
+      sandbox,
+      toolName: SANDBOX_RUN_CODE_TOOL_NAME,
+      mappedName: SANDBOX_RUN_CODE_TOOL_NAME,
+      id: 'call-1',
+      arguments: { language: 'python', script_path: '/workspace/a.py' },
+    });
+    const readScript = runCode.mock.calls[0]?.[1]?.readScript;
+    if (readScript === undefined) {
+      throw new Error('Expected the run to carry a workspace reader');
+    }
+    await expect(readScript('/etc/passwd')).rejects.toThrow('script_path must be a file under /workspace');
+    await expect(readScript('../secret.py')).rejects.toThrow('script_path must be a file under /workspace');
+    expect(downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('tells the model what to do when the workspace file cannot be read', async () => {
+    const downloadFile = jest.fn().mockRejectedValue(new Error('sandbox 404 at /internal/path'));
+    const { service, runCode } = makeRunCodeService(async () => okRunCodeResult());
+    const sandbox = makeSandbox(makeProvider({ downloadFile }), service);
+    await executeSingleTool({
+      sandbox,
+      toolName: SANDBOX_RUN_CODE_TOOL_NAME,
+      mappedName: SANDBOX_RUN_CODE_TOOL_NAME,
+      id: 'call-1',
+      arguments: { language: 'python', script_path: 'missing.py' },
+    });
+    const readScript = runCode.mock.calls[0]?.[1]?.readScript;
+    if (readScript === undefined) {
+      throw new Error('Expected the run to carry a workspace reader');
+    }
+    const failure = readScript('missing.py');
+    await expect(failure).rejects.toThrow('script_path "missing.py" could not be read.');
+    await expect(failure).rejects.not.toThrow('/internal/path');
   });
 });

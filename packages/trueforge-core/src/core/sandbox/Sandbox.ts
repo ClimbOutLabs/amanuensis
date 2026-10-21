@@ -104,10 +104,12 @@ import {
 } from './hostAuthenticatedGit';
 import {
   commandDownloadsPackages,
+  commandInstallsPypiOrNpmPackages,
   findCommandLineGitDependency,
   findGitDependency,
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   PACKAGE_MANIFEST_FILES,
+  PACKAGE_UNAVAILABLE_RULE,
   packageDownloadCardWhat,
 } from './packageMirrors';
 import {
@@ -1377,7 +1379,7 @@ ${execNetworkSentences({ offline })} Make separate tool calls in one response; t
 /** What the run_code description says is installed; the slot guest ships a smaller set than the Docker image. */
 function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string {
   return offline
-    ? 'Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. No installs at runtime: if a package is missing, say so instead of installing it.'
+    ? `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`
     : 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
 }
 
@@ -1387,9 +1389,15 @@ function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string 
  * attachments staged by the harness are advertised without the model ever
  * base64-encoding them.
  */
-export function createSandboxRunCodeDescription({ offline }: { offline: boolean }): string {
+export function createSandboxRunCodeDescription({
+  offline,
+  workspaceDir,
+}: {
+  offline: boolean;
+  workspaceDir: string;
+}): string {
   return `Run Python or Node.js code in an isolated, offline sandbox.
-language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
+language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}, such as ${workspaceDir}/size.py). A script_path run reads a copy of that one file, which is never changed; no other workspace file is visible to the run. Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline })}
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
@@ -1727,6 +1735,9 @@ function execInterpreterGuardFailure(input: {
 const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
+const PACKAGE_INSTALL_UNAVAILABLE_REFUSAL =
+  'Packages cannot be downloaded in this chat, so this install was not run. Use the standard library or the packages that are already installed, or open this work on a repository that allows downloads. Do not retry it and do not try another tool for the same job.';
+
 function sandboxExecPreflightFailure(input: {
   command: string;
   purpose: SandboxInvocationPurpose | undefined;
@@ -1736,6 +1747,7 @@ function sandboxExecPreflightFailure(input: {
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
   hasNetwork: boolean;
+  packageDownloadsPossible: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1753,6 +1765,9 @@ function sandboxExecPreflightFailure(input: {
   // An impossible action must not reach an approval card.
   if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
+  }
+  if (!input.packageDownloadsPossible && commandInstallsPypiOrNpmPackages(input.command)) {
+    return PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
   }
   if (input.purpose === undefined) {
     return 'A terminal invocation must declare its purpose explicitly.';
@@ -1779,7 +1794,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run a checked-in script. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -1789,12 +1804,12 @@ function sandboxExecPreflightFailure(input: {
   }
   // A "verify" label must not cover opaque code: inline evaluators, heredocs,
   // and tee would let arbitrary code execution ride on a verification
-  // approval. Run a checked-in script so the verification step stays reviewable.
+  // approval. A named shell script keeps the verification step reviewable.
   if (
     input.purpose === 'verify' &&
     (sandboxCommandUsesUnstructuredOperation(input.command) || sandboxVerifyCommandUsesInlineEval(input.command))
   ) {
-    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a script and run the script so the verification step stays reviewable.';
+    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a shell script and run it by name so the verification step stays reviewable. Python and Node code cannot run through exec at all.';
   }
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
@@ -2196,6 +2211,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
+        packageDownloadsPossible: this.packageDownloadsPossible(),
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2430,10 +2446,13 @@ export class Sandbox extends LocalToolMCP {
         ? {}
         : {
             ...sentinelStamp,
-            tier3_card: withPackageDownloadCard({
-              card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
-              packageCard,
-            }),
+            // A call the exec preflight refuses shows no card: the command it names cannot run.
+            tier3_card: invalidExecPreflight
+              ? undefined
+              : withPackageDownloadCard({
+                  card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
+                  packageCard,
+                }),
           }),
       // The approval token (if any) was minted over the invoked name and the
       // normalized effective arguments, not the remapped original_tool_name or
@@ -3797,6 +3816,15 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * Whether a package download can ever succeed in this chat. The package mirrors serve only a bound
+   * repository; whether the person has allowed downloads for it is a separate question that the
+   * approval card asks.
+   */
+  private packageDownloadsPossible(): boolean {
+    return this.loadPackageMirrorToken !== undefined && this.boundRepository !== undefined;
+  }
+
+  /**
    * The package mirror token for this session's bound repository, or undefined when the person has
    * not allowed downloads for it. A resolver failure keeps the sandbox offline, never the reverse.
    */
@@ -4695,7 +4723,10 @@ export class Sandbox extends LocalToolMCP {
    * reads them directly instead of re-uploading bytes through `files_in`.
    */
   private renderRunCodeDescription(): string {
-    const runCodeDescription = createSandboxRunCodeDescription({ offline: !this.hasNetwork() });
+    const runCodeDescription = createSandboxRunCodeDescription({
+      offline: !this.hasNetwork(),
+      workspaceDir: this.runCodeWorkspaceDir(),
+    });
     const staged = [...this.runCodeIngressStaging.values()];
     if (staged.length === 0) {
       return runCodeDescription;
@@ -4706,6 +4737,35 @@ export class Sandbox extends LocalToolMCP {
       `Available in /ingress (read directly by filename, do NOT re-upload via files_in):\n` +
       `${lines.join('\n')}\n`
     );
+  }
+
+  /** The sandbox directory the file tools write to; script_path is resolved against it. */
+  private runCodeWorkspaceDir(): string {
+    return this.provider.getWorkspaceDir() ?? '/workspace';
+  }
+
+  /**
+   * Reads a file the model wrote under the workspace, for `run_code` script_path. Only that one file
+   * is read; the error text is shown to the model, so it never carries provider details.
+   */
+  private async readRunCodeScript(scriptPath: string): Promise<Buffer> {
+    const workspaceDir = this.runCodeWorkspaceDir();
+    const resolved = posix.normalize(posix.isAbsolute(scriptPath) ? scriptPath : posix.join(workspaceDir, scriptPath));
+    if (!resolved.startsWith(`${workspaceDir}/`)) {
+      throw new Error(`script_path must be a file under ${workspaceDir}. Pass a path like ${workspaceDir}/size.py.`);
+    }
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      return await this.provider.downloadFile({
+        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+        path: resolved,
+      });
+    } catch (error) {
+      throw new Error(
+        `script_path "${scriptPath}" could not be read. Check that the file exists under ${workspaceDir}, or write it with write_file first.`,
+        { cause: error },
+      );
+    }
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
@@ -4727,6 +4787,7 @@ export class Sandbox extends LocalToolMCP {
         signal: context?.signal,
         packageMirrorToken: await this.resolvePackageMirrorToken(),
         attachments: [...this.runCodeIngressStaging.values()],
+        readScript: scriptPath => this.readRunCodeScript(scriptPath),
         onProgress: (message: string) => {
           provisioningMessages.push(message);
           this.logger.info('run_code provisioning progress', { message });
@@ -4991,6 +5052,7 @@ export class Sandbox extends LocalToolMCP {
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
+      packageDownloadsPossible: this.packageDownloadsPossible(),
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {

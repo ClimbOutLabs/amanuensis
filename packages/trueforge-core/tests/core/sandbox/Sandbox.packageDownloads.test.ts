@@ -123,14 +123,32 @@ describe('the first package download in a repo', () => {
     expect(info.tier3_card?.plain_what).not.toContain('public package sites');
   });
 
-  it('shows the ordinary card wording when no repository is bound', async () => {
+  it.each([
+    ['pip install requests', 'pip'],
+    ['npm install left-pad', 'npm'],
+  ])('refuses %s before any card when no repository is bound, and never runs it', async (command, label) => {
+    const execCalls: SandboxExecParams[] = [];
     const sandbox = makeSandbox({
-      execCalls: [],
+      execCalls,
       allowed: () => false,
       allowPackageDownloads: async () => undefined,
     });
-    const info = await sandbox.toolCallInfo(PIP_CALL);
-    expect(info.tier3_card?.plain_what).not.toContain('public package sites');
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Install packages', purpose: 'execute', command },
+    };
+    const info = await sandbox.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(false);
+    expect(info.tier3_card).toBeUndefined();
+
+    const response = await sandbox.callTool(call);
+    if (!isCallToolResponseResult(response)) throw new Error(`Expected a ${label} refusal result`);
+    expect(response.result.isError).toBe(true);
+    const content = response.result.content[0];
+    if (content?.type !== 'text') throw new Error('Expected a text tool result');
+    expect(content.text).toContain('Packages cannot be downloaded in this chat, so this install was not run.');
+    expect(content.text).toContain('open this work on a repository that allows downloads');
+    expect(execCalls.some(params => params.command === command)).toBe(false);
   });
 
   it('is refused with the card while unapproved: nothing runs and nothing is recorded', async () => {
