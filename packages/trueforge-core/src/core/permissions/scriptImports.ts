@@ -61,14 +61,14 @@ function pythonLoadsOnlyStandard(source: string): boolean {
   const fromImportKeywords = new Set<number>();
   for (const match of source.matchAll(/\bfrom\s+([^\s]+)\s+import\b/gu)) {
     modules.push(match[1] ?? '');
-    fromImportKeywords.add((match.index ?? 0) + match[0].length - 'import'.length);
+    fromImportKeywords.add(match.index + match[0].length - 'import'.length);
   }
   // Every other `import` keyword: a comma-separated list of names, each optionally `as` an alias.
   for (const match of source.matchAll(/\bimport\b/gu)) {
-    if (fromImportKeywords.has(match.index ?? -1)) {
+    if (fromImportKeywords.has(match.index)) {
       continue;
     }
-    const rest = source.slice((match.index ?? 0) + 'import'.length).split(/[\n;#]/u, 1)[0] ?? '';
+    const rest = source.slice(match.index + 'import'.length).split(/[\n;#]/u, 1)[0] ?? '';
     const names = rest.split(',').map(item => (item.trim().split(/\s+as\s+/u)[0] ?? '').trim());
     if (names.some(name => name === '')) {
       return false;
