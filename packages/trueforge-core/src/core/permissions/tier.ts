@@ -27,6 +27,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_send',
   'calendar_write',
   'schedule_write',
+  'persona_write',
 ]);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
@@ -39,6 +40,7 @@ export const AUTO_DENY_REASONS = [
   'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
+  'private_text_check',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
@@ -115,6 +117,17 @@ export const Tier3ScheduleSchema = z
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
 
+/** A specialist that a chat call adds, shown in full. Existing personas are never changed by a call. */
+export const Tier3PersonaSchema = z
+  .object({
+    name: z.string().describe('Specialist name in plain words.'),
+    description: z.string().describe('One line on what the specialist is for.'),
+    instructions: z.string().describe('The whole instruction text the specialist follows.'),
+    model_name: z.string().describe('The model the specialist answers with.'),
+  })
+  .describe('The specialist a chat call adds, shown in full.')
+  .openapi('Tier3Persona');
+
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
@@ -145,11 +158,13 @@ export const Tier3CardSchema = z
     email: Tier3EmailSchema.nullable().optional(),
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
+    persona: Tier3PersonaSchema.nullable().optional(),
   })
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
+export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {

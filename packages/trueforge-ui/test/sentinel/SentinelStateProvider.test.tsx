@@ -42,6 +42,7 @@ const CARD = {
   email: null,
   calendar_event: null,
   schedule: null,
+  persona: null,
 };
 
 describe('SentinelStateProvider', () => {

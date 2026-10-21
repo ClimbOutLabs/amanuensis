@@ -60,6 +60,7 @@ test_the_question_is_asked_once() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>n
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
@@ -75,6 +76,7 @@ Enter password again=>$SENTINEL_PASSWORD"
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD

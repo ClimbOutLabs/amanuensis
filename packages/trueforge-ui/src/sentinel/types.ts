@@ -13,11 +13,8 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
-import {
-  heldBecause,
-  savedSearchHoldReason,
-  SERVER_SECRET_REASON,
-} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -149,6 +146,20 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
+  /** The whole specialist when the action adds one, or null. */
+  persona: SentinelApprovalPersona | null;
+};
+
+/** The whole specialist a chat call adds, in plain words. */
+export type SentinelApprovalPersona = {
+  /** Specialist name in plain words. */
+  name: string;
+  /** One line on what the specialist is for. */
+  description: string;
+  /** The whole instruction text the specialist follows. */
+  instructions: string;
+  /** The model the specialist answers with. */
+  model_name: string;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -238,7 +249,7 @@ export type SentinelUserSettings = {
   tier2_auto_allow: Tier2ActionKind[];
   /** While on, the search provider you designated runs web searches without asking. Default: on. */
   search_without_asking: boolean;
-  /** While on, maps run without asking unless this chat has read private data. Default: off. */
+  /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
   maps_without_asking: boolean;
 };
 
@@ -273,6 +284,8 @@ export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
   /** Answers already given, by tool call id. Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
+  /** The words the owner typed with a "Change it" answer, by tool call id. Absent when the host reads none. */
+  changeRequests?: Record<string, string> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -322,19 +335,19 @@ const SEARCH_QUERY_MARKER = ' for: ';
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
-  const because = savedSearchHoldReason(card.why_asked_again);
-  if (because === undefined) return card;
-  if (because === SERVER_SECRET_REASON) {
+  const saved = savedSearchHold(card.why_asked_again);
+  if (saved === undefined) return card;
+  if (saved.secret) {
     const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: `${heading}${heldBecause(SERVER_SECRET_REASON)}`,
+      plain_what: withHoldSay(heading, saved.say),
       why_asked_again: null,
       outbound_text: null,
     };
   }
-  return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
+  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -448,6 +461,19 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
+/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+function parsePersona(value: unknown): SentinelApprovalPersona | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  if (name === undefined || description === undefined || instructions === undefined || model_name === undefined) {
+    return null;
+  }
+  return { name, description, instructions, model_name };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -491,6 +517,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
+    persona: parsePersona(value.persona),
   });
 }
 
@@ -580,15 +607,30 @@ function answersFromEvent(event: unknown): [string, ApprovalAnswer][] {
   return answers;
 }
 
+/** The words the owner typed for a "Change it" answer, by tool call id. */
+function changeRequestsFromEvent(event: unknown): [string, string][] {
+  if (!isRecord(event) || event.type !== 'turn.created' || !Array.isArray(event.input)) return [];
+  const requests: [string, string][] = [];
+  for (const item of event.input) {
+    if (!isRecord(item) || item.type !== 'user.tool_approval' || !isRecord(item.approval)) continue;
+    const toolCallId = optionalString(item, 'tool_call_id') ?? optionalString(item, 'toolCallId');
+    const words = changeRequestText(optionalString(item.approval, 'reason'));
+    if (toolCallId !== undefined && words !== undefined) requests.push([toolCallId, words]);
+  }
+  return requests;
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
+  const changeRequests: Record<string, string> = {};
   for (const event of events) {
     for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
+    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[toolCallId] = words;
   }
-  return { approvals: [...approvals.values()], answers };
+  return { approvals: [...approvals.values()], answers, changeRequests };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {

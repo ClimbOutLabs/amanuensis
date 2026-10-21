@@ -43,6 +43,7 @@ For the first instance it asks, with defaults in brackets:
 
 - `Name for this instance [main]:` (skipped when you pass `--name` or `--yes`, or when the input is not a terminal; the name is then `main` unless `--name` gives one)
 - Your email, used to sign in (skipped when you pass `--email`)
+- What should Aman call you? `[the part of your email before the @]` (skipped when you pass `--your-name`). The app shows this name, and Personalization starts with it
 - Whether to back up automatically every day `[Y/n]` (skipped when you pass `--backups`)
 - `Go ahead?` `[Y/n]`, after it prints the plan
 - Password (typed twice, never echoed; at least 8 characters with a number and a symbol, at most 72 bytes)
@@ -253,7 +254,7 @@ This is a one-time move run by whoever operates the instance, from a terminal on
 aman import ~/.amanuensis/exports/aman-export-<timestamp>.zip --display-name "Your Name"
 ```
 
-`aman import FILE` runs `installer/install.sh instance import <name> FILE`; with more than one instance, add `--instance <name>`. Imported chats show the name given with `--display-name`; without it, the import asks, and Enter keeps the part of your email before the `@`.
+`aman import FILE` runs `installer/install.sh instance import <name> FILE`; with more than one instance, add `--instance <name>`. Imported chats show the name given with `--display-name`; without it, they show the name Aman calls you. An instance with no such name asks, and Enter keeps the part of your email before the `@`.
 
 Before anything is written, the import:
 

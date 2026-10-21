@@ -4,6 +4,7 @@ import type { CompactionModel } from '../core/capabilities/builtins/ContextCompa
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ModelMessageEvent } from '../core/events/schema';
 import type { SentinelHostContext } from '../core/permissions';
+import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
@@ -33,6 +34,8 @@ export interface ResolvedAgentDefinition {
  * per-request state (secrets, providers, caches) freely.
  */
 export interface ITurnResourceResolver<TTurnCustom extends object = Record<string, never>> {
+  /** The turn's search and private-read state, shared by every thread's host context so one thread's reads bind the others. */
+  readonly webSearchTurn: WebSearchTurnState;
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;
   /**

@@ -2,16 +2,19 @@ import { ChatImageScope, Markdown, SlotsProvider, TurnImages, type ChatImagesCat
 import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
 
-const SILENT_ID = 'a'.repeat(32);
+const HARBOR_ID = 'a'.repeat(32);
 const ARTIFACT_ID = 'b'.repeat(32);
 const APPROVED_ID = 'c'.repeat(32);
+/** The image route answers this id with a 404, as a copy the browser cannot load would. */
+const BROKEN_ID = 'd'.repeat(32);
 
 /** Stands in for the server: answers like the real routes, and every image address is same-origin. */
 const port: ChatImagesCatalog = {
   listTurnImages: () =>
     Promise.resolve({
       artifacts: [{ path: 'run_code/chart.png', name: 'chart.png' }],
-      emails: [{ tool_call_id: 'mail-1', count: 3 }],
+      tool_images: [],
+      emails: [{ tool_call_id: 'mail-1', count: 2 }],
     }),
   showTurnImages: ({ source, approved }) => {
     if (source.kind === 'artifact') {
@@ -23,24 +26,35 @@ const port: ChatImagesCatalog = {
     if (source.kind === 'email') {
       return Promise.resolve(
         approved
-          ? { status: 'done', images: [{ status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 }] }
-          : { status: 'ask', count: 3, host: null },
+          ? {
+              status: 'done',
+              images: [
+                { status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 },
+                { status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 },
+              ],
+            }
+          : { status: 'ask', count: 2, host: null },
       );
     }
-    if (source.kind === 'reply' && source.url === 'https://example.com/photos/harbor.png') {
-      return Promise.resolve({
-        status: 'done',
-        images: [{ status: 'shown', image_id: SILENT_ID, width: 320, height: 200 }],
-      });
-    }
-    if (source.kind === 'reply' && source.url === 'https://example.com/photos/huge.png') {
+    if (source.kind === 'reply') {
+      if (!approved) {
+        return Promise.resolve({ status: 'ask', count: 1, host: 'example.com' });
+      }
+      if (source.url === 'https://example.com/photos/harbor.png') {
+        return Promise.resolve({
+          status: 'done',
+          images: [{ status: 'shown', image_id: HARBOR_ID, width: 320, height: 200 }],
+        });
+      }
+      if (source.url === 'https://example.com/photos/broken.png') {
+        return Promise.resolve({
+          status: 'done',
+          images: [{ status: 'shown', image_id: BROKEN_ID, width: 320, height: 200 }],
+        });
+      }
       return Promise.resolve({ status: 'done', images: [{ status: 'refused', reason: 'too_large' }] });
     }
-    return Promise.resolve(
-      approved
-        ? { status: 'done', images: [{ status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 }] }
-        : { status: 'ask', count: 1, host: 'example.org' },
-    );
+    return Promise.reject(new Error(`unexpected source ${source.kind}`));
   },
   imageUrl: ({ sessionId, imageId }) => `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
 };
@@ -50,9 +64,9 @@ const REPLY = [
   '',
   '![Harbor at dusk](https://example.com/photos/harbor.png)',
   '',
-  'And the chart someone linked:',
+  'And a second photo, which will not load:',
   '',
-  '![Quarterly chart](https://example.org/charts/q3.png)',
+  '![Broken photo](https://example.com/photos/broken.png)',
   '',
   'The full-size scan is too big to show here: ![Scan](https://example.com/photos/huge.png)',
   '',

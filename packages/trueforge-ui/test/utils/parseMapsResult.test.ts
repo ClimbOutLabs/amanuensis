@@ -67,7 +67,7 @@ describe('parseMapsResult', () => {
   const roadResult = (mode?: string) => ({
     status: 'ok',
     ...(mode === undefined ? {} : { mode }),
-    from: { resolved_name: 'Rua da Emenda 45', lat: 38.7106, lng: -9.1426 },
+    from: { resolved_name: 'Travessa das Gaivotas 4', lat: 38.7106, lng: -9.1426 },
     to: { resolved_name: 'R. de Sao Bernardo 92', lat: 38.7142, lng: -9.1597 },
     distance_km: 1.9,
     duration_min: 24,

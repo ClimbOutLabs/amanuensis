@@ -63,7 +63,7 @@ export const GetThreadSchema = z
 export const ReadEmailSchema = z.object({ message_id: id }).strict();
 
 export const DownloadAttachmentSchema = z
-  .object({ message_id: id, attachment_id: z.string().min(1).max(512) })
+  .object({ message_id: id, attachment_handle: z.string().min(1).max(64) })
   .strict();
 
 export const ListDraftsSchema = z

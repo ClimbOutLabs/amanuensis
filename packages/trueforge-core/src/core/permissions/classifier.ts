@@ -26,6 +26,12 @@ import {
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
+  isPersonaWriteToolName,
+  LIST_PERSONAS_TOOL_NAME,
+  PERSONA_SERVER_ID,
+  USE_PERSONA_TOOL_NAME,
+} from '../personas/toolContract';
+import {
   isScheduleStatusToolName,
   isScheduleWriteToolName,
   LIST_SCHEDULES_TOOL_NAME,
@@ -64,7 +70,13 @@ import {
   type ExtractionResult,
 } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
-import { isMapsToolName, MAPS_SILENT_REASON, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
+import {
+  isMapsToolName,
+  MAPS_AFTER_READ_SILENT_REASON,
+  MAPS_SILENT_REASON,
+  RENDER_PLACES_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+} from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   appendOutboundTrace,
@@ -75,13 +87,15 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
+import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
 import {
-  heldBecause,
+  GUARD_RULE_SAY,
+  HOLD_SAY,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
-  SERVER_SECRET_REASON,
+  withHoldSay,
 } from './searchHoldText';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
@@ -100,6 +114,7 @@ import {
   tier3Decision,
   type Tier2ActionKind,
   type Tier3Card,
+  type Tier3Persona,
   type Tier3Schedule,
   type TierDecision,
   type TrackedExecutionBinding,
@@ -125,10 +140,10 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
-  markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateTextForChecks,
+  SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_SILENT_REASON,
-  SILENT_FETCHES_PER_HOST,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
   type SearchAskReason,
@@ -184,6 +199,8 @@ export interface SentinelAction {
   calendar_write?: CalendarWriteReview | undefined;
   /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
   schedule_write?: Tier3Schedule | undefined;
+  /** The specialist a create would add, settled by the persona tool set from the request and the owner's personas. */
+  persona_write?: Tier3Persona | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1401,7 +1418,8 @@ async function holdSearchCall(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
   reason: SearchAskReason;
-  why: string;
+  /** The one sentence that says why Aman is asking. */
+  say: string;
   /** The card's one line, with any held key masked. */
   summary: string;
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
@@ -1426,13 +1444,8 @@ async function holdSearchCall(input: {
     card: {
       plain_what:
         tavily === null
-          ? searchHoldCardText({
-              summary: escapeDisplayText(shown),
-              why: input.why,
-            })
-          : input.why === ''
-            ? tavily
-            : `${tavily.replace(/\.$/, '')}${heldBecause(input.why)}`,
+          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say })
+          : withHoldSay(tavily, input.say),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -1445,7 +1458,7 @@ async function holdSearchCall(input: {
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
-    reason_detail: input.why === '' ? 'Searches are set to ask.' : `Web search held: ${input.why}.`,
+    reason_detail: input.say,
     sensitive_read: false,
     approval_token_id: await mintPlainToken({
       ctx,
@@ -1454,7 +1467,7 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
-  return { ...decision, audit_description: searchHoldAuditText({ server, why: input.why }) };
+  return { ...decision, audit_description: searchHoldAuditText({ server, say: input.say }) };
 }
 
 /**
@@ -1488,8 +1501,8 @@ async function classifySearchProviderTool(input: {
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
-  const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, summary, params: action.canonical_params, fields: extraction.fields });
+  const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
+    holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1505,7 +1518,7 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      why: SERVER_SECRET_REASON,
+      say: HOLD_SAY.secret,
       summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
       params: masked,
       fields: {
@@ -1522,53 +1535,93 @@ async function classifySearchProviderTool(input: {
     return heldWithoutKey(secrets);
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', '');
+    return held('mcp_search_setting_ask', HOLD_SAY.search_setting);
   }
   if (!verdict.ok) {
-    return held('mcp_search_guard', describeOutboundRule(verdict.rule));
+    return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
   }
-  if (hasReadPrivateData(ctx.web_search)) {
-    return held(
-      'mcp_search_after_private_read',
-      'this chat read your email or calendar, and a search could carry it out',
-    );
+  const readMode = hasReadPrivateData(ctx.web_search);
+  if (readMode) {
+    const texts = privateTextForChecks(ctx.web_search);
+    if (texts === undefined || strings === undefined) {
+      return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+    }
+    const leak = privateTextLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended
+        ? privateTextSkipped(leak)
+        : held('mcp_search_after_private_read', HOLD_SAY.private_read);
+    }
   }
   // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
   if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
-    return held(
-      'mcp_search_after_private_read',
-      'this chat read something private, like a key or a secrets file, and a search could carry it out',
-    );
+    return held('mcp_search_after_private_read', HOLD_SAY.private_read);
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
+    return held('mcp_search_limit', HOLD_SAY.search_limit);
   }
   if (
     strings !== undefined &&
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
-    return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+    return held('mcp_search_unreturned_url', HOLD_SAY.unseen_link);
   }
   if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
-    return held(
-      'mcp_search_host_limit',
-      `this turn already fetched ${String(SILENT_FETCHES_PER_HOST)} pages from that site without asking`,
-    );
+    return held('mcp_search_host_limit', HOLD_SAY.site_limit);
   }
   return tier1Decision({
-    reason: SEARCH_SILENT_REASON,
+    reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
     reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
 }
 
-/** Detail for a maps call that asks although the user let maps run without asking, because the chat is not clean. */
-const MAPS_ASKED_DETAIL =
-  'Maps asked this time because this chat read private data or the request holds text that must not leave.';
+/** Said to the owner when a scheduled run's search or map is skipped because its text was copied from mail or calendar. */
+const PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE =
+  'One lookup was skipped, because it would have shared something from your mail or calendar.';
 
-/** Detail for a maps call that always asks, because the user has not let maps run without asking. */
-const MAPS_ALWAYS_ASKS_DETAIL = 'Maps tools are always Tier 3 by policy.';
+/** What a skipped call's text would have carried, in plain words. */
+function leakWords(leak: PrivateTextLeak): string {
+  switch (leak) {
+    case 'contact':
+      return 'an email address or phone number';
+    case 'number':
+      return 'a long number';
+    case 'name':
+      return "a person's name";
+    case 'phrase':
+      return 'a phrase copied word for word';
+    case 'token':
+      return 'a long code';
+  }
+}
+
+/** A call that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
+  return autoDenyDecision({
+    reason: 'private_text_check',
+    reason_detail: `It would have shared ${leakWords(leak)} from your mail or calendar.`,
+    owner_message: PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE,
+    sensitive_read: false,
+  });
+}
+
+/**
+ * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
+ * read does not mark the chat as holding a secret.
+ */
+function isCheckedPrivateRead(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'truefoundry-system' &&
+    (action.mcp_server_name === GMAIL_SERVER_ID || action.mcp_server_name === CALENDAR_SERVER_ID)
+  );
+}
 
 /**
  * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
@@ -1585,19 +1638,42 @@ async function classifyMapsSilently(input: {
   if (!verdict.ok) {
     return undefined;
   }
-  if (hasReadPrivateData(ctx.web_search) || ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
     return undefined;
+  }
+  const readMode = hasReadPrivateData(ctx.web_search);
+  const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
+  if (readMode && texts === undefined) {
+    return undefined;
+  }
+  if (texts !== undefined && strings !== undefined) {
+    // A map may name a street address from the mail, so only the words of a search are checked for copies.
+    const leak = privateTextLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended ? privateTextSkipped(leak) : undefined;
+    }
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return tier1Decision({
-    reason: MAPS_SILENT_REASON,
-    reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-    sensitive_read: false,
-  });
+  return readMode
+    ? tier1Decision({
+        reason: MAPS_AFTER_READ_SILENT_REASON,
+        reason_detail: `Map: ${values.join(', ')}`,
+        sensitive_read: false,
+      })
+    : tier1Decision({
+        reason: MAPS_SILENT_REASON,
+        reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+        sensitive_read: false,
+      });
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -1750,7 +1826,6 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     });
   }
   if (isGmailReadToolName(action.tool_name)) {
-    markPrivateDataRead(ctx.web_search);
     return tier1Decision({
       reason: 'gmail_read',
       reason_detail: 'Read your email.',
@@ -1922,7 +1997,6 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   if (!isCalendarReadToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
   }
-  markPrivateDataRead(ctx.web_search);
   return tier1Decision({
     reason: 'calendar_read',
     reason_detail: 'Read your calendar.',
@@ -1961,6 +2035,67 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       next_runs: review.next_runs.map(show),
     },
   };
+}
+
+/** The approval card for adding a specialist, built from what the host will save. */
+function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  // The description is shown as one sentence, so a trailing full stop is not doubled.
+  const sentence = show(review.description).replace(/[.!?]+$/, '');
+  return {
+    plain_what: `Add a specialist: ${show(review.name)}. ${sentence}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    persona: {
+      name: show(review.name),
+      description: show(review.description),
+      instructions: escapeDisplayText(review.instructions, { keepNewlines: true }),
+      model_name: show(review.model_name),
+    },
+  };
+}
+
+/**
+ * Adding a specialist always asks with the full instructions. Reading the list and switching this chat to an
+ * existing specialist run without asking. Any other persona tool name fails closed.
+ */
+async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.tool_name === LIST_PERSONAS_TOOL_NAME) {
+    return tier1Decision({ reason: 'persona_read', reason_detail: 'Read your specialists.', sensitive_read: false });
+  }
+  if (action.tool_name === USE_PERSONA_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'persona_switch',
+      reason_detail: 'Switch this chat to a specialist you already have.',
+      sensitive_read: false,
+    });
+  }
+  if (!isPersonaWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown specialist tool.' });
+  }
+  if (action.persona_write === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The specialist could not be checked, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: personaWriteCard({ review: action.persona_write, agent_intent: ctx.agent_intent }),
+    reason: 'persona_write',
+    reason_detail: 'Adding a specialist always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
 }
 
 /**
@@ -2337,6 +2472,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
   }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === PERSONA_SERVER_ID) {
+    return classifyPersonaTool(action, ctx);
+  }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
   }
@@ -2393,7 +2531,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
           reason: 'offline_mode',
-          reason_detail: 'Maps need network access, which is disabled while offline.',
+          reason_detail: HOLD_SAY.maps_offline,
           sensitive_read: false,
         });
       }
@@ -2425,7 +2563,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: 'maps_tool',
-        reason_detail: runsWithoutAsking ? MAPS_ASKED_DETAIL : MAPS_ALWAYS_ASKS_DETAIL,
+        reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
@@ -2472,7 +2610,8 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
-  if (decision.sensitive_read && decision.auto_deny === null) {
+  // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
+  if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
     ctx.services.private_reads.markPrivateDataRead(ctx);
   }
   await recordClassificationAudit({

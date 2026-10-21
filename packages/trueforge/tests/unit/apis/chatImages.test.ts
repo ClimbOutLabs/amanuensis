@@ -69,14 +69,12 @@ async function buildApp() {
         store,
         sessionStore: {
           listTurnEvents: () => Promise.resolve({ data: [], pagination: { limit: 200 } }),
-          getTurn: () => Promise.resolve(undefined),
         },
         turnArtifactStore: new FakeTurnArtifactStore(),
         reencode: () => Promise.resolve({ ok: false, reason: 'sandbox_unavailable' }),
         sentinel: {
           audit: null,
           isOffline: () => Promise.resolve(false),
-          searchWithoutAsking: () => Promise.resolve(true),
           outboundSecrets: () => Promise.resolve([]),
         },
         fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
@@ -138,6 +136,7 @@ describe('chat image routes', () => {
     const list = await app.request('/api/chat-images/sessions/mine/turns/t1', { headers: session });
     expect(z.object({ data: TurnImageListSchema }).parse(await list.json()).data).toEqual({
       artifacts: [],
+      tool_images: [],
       emails: [],
     });
 

@@ -1,3 +1,4 @@
+import { sumKnownCostUsd } from '@truefoundry/trueforge-core/core/util/usageCost';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 /** One `aman.model.usage` event: the calls one role made on one model during a turn. */
@@ -8,6 +9,7 @@ export type ModelUsageRow = {
   role: ModelUsageEvent['role'];
   roleLabel: string;
   displayName: string;
+  provider: string;
   providerLabel: string;
   calls: number;
   reportedCalls: number;
@@ -20,7 +22,7 @@ export type ModelUsageRow = {
 /** What a turn spent, from the usage its provider reported. */
 export type ModelUsageSummary = {
   /** The model that answered: the chat role's busiest model, else the busiest of any role. */
-  answer: Pick<ModelUsageRow, 'displayName' | 'providerLabel'>;
+  answer: Pick<ModelUsageRow, 'displayName' | 'provider' | 'providerLabel'>;
   inputTokens: number;
   outputTokens: number;
   /** Null when any reported call has no known price, so a partial sum is never shown as the total. */
@@ -60,6 +62,11 @@ const PROVIDER_LABELS: Record<string, string> = {
   custom: 'Custom provider',
 };
 
+// How a provider reads inside a sentence, where the generic custom label is not a name.
+const INLINE_PROVIDER_LABELS: Record<string, string> = {
+  custom: 'custom provider',
+};
+
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
 }
@@ -84,15 +91,6 @@ export function describeListPriceCost(cost: number): string {
   return `${formatCostUsd(cost)} at list price`;
 }
 
-function sumCost(costs: readonly (number | null)[]): number | null {
-  let total = 0;
-  for (const cost of costs) {
-    if (cost === null) return null;
-    total += cost;
-  }
-  return total;
-}
-
 function toRows(events: readonly ModelUsageEvent[]): ModelUsageRow[] {
   const rows = new Map<string, ModelUsageRow & { costParts: (number | null)[] }>();
   for (const event of events) {
@@ -101,6 +99,7 @@ function toRows(events: readonly ModelUsageEvent[]): ModelUsageRow[] {
       role: event.role,
       roleLabel: ROLE_LABELS[event.role],
       displayName: event.displayName,
+      provider: event.provider,
       providerLabel: providerLabel(event.provider),
       calls: 0,
       reportedCalls: 0,
@@ -118,7 +117,7 @@ function toRows(events: readonly ModelUsageEvent[]): ModelUsageRow[] {
   }
   return [...rows.values()].map(({ costParts, ...row }) => ({
     ...row,
-    costUsd: costParts.length === 0 ? null : sumCost(costParts),
+    costUsd: costParts.length === 0 ? null : sumKnownCostUsd(costParts),
   }));
 }
 
@@ -141,10 +140,14 @@ export function summarizeModelUsage(events: readonly ModelUsageEvent[] | undefin
   const calls = ordered.reduce((sum, row) => sum + row.calls, 0);
   const reportedCalls = ordered.reduce((sum, row) => sum + row.reportedCalls, 0);
   return {
-    answer: { displayName: answerRow.displayName, providerLabel: answerRow.providerLabel },
+    answer: {
+      displayName: answerRow.displayName,
+      provider: answerRow.provider,
+      providerLabel: answerRow.providerLabel,
+    },
     inputTokens: ordered.reduce((sum, row) => sum + row.inputTokens, 0),
     outputTokens: ordered.reduce((sum, row) => sum + row.outputTokens, 0),
-    costUsd: reportedCalls === 0 ? null : sumCost(reportedCosts),
+    costUsd: reportedCalls === 0 ? null : sumKnownCostUsd(reportedCosts),
     unreportedCalls: calls - reportedCalls,
     noneReported: reportedCalls === 0,
     rows: ordered,
@@ -153,17 +156,43 @@ export function summarizeModelUsage(events: readonly ModelUsageEvent[] | undefin
   };
 }
 
-function pluralize(count: number, singular: string): string {
-  return `${formatTokens(count)} ${singular}${count === 1 ? '' : 's'}`;
-}
-
-/** "+ 2 helper calls on Nemotron 3 Nano", or undefined when there were none. */
-export function describeHelperCalls(summary: ModelUsageSummary): string | undefined {
-  if (summary.helperCalls === 0) return undefined;
-  return `+ ${pluralize(summary.helperCalls, 'helper call')} on ${summary.helperModelNames.join(', ')}`;
-}
-
 /** "1,800 in, 340 out". */
 export function describeTokenSplit({ inputTokens, outputTokens }: Pick<ModelUsageRow, 'inputTokens' | 'outputTokens'>) {
   return `${formatTokens(inputTokens)} in, ${formatTokens(outputTokens)} out`;
+}
+
+/** One labelled row of an answer's usage, such as Tokens: "2,140 (1,800 in, 340 out)". */
+export type ModelUsageFact = {
+  key: 'model' | 'tokens' | 'cost' | 'helpers';
+  label: string;
+  value: string;
+};
+
+function describeTotalTokens(summary: ModelUsageSummary): string {
+  if (summary.noneReported) return 'not reported';
+  const reported = `${formatTokens(summary.inputTokens + summary.outputTokens)} (${describeTokenSplit(summary)})`;
+  if (summary.unreportedCalls === 0) return reported;
+  return `${reported}, not reported for ${summary.unreportedCalls === 1 ? '1 call' : `${formatTokens(summary.unreportedCalls)} calls`}`;
+}
+
+function describeHelperCalls(summary: ModelUsageSummary): string {
+  const [onlyModel, ...otherModels] = summary.helperModelNames;
+  const sameModel = otherModels.length === 0 && onlyModel === summary.answer.displayName;
+  return `${formatTokens(summary.helperCalls)}, ${sameModel ? 'same model' : `on ${summary.helperModelNames.join(', ')}`}`;
+}
+
+/** The rows shown in an answer's details: model, tokens, cost when priced, and helper calls when any ran. */
+export function describeModelUsage(summary: ModelUsageSummary): ModelUsageFact[] {
+  const provider = INLINE_PROVIDER_LABELS[summary.answer.provider] ?? summary.answer.providerLabel;
+  const facts: ModelUsageFact[] = [
+    { key: 'model', label: 'Model', value: `${summary.answer.displayName} (${provider})` },
+    { key: 'tokens', label: 'Tokens', value: describeTotalTokens(summary) },
+  ];
+  if (summary.costUsd !== null) {
+    facts.push({ key: 'cost', label: 'Cost', value: describeListPriceCost(summary.costUsd) });
+  }
+  if (summary.helperCalls > 0) {
+    facts.push({ key: 'helpers', label: 'Helper calls', value: describeHelperCalls(summary) });
+  }
+  return facts;
 }
