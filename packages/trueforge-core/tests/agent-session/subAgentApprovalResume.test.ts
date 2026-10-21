@@ -231,3 +231,41 @@ describe('a sub-agent that paused for approval, after the session is reopened fr
     expect(callTool).not.toHaveBeenCalled();
   });
 });
+
+describe('a sub-agent card whose request ended after the person sent a new message', () => {
+  it('refuses Approve on an ended request and runs nothing', async () => {
+    const { store, sentinelServices, resolver, callTool, paused } = await setup();
+    const pending = paused?.state.status === 'done' ? paused.state.required_actions : [];
+    const child = pending.find(action => action.type === EventType.TOOL_APPROVAL_REQUIRED);
+    const sessions = new Sessions({ sessionStore: store, sentinelServices });
+    const session = await sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    const next = await session?.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'What else is on my list?' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver,
+    });
+    for await (const event of next?.stream() ?? []) {
+      void event;
+    }
+
+    const tip = await sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    await expect(
+      tip?.createTurn({
+        turn_id: mintTestTurnId(),
+        input: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: child?.thread_id ?? '',
+            tool_call_id: 'call-send',
+            approval: { status: 'allow' },
+          },
+        ],
+        signal: new AbortController().signal,
+        resolver,
+      }),
+    ).rejects.toThrow('This request ended');
+    expect(callTool).not.toHaveBeenCalled();
+  });
+});
