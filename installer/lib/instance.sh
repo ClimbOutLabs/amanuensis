@@ -713,8 +713,9 @@ print_instance_block() {
 
 # Everything an installed machine already has: the recorded release and the shared network owner.
 require_installed() {
-  [ -f "$RELEASE_DIR/release.json" ] && [ -d "$MACHINE_DIR" ] ||
+  if [ ! -f "$RELEASE_DIR/release.json" ] || [ ! -d "$MACHINE_DIR" ]; then
     die "Aman is not set up on this computer yet. Run install.sh first."
+  fi
 }
 
 load_installed_release() {
@@ -910,7 +911,9 @@ new_instance_name_problem() {
 cmd_instance_add() {
   if [ -z "${OPT_NAME:-}" ]; then
     # Only a person at a terminal can answer; anything else still needs the name on the command line.
-    [ -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] || usage_die "usage: install.sh instance add <name> [--email ...]"
+    if [ ! -t 0 ] || [ "$ASSUME_YES" = 1 ] || [ "$DRY_RUN" = 1 ]; then
+      usage_die "usage: install.sh instance add <name> [--email ...]"
+    fi
     require_installed
     ask_valid OPT_NAME "Name for this instance:" "" "" new_instance_name_problem
   fi

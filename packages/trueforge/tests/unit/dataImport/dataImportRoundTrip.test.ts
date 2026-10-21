@@ -44,6 +44,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../../src/db/sqlite/types';
 import type { WithTransaction } from '../../../src/db/transaction';
+import { PERSISTED_ARTIFACT_MIME } from '../../../src/runtime/artifacts/persistTurnArtifacts';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { createPostgresTestDatabase } from '../../db/postgres/testDatabase';
 import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
@@ -230,6 +231,10 @@ function normalizeSection(name: string, parsed: unknown): unknown {
       entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
         stringAt(artifact['path'], 'path'),
       );
+      for (const artifact of recordsAt(entry['artifacts'], 'artifacts')) {
+        // The imported side is checked by expectUploadsStoredAsDownloads; the source keeps the real type.
+        artifact['mime'] = '<mime>';
+      }
       if (session['session_id'] === SEED_IDS.sessionRunning) {
         // The turn that was running at export time lands cancelled on import:
         // its state changes and its stream gains the closing turn.done event.
@@ -313,12 +318,24 @@ function expectNoApprovalGrants(archive: Map<string, Buffer>): void {
   }
 }
 
+/** Import stores every upload as a plain download, whatever type the archive claims. */
+function expectUploadsStoredAsDownloads(archive: Map<string, Buffer>): void {
+  for (const entry of recordsAt(legacySessionsOf(archive), 'sessions')) {
+    for (const artifact of recordsAt(entry['artifacts'], 'artifacts')) {
+      if (artifact['status'] === 'stored') {
+        expect(artifact['mime']).toBe(PERSISTED_ARTIFACT_MIME);
+      }
+    }
+  }
+}
+
 function expectExportsToMatch(first: Buffer, second: Buffer): void {
   const firstEntries = new Map(readZipEntries(first).map(entry => [entry.name, entry.data]));
   const secondEntries = new Map(readZipEntries(second).map(entry => [entry.name, entry.data]));
   expect([...secondEntries.keys()].sort()).toEqual([...firstEntries.keys()].sort());
   expect(auditRowsWithoutIds(secondEntries)).toEqual(auditRowsWithoutIds(firstEntries));
   expectNoApprovalGrants(secondEntries);
+  expectUploadsStoredAsDownloads(secondEntries);
   expect(normalizeSection('sessions.json', legacySessionsOf(secondEntries))).toEqual(
     normalizeSection('sessions.json', legacySessionsOf(firstEntries)),
   );
