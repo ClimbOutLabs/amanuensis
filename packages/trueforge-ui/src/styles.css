@@ -559,7 +559,7 @@
   color: var(--gold-ink);
   font-size: 0.75rem;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: 0.125rem;
 }
 
 .aman-runtime-rail__section-value a {

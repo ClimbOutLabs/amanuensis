@@ -107,7 +107,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     padding: 0.35rem 0.6rem;
-    border-radius: 999px;
+    border-radius: 999rem;
   }
 
   .aman-shell > .aman-runtime-rail .aman-runtime-rail__needs-you .aman-runtime-rail__section-label {
