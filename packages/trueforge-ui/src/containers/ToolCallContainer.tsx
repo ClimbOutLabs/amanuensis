@@ -14,9 +14,11 @@ import {
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
-import { useCallback, useState } from 'react';
+import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
+import { useCallback, useEffect, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
+import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -324,6 +326,12 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
+  // A specialist added in this chat shows in the persona list without a page reload.
+  const reloadPersonas = useOptionalPersonas()?.reload;
+  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  useEffect(() => {
+    if (specialistAdded) void reloadPersonas?.();
+  }, [specialistAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;

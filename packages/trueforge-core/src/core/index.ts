@@ -395,7 +395,7 @@ export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/stru
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
 // Skills: the ISkillMounter seam lets hosts plug in their own skill sources
-export { InstructionBuilder } from './InstructionBuilder';
+export { InstructionBuilder, rootAgentIdentity, type RootAgentNames } from './InstructionBuilder';
 export {
   SKILLS_PREAMBLE,
   SkillMounter,
@@ -483,6 +483,7 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
   Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,

@@ -52,6 +52,7 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 
 /**
@@ -1242,6 +1243,8 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
+  personas?: PersonaTurnContext | undefined;
 }
 
 /**
@@ -1293,6 +1296,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const google = await this.#google(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
+    const personas = this.#space.personas;
     return {
       ...resolved,
       extraCapabilities: [
@@ -1306,6 +1310,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
+        ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
           : [

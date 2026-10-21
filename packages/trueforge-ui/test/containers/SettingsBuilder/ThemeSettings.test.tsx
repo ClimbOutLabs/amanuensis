@@ -40,12 +40,12 @@ describe('ThemeSettings model and cost switch', () => {
     window.localStorage.removeItem(MODEL_USAGE_DISPLAY_STORAGE_KEY);
     renderSettings();
 
-    expect(screen.getByRole('switch', { name: 'Show model and cost under answers' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Show model and cost in answer details' })).toBeChecked();
   });
 
   it('switches the display off and back on, and remembers it', () => {
     renderSettings();
-    const toggle = screen.getByRole('switch', { name: 'Show model and cost under answers' });
+    const toggle = screen.getByRole('switch', { name: 'Show model and cost in answer details' });
 
     fireEvent.click(toggle);
     expect(toggle).not.toBeChecked();

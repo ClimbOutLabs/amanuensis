@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import type { RootAgentNames } from '@truefoundry/trueforge-core/core';
+
 export const PERSONALIZATION_CONTEXT_VERSION = 'personalization-context/v1';
 export const PERSONALIZATION_MAX_CONTEXT_CHARACTERS = 6_000;
 /** Hard bound on the learned document; the learning pass drops oversized rewrites whole. */
@@ -118,6 +120,17 @@ export function isPersonalizationUnchanged(params: {
     params.existing.digest === personalizationDigest(params.next) &&
     params.existing.learning_enabled === params.next.learning_enabled
   );
+}
+
+/**
+ * The names the root assistant's identity is built from. The person is addressed by the preferred name when set,
+ * otherwise by their name. Before any profile exists both stay unset and the core default applies.
+ */
+export function rootIdentityNames(profile: PersonalizationProfile | undefined): RootAgentNames {
+  return {
+    assistantName: profile?.assistant_name,
+    personName: profile?.address_as ?? profile?.user_name,
+  };
 }
 
 function joinPreferences(preferences: readonly string[]): string {
