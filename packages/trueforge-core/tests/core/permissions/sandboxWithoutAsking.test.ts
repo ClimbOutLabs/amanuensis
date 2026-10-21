@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
@@ -8,6 +8,7 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import type { TrackedExecutableScope } from '../../../src/core/permissions/trackedExecutables';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 /** Services where the owner's "run code in the sandbox without asking" switch is on or off. */
@@ -35,6 +36,39 @@ function makeCtx({ services, workspace }: { services: SentinelServices; workspac
     agent_intent: 'make a small script',
     web_search: createWebSearchTurnState(),
   };
+}
+
+/** The scope a classifier call for `workspace` in conversation `conv-1` reads from the tracked set. */
+function trackedScope(workspace: string): TrackedExecutableScope {
+  return {
+    tenant_id: 't1',
+    created_by: 'u1',
+    conversation_id: 'conv-1',
+    repository_id: null,
+    workspace_cwd: workspace,
+  };
+}
+
+/**
+ * Writes a script into the workspace. `authored` records it the way the sandbox does for a file the
+ * agent's own file tools wrote in this conversation; otherwise it stands for a repo, downloaded or unknown file.
+ */
+function writeScript({
+  services,
+  workspace,
+  name,
+  authored,
+}: {
+  services: SentinelServices;
+  workspace: string;
+  name: string;
+  authored: boolean;
+}): void {
+  const file = join(workspace, name);
+  writeFileSync(file, 'print(1)\n');
+  if (authored) {
+    services.tracked_store.track({ scope: trackedScope(workspace), file_identity: realpathSync(file) });
+  }
 }
 
 function action(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
@@ -81,15 +115,10 @@ describe('in-sandbox work with the switch on runs without a card', () => {
   );
 
   test.each([
-    ['python3 humanize_demo.py', 'sandbox_command'],
-    ['python3 -m pytest -q', 'sandbox_command'],
-    ['pytest -q', 'sandbox_command'],
-    ['npm test', 'sandbox_command'],
     ['npm install humanize', 'sandbox_package_install'],
     ['pip install humanize', 'sandbox_package_install'],
     ['pip install "humanize==4.9.0"', 'sandbox_package_install'],
     ['python3 -m pip install humanize', 'sandbox_package_install'],
-    ['node demo.js', 'sandbox_command'],
   ])('%s runs without a card', (command, reason) =>
     withWorkspace(async workspace => {
       const decision = await classifyTier(
@@ -115,6 +144,76 @@ describe('in-sandbox work with the switch on runs without a card', () => {
       expect(decision.tier).toBe(1);
       expect(decision.auto_deny).toBeNull();
     }),
+  );
+});
+
+/** Runs that are silent only when the script they run is one Aman wrote in this conversation. */
+const AUTHORED_SILENT_RUNS: readonly { command: string; file: string }[] = [
+  { command: 'python3 agent_tool.py', file: 'agent_tool.py' },
+  { command: 'python3 -u agent_tool.py --flag', file: 'agent_tool.py' },
+  { command: 'bash agent_tool.sh', file: 'agent_tool.sh' },
+  { command: 'node agent_tool.js', file: 'agent_tool.js' },
+];
+
+/** Runs that keep their card even when the switch is on: a script from outside Aman's conversation, or no script at all. */
+const CARDED_RUNS: readonly { command: string; file: string | null }[] = [
+  { command: 'python3 repo_tool.py', file: 'repo_tool.py' },
+  { command: 'bash repo_tool.sh', file: 'repo_tool.sh' },
+  { command: 'node repo_tool.js', file: 'repo_tool.js' },
+  { command: 'sh -c "./repo_tool.sh"', file: 'repo_tool.sh' },
+  { command: 'sh -c "./agent_tool.sh"', file: 'agent_tool.sh' },
+  { command: 'python3 -m agent_tool', file: 'agent_tool.py' },
+  { command: 'pytest -q', file: null },
+  { command: 'python3 -m pytest -q', file: null },
+  { command: 'npm test', file: null },
+  { command: 'python3 -', file: null },
+];
+
+describe('a script runs silently only when Aman wrote it in this conversation', () => {
+  test.each(AUTHORED_SILENT_RUNS)('$command runs without a card when Aman wrote the script', ({ command, file }) =>
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: file, authored: true });
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_command');
+      expect(decision.card).toBeNull();
+    })(),
+  );
+
+  test.each(CARDED_RUNS)('$command keeps its card with the switch on', ({ command, file }) =>
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      if (file !== null) {
+        writeScript({ services, workspace, name: file, authored: command.includes('agent_tool') });
+      }
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+    })(),
+  );
+
+  test.each([...AUTHORED_SILENT_RUNS, ...CARDED_RUNS])(
+    '$command keeps its card with the switch off',
+    ({ command, file }) =>
+      withWorkspace(async workspace => {
+        const services = servicesWith({ sandbox_without_asking: false });
+        if (file !== null) {
+          writeScript({ services, workspace, name: file, authored: true });
+        }
+        const decision = await classifyTier(
+          action('exec', { command, cwd: workspace }),
+          makeCtx({ services, workspace }),
+        );
+        expect(decision.tier).toBe(3);
+        expect(decision.card).not.toBeNull();
+      })(),
   );
 });
 
@@ -144,9 +243,11 @@ describe('the same in-sandbox work asks with the switch off', () => {
   test(
     'python3 on a script the agent wrote asks',
     withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: false });
+      writeScript({ services, workspace, name: 'humanize_demo.py', authored: true });
       const decision = await classifyTier(
         action('exec', { command: 'python3 humanize_demo.py', cwd: workspace }),
-        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+        makeCtx({ services, workspace }),
       );
       expect(decision.tier).toBe(3);
     }),
@@ -217,9 +318,11 @@ describe('actions that leave the sandbox still ask, with the switch on', () => {
   test(
     'a script run from outside the workspace asks',
     withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'demo.py', authored: true });
       const decision = await classifyTier(
-        action('exec', { command: 'python3 demo.py', cwd: '/' }),
-        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        action('exec', { command: `python3 ${join(workspace, 'demo.py')}`, cwd: '/' }),
+        makeCtx({ services, workspace }),
       );
       expect(decision.tier).toBe(3);
       expect(decision.reason).toBe('cwd_outside_workspace');

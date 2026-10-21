@@ -6,7 +6,6 @@ import {
   InMemoryTrackedExecutableStore,
   isGitControlPath,
   isSandboxToolPath,
-  observeShellCreatedFiles,
   skipWrapperPrefix,
   writeTargetTouchesGitControl,
 } from '../../../src/core/permissions/trackedExecutables';
@@ -14,6 +13,7 @@ import {
 const SCOPE = {
   tenant_id: 't1',
   created_by: 'u1',
+  conversation_id: 'conv-1',
   repository_id: 'r1',
   workspace_cwd: '/repo',
 };
@@ -34,6 +34,13 @@ describe('InMemoryTrackedExecutableStore', () => {
     const identity = '/repo/dist/tool';
     store.track({ scope: SCOPE, file_identity: identity });
     expect(store.isTracked({ scope: { ...SCOPE, repository_id: 'r2' }, file_identity: identity })).toBe(false);
+  });
+
+  test('a file Aman wrote in one conversation is not tracked in another', () => {
+    const store = new InMemoryTrackedExecutableStore();
+    const identity = '/repo/dist/tool';
+    store.track({ scope: SCOPE, file_identity: identity });
+    expect(store.isTracked({ scope: { ...SCOPE, conversation_id: 'conv-2' }, file_identity: identity })).toBe(false);
   });
 
   test('grants are keyed by conversation and purged per conversation', () => {
@@ -71,23 +78,6 @@ describe('skipWrapperPrefix', () => {
     expect(skipWrapperPrefix(['env', 'FOO=bar', 'ls'])).toEqual(['ls']);
     expect(skipWrapperPrefix(['FOO=bar', 'ls'])).toEqual(['FOO=bar', 'ls']);
     expect(skipWrapperPrefix(['ls', '-la'])).toEqual(['ls', '-la']);
-  });
-});
-
-describe('observeShellCreatedFiles', () => {
-  test('detects redirect targets', () => {
-    expect(observeShellCreatedFiles({ command: 'echo hi > out.txt' })).toContain('out.txt');
-  });
-
-  test('detects touch/cp/mv/install targets', () => {
-    expect(observeShellCreatedFiles({ command: 'touch newfile' })).toContain('newfile');
-    // cp records the destination (the created file), not the source.
-    expect(observeShellCreatedFiles({ command: 'cp a b' })).toEqual(['b']);
-    expect(observeShellCreatedFiles({ command: 'mv old new' })).toContain('new');
-  });
-
-  test('returns nothing for read-only commands', () => {
-    expect(observeShellCreatedFiles({ command: 'ls -la' })).toEqual([]);
   });
 });
 
