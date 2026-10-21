@@ -79,6 +79,11 @@ export interface HarvestedFile {
 
 export interface RunCodeCallOptions {
   signal: AbortSignal | undefined;
+  /**
+   * Package mirror grant for this call, resolved by the caller for the chat's repo when the person
+   * allowed downloads for it. Undefined keeps the run fully offline.
+   */
+  packageMirrorToken: string | undefined;
   /** Turn attachments staged into ingress (harness-owned, §2.1.1). */
   attachments: TurnAttachment[] | undefined;
   /** Progress events for the explicit provisioning step. */
@@ -392,6 +397,7 @@ export class RunCodeService implements RunCodeBackend {
         attachments,
         signal: options?.signal,
         onHarvestedFiles: options?.onHarvestedFiles,
+        packageMirrorToken: options?.packageMirrorToken,
       });
     } catch (error) {
       // dispatch itself broke (driver throw, host I/O). The service
@@ -476,6 +482,7 @@ export class RunCodeService implements RunCodeBackend {
     attachments: TurnAttachment[];
     signal: AbortSignal | undefined;
     onHarvestedFiles: ((files: HarvestedFile[]) => Promise<void>) | undefined;
+    packageMirrorToken: string | undefined;
   }): Promise<RunCodeResult> {
     const timeoutSeconds = Math.min(input.input.timeout_seconds ?? this.defaultTimeoutSeconds, this.maxTimeoutSeconds);
     const timeoutMs = timeoutSeconds * 1000;
@@ -508,6 +515,7 @@ export class RunCodeService implements RunCodeBackend {
       diskMb: this.diskMb,
       runId: input.runId,
       env: SANDBOX_RUN_ENV,
+      packageMirrorToken: input.packageMirrorToken,
       sandboxIdentity: identity,
       signal: controller.signal,
       // FC pull-before-kill best-effort grace (Docker ignores it).

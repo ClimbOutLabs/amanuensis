@@ -43,7 +43,7 @@ extra_sign_in_users() { # registry file, instance folder
   fi
   emails=$(
     {
-      sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
+      LC_ALL=C sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
       env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | tr ',' '\n'
     } | LC_ALL=C awk -v owner="$(lowercase "$owner")" '
       { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
@@ -54,8 +54,8 @@ extra_sign_in_users() { # registry file, instance folder
   else
     names=$(
       {
-        sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
-        sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | LC_ALL=C tr '[:upper:]_' '[:lower:]-'
+        LC_ALL=C sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
+        LC_ALL=C sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | LC_ALL=C tr '[:upper:]_' '[:lower:]-'
       } | awk '!seen[$0]++'
     )
   fi

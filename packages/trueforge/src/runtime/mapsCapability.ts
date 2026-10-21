@@ -21,11 +21,13 @@ import {
   LocalToolMCP,
   mapsDestinationHosts,
   MapsTravelModeSchema,
+  normalizedWords,
   RENDER_MAP_TOOL_NAME,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
   resolveLocalTime,
   toolResultResponse,
+  type FetchedPageScope,
   type FetchedPageStore,
   type MapsRouteResult as MapsRouteResultBody,
   type MapsTravelMode,
@@ -474,12 +476,17 @@ function mapsErrorResult({
   error,
   field,
   mode,
+  refused,
 }: {
   error: MapsUpstreamError;
   field?: string;
   mode?: MapsTravelMode;
+  refused?: { name: string; reason: string }[];
 }): ReturnType<typeof toolResultResponse> {
   const body: MapsErrorBody = { status: 'error', code: error.code };
+  if (refused !== undefined) {
+    body.refused = refused;
+  }
   if (field !== undefined) {
     body.field = field;
   }
@@ -496,23 +503,192 @@ function mapsErrorResult({
 }
 
 const REFUSAL_REASONS = {
-  source_not_fetched: 'Aman has not read that page, so the details cannot be checked.',
-  name_not_found: 'The name is not on that page.',
-  address_not_found: 'The address is not on that page.',
+  source_not_fetched:
+    'Aman has not read that page, so the details cannot be checked. Read that page first, then try again.',
+  name_not_found: 'The name is not on that page. Copy it word for word from the page and try again.',
+  address_not_found: 'The address is not on that page. Copy it word for word from the page and try again.',
+  place_only_in_address:
+    "That place only appears in the page's web address. Read a page that lists it, then try again.",
+  address_apart_from_name:
+    'The name and address are not together on that page. Copy them from one listing and try again.',
 } as const;
 
+const OUT_OF_AREA_REASON =
+  'The place the map found is in a different area. Try again with a fuller address, adding the town or postcode.';
+
 /**
- * Pins places the model found on pages this server fetched. A place is kept only when its name and
- * address are on its source page, and each detail only when the page states it; the source and the
- * fetch time are the server's. Only the addresses go to the geocoder.
+ * US states, under the spellings normalizedWords folds their names to, with the code a geocoder
+ * shortens them to. A query and a result may spell the same state either way, so both forms count
+ * as the same area, and a different state in the result contradicts the one the query named.
+ */
+const US_STATE_CODES: Readonly<Record<string, string>> = {
+  alabama: 'al',
+  alaska: 'ak',
+  arizona: 'az',
+  arkansas: 'ar',
+  california: 'ca',
+  colorado: 'co',
+  connecticut: 'ct',
+  delaware: 'de',
+  'district of columbia': 'dc',
+  florida: 'fl',
+  georgia: 'ga',
+  hawaii: 'hi',
+  idaho: 'id',
+  illinois: 'il',
+  indiana: 'in',
+  iowa: 'ia',
+  kansas: 'ks',
+  kentucky: 'ky',
+  louisiana: 'la',
+  maine: 'me',
+  maryland: 'md',
+  massachusetts: 'ma',
+  michigan: 'mi',
+  minnesota: 'mn',
+  mississippi: 'ms',
+  missouri: 'mo',
+  montana: 'mt',
+  nebraska: 'ne',
+  nevada: 'nv',
+  'new hampshire': 'nh',
+  'new jersey': 'nj',
+  'new mexico': 'nm',
+  'new york': 'ny',
+  'n carolina': 'nc',
+  'n dakota': 'nd',
+  ohio: 'oh',
+  oklahoma: 'ok',
+  oregon: 'or',
+  pennsylvania: 'pa',
+  'rhode island': 'ri',
+  's carolina': 'sc',
+  's dakota': 'sd',
+  tennessee: 'tn',
+  texas: 'tx',
+  utah: 'ut',
+  vermont: 'vt',
+  virginia: 'va',
+  washington: 'wa',
+  'w virginia': 'wv',
+  wisconsin: 'wi',
+  wyoming: 'wy',
+};
+
+const US_STATE_NAMES_BY_CODE: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(US_STATE_CODES).map(([name, code]) => [code, name]),
+);
+const US_STATE_CODE_SET: ReadonlySet<string> = new Set(Object.values(US_STATE_CODES));
+
+/** The spellings one area part may appear under: itself, plus the other form of a US state. */
+function areaSpellings(tokens: readonly string[]): string[] {
+  const phrase = tokens.join(' ');
+  const code = US_STATE_CODES[phrase];
+  if (code !== undefined) {
+    return [phrase, code];
+  }
+  if (tokens.length === 1 && US_STATE_CODE_SET.has(phrase)) {
+    const name = US_STATE_NAMES_BY_CODE[phrase];
+    return name === undefined ? [phrase] : [phrase, name];
+  }
+  return [phrase];
+}
+
+/** Whether an area part appears in the result name under any of its spellings. */
+function areaPartAppears(tokens: readonly string[], displayWords: string): boolean {
+  return areaSpellings(tokens).some(spelling => displayWords.includes(` ${spelling} `));
+}
+
+/** The US state code an area part names, spelled out or as the code itself; undefined for any other part. */
+function stateCodeOf(tokens: readonly string[]): string | undefined {
+  const phrase = tokens.join(' ');
+  const code = US_STATE_CODES[phrase];
+  if (code !== undefined) {
+    return code;
+  }
+  return tokens.length === 1 && US_STATE_CODE_SET.has(phrase) ? phrase : undefined;
+}
+
+/** Whether the result name names a US state of its own, by name or by code, other than the given one. */
+function displayNamesOtherState({ displayWords, ownCode }: { displayWords: string; ownCode: string }): boolean {
+  for (const [name, code] of Object.entries(US_STATE_CODES)) {
+    if (code !== ownCode && displayWords.includes(` ${name} `)) {
+      return true;
+    }
+  }
+  return displayWords.split(' ').some(token => token !== '' && token !== ownCode && US_STATE_CODE_SET.has(token));
+}
+
+/**
+ * Whether a geocoder result sits in the area the query itself names. The area is what follows the
+ * first comma, in parts. It matches when every long number after the comma (a postcode) appears
+ * in the result name, or when the last part (the region) appears there, spelled out or, for a US
+ * state, as its code. The first part matching counts too, unless a later part names a US state
+ * the result contradicts with a different state of its own; parts between the two, such as a
+ * district, may be left out by the geocoder. A query that names no area passes.
+ */
+export function isInRequestedArea({ query, displayName }: { query: string; displayName: string }): boolean {
+  const segments = query.split(',');
+  if (segments.length < 2) {
+    return true;
+  }
+  const areaParts = segments
+    .slice(1)
+    .map(segment =>
+      normalizedWords(segment)
+        .trim()
+        .split(' ')
+        .filter(token => /^\p{L}+$/u.test(token)),
+    )
+    .filter(part => part.length > 0);
+  const numbers: string[] =
+    segments
+      .slice(1)
+      .join(',')
+      .match(/\d{3,}/g) ?? [];
+  if (areaParts.length === 0 && numbers.length === 0) {
+    return true;
+  }
+  const displayNumbers: string[] = displayName.match(/\d{3,}/g) ?? [];
+  if (numbers.length > 0 && numbers.every(number => displayNumbers.includes(number))) {
+    return true;
+  }
+  if (areaParts.length === 0) {
+    return false;
+  }
+  const displayWords = normalizedWords(displayName);
+  const lastPart = areaParts[areaParts.length - 1];
+  if (lastPart !== undefined && areaPartAppears(lastPart, displayWords)) {
+    return true;
+  }
+  const firstPart = areaParts[0];
+  if (firstPart === undefined || !areaPartAppears(firstPart, displayWords)) {
+    return false;
+  }
+  return !areaParts.slice(1).some(part => {
+    const code = stateCodeOf(part);
+    return (
+      code !== undefined &&
+      !areaPartAppears(part, displayWords) &&
+      displayNamesOtherState({ displayWords, ownCode: code })
+    );
+  });
+}
+
+/**
+ * Pins places the model found on pages this server fetched for this chat. A place is kept only
+ * when its name and address are on its source page, and each detail only when the page states it;
+ * the source and the fetch time are the server's. Only the addresses go to the geocoder.
  */
 export async function renderPlaces({
   service,
   pages,
+  scope,
   input,
 }: {
   service: MapsService;
   pages: FetchedPageStore;
+  scope: FetchedPageScope;
   input: RenderPlacesInput;
 }): Promise<ReturnType<typeof toolResultResponse>> {
   const refused: { name: string; reason: string }[] = [];
@@ -529,6 +705,7 @@ export async function renderPlaces({
         source_url: claim.source_url,
       },
       pages,
+      scope,
     });
     if (result.ok) {
       grounded.push(result.place);
@@ -537,18 +714,25 @@ export async function renderPlaces({
     }
   }
   if (grounded.length === 0) {
-    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded') });
+    return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
   }
   try {
     const places = [];
     for (const place of grounded) {
       const found = await service.geocode(place.address);
+      if (found !== null && !isInRequestedArea({ query: place.address, displayName: found.resolved_name })) {
+        refused.push({ name: place.name, reason: OUT_OF_AREA_REASON });
+        continue;
+      }
       places.push({
         ...place,
         lat: found?.lat ?? null,
         lng: found?.lng ?? null,
         already_in_calendar: isInCalendar({ place, locations: input.calendar_locations }),
       });
+    }
+    if (places.length === 0) {
+      return mapsErrorResult({ error: new MapsUpstreamError('not_grounded'), refused });
     }
     return toolResultResponse({
       text: JSON.stringify({ status: 'ok', places, refused, attribution: MAPS_ATTRIBUTION }),
@@ -567,6 +751,7 @@ class MapsTool extends LocalToolMCP {
 
   constructor(
     private readonly service: MapsService,
+    private readonly pagesScope: FetchedPageScope,
     private readonly logger: Logger,
     private readonly timezone: string,
     tracing: AgentTracing,
@@ -606,7 +791,7 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
       description:
-        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
+        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use only for a place or address the user typed themselves. A place that came from a web page goes through render_places instead, never this tool. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
       schema: RENDER_MAP_INPUT_SCHEMA,
       handler: async input => this.renderMap(input),
     }),
@@ -620,9 +805,10 @@ class MapsTool extends LocalToolMCP {
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
       description:
-        "Pin places on one map card, each with the details found on the page it came from. Use only after tavily_extract has read the pages. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Pass the page's own link as source_url. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
+        "Pin places on one map card, each with the details found on the page it came from. Use after a page reading tool has read the pages, whichever one it was: tavily_extract, web_fetch, or another provider's fetch tool all count. Copy each name, address, language, opening hours, price and phone word for word from the page text; leave a detail out when the page does not state it. Short forms such as St for Street are fine. Pass the page's own link as source_url. Every refused place comes back with its name and the reason, so fix that one detail and call again for it. If the user's calendar already lists a place, pass its location text in calendar_locations. The tool checks every detail against the page and drops what it cannot find; the user is asked to approve each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
-      handler: async input => renderPlaces({ service: this.service, pages: fetchedPages, input }),
+      handler: async input =>
+        renderPlaces({ service: this.service, pages: fetchedPages, scope: this.pagesScope, input }),
     }),
   ];
 
@@ -633,7 +819,7 @@ class MapsTool extends LocalToolMCP {
   private async renderMap(input: RenderMapInput): Promise<ReturnType<typeof toolResultResponse>> {
     try {
       const place = await this.service.geocode(input.place_name);
-      if (place === null) {
+      if (place === null || !isInRequestedArea({ query: input.place_name, displayName: place.resolved_name })) {
         return mapsErrorResult({ error: new MapsUpstreamError('not_found') });
       }
       const pins = input.poi === undefined ? [] : await this.service.searchPoi(place, input.poi);
@@ -735,6 +921,8 @@ class MapsTool extends LocalToolMCP {
 export interface MapsCapabilityOptions {
   tracing: AgentTracing;
   logger: Logger;
+  /** The tenant and chat read pages are checked for; a page read in another chat does not count. */
+  pages_scope: FetchedPageScope;
   /** IANA zone the user's local times are read in; UTC when the client sent none. */
   timezone?: string | undefined;
 }
@@ -776,7 +964,13 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
   });
   return {
     systemToolSets: [
-      new MapsTool(service, options.logger, resolveLocalTime(new Date(), options.timezone).zone, options.tracing),
+      new MapsTool(
+        service,
+        options.pages_scope,
+        options.logger,
+        resolveLocalTime(new Date(), options.timezone).zone,
+        options.tracing,
+      ),
     ],
   };
 }

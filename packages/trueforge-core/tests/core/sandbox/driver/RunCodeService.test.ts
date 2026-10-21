@@ -504,6 +504,7 @@ describe('RunCodeService', () => {
         attachments: [{ name: 'photo.png', bytes: Buffer.from('img') }],
         onProgress: undefined,
         onHarvestedFiles: undefined,
+        packageMirrorToken: undefined,
       },
     );
     expect(result.status).toBe('ok');
@@ -542,6 +543,7 @@ describe('RunCodeService', () => {
         attachments: [{ name: 'photo.png', bytes: Buffer.from('x') }],
         onProgress: undefined,
         onHarvestedFiles: undefined,
+        packageMirrorToken: undefined,
       },
     );
     if (collision.status === 'failed') {
@@ -591,6 +593,7 @@ describe('RunCodeService', () => {
       signal: undefined,
       attachments: undefined,
       onProgress: undefined,
+      packageMirrorToken: undefined,
       onHarvestedFiles: async files => {
         sinkFiles = files;
         // The sink must observe the run root before the finally-block cleanup deletes it.
@@ -617,6 +620,7 @@ describe('RunCodeService', () => {
       signal: undefined,
       attachments: undefined,
       onProgress: undefined,
+      packageMirrorToken: undefined,
       onHarvestedFiles: async () => {
         throw new Error('disk on fire');
       },

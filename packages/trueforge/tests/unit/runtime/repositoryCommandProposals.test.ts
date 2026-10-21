@@ -201,6 +201,7 @@ describe('repository command proposals', () => {
         name: 'demo',
         clone_url: 'https://example.test/demo.git',
         default_branch: 'main',
+        package_downloads_allowed: false,
         revision: 1,
         created_at: '2026-01-01T00:00:00.000Z',
         updated_at: '2026-01-01T00:00:00.000Z',
@@ -238,5 +239,137 @@ describe('repository command proposals', () => {
 
     await expect(synchronization).rejects.toThrow('cancel proposal synchronization');
     expect(replaceVerifyCommandProposals).not.toHaveBeenCalled();
+  });
+
+  it('prefers explicit hatch scripts over inferred pyproject tool table commands', () => {
+    const proposals = deriveRepositoryCommandProposals({
+      repository_id: 'repo-a',
+      confirmed_commands: [],
+      sources: [
+        {
+          source_kind: 'pyproject_toml',
+          source_path: 'pyproject.toml',
+          source_fingerprint: 'sha256:pyproject-a',
+          content: [
+            '[build-system]',
+            'requires = ["hatchling"]',
+            '',
+            '[tool.pytest.ini_options]',
+            'testpaths = ["tests"]',
+            '',
+            '[tool.ruff.lint]',
+            'select = ["E"]',
+            '',
+            '[tool.hatch.envs.default.scripts]',
+            'test = "pytest -q"',
+            'lint = "ruff check ."',
+            '',
+            '[tool.hatch.envs.types.scripts]',
+            'check = "mypy src"',
+          ].join('\n'),
+        },
+      ],
+    });
+
+    expect(proposals.map(proposal => ({ purpose: proposal.purpose, command: proposal.command }))).toEqual([
+      { purpose: 'test', command: 'pytest -q' },
+      { purpose: 'verify', command: 'ruff check .' },
+    ]);
+  });
+
+  it('derives no pyproject commands from a file without tool tables', () => {
+    const proposals = deriveRepositoryCommandProposals({
+      repository_id: 'repo-a',
+      confirmed_commands: [],
+      sources: [
+        {
+          source_kind: 'pyproject_toml',
+          source_path: 'pyproject.toml',
+          source_fingerprint: 'sha256:pyproject-b',
+          content: ['[project]', 'name = "demo"', 'version = "1.0.0"'].join('\n'),
+        },
+      ],
+    });
+
+    expect(proposals).toEqual([]);
+  });
+
+  it('derives commands only from well known Makefile targets', () => {
+    const proposals = deriveRepositoryCommandProposals({
+      repository_id: 'repo-a',
+      confirmed_commands: [],
+      sources: [
+        {
+          source_kind: 'makefile',
+          source_path: 'Makefile',
+          source_fingerprint: 'sha256:makefile-a',
+          content: [
+            'VERSION := 1.0.0',
+            '.PHONY: build test lint deploy',
+            '',
+            'build:',
+            '\tgo build ./...',
+            '',
+            'test: build',
+            '\tgo test ./...',
+            '',
+            'lint:',
+            '\tgolangci-lint run',
+            '',
+            'deploy:',
+            '\t./deploy.sh',
+            '',
+            '%.o: %.c',
+            '\tcc -c $<',
+          ].join('\n'),
+        },
+      ],
+    });
+
+    expect(proposals.map(proposal => ({ purpose: proposal.purpose, command: proposal.command }))).toEqual([
+      { purpose: 'build', command: 'make build' },
+      { purpose: 'test', command: 'make test' },
+      { purpose: 'verify', command: 'make lint' },
+    ]);
+  });
+
+  it('synchronizes pyproject and Makefile proposals into the store', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteRepositoryStore(db);
+    const repository = await store.createRepository({
+      ...OWNER,
+      name: 'python-demo',
+      clone_url: 'https://example.test/python-demo.git',
+      default_branch: 'main',
+    });
+
+    await synchronizeRepositoryCommandProposals({
+      ...OWNER,
+      repository_id: repository.id,
+      sources: [
+        {
+          source_kind: 'pyproject_toml',
+          source_path: 'pyproject.toml',
+          source_fingerprint: 'sha256:pyproject-c',
+          content: ['[tool.pytest.ini_options]', '[tool.mypy]'].join('\n'),
+        },
+        {
+          source_kind: 'makefile',
+          source_path: 'Makefile',
+          source_fingerprint: 'sha256:makefile-b',
+          content: ['check:', '\t./check.sh'].join('\n'),
+        },
+      ],
+      store,
+      signal: undefined,
+    });
+
+    const stored = await store.listVerifyCommandProposals({ ...OWNER, repository_id: repository.id });
+    expect(stored.map(item => `${item.source_kind}:${item.purpose}:${item.command}`).sort()).toEqual([
+      'makefile:verify:make check',
+      'pyproject_toml:test:pytest',
+      'pyproject_toml:verify:mypy .',
+    ]);
   });
 });

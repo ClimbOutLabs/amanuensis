@@ -18,6 +18,7 @@ import {
   savedSearchHoldReason,
   SERVER_SECRET_REASON,
 } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -49,16 +50,19 @@ const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 
+/** One recipient of a mail card: the name it is shown with, empty when it has none, and the address mail goes to. */
+export type SentinelApprovalMailbox = Tier3Mailbox;
+
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
   action: SentinelApprovalEmailAction;
-  to: string[];
-  cc: string[];
-  bcc: string[];
+  to: SentinelApprovalMailbox[];
+  cc: SentinelApprovalMailbox[];
+  bcc: SentinelApprovalMailbox[];
   subject: string;
   body: string;
   /** The saved draft a change replaces, or null. */
-  replaces: { subject: string; to: string[] } | null;
+  replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
   reply_in_thread: { subject: string; from: string } | null;
 };
@@ -145,6 +149,20 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
+  /** The whole specialist when the action adds one, or null. */
+  persona: SentinelApprovalPersona | null;
+};
+
+/** The whole specialist a chat call adds, in plain words. */
+export type SentinelApprovalPersona = {
+  /** Specialist name in plain words. */
+  name: string;
+  /** One line on what the specialist is for. */
+  description: string;
+  /** The whole instruction text the specialist follows. */
+  instructions: string;
+  /** The model the specialist answers with. */
+  model_name: string;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -234,6 +252,8 @@ export type SentinelUserSettings = {
   tier2_auto_allow: Tier2ActionKind[];
   /** While on, the search provider you designated runs web searches without asking. Default: on. */
   search_without_asking: boolean;
+  /** While on, maps run without asking unless this chat has read private data. Default: off. */
+  maps_without_asking: boolean;
 };
 
 /**
@@ -341,19 +361,30 @@ function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefin
   return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
 }
 
+function mailboxList(value: unknown): SentinelApprovalMailbox[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const mailboxes: SentinelApprovalMailbox[] = [];
+  for (const item of value) {
+    const mailbox = readStoredMailbox(item);
+    if (mailbox === undefined) return undefined;
+    mailboxes.push(mailbox);
+  }
+  return mailboxes;
+}
+
 function parseEmail(value: unknown): SentinelApprovalEmail | null {
   if (!isRecord(value)) return null;
   const action = parseEmailAction(value.action);
-  const to = stringList(value.to);
-  const cc = stringList(value.cc);
-  const bcc = stringList(value.bcc);
+  const to = mailboxList(value.to);
+  const cc = mailboxList(value.cc);
+  const bcc = mailboxList(value.bcc);
   const subject = optionalString(value, 'subject');
   const body = optionalString(value, 'body');
   if (action === undefined || to === undefined || cc === undefined || bcc === undefined) return null;
   if (subject === undefined || body === undefined) return null;
   const replaced = value.replaces;
   const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
-  const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
+  const replacedTo = isRecord(replaced) ? mailboxList(replaced.to) : undefined;
   // The SDK camel-cases the keys it knows, so a card that came through it names this one replyInThread.
   const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
@@ -431,6 +462,19 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
+/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+function parsePersona(value: unknown): SentinelApprovalPersona | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  if (name === undefined || description === undefined || instructions === undefined || model_name === undefined) {
+    return null;
+  }
+  return { name, description, instructions, model_name };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -474,6 +518,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
+    persona: parsePersona(value.persona),
   });
 }
 
@@ -640,10 +685,13 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
 /** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
-  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+  if (!isRecord(settings)) {
+    return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true, maps_without_asking: false };
+  }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
   };
 }

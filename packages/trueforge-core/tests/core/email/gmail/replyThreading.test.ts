@@ -121,7 +121,7 @@ describe('a reply with valid threading', () => {
     );
     expect(info.tier3_card?.email).toMatchObject({
       action: 'send',
-      to: ['grace@example.com'],
+      to: [{ name: 'Grace', address: 'grace@example.com' }],
       subject: 'Re: Invitation to the lease signing',
       body: 'I accept, thank you.',
       reply_in_thread: { subject: 'Invitation to the lease signing', from: 'grace@example.com' },

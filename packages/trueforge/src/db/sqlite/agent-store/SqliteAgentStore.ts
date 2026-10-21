@@ -38,6 +38,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'agent'>) {
     'description' as const,
     jsonText<AgentSpec>(eb.ref('manifest')).as('manifest'),
     'external_id' as const,
+    'host_managed' as const,
     jsonText<CreatedBySubject>(eb.ref('created_by_subject')).as('created_by_subject'),
     'created_at' as const,
     'updated_at' as const,
@@ -51,12 +52,14 @@ function toRecord(row: {
   description: string;
   manifest: AgentSpec;
   external_id: string | null;
+  host_managed: number;
   created_by_subject: CreatedBySubject;
   created_at: string;
   updated_at: string;
 }): AgentRecord {
   return {
     ...row,
+    host_managed: row.host_managed === 1,
     manifest: parseStoredAgentSpec(row.manifest),
     created_by_subject: CreatedBySubjectSchema.parse(row.created_by_subject),
   };
@@ -78,6 +81,10 @@ export class SqliteAgentStore implements IAgentStore<Transaction<Database>> {
     }
     const db = transaction ?? this.#db;
     let query = db.selectFrom('agent').select(recordColumns).where('tenant_id', '=', input.tenant_id);
+    // Filtered in the query, not after it, so every page is full and its next token is honest.
+    if (!input.include_host_managed) {
+      query = query.where('host_managed', '=', 0);
+    }
     if (input.external_ids !== undefined) {
       query = query.where('external_id', 'in', [...input.external_ids]);
     }
@@ -157,6 +164,7 @@ export class SqliteAgentStore implements IAgentStore<Transaction<Database>> {
           description: input.description,
           manifest: jsonbBind(input.manifest),
           external_id: input.external_id,
+          host_managed: input.host_managed ? 1 : 0,
           created_by_subject: jsonbBind(input.created_by_subject),
           created_at: timestamp,
           updated_at: timestamp,

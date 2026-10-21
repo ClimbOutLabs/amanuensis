@@ -888,6 +888,7 @@ describe('ToolCallContainer', () => {
         email: null,
         calendar_event: null,
         schedule: null,
+        persona: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -903,11 +904,13 @@ describe('ToolCallContainer', () => {
           offline_mode: false,
           tier2_auto_allow: [],
           search_without_asking: true,
+          maps_without_asking: false,
         })),
         updateUserSettings: vi.fn(async () => ({
           offline_mode: false,
           tier2_auto_allow: [],
           search_without_asking: true,
+          maps_without_asking: false,
         })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
@@ -954,8 +957,7 @@ describe('ToolCallContainer: held search request', () => {
   function renderHeldSearch(call: Record<string, unknown>, status?: ThreadMessageLike['status']) {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
-        server: 'finder',
-        query: 'how do I rotate ws••••••3x safely',
+        summary: 'how do I rotate ws••••••3x safely',
         why: "it contains one of this computer's keys",
       }),
       plain_why: null,
@@ -971,16 +973,23 @@ describe('ToolCallContainer: held search request', () => {
       email: null,
       calendar_event: null,
       schedule: null,
+      persona: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
       listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
     };

@@ -4,6 +4,7 @@ import { GoogleApiError } from '../../google/errors';
 import { GoogleRestClient, type GoogleRestProduct } from '../../google/restClient';
 import {
   AttachmentBodySchema,
+  decodeAttachmentData,
   DraftListSchema,
   DraftSchema,
   GmailMessageSchema,
@@ -111,7 +112,7 @@ export class GmailApi {
     });
   }
 
-  /** The attachment's bytes, decoded. */
+  /** The attachment's bytes, decoded. The id comes from the same read as the message it is fetched with. */
   async getAttachment(input: { messageId: string; attachmentId: string }): Promise<Buffer> {
     const body = await this.#rest.parsed(AttachmentBodySchema, {
       query: undefined,
@@ -120,7 +121,7 @@ export class GmailApi {
       path: `/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}`,
       maxResponseBytes: MAX_ATTACHMENT_RESPONSE_BYTES,
     });
-    return Buffer.from((body.data ?? '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    return decodeAttachmentData(body.data ?? '');
   }
 
   async listDrafts(input: { maxResults: number; pageToken: string | undefined }): Promise<DraftList> {

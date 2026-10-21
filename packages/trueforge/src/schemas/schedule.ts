@@ -93,6 +93,7 @@ export const ScheduleSchema = z
   .object({
     id: z.string(),
     agent_name: NameSchema,
+    runs_as: z.string().describe('Who runs it, in plain words: a persona, the assistant, or a saved agent.'),
     name: NameSchema,
     manifest: ScheduleManifestSchema,
     created_by_subject: CreatedBySubjectSchema,

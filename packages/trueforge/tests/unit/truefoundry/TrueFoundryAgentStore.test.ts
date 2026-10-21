@@ -62,6 +62,7 @@ function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
     description: 'research',
     manifest: manifest(),
     external_id: null,
+    host_managed: false,
     created_by_subject: CREATED_BY_SUBJECT,
     created_at: now,
     updated_at: now,
@@ -148,11 +149,26 @@ describe('TrueFoundryAgentStore', () => {
     });
 
     await expect(
-      store.listAgents({ tenant_id: TENANT, agent_name: undefined, limit: undefined, page_token: undefined }, TXN),
+      store.listAgents(
+        {
+          include_host_managed: false,
+          tenant_id: TENANT,
+          agent_name: undefined,
+          limit: undefined,
+          page_token: undefined,
+        },
+        TXN,
+      ),
     ).resolves.toBe(listed);
     await expect(store.getAgent({ tenant_id: TENANT, id: 'agent-1' }, TXN)).resolves.toBe(listed.data[0]);
     expect(listAgents).toHaveBeenCalledWith(
-      { tenant_id: TENANT, agent_name: undefined, limit: undefined, page_token: undefined },
+      {
+        tenant_id: TENANT,
+        agent_name: undefined,
+        include_host_managed: false,
+        limit: undefined,
+        page_token: undefined,
+      },
       TXN,
     );
     expect(getAgent).toHaveBeenCalledWith({ tenant_id: TENANT, id: 'agent-1' }, TXN);
@@ -187,6 +203,7 @@ describe('TrueFoundryAgentStore', () => {
           description: 'research',
           manifest: manifest({ mcp_servers: [{ name: 'slack' }] }),
           external_id: null,
+          host_managed: false,
         },
         TXN,
       ),
@@ -225,6 +242,7 @@ describe('TrueFoundryAgentStore', () => {
           description: 'research',
           manifest: manifest(),
           external_id: null,
+          host_managed: false,
         },
         TXN,
       ),
@@ -255,6 +273,7 @@ describe('TrueFoundryAgentStore', () => {
         description: '',
         manifest: AgentSpecSchema.parse({ model: { name: 'openai-gateway/gpt-5' }, instructions: '' }),
         external_id: null,
+        host_managed: false,
       },
       TXN,
     );
@@ -281,6 +300,7 @@ describe('TrueFoundryAgentStore', () => {
         description: 'Finds papers',
         manifest: manifest(),
         external_id: null,
+        host_managed: false,
       },
       TXN,
     );
@@ -310,6 +330,7 @@ describe('TrueFoundryAgentStore', () => {
           description: 'research',
           manifest: manifest(),
           external_id: null,
+          host_managed: false,
         },
         TXN,
       ),
@@ -341,6 +362,7 @@ describe('TrueFoundryAgentStore', () => {
           description: 'research',
           manifest: manifest(),
           external_id: null,
+          host_managed: false,
         },
         TXN,
       ),
@@ -378,6 +400,7 @@ describe('TrueFoundryAgentStore', () => {
           description: 'research',
           manifest: manifest(),
           external_id: null,
+          host_managed: false,
         },
         TXN,
       ),

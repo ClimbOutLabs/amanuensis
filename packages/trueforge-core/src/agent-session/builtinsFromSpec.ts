@@ -23,7 +23,7 @@ import type { BoundRepository, Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import type { AgentSpec } from './schemas/agentSpec';
 
-export function builtinsFromSpec(input: {
+export interface BuiltinsFromSpecInput {
   spec: AgentSpec;
   definition: AgentDefinition;
   /**
@@ -46,7 +46,9 @@ export function builtinsFromSpec(input: {
    */
   compactionThresholdTokensDefault?: number | undefined;
   boundRepository?: BoundRepository | undefined;
-}): AgentCapability[] {
+}
+
+export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[] {
   const {
     spec,
     definition,
@@ -129,4 +131,15 @@ export function builtinsFromSpec(input: {
   }
 
   return capabilities;
+}
+
+/**
+ * The capabilities a thread runs with: the spec's builtins, then the host's extra capabilities.
+ * Root threads, sub-agent threads and the prompt report all assemble through this one function.
+ */
+export function threadCapabilities({
+  extraCapabilities,
+  ...input
+}: BuiltinsFromSpecInput & { extraCapabilities?: readonly AgentCapability[] | undefined }): AgentCapability[] {
+  return [...builtinsFromSpec(input), ...(extraCapabilities ?? [])];
 }

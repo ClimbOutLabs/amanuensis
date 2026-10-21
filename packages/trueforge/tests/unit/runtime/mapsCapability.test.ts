@@ -1,4 +1,4 @@
-import { mapsDestinationHosts } from '@truefoundry/trueforge-core/core';
+import { mapsDestinationHosts, type FetchedPageScope } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import {
@@ -8,6 +8,7 @@ import {
   MapsService,
   UpstreamLimiter,
   createMapsRoutingProvider,
+  isInRequestedArea,
   mapsCapability,
   roundOriginCoordinate,
   type MapsRoadMode,
@@ -17,6 +18,8 @@ import {
 import { MapsUpstreamError } from '../../../src/runtime/mapsErrors';
 import { UPSTREAM_JSON_MAX_BODY_BYTES } from '../../../src/runtime/mapsUpstream';
 import { unusedRoadProviders, unusedTransitProvider } from '../../fixtures/mapsProviders';
+
+const PAGES_SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -276,7 +279,11 @@ describe('MapsService.route origin privacy', () => {
 
 describe('maps connector binding', () => {
   it('binds approvals to the configured upstream hosts, matching what the approval card names', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
     const toolSet = capability.systemToolSets?.[0];
     if (toolSet === undefined) {
       throw new Error('maps capability has no tool sets');
@@ -290,12 +297,78 @@ describe('maps connector binding', () => {
   });
 
   it('names the walking, cycling and public transport services in the approval destination', async () => {
-    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+    });
     const binding = capability.systemToolSets?.[0]?.resolveConnector?.({
       name: 'render_route',
       arguments: { from_place: 'A', to_place: 'B', mode: 'transit' },
     });
     expect(binding?.destination_host).toContain('routing.openstreetmap.de');
     expect(binding?.destination_host).toContain('api.transitous.org');
+  });
+});
+
+describe('isInRequestedArea', () => {
+  it('accepts the right city when the geocoder abbreviates the state', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, MO, United States',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts the right city when the query abbreviates the state and the geocoder spells it out', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, MO',
+        displayName: '102 Main St, Springfield, Missouri, United States',
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses the same city name in a different state', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, Illinois, United States',
+      }),
+    ).toBe(false);
+  });
+
+  it('refuses a different state even when the query gives the state in full and the result only abbreviates its own', () => {
+    expect(
+      isInRequestedArea({
+        query: '102 Main St, Springfield, Missouri',
+        displayName: '102 Main St, Springfield, IL, United States',
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts a result matched by postcode alone when the city is spelled differently', () => {
+    expect(
+      isInRequestedArea({
+        query: '12 Example Street, Lisbon 1100-000',
+        displayName: '12 Example Street, Santa Maria Maior, 1100-000 Lisboa, Portugal',
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses a result in a different city when there is no postcode to save it', () => {
+    expect(
+      isInRequestedArea({ query: '12 Example Street, Lisbon', displayName: '12 Example Street, Porto, Portugal' }),
+    ).toBe(false);
+  });
+
+  it('accepts a result when the geocoder leaves out a district the query names before the city', () => {
+    expect(
+      isInRequestedArea({
+        query: '5 High Street, Camden, London',
+        displayName: '5 High Street, London, NW1 8AF, United Kingdom',
+      }),
+    ).toBe(true);
   });
 });

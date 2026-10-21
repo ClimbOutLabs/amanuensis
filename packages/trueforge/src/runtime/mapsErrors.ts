@@ -12,6 +12,8 @@ export interface MapsErrorBody {
   /** Another mode worth offering when this one found nothing. */
   try_instead?: MapsTravelMode | undefined;
   service?: 'geocoder' | 'router' | undefined;
+  /** Places that were refused and why, so the model can fix one detail and the card can name them. */
+  refused?: { name: string; reason: string }[] | undefined;
 }
 
 /** Upstream failure with a maps error code for the tool result body. */

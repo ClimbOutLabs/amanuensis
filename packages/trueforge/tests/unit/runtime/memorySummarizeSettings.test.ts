@@ -86,6 +86,7 @@ function agentRecord(): AgentRecord {
     description: 'Test agent',
     manifest: AgentSpecSchema.parse({ model: { name: 'openai/gpt-4o' } }),
     external_id: null,
+    host_managed: false,
     created_by_subject: {
       subject_id: 'user-1',
       subject_type: 'user',

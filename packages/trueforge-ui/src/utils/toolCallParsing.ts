@@ -471,6 +471,7 @@ export function parseSandboxResult(result: string | undefined): {
   exitCode?: number | null;
   resultText?: string;
   resultJson?: string;
+  notices?: string[];
 } {
   if (result === undefined) return {};
   const parsed = parseJsonIncrementally(result);
@@ -482,10 +483,14 @@ export function parseSandboxResult(result: string | undefined): {
   const response = isUnknownRecord(visibleResult.response) ? visibleResult.response : undefined;
   const exitCode = typeof response?.exitCode === 'number' ? response.exitCode : null;
   const resultText = typeof response?.result === 'string' ? response.result : undefined;
+  const notices = Array.isArray(visibleResult.notices)
+    ? visibleResult.notices.filter((notice): notice is string => typeof notice === 'string')
+    : [];
   return {
     exitCode,
     resultText,
     resultJson: parsed.isPartial ? result : JSON.stringify(visibleResult, null, 2),
+    ...(notices.length > 0 ? { notices } : {}),
   };
 }
 
@@ -686,6 +691,20 @@ function parsePlace(value: unknown): MapPlace | undefined {
   };
 }
 
+/** The places a pin call refused, as written by the server: a name and a plain reason each. */
+function parseRefusedPlaces(body: Record<string, unknown>): { name: string; reason: string }[] {
+  if (!Array.isArray(body.refused)) {
+    return [];
+  }
+  return body.refused.flatMap(candidate => {
+    if (!isUnknownRecord(candidate)) {
+      return [];
+    }
+    const { name, reason } = candidate;
+    return typeof name === 'string' && typeof reason === 'string' ? [{ name, reason }] : [];
+  });
+}
+
 function parsePlacesResult(body: Record<string, unknown>, attribution: string): ParsedMapsResult {
   const places = Array.isArray(body.places) ? body.places.flatMap(candidate => parsePlace(candidate) ?? []) : [];
   if (places.length === 0) {
@@ -705,6 +724,7 @@ function parsePlacesResult(body: Record<string, unknown>, attribution: string): 
       address: null,
       pins,
       places,
+      refused: parseRefusedPlaces(body),
       attribution,
     },
   };
@@ -734,10 +754,15 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'The time for the trip could not be understood.' };
     }
     if (code === 'not_grounded') {
+      const refused = parseRefusedPlaces(body);
+      const names = refused.slice(0, 3).map(place => place.name);
       return {
         state: 'unavailable',
         data: null,
-        blockedMessage: 'The details could not be checked against the pages Aman read, so no places were pinned.',
+        blockedMessage:
+          names.length === 0
+            ? 'The details could not be checked against the pages Aman read, so no places were pinned.'
+            : `The details could not be checked against the pages Aman read, so no places were pinned. Left out: ${names.join(', ')}. Check each name and address against its page, then try again.`,
       };
     }
     if (code === 'rate_limited') {

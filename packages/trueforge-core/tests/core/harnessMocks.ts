@@ -109,14 +109,16 @@ export function makeStubPublicSandbox(
 export async function* unknownToolStream({
   toolName,
   callId,
+  args = '{}',
 }: {
   toolName: string;
   callId: string;
+  args?: string;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const call = {
     id: callId,
     type: 'function' as const,
-    function: { name: toolName, arguments: '{}' },
+    function: { name: toolName, arguments: args },
   };
   yield {
     id: `chunk-${callId}`,

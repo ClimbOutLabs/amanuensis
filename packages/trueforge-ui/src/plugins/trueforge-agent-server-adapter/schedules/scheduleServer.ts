@@ -35,11 +35,12 @@ async function loadAgentIndex(client: TrueForge): Promise<AgentIndex> {
   return { idToName, nameToId };
 }
 
+/**
+ * A schedule made in a chat runs as an agent the agents list leaves out, so its id here is its name. An unknown
+ * key goes through as a name and the server answers for it.
+ */
 function resolveAgentName(agentId: string, index: AgentIndex): string {
-  const byId = index.idToName.get(agentId);
-  if (byId != null) return byId;
-  if (index.nameToId.has(agentId)) return agentId;
-  throw new Error(`Unknown agent: ${agentId}`);
+  return index.idToName.get(agentId) ?? agentId;
 }
 
 function collectAgentIds(req?: ListSchedulesParams): string[] {
@@ -64,6 +65,7 @@ function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule 
     name: wire.name,
     agentId,
     agentName: wire.agentName,
+    runsAs: wire.runsAs,
     task: wire.manifest.task,
     cron: wire.manifest.cron,
     timezone: wire.manifest.timezone ?? 'UTC',

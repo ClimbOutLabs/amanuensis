@@ -1,9 +1,5 @@
 // @vitest-environment jsdom
-import {
-  heldBecause,
-  searchHoldCardText,
-  SERVER_SECRET_REASON,
-} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -104,12 +100,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: oslo weather',
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
+      // A card saved before the wording changed keeps its own sentence and gets the reason after it.
       expect(card?.plain_what).toBe(
-        searchHoldCardText({
-          server: 'finder',
-          query: 'oslo weather',
-          why: 'this turn already ran 8 searches without asking',
-        }),
+        `Search the web through finder for: oslo weather${heldBecause('this turn already ran 8 searches without asking')}`,
       );
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
@@ -232,12 +225,12 @@ describe('extractSentinelFromEvent', () => {
               outbound_truncated: false,
               email: {
                 action: 'change',
-                to: ['grace@example.com'],
+                to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
                 cc: [],
-                bcc: ['audit@example.com'],
+                bcc: [{ name: '', address: 'audit@example.com' }],
                 subject: 'Lease',
                 body: 'Thursday works.\n\nAda',
-                replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+                replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
                 reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
               },
             },
@@ -248,12 +241,12 @@ describe('extractSentinelFromEvent', () => {
     );
     expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
       action: 'change',
-      to: ['grace@example.com'],
+      to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
       cc: [],
-      bcc: ['audit@example.com'],
+      bcc: [{ name: '', address: 'audit@example.com' }],
       subject: 'Lease',
       body: 'Thursday works.\n\nAda',
-      replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+      replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
       reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
     });
   });
@@ -268,6 +261,17 @@ describe('extractSentinelFromEvent', () => {
     expect(card(null)).toBeNull();
     expect(card({ action: 'forward', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null })).toBeNull();
     expect(card({ action: 'send', to: 'grace@example.com', cc: [], bcc: [], subject: 's', body: 'b' })).toBeNull();
+    // A card stored before names were kept holds bare address strings; each is read as a recipient with no name.
+    expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toEqual({
+      action: 'send',
+      to: [{ name: '', address: 'grace@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 's',
+      body: 'b',
+      replaces: null,
+      reply_in_thread: null,
+    });
   });
 
   const CALENDAR_EVENT = {
@@ -601,7 +605,12 @@ describe('parseAuditEntries', () => {
 
 describe('parseUserSettings', () => {
   it('defaults to offline off, nothing relaxed and searches running without asking', () => {
-    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+    const defaults = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+    };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
     expect(parseUserSettings({ data: null })).toEqual(defaults);
@@ -615,7 +624,12 @@ describe('parseUserSettings', () => {
       parseUserSettings({
         data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
       }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+    ).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+    });
   });
 
   it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
@@ -623,11 +637,17 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
+  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
     });
   });
 });

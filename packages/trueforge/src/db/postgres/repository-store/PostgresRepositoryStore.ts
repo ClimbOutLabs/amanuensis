@@ -21,6 +21,7 @@ import {
   type RepositoryOwnerInput,
   type RepositoryRecord,
   type SessionBindingRecord,
+  type SetPackageDownloadsInput,
   type UnbindSessionInput,
   type VerifyCommandInput,
   type VerifyCommandMutationResult,
@@ -52,7 +53,7 @@ function purpose(value: string): VerifyCommandPurpose {
 }
 
 function proposalSourceKind(value: string): VerifyCommandProposalSourceKind {
-  if (value === 'agents_md' || value === 'package_json') {
+  if (value === 'agents_md' || value === 'makefile' || value === 'package_json' || value === 'pyproject_toml') {
     return value;
   }
   throw new Error(`invalid verification command proposal source: ${value}`);
@@ -273,6 +274,42 @@ export class PostgresRepositoryStore implements IRepositoryStore<Transaction<Dat
         ])
         .executeTakeFirst();
       return row === undefined ? undefined : toSessionBindingRecord(row);
+    };
+    return transaction ? run(transaction) : this.#db.transaction().execute(run);
+  }
+
+  async setPackageDownloadsAllowed(
+    input: SetPackageDownloadsInput,
+    transaction?: Transaction<Database>,
+  ): Promise<RepositoryRecord | undefined> {
+    const run = async (trx: Transaction<Database>): Promise<RepositoryRecord | undefined> => {
+      const repository = await this.getRepositoryForUpdate(trx, input);
+      if (repository === undefined) {
+        return undefined;
+      }
+      assertRevision(repository, input.expected_revision);
+      const row = await trx
+        .updateTable('repository')
+        .set({
+          package_downloads_allowed: input.allowed,
+          revision: sql<number>`revision + 1`,
+          updated_at: now(),
+        })
+        .where('id', '=', repository.id)
+        .where('tenant_id', '=', repository.tenant_id)
+        .where('created_by', '=', repository.created_by)
+        .where('revision', '=', repository.revision)
+        .returningAll()
+        .executeTakeFirst();
+      if (row === undefined) {
+        const actual = await this.getRepository(input, trx);
+        throw new RepositoryRevisionConflictError({
+          repository_id: repository.id,
+          expected_revision: repository.revision,
+          actual_revision: actual?.revision ?? repository.revision,
+        });
+      }
+      return toRepositoryRecord(row);
     };
     return transaction ? run(transaction) : this.#db.transaction().execute(run);
   }

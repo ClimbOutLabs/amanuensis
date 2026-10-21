@@ -35,6 +35,8 @@ export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
 export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
+export { measurePromptRequest } from './runtime/promptReport';
+export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
 export {
   extractBase64,
   isAgentInputUserMessage,
@@ -307,6 +309,12 @@ export type {
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
+export {
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  commandDownloadsPackages,
+  findCommandLineGitDependency,
+  findGitDependency,
+} from './sandbox/packageMirrors';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -374,7 +382,13 @@ export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
-export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
+export {
+  DEFAULT_SESSION_DISK_MB,
+  SLOT_MIRROR_GUEST_PORT,
+  SLOT_MIRROR_SOCKET_NAME,
+  slotMirrorSocketPathsIn,
+  slotSocketPathsIn,
+} from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
@@ -469,6 +483,7 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
   Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,
@@ -481,6 +496,7 @@ export {
   remoteImageAskReason,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export { FetchedPageStore, fetchedPages } from './search/fetchedPages';
-export { groundPlace, isInCalendar } from './search/groundPlace';
+export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
+export type { FetchedPageScope } from './search/fetchedPages';
+export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';

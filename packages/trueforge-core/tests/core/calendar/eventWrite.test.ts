@@ -59,6 +59,9 @@ describe('a new event', () => {
       calendar: ACCOUNT,
       title: 'Dentist',
       when: 'Monday, October 19, 2026, 9:00 am to 10:30 am',
+      short_when: 'Mon Oct 19, 9:00 to 10:30 am',
+      span_days: 1,
+      already_created: false,
       time_zone: 'America/New_York',
       duration: '1 hour 30 minutes',
       location: '12 Main St',
@@ -101,6 +104,8 @@ describe('a new event', () => {
     expect(request.body.start).toEqual({ date: '2026-12-24', dateTime: null, timeZone: null });
     expect(request.body.end).toEqual({ date: '2026-12-27', dateTime: null, timeZone: null });
     expect(review.when).toBe('Thursday, December 24, 2026 to Saturday, December 26, 2026, all day');
+    expect(review.short_when).toBe('Thu Dec 24 to Sat Dec 26, all day');
+    expect(review.span_days).toBe(3);
     expect(review.duration).toBe('3 days');
     expect(ok(create({ title: 'Holiday', start: '2026-12-25', end: '2026-12-25' })).review).toMatchObject({
       when: 'Friday, December 25, 2026, all day',

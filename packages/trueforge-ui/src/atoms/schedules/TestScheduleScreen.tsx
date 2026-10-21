@@ -83,7 +83,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
-        <DetailRow label="Agent">{agentName}</DetailRow>
+        <DetailRow label="Runs as">{agentName}</DetailRow>
         <DetailRow label="Name">{schedule.name}</DetailRow>
         <DetailRow label="Status">
           <ScheduleStatusBadge status={schedule.status} />

@@ -225,6 +225,7 @@ export async function findInstanceData<TTransaction>(
     const agentPage = await deps.agentStore.listAgents({
       tenant_id: tenantId,
       agent_name: undefined,
+      include_host_managed: true,
       limit: PAGE_SIZE,
       page_token: agentToken,
     });

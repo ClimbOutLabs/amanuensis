@@ -108,6 +108,7 @@ export function createImageReencoder(deps: { resolveSandbox: () => ImageSandbox 
         signal: undefined,
         attachments: [{ name: REENCODE_INPUT_NAME, bytes: input.bytes }],
         onProgress: undefined,
+        packageMirrorToken: undefined,
         onHarvestedFiles: files => {
           harvested = files;
           return Promise.resolve();

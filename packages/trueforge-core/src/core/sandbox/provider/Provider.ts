@@ -54,6 +54,12 @@ export interface SandboxExecParams {
   workspaceLock?: WorkspaceExecutionLock | undefined;
   /** The repositories the user approved for this network git command; host-carried git offers its token to no other. */
   approvedGitRemotes?: GitRemotePrecondition | undefined;
+  /**
+   * Package mirror grant for this call, issued for the workspace repo the person allowed downloads
+   * for. Providers that serve mirrors (sandbox slots) pass it to the agent; others ignore it and the
+   * call stays offline.
+   */
+  packageMirrorToken?: string | undefined;
 }
 
 export interface WorkspaceExecutionLock {

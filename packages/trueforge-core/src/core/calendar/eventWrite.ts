@@ -51,6 +51,10 @@ export interface EventWriteRequest {
 export interface EventTimesView {
   /** Local date and time in plain words, e.g. `Monday, October 19, 2026, 9:00 am to 10:00 am`. */
   when: string;
+  /** Short plain date and time for the approval card, e.g. `Tue Oct 27, 2:30 to 3:00 pm`. */
+  short_when: string;
+  /** How many calendar days the event spans in its zone; more than 1 makes the card warn. */
+  span_days: number;
   /** e.g. `1 hour 30 minutes`, `All day`, `3 days`. */
   duration: string;
 }
@@ -62,6 +66,12 @@ export interface CalendarWriteReview {
   calendar: string;
   title: string;
   when: string;
+  /** Short plain date and time for the approval card, e.g. `Tue Oct 27, 2:30 to 3:00 pm`. */
+  short_when: string;
+  /** How many calendar days the event spans; more than 1 makes the card warn. */
+  span_days: number;
+  /** True when this same event was already created in this chat in the last few minutes. */
+  already_created: boolean;
   time_zone: string;
   duration: string;
   location: string;
@@ -72,7 +82,7 @@ export interface CalendarWriteReview {
   guests_emailed: boolean;
   /** A change to one date of a repeating event. */
   one_of_repeating: boolean;
-  before: { title: string; when: string; duration: string; location: string } | null;
+  before: { title: string; when: string; short_when: string; duration: string; location: string } | null;
   /** Why the guests would get something the card cannot show, so the write is refused; null when nothing is hidden. */
   incomplete_reason: string | null;
 }
@@ -94,6 +104,32 @@ function dayLabel(date: string): string {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(`${date}T12:00:00Z`));
+}
+
+/** `Tue Oct 27`: the short day label the approval card shows. */
+function shortDayLabel(date: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).formatToParts(new Date(`${date}T12:00:00Z`));
+  const part = (type: string) => parts.find(entry => entry.type === type)?.value ?? '';
+  return `${part('weekday')} ${part('month')} ${part('day')}`;
+}
+
+/** `2:30 to 3:00 pm` when both ends share a suffix, otherwise each end keeps its own. */
+function shortClockRange(input: {
+  from: { hour: number; minute: number };
+  to: { hour: number; minute: number };
+}): string {
+  const suffixOf = (clock: { hour: number }) => (clock.hour >= 12 ? 'pm' : 'am');
+  if (suffixOf(input.from) === suffixOf(input.to)) {
+    const bare = (clock: { hour: number; minute: number }) =>
+      `${String(clock.hour % 12 === 0 ? 12 : clock.hour % 12)}:${String(clock.minute).padStart(2, '0')}`;
+    return `${bare(input.from)} to ${bare(input.to)} ${suffixOf(input.to)}`;
+  }
+  return `${clockLabel(input.from)} to ${clockLabel(input.to)}`;
 }
 
 function clockLabel({ hour, minute }: { hour: number; minute: number }): string {
@@ -168,6 +204,11 @@ function resolveTimes(input: { start: string; end: string; zone: string }): Reso
       end: { date: shiftDate({ date: end, days: 1 }), dateTime: null, timeZone: null },
       view: {
         when: start === end ? `${dayLabel(start)}, all day` : `${dayLabel(start)} to ${dayLabel(end)}, all day`,
+        short_when:
+          start === end
+            ? `${shortDayLabel(start)}, all day`
+            : `${shortDayLabel(start)} to ${shortDayLabel(end)}, all day`,
+        span_days: days,
         duration: days === 1 ? 'All day' : plural({ count: days, unit: 'day' }),
       },
     };
@@ -206,6 +247,11 @@ function resolveTimes(input: { start: string; end: string; zone: string }): Reso
         from.date === to.date
           ? `${dayLabel(from.date)}, ${clockLabel(from)} to ${clockLabel(to)}`
           : `${dayLabel(from.date)}, ${clockLabel(from)} to ${dayLabel(to.date)}, ${clockLabel(to)}`,
+      short_when:
+        from.date === to.date
+          ? `${shortDayLabel(from.date)}, ${shortClockRange({ from, to })}`
+          : `${shortDayLabel(from.date)}, ${clockLabel(from)} to ${shortDayLabel(to.date)}, ${clockLabel(to)}`,
+      span_days: daysBetween({ from: from.date, to: to.date }) + 1,
       duration: durationLabel(minutes),
     },
   };
@@ -268,6 +314,9 @@ export function resolveCreate(input: { call: CreateEventInput; zone: string; acc
       calendar: input.account,
       title: call.title,
       when: times.view.when,
+      short_when: times.view.short_when,
+      span_days: times.view.span_days,
+      already_created: false,
       time_zone: zone,
       duration: times.view.duration,
       location,
@@ -320,7 +369,7 @@ export function resolveUpdate(input: {
 }): ResolvedEventWrite {
   const { call, zone, existing } = input;
   if (existing.status === 'cancelled') {
-    return { ok: false, error: 'Google Calendar has no such event.' };
+    return { ok: false, error: 'That event was already removed.' };
   }
   // An id from get_event's recurring_event_id names the whole series; only one date is ever changed.
   if ((existing.recurrence?.length ?? 0) > 0) {
@@ -358,7 +407,9 @@ export function resolveUpdate(input: {
     return { ok: false, error: 'The event times could not be read.' };
   }
   const beforeTimes = resolveTimes({ ...before, zone });
-  const beforeView = beforeTimes.ok ? beforeTimes.view : { when: '(no time)', duration: '' };
+  const beforeView: EventTimesView = beforeTimes.ok
+    ? beforeTimes.view
+    : { when: '(no time)', short_when: '(no time)', span_days: 1, duration: '' };
   const timesChange = call.start !== undefined || call.end !== undefined;
   let times: { start: EventTimeWrite | undefined; end: EventTimeWrite | undefined; view: EventTimesView } = {
     start: undefined,
@@ -406,6 +457,9 @@ export function resolveUpdate(input: {
       calendar: input.account,
       title: call.title ?? titleOf(existing.summary),
       when: times.view.when,
+      short_when: times.view.short_when,
+      span_days: times.view.span_days,
+      already_created: false,
       time_zone: zone,
       duration: times.view.duration,
       location,
@@ -420,6 +474,7 @@ export function resolveUpdate(input: {
       before: {
         title: titleOf(existing.summary),
         when: beforeView.when,
+        short_when: beforeView.short_when,
         duration: beforeView.duration,
         location: existing.location ?? '',
       },

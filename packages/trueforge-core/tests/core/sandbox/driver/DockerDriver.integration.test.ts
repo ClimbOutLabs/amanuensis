@@ -133,6 +133,7 @@ describe('DockerDriver integration (live daemon)', () => {
         sandboxIdentity,
         signal: undefined,
         harvestGraceMs: 2000,
+        packageMirrorToken: undefined,
       };
       const result = await driver.run(params);
       expect(result.terminatedBy).toBe('completed');

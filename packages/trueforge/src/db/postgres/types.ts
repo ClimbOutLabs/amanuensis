@@ -206,6 +206,7 @@ export interface SentinelUserSettingsTable {
   offline_mode: boolean;
   tier2_auto_allow: JSONColumnType<Tier2ActionKind[], Tier2ActionKind[] | string, Tier2ActionKind[] | string>;
   search_without_asking: boolean;
+  maps_without_asking: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -643,6 +644,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JSONColumnType<AgentSpec, AgentSpec, AgentSpec>;
   external_id: string | null;
+  /** True for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<boolean>;
   created_by_subject: JSONColumnType<CreatedBySubject, CreatedBySubject, CreatedBySubject>;
   created_at: Date;
   updated_at: Date;
@@ -665,6 +668,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JSONColumnType<ScheduleManifest, ScheduleManifest, ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */
@@ -831,6 +836,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<boolean>;
   revision: Generated<number>;
   created_at: Date;
   updated_at: Date;

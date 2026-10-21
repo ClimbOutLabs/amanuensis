@@ -1,7 +1,9 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
 import { CHAT_IMAGE_MAX_PER_EMAIL } from '../../chatImages';
+import type { Tier3Mailbox } from '../../permissions/tierMailbox';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
+import { deliveredMailboxOf, MAX_ANGLE_ADDRESS_CHARS } from './mailbox';
 import {
   headerOf,
   labelIdsOf,
@@ -60,7 +62,7 @@ function envelope(context: ResultContext) {
 
 /** Most messages of one thread a result lists, and most attachments it names per message. */
 const MAX_THREAD_MESSAGES = 60;
-const MAX_ATTACHMENTS_LISTED = 20;
+export const MAX_ATTACHMENTS_LISTED = 20;
 
 /** Most labels a row names, and the longest label id kept. */
 const MAX_LABELS_LISTED = 30;
@@ -84,7 +86,6 @@ const CHARS_PER_TOKEN = 4;
 /** Most addresses one header lists in a result; a longer list is cut so a result stays inside its bound. */
 const MAX_ADDRESSES = 50;
 const MAX_LISTED_RECIPIENTS = 10;
-const MAX_ANGLE_ADDRESS_CHARS = 320;
 
 /** Said plainly when a list stopped waiting; the page token is withheld then, since it would skip the rest. */
 function slowNote(input: { shown: number; notReached: number }) {
@@ -158,22 +159,14 @@ function addressParts(rawHeader: string): { parts: string[]; balanced: boolean }
 }
 
 /**
- * Bare addresses out of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The
- * header is cut at a fixed length and split before any name is decoded, so a name like "Doe, John" stays one
- * name. One linear pass: no pattern here can be made to backtrack.
+ * Every mailbox of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The header is
+ * cut at a fixed length and split before any name is decoded, so a name like "Doe, John" stays one name. One
+ * linear pass: no pattern here can be made to backtrack.
  */
-export function addressesOf(rawHeader: string): string[] {
-  const out: string[] = [];
-  for (const part of addressParts(rawHeader).parts) {
-    const close = part.indexOf('>');
-    const open = close === -1 ? -1 : part.lastIndexOf('<', close);
-    const inner = open === -1 ? '' : part.slice(open + 1, close);
-    const address = inner !== '' && inner.length <= MAX_ANGLE_ADDRESS_CHARS ? inner : part.trim();
-    if (address !== '') {
-      out.push(address);
-    }
-  }
-  return out;
+export function mailboxesOf(rawHeader: string): Tier3Mailbox[] {
+  return addressParts(rawHeader)
+    .parts.map(part => deliveredMailboxOf(part))
+    .filter(mailbox => mailbox.address !== '');
 }
 
 /** One mailbox address: a single `@`, and nothing a parser could read as a comment, group, quote or route. */
@@ -208,11 +201,16 @@ export function addressListIsPlain(rawHeader: string): boolean {
   return balanced && (rawHeader.trim() === '' || parts.every(isPlainMailbox));
 }
 
-/** Every address of a header, uncapped: a send must be shown and hashed with all of them. */
-export function addressesIn(input: { message: GmailMessage; name: string }): string[] {
+/** Every mailbox of a header, uncapped: a send must be shown and hashed with all of them. */
+export function mailboxesIn(input: { message: GmailMessage; name: string }): Tier3Mailbox[] {
   return input.message.payload === undefined
     ? []
-    : addressesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+    : mailboxesOf(rawHeaderOf({ part: input.message.payload, name: input.name }));
+}
+
+/** Every address of a header, uncapped. */
+export function addressesIn(input: { message: GmailMessage; name: string }): string[] {
+  return mailboxesIn(input).map(mailbox => mailbox.address);
 }
 
 /** Gmail's snippet is HTML-escaped plain text. */
@@ -221,7 +219,7 @@ function cleanSnippet(snippet: string | undefined): string {
 }
 
 function attachmentEntry(file: AttachmentInfo) {
-  return { id: file.id, filename: file.filename, mime_type: file.mimeType, size: file.size };
+  return { handle: file.handle, filename: file.filename, mime_type: file.mimeType, size: file.size };
 }
 
 /** The attachments a message names that fit the budget, and how many of its attachments are not named. */

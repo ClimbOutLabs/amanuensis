@@ -100,7 +100,7 @@ test_kept_backups_are_never_pruned() {
     run_install backup
     assert_rc 0
   done
-  assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d -name '*Z' -o -mindepth 1 -maxdepth 1 -type d -name '*Z-[0-9]*' | wc -l | tr -d ' ')" 7
+  assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d -name '*Z' -o -mindepth 1 -maxdepth 1 -type d -name '*Z-[[:digit:]]*' | wc -l | tr -d ' ')" 7
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d -name '*-before-import' | wc -l | tr -d ' ')" 1
   sandbox_drop
 }

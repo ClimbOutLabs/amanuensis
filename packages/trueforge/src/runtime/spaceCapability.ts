@@ -20,6 +20,15 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
+  SPACE_SERVER_ID,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -43,15 +52,8 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
-
-export const SPACE_SERVER_ID = 'space';
-export const LIST_SPACES_TOOL_NAME = 'list_spaces';
-export const GET_SPACE_TOOL_NAME = 'get_space';
-export const CREATE_SPACE_TOOL_NAME = 'create_space';
-export const UPDATE_SPACE_TOOL_NAME = 'update_space';
-export const REVERT_SPACE_TOOL_NAME = 'revert_space';
-export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no
@@ -198,22 +200,17 @@ export class SpaceBodyTooLongError extends Error {
 
 const SPACE_INSTRUCTION_SECTION = 'spaces';
 const SPACE_INSTRUCTION = `
-When the user asks you to build, create, or set up a space (or a tracker, board, or page they want kept up to date, such as "build me a space for tracking houses in Spain"), call list_spaces first: if an existing space already covers the same subject, update it with update_space instead of creating a duplicate. Use get_space to read a space’s current body and revision before calling update_space. Create a new space with create_space only when no existing one fits, and keep it current with update_space as the underlying facts change. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body; its content is host-rendered in the Spaces view, not a markdown file or a sandbox artifact, so the sandbox is not the place for it. Pass body as an array of lines, one line per element (each table row its own element, and a blank line as an empty-string element); a single string with escaped newlines is unreliable to produce and tends to collapse onto one line, breaking tables.
+When the user asks you to build, create, or set up a space (a tracker, board, or page they want kept up to date), call list_spaces first: if an existing space already covers the subject, update it with update_space instead of creating a duplicate. Read a space's current body and revision with get_space before calling update_space. Create a space with create_space only when no existing one fits, and keep it current with update_space as the facts change. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host renders it in the Spaces view, not as a markdown file or sandbox artifact. Pass body as an array of lines, one element per line: each table row is its own element, and a blank line is an empty-string element. A single string with escaped newlines collapses onto one line and breaks tables.
 
-Choose format 'markdown' for a plain list or note, and format 'html' whenever the space is meant to be looked at rather than skimmed as a list: a tracker, board, dashboard, or anything where layout, color, or images carry meaning. An html space is one complete document fragment, and the host injects a designed base stylesheet ahead of it: a type scale, a warm neutral palette drawn from the app's own theme with one accent, a 4px spacing rhythm, and ready-made classes and elements you should write semantic HTML against rather than reinvent — .page-header (a title plus a .subtitle or a <p> for the page's own heading block), section or .card (a bordered, padded group of related content), .grid-2 or .grid-3 (lay cards side by side), table with a <thead> header row and <tbody> rows (already full width with a distinguished header row and zebra striping; the host adds class="num" to any <td> whose content is a bare number for you, or add it yourself on a cell it would miss), .badge / .badge-success / .badge-warning (small status pills), and <details> (already styled as a collapsible block). Add only a small <style> block of your own, after that markup, for page-specific touches — it applies after the base stylesheet and can override it, but the point is to need little of it. A minimal skeleton: a .page-header with the title and a one-line subtitle, one .grid-2 or .grid-3 of .card elements for key stats, one table for the tracked rows, and a <details> for anything worth tucking away — for example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates, 2 viewed</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div><div class="card"><h3>Viewed</h3><p>2 of 6</p></div></div><table><thead><tr><th>Address</th><th>Price</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td>250000</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table><details><summary>Notes</summary><p>...</p></details>\`.
+Use format 'markdown' for a plain list or note, and format 'html' when the space is meant to be looked at rather than skimmed: a tracker, board, dashboard, or anything where layout, color, or images carry meaning. An html space is one complete document fragment. The host injects a base stylesheet ahead of it (a type scale, a warm neutral palette with one accent, a 4px spacing rhythm). Write semantic HTML on its classes rather than reinventing them: .page-header (title plus a .subtitle or <p>), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody> (the host styles it and adds class="num" to bare-number cells), .badge with .badge-success or .badge-warning, and <details>. Add only a small <style> block after the markup, for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates, 2 viewed</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
-Author every html space the same way you would author a standalone web artifact, built on the classes above rather than writing page chrome from scratch: one self-contained document, inline CSS, no external scripts, no external stylesheets, images as https or data URIs. \
-If the web-artifacts-builder skill is mounted in this session, follow its SKILL.md design guidance as well, but do not run its bundling scripts: a space is an HTML fragment rendered by the host, not a bundled app. \
-Emoji are fine in spaces: they are plain Unicode text, nothing forbids them. \
-Prefer web images by https URL over data URIs: an <img src="https://..."> costs you only the URL string, because the browser fetches the bytes at render time, while a data URI embeds base64 in the HTML itself and eats context — use https image URLs when you have tools to find them or the user supplies them. \
-Never author a space by editing files in the sandbox, not with apply_patch, replace_text, write_file, or exec: spaces are created and updated with create_space and update_space only. \
-The host’s sanitiser decides what actually renders either way.
+Author every html space on those classes rather than writing page chrome from scratch: one self-contained document, inline CSS, no external scripts, no external stylesheets, and images as https or data URIs. If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment rendered by the host, not a bundled app. Emoji are fine in spaces: they are plain Unicode text. Prefer web images by https URL over data URIs: the browser fetches the bytes at render time, while a data URI embeds base64 in the HTML and eats context. Never author a space by editing files in the sandbox, with apply_patch, replace_text, write_file, or exec: use create_space and update_space only. The host's sanitiser decides what actually renders.
 
-For a tracker (houses, tasks, candidates, or anything with several tracked items), put one row per item in a table (a markdown table for format 'markdown', a styled <table> for format 'html'), with columns for whatever the user cares about (for houses in Spain, that might be address, price, location, and viewing status).
+For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table (a markdown table, or a <table> for html), with columns for what the user cares about.
 
-update_space accepts exactly one of the full body, a list of search/replace edits, or a list of block_edits (never two at once): for small changes to a large space, pass edits with search/replace pairs applied to the current body in order, instead of resending the whole body. Each search is an exact, case-sensitive, whitespace-sensitive substring match against the current body (lines joined by a single newline) — copy search text verbatim from the most recent get_space body, never from memory or a metadata-only read. Each search must match or the whole update fails and nothing is persisted; every occurrence of a search is replaced, so prefer long, unique search strings anchored with surrounding context; and each edit sees the result of the previous ones, so keep edits independent. If an edit’s search is not found, do not recompute search text and do not retry the edits: send the full updated body instead. After DELTA_BREAKER_TRIP_AFTER_FAILURES consecutive failed delta updates on one space, delta updates lock for the session — further edits or block_edits are refused until a successful full-body update or revert_space unlocks them.
+update_space takes exactly one of the full body, a list of search/replace edits, or a list of block_edits, never two at once. For small changes to a large space, pass edits. Each search is an exact, case-sensitive, whitespace-sensitive substring of the current body (lines joined by one newline). Copy it verbatim from the latest get_space body, never from memory or a metadata-only read. A search that does not match fails the whole update, and nothing is saved. Every occurrence of a search is replaced, so prefer long, unique searches with surrounding context; a search must never be a single common word. Each edit sees the result of the previous ones, so keep edits independent. If a search is not found, do not recompute it or retry the edits: send the full updated body instead. After DELTA_BREAKER_TRIP_AFTER_FAILURES consecutive failed delta updates on one space, edits and block_edits are refused for the session until a successful full-body update or revert_space unlocks them.
 
-The reliable delta path is block_edits: delimit the independently-updated sections of a space with \`<!-- @block:name -->\` markers (valid in both html and markdown bodies; anchor names are case-sensitive, so prefer short kebab-case like \`pricing-table\`). Each marker starts a block whose content runs to the next marker or the end of the body. A \`<!-- @block:… -->\` marker inside a fenced code block (\`\`\` / ~~~) or a <pre>/<code> element is documentation text, not a block — it can never be addressed by block_edits. A block_edits entry names the anchor and supplies the block’s complete new content — you generate the new content instead of reproducing old text, so there is nothing to mis-copy; pass an empty new_content to delete the block, and new \`<!-- @block:… -->\` markers inside new_content split the block. An unknown or duplicated anchor fails the whole update and the error lists the valid anchors. A space with no markers has one implicit block named "auto-body" covering the whole body. After a context compaction, call list_blocks (not get_space) to recover the current anchors with an 80-character preview of each block, then edit by anchor; list_blocks also reports the preamble (text before the first marker), which is not addressable by anchor and is edited via a full-body update when needed. For a full-body update, read the space’s current body first (with get_space) and resend the full body with your changes folded in. Every update keeps the previous content: get_space accepts a revision to read an older version (only recent revisions are kept), and revert_space restores one as a new current revision — use revert_space to undo a bad update rather than reconstructing the content from memory. expected_aggregate_revision and expected_revision are optional on both create_space and update_space: leave them out and the host reads the current values for you, so a plain create or update just works. Supply them yourself only when you already have them from a preceding tool result; if a value you do supply turns out stale, the error names the current one, so retry once with that value before giving up. For a full-body update, retry once with that value. On the edits path, a stale revision means the body moved under you: do not retry the edits, send the full updated body instead.
+Block edits are the reliable delta path. Delimit independently updated sections with \`<!-- @block:name -->\` markers (valid in html and markdown; names are case-sensitive, so prefer short kebab-case such as \`pricing-table\`). A block runs from its marker to the next marker or the end of the body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block, and block_edits cannot address it. A block_edits entry names the anchor and gives the block's complete new content. An empty new_content deletes the block, and new markers inside new_content split it. An unknown or duplicate anchor fails the whole update, and the error lists the valid anchors. A space with no markers has one implicit block, "auto-body", covering the whole body. After a context compaction, call list_blocks (not get_space) to recover the anchors, with an 80-character preview of each block. list_blocks also reports the preamble (text before the first marker), which has no anchor and changes only through a full-body update. For a full-body update, read the current body with get_space and resend it with your changes folded in. Every update keeps the previous content: get_space accepts a revision to read an older version (only recent ones are kept), and revert_space restores one as a new current revision. To undo a bad update, use revert_space rather than rebuilding the content from memory. expected_aggregate_revision and expected_revision are optional on create_space and update_space. Leave them out and the host reads the current values. Supply one only when a preceding tool result gave it to you. If a supplied value is stale, the error names the current one: retry once with it. On the edits path, a stale revision means the body moved, so do not retry the edits; send the full updated body instead.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -651,7 +648,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: LIST_SPACES_TOOL_NAME,
       description:
-        'List every persistent space visible to the user, without body content: id, name, purpose, status, revision, and updated_at for each, plus the current aggregate_revision. Call this before create_space to check whether a space already covers the subject you are about to create, so you update it instead of making a duplicate. Use get_space to read one space’s full body.',
+        "List the user's spaces without bodies: id, name, purpose, status, revision, and updated_at, plus the aggregate_revision. Call before create_space to check for an existing space on the same subject.",
       schema: LIST_SPACES_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       handler: async () => this.read(() => this.list()),
@@ -659,7 +656,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: GET_SPACE_TOOL_NAME,
       description:
-        'Read one persistent space by id: its metadata (name, purpose, status, format, revision) plus the current aggregate_revision, with the full body included unless include_body is false. Call this before update_space to read the current body and revision. Pass revision to read a retained historical revision instead of the current one (for example to inspect what a bad update overwrote). Pass include_body: false when you already have the body from a recent get_space and only need the current revision: this avoids duplicating large HTML in the prompt. include_body: false is for metadata-only reads — do not combine it with revision when you want to inspect the historical body. Use list_spaces first if you do not already have the space id.',
+        'Read one space by id: metadata, the aggregate_revision, and the body unless include_body is false. Call before update_space to get the current body and revision. Pass revision to read a retained older revision. Use include_body false only when a recent get_space already returned the body, and never combine it with revision when you want an old body. Use list_spaces first if you lack the id.',
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       handler: async input => this.read(() => this.get(input)),
@@ -667,39 +664,34 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create one persistent space: a named, structured page the host renders in the Spaces view and keeps until archived. Use this instead of a sandbox file whenever the user wants something durable to track or come back to; call list_spaces first to check a space for the same subject does not already exist. Set format to 'markdown' for a plain list or note, and 'html' whenever the space is meant to be looked at rather than skimmed as a list: a tracker, board, or dashboard. A markdown body is the whole content of the page (headings, lists, and tables are all fine). An html body is one complete document fragment; the host injects a designed base stylesheet ahead of it, so write semantic HTML against its classes (.page-header for the title block, section or .card for grouped content, .grid-2 / .grid-3 to lay cards side by side, table with <thead>/<tbody>, .badge / .badge-success / .badge-warning for status pills, <details> for collapsible detail) and add only a small page-specific <style> block of your own, images from https URLs or data URIs; no <script>, no external stylesheets, and no external fonts (the host strips all three). For a tracker, put one row per tracked item in a table (markdown table, or a styled <table> for html) with the columns the user cares about. Pass body as an array of lines (one line per element, table rows one per element, blank lines as empty-string elements); a single string with escaped newlines is unreliable to produce correctly. Delimit the independently-updated sections of the body with `<!-- @block:name -->` markers (valid in html and markdown; anchor names are case-sensitive, prefer short kebab-case): each marker starts a block whose content runs to the next marker or the end of the body, so later update_space block_edits can replace one section without resending the page. expected_aggregate_revision is optional; omit it and the host fills in the current value.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. expected_aggregate_revision is optional.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.create(input)),
     }),
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
-        'Update one persistent space. Provide exactly one of body, edits, or block_edits. ' +
-        "For body (full replacement): replaces name, purpose, status, format, and body wholesale \u2014 name, purpose, and status are required (format defaults to 'markdown' if omitted). Call get_space first to read the current values if you are changing only one field, then resend the full current body with your changes folded in. " +
-        'For edits (delta updates): a list of up to 50 search/replace pairs applied to the current body in order; use this for small changes to a large space to avoid resending the full HTML. name, purpose, status, and format are optional with edits \u2014 omit them to leave metadata unchanged, provide them to change specific fields. ' +
-        'Each search is an exact, case-sensitive, whitespace-sensitive substring match against the current body (lines joined by a single newline character). Copy search text verbatim from the most recent get_space body \u2014 do not retype, reformat, or normalize it, and never compose search strings from memory or from a metadata-only read: use edits only when you have the current body from a recent get_space in this conversation. ' +
-        'Each search replaces every occurrence in the body, so use long, unique search strings anchored with surrounding context \u2014 never a single common word like a status label. The result reports how many occurrences each edit replaced, so check the counts match what you intended; if they do not, call revert_space to undo. ' +
-        'Edits apply sequentially, so a later edit\u2019s search sees the result of earlier edits: keep edits independent \u2014 a later edit\u2019s search must not match text produced by an earlier edit\u2019s replacement. If two changes interact, combine them into a single edit. ' +
-        'If an edit\u2019s search is not found, the entire update fails and nothing is persisted. Do NOT retry the edits and do NOT recompute search text from another read: delta retries after a miss do not converge. Send the full updated body instead (get_space first if you no longer have the current body, then pass body, not edits). After DELTA_BREAKER_TRIP_AFTER_FAILURES consecutive failed delta updates on one space, delta updates lock for the session: further edits or block_edits are refused until a successful full-body update or revert_space unlocks them. ' +
-        'For block_edits (anchor-addressed delta updates): a list of up to 50 {anchor, new_content} pairs \u2014 the reliable delta path. Each anchor names a <!-- @block:name --> marker in the current body; new_content replaces that block\u2019s content wholesale, so you generate the new content instead of reproducing old text and there is nothing to mis-copy. Pass an empty new_content to delete the block; new <!-- @block:\u2026 --> markers inside new_content split the block. Anchor names are case-sensitive; an unknown or duplicated anchor fails the whole update and the error lists the valid anchors. A <!-- @block:\u2026 --> marker inside a fenced code block (``` / ~~~) or a <pre>/<code> element is documentation text, not a block, and cannot be addressed. A space with no block markers has one implicit block named "auto-body" covering the whole body. The result reports each block\u2019s new content length so you can verify the write. ' +
-        'As a safety net, an update that would shrink the body to less than a tenth of its current size is refused unless you pass confirm_shrink: true \u2014 a truncated or accidental write must never silently wipe a space. ' +
-        "format 'markdown' is a plain list or note; format 'html' is a designed page: one complete document fragment, with the host's base stylesheet injected ahead of it, so write semantic HTML against its classes (.page-header, section / .card, .grid-2 / .grid-3, table with <thead>/<tbody>, .badge / .badge-success / .badge-warning, <details>) and add only a small page-specific <style> block of your own, plus images from https URLs or data URIs; no <script>, no external stylesheets, and no external fonts (the host strips all three). " +
-        'Pass body as an array of lines (one line per element, table rows one per element, blank lines as empty-string elements); a single string with escaped newlines is unreliable to produce correctly. ' +
-        'expected_revision and expected_aggregate_revision are optional; omit them and the host fills in the current values.',
+        'Update one space. Provide exactly one of body, edits, or block_edits. ' +
+        'body replaces the whole space: name, purpose, and status are required with it; format defaults to markdown. ' +
+        "edits: up to 50 search/replace pairs applied in order to the current body. Copy each search verbatim from a recent get_space; a search that matches nothing fails the whole update. Check each edit's replacement count against what you intended, and call revert_space if it is wrong. Combine interacting changes into one edit. " +
+        'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; an empty new_content deletes the block. ' +
+        'With edits or block_edits, name, purpose, status, and format are optional. ' +
+        'An update that would shrink the body below a tenth of its size needs confirm_shrink: true. ' +
+        'Pass body as an array of lines. expected_revision and expected_aggregate_revision are optional.',
       schema: UPDATE_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.update(input)),
     }),
     defineTool({
       name: REVERT_SPACE_TOOL_NAME,
       description:
-        'Restore a historical revision of a space as a new current revision. Use this to undo a bad update_space: pass the revision you want back (read it first with get_space if you are unsure), and the space’s name, purpose, status, format, and body return to exactly what they were at that revision, recorded as a new revision — the bad content stays recoverable too. expected_revision and expected_aggregate_revision are optional; omit them and the host fills in the current values.',
+        'Restore an older revision of a space as a new current revision, to undo a bad update_space. The name, purpose, status, format, and body return to that revision; the bad content stays recoverable. expected_revision and expected_aggregate_revision are optional.',
       schema: REVERT_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.revert(input)),
     }),
     defineTool({
       name: LIST_BLOCKS_TOOL_NAME,
       description:
-        'List the addressable blocks of one persistent space without resending the body: each block\u2019s anchor name, an 80-character preview of its content, and how many times the anchor occurs. A space whose body has no <!-- @block:\u2026 --> markers reports a single "auto-body" block covering the whole body. Text before the first marker (the preamble) is not addressable by anchor; it is reported separately with its preview and length, and edited via a full-body update_space. A <!-- @block:\u2026 --> marker inside a fenced code block (``` / ~~~) or a <pre>/<code> element is documentation text, not a block, and is not listed. Call this after a context compaction \u2014 or before update_space block_edits \u2014 to recover the current anchors cheaply instead of re-reading the full body with get_space.',
+        "List one space's block anchors with an 80-character preview of each, without the body. Use it after a context compaction or before block_edits. The preamble (text before the first marker) is reported separately and changes only through a full-body update_space.",
       schema: LIST_BLOCKS_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       handler: async input => this.read(() => this.listBlocks(input)),
@@ -1251,6 +1243,8 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
+  personas?: PersonaTurnContext | undefined;
 }
 
 /**
@@ -1302,14 +1296,21 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const google = await this.#google(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
+    const personas = this.#space.personas;
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
-        mapsCapability({ tracing: input.tracing, logger: this.#space.logger, timezone: this.clientTimezone }),
+        mapsCapability({
+          tracing: input.tracing,
+          logger: this.#space.logger,
+          pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
+          timezone: this.clientTimezone,
+        }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
+        ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
           : [

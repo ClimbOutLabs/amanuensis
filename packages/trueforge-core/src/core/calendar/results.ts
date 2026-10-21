@@ -213,6 +213,8 @@ export function getEventResult(input: { context: CalendarResultContext; event: C
 
   return {
     ...envelope(context),
+    // A cancelled event is one the owner already removed; say that plainly, not as a failure.
+    ...(event.status === 'cancelled' ? { note: 'That event was already removed.' } : {}),
     event: {
       ...base,
       ...(repeats.length === 0 ? {} : { repeats }),

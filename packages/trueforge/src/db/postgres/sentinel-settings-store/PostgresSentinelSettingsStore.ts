@@ -22,7 +22,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
     const db = transaction ?? this.#db;
     const row = await db
       .selectFrom('sentinel_user_settings')
-      .select(['offline_mode', 'tier2_auto_allow', 'search_without_asking'])
+      .select(['offline_mode', 'tier2_auto_allow', 'search_without_asking', 'maps_without_asking'])
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .executeTakeFirst();
@@ -32,6 +32,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
           offline_mode: row.offline_mode,
           tier2_auto_allow: normalizeTier2AutoAllow(row.tier2_auto_allow),
           search_without_asking: row.search_without_asking,
+          maps_without_asking: row.maps_without_asking,
         };
   }
 
@@ -47,6 +48,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
         offline_mode: input.offline_mode ?? false,
         tier2_auto_allow: json(tier2 ?? []),
         search_without_asking: input.search_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking,
+        maps_without_asking: input.maps_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.maps_without_asking,
         created_at: now(),
         updated_at: now(),
       })
@@ -56,6 +58,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
           ...(input.offline_mode === undefined ? {} : { offline_mode: input.offline_mode }),
           ...(tier2 === undefined ? {} : { tier2_auto_allow: json(tier2) }),
           ...(input.search_without_asking === undefined ? {} : { search_without_asking: input.search_without_asking }),
+          ...(input.maps_without_asking === undefined ? {} : { maps_without_asking: input.maps_without_asking }),
         }),
       )
       .execute();

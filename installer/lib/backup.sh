@@ -102,7 +102,7 @@ backup_instance() {
 # Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
 plain_backups() {
   [ -d "$BACKUPS_DIR" ] || return 0
-  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | grep -E '/[0-9]{8}T[0-9]{6}Z(-[0-9]+)?$' | sort || true
+  find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | grep -E '/[[:digit:]]{8}T[[:digit:]]{6}Z(-[[:digit:]]+)?$' | sort || true
 }
 
 backup_prune() {

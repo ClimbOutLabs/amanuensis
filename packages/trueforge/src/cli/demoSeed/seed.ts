@@ -348,6 +348,7 @@ async function seedAgent<TTransaction>({
       description: world.agentDescription,
       manifest,
       external_id: null,
+      host_managed: false,
       created_by_subject: subjectFor(scope.userId),
     });
     return { outcome: 'created', agentId: created.id };
@@ -450,6 +451,7 @@ async function seedSchedule<TTransaction>({
           agent_id: agentId,
           agent_name: DEMO_AGENT_NAME,
           name: DEMO_SCHEDULE_NAME,
+          persona_id: null,
           manifest: world.scheduleManifest,
           created_by_subject: subjectFor(scope.userId),
           runFrom: now,

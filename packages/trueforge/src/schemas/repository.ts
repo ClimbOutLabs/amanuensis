@@ -50,6 +50,7 @@ export const RepositorySchema = z
     name: RepositoryNameSchema,
     clone_url: CloneUrlSchema,
     default_branch: DefaultBranchSchema,
+    package_downloads_allowed: z.boolean(),
     revision: RepositoryRevisionSchema,
     created_at: z.iso.datetime(),
     updated_at: z.iso.datetime(),
@@ -70,6 +71,14 @@ export const CreateRepositoryRequestSchema = z
   .object({ repository: CreateRepositoryPayloadSchema })
   .strict()
   .openapi('CreateRepositoryRequest');
+
+export const SetPackageDownloadsRequestSchema = z
+  .object({
+    allowed: z.boolean(),
+    expected_revision: RepositoryRevisionSchema.optional(),
+  })
+  .strict()
+  .openapi('SetPackageDownloadsRequest');
 
 export const VerifyCommandSchema = z
   .object({
@@ -133,6 +142,74 @@ export const SessionRepositoryBindingSchema = z
   .strict()
   .openapi('SessionRepositoryBinding');
 
+export const GithubRepositoryOptionSchema = z
+  .object({
+    name: RepositoryNameSchema,
+    full_name: z.string().min(1).max(255),
+    clone_url: CloneUrlSchema,
+    default_branch: DefaultBranchSchema,
+    size_kb: z.number().int().nonnegative(),
+    private: z.boolean(),
+  })
+  .strict()
+  .openapi('GithubRepositoryOption');
+
+export const GithubRepositoriesDataSchema = z
+  .object({ repositories: z.array(GithubRepositoryOptionSchema) })
+  .strict()
+  .openapi('GithubRepositoriesData');
+
+export const ListGithubRepositoriesResponseSchema = z
+  .object({ data: GithubRepositoriesDataSchema })
+  .strict()
+  .openapi('ListGithubRepositoriesResponse');
+
+export const GithubRepositoryDetailsSchema = z
+  .object({
+    name: RepositoryNameSchema,
+    full_name: z.string().min(1).max(255),
+    clone_url: CloneUrlSchema,
+    default_branch: DefaultBranchSchema,
+    size_kb: z.number().int().nonnegative(),
+    private: z.boolean(),
+    branches: z.array(z.string().min(1).max(255)),
+  })
+  .strict()
+  .openapi('GithubRepositoryDetails');
+
+export const GetGithubRepositoryDetailsResponseSchema = z
+  .object({ data: GithubRepositoryDetailsSchema })
+  .strict()
+  .openapi('GetGithubRepositoryDetailsResponse');
+
+export const GithubRepositoryQuerySchema = z
+  .object({ clone_url: CloneUrlSchema.optional() })
+  .openapi('GithubRepositoryQuery');
+
+export const StartRepositoryWorkRequestSchema = z
+  .object({
+    clone_url: CloneUrlSchema,
+    branch: z.string().trim().min(1).max(255),
+  })
+  .strict()
+  .openapi('StartRepositoryWorkRequest');
+
+export const StartRepositoryWorkDataSchema = z
+  .object({
+    session_id: z.string().min(1),
+    repository_id: RepositoryIdSchema,
+    workspace_cwd: WorkspaceCwdSchema,
+    branch: z.string().min(1).max(255),
+    repository: RepositorySchema,
+  })
+  .strict()
+  .openapi('StartRepositoryWorkData');
+
+export const StartRepositoryWorkResponseSchema = z
+  .object({ data: StartRepositoryWorkDataSchema })
+  .strict()
+  .openapi('StartRepositoryWorkResponse');
+
 export const GetRepositoryResponseSchema = z.object({ data: RepositorySchema }).openapi('GetRepositoryResponse');
 export const ListRepositoriesResponseSchema = z
   .object({ data: z.array(RepositorySchema) })
@@ -172,5 +249,8 @@ export const DeleteVerifyCommandResponseSchema = z.object({}).openapi('DeleteVer
 export const DeleteVerifyCommandProposalResponseSchema = z.object({}).openapi('DeleteVerifyCommandProposalResponse');
 
 export type RepositoryWire = z.infer<typeof RepositorySchema>;
+export type GithubRepositoryOptionWire = z.infer<typeof GithubRepositoryOptionSchema>;
+export type GithubRepositoryDetailsWire = z.infer<typeof GithubRepositoryDetailsSchema>;
+export type StartRepositoryWorkWire = z.infer<typeof StartRepositoryWorkDataSchema>;
 export type VerifyCommandWire = z.infer<typeof VerifyCommandSchema>;
 export type VerifyCommandProposalWire = z.infer<typeof VerifyCommandProposalSchema>;

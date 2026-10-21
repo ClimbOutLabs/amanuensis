@@ -7951,6 +7951,10 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "runs_as": {
+            "description": "Who runs it, in plain words: a persona, the assistant, or a saved agent.",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -7959,6 +7963,7 @@
         "required": [
           "id",
           "agent_name",
+          "runs_as",
           "name",
           "manifest",
           "created_by_subject",
@@ -9660,7 +9665,7 @@
           "bcc": {
             "description": "Hidden copy recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           },
@@ -9671,7 +9676,7 @@
           "cc": {
             "description": "Copied recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           },
@@ -9685,7 +9690,7 @@
               "to": {
                 "description": "Recipients of the draft being replaced.",
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/Tier3Mailbox"
                 },
                 "type": "array"
               }
@@ -9727,7 +9732,7 @@
           "to": {
             "description": "Recipients.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
           }
@@ -9746,6 +9751,24 @@
           "object",
           "null"
         ]
+      },
+      "Tier3Mailbox": {
+        "description": "One email recipient: its name and its address.",
+        "properties": {
+          "address": {
+            "description": "Email address the message is delivered to.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name of the recipient, or an empty string when it has none.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address"
+        ],
+        "type": "object"
       },
       "Tier3Schedule": {
         "description": "The schedule a chat call creates or deletes, shown in full.",

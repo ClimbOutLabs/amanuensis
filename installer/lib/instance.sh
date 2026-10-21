@@ -3,6 +3,9 @@
 
 APP_EXPECTED_CONTAINERS=3
 
+# Set while a new instance may hold Docker objects but is not saved yet, so a failed run can name its cleanup.
+INSTANCE_PENDING=
+
 instance_dir() { printf '%s/%s' "$INSTANCES_DIR" "$1"; }
 
 # The only place an instance directory is deleted. The name must be valid and the resolved path a
@@ -38,7 +41,7 @@ dcm() {
 stt_threads() {
   local n
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-  case "$n" in '' | *[!0-9]*) n=4 ;; esac
+  case "$n" in '' | *[![:digit:]]*) n=4 ;; esac
   if [ "$n" -gt 4 ]; then n=4; fi
   if [ "$n" -lt 1 ]; then n=1; fi
   printf '%s' "$n"
@@ -525,6 +528,7 @@ instance_create() {
   fi
   issuer_check "$I_ISSUER"
   if [ -n "$I_ORIGINS" ]; then network_on=1; fi
+  INSTANCE_PENDING=$I_NAME
   if [ "$I_SANDBOX" = slots ]; then sandbox_ensure "$I_NAME"; fi
   remove_instance_dir "$I_NAME"
   ensure_private_dir "$dir"
@@ -551,6 +555,7 @@ instance_create() {
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
+  INSTANCE_PENDING=
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
     warn "An earlier instance with this name left data behind (aman_${I_NAME}_data), which this one takes over."
@@ -708,8 +713,9 @@ print_instance_block() {
 
 # Everything an installed machine already has: the recorded release and the shared network owner.
 require_installed() {
-  [ -f "$RELEASE_DIR/release.json" ] && [ -d "$MACHINE_DIR" ] ||
+  if [ ! -f "$RELEASE_DIR/release.json" ] || [ ! -d "$MACHINE_DIR" ]; then
     die "Aman is not set up on this computer yet. Run install.sh first."
+  fi
 }
 
 load_installed_release() {
@@ -777,7 +783,7 @@ instance_enforce_single_owner() { # name
   [ -n "$list" ] || return 1
   while IFS= read -r key; do
     reg_unset "$name" "$key"
-  done < <(sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")
+  done < <(LC_ALL=C sed -n 's/^\(user_[a-z0-9-]*\)=.*/\1/p' "$(reg_file "$name")")
   if [ -f "$env" ]; then
     env_managed_set "$env" OIDC_ALLOWED_EMAILS "$(reg_get "$name" owner_email)"
     env_drop_outside_block "$env" OIDC_ALLOWED_EMAILS
@@ -905,7 +911,9 @@ new_instance_name_problem() {
 cmd_instance_add() {
   if [ -z "${OPT_NAME:-}" ]; then
     # Only a person at a terminal can answer; anything else still needs the name on the command line.
-    [ -t 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] || usage_die "usage: install.sh instance add <name> [--email ...]"
+    if [ ! -t 0 ] || [ "$ASSUME_YES" = 1 ] || [ "$DRY_RUN" = 1 ]; then
+      usage_die "usage: install.sh instance add <name> [--email ...]"
+    fi
     require_installed
     ask_valid OPT_NAME "Name for this instance:" "" "" new_instance_name_problem
   fi
@@ -986,17 +994,108 @@ cmd_instance_list() {
   } | align_columns
 }
 
-# Volumes that belong to an instance: those labelled for it plus the two it is named after.
+# Ids of the containers, networks or volumes that Compose labelled with a project.
+project_objects() { # containers|networks|volumes project
+  case "$1" in
+    containers) D ps -aq --filter "label=com.docker.compose.project=$2" 2>/dev/null || true ;;
+    networks) D network ls -q --filter "label=com.docker.compose.project=$2" 2>/dev/null || true ;;
+    volumes) D volume ls -q --filter "label=com.docker.compose.project=$2" 2>/dev/null || true ;;
+  esac
+}
+
+# Volumes that belong to an instance: those labelled for it or for its Compose projects, and those named after it
+# (found by name too, since an install that failed early may have left them without labels or a saved instance).
 instance_volumes() {
   local name=$1 volume
   {
     D volume ls -q --filter "label=com.amanuensis.instance=$name" 2>/dev/null || true
+    project_objects volumes "aman-$name"
+    project_objects volumes "$name-slots"
+    for volume in $(D volume ls -q 2>/dev/null || true); do
+      case "$volume" in
+        aman_stt_cache | aman_machine) ;;
+        "aman_${name}_"* | "${name}_slot_"*) printf '%s\n' "$volume" ;;
+      esac
+    done
     for volume in "aman_${name}_data" "aman_${name}_dex"; do
       if docker_volume_exists "$volume"; then
         printf '%s\n' "$volume"
       fi
     done
   } | sort -u
+}
+
+# The shared speech-to-text project's volumes.
+machine_volumes() {
+  {
+    project_objects volumes aman-machine
+    if docker_volume_exists aman_stt_cache; then printf '%s\n' aman_stt_cache; fi
+  } | sort -u
+}
+
+# Removes the containers and networks of Compose projects, whatever the registry says; counts them in PURGED_CONTAINERS
+# and PURGED_NETWORKS. Volumes are left to volumes_purge, which reports each failure.
+PURGED_CONTAINERS=0
+PURGED_NETWORKS=0
+projects_purge() { # project...
+  local project ids id
+  for project in "$@"; do
+    ids=$(project_objects containers "$project")
+    for id in $ids; do
+      if D rm -f "$id" >/dev/null 2>&1; then PURGED_CONTAINERS=$((PURGED_CONTAINERS + 1)); fi
+    done
+    ids=$(project_objects networks "$project")
+    for id in $ids; do
+      if D network rm "$id" >/dev/null 2>&1; then PURGED_NETWORKS=$((PURGED_NETWORKS + 1)); fi
+    done
+  done
+}
+
+# True when Docker still holds anything named for the instance.
+instance_has_leftovers() {
+  local name=$1 project
+  [ -n "$(instance_volumes "$name")" ] && return 0
+  for project in "aman-$name" "$name-slots"; do
+    [ -z "$(project_objects containers "$project")$(project_objects networks "$project")" ] || return 0
+  done
+  return 1
+}
+
+machine_has_leftovers() {
+  [ -d "$MACHINE_DIR" ] && return 0
+  [ -n "$(project_objects containers aman-machine)$(project_objects networks aman-machine)$(machine_volumes)" ]
+}
+
+# After the last instance is purged: the shared speech-to-text project with its volumes, the daily backup job and
+# the installer's own folders. The removal log and the backups stay; backups are the person's data.
+machine_purge() {
+  if [ -f "$MACHINE_DIR/compose.yaml" ] && [ -f "$MACHINE_DIR/.env" ]; then
+    dcm down --volumes --remove-orphans >/dev/null 2>&1 || warn "could not stop the speech-to-text service cleanly; continuing with the removal"
+  fi
+  projects_purge aman-machine
+  # shellcheck disable=SC2046 # volume names are single words
+  volumes_purge $(machine_volumes) || exit 1
+  backup_schedule_disable
+  installer_state_remove
+}
+
+# Deletes the installer's folders under the home folder; never anything else, and never through a symbolic link.
+installer_state_remove() {
+  local entry
+  case "$AMAN_HOME" in / | "$HOME" | "") return 0 ;; esac
+  # A --home that points at a source checkout must keep its own lib, bin and release folders.
+  [ -e "$AMAN_HOME/.git" ] || [ -d "$AMAN_HOME/installer" ] && return 0
+  [ -d "$STATE_DIR" ] && [ ! -L "$AMAN_HOME" ] && [ ! -L "$STATE_DIR" ] || return 0
+  for entry in instances machine tls lib bin release runtime; do
+    rm -rf -- "${AMAN_HOME:?}/$entry"
+  done
+  find "$STATE_DIR" -mindepth 1 -maxdepth 1 ! -name install.log ! -name lock -exec rm -rf -- {} +
+}
+
+# On a failed run that may have left parts of a new instance in Docker: the one command that removes them.
+instance_pending_notice() {
+  [ -n "$INSTANCE_PENDING" ] || return 0
+  printf 'To clean up what this run left behind, run: install.sh instance remove %s --purge-data\n' "$INSTANCE_PENDING" >&2
 }
 
 # Deletes the given volumes. Every failure is reported and the return code says so.
@@ -1032,7 +1131,7 @@ confirm_purge_name() {
 }
 
 cmd_instance_remove() {
-  local name=${OPT_NAME:-} exists=0 slots=0 volumes purge_list
+  local name=${OPT_NAME:-} exists=0 slots=0 left=0 machine_left=0 last_one=0 volumes='' purge_list line
   [ -n "$name" ] || usage_die "usage: install.sh instance remove <name> [--purge-data]"
   valid_name "$name" || usage_die "invalid instance name"
   if reg_exists "$name" || [ -d "$(instance_dir "$name")" ]; then
@@ -1040,13 +1139,16 @@ cmd_instance_remove() {
     if instance_sandbox_wanted "$name"; then slots=1; fi
   fi
   if [ "$exists" = 0 ]; then
-    volumes=
     if docker_reach_quietly; then
       volumes=$(instance_volumes "$name" | tr '\n' ' ')
+      volumes=${volumes% }
+      if instance_has_leftovers "$name"; then left=1; fi
     fi
     # A removal that stopped while deleting the sandboxes leaves them behind; the same command finishes it.
     if sandbox_slots_left "$name"; then slots=1; fi
-    if [ -z "${volumes// /}" ] && [ "$slots" = 0 ]; then
+    # The shared speech-to-text service goes with the last instance, so it counts as something left to do.
+    if [ "${OPT_PURGE:-0}" = 1 ] && [ -z "$(reg_names)" ] && machine_has_leftovers; then machine_left=1; fi
+    if [ "$left" = 0 ] && [ "$slots" = 0 ] && [ "$machine_left" = 0 ]; then
       say "Instance $name does not exist; nothing to do."
       return 0
     fi
@@ -1054,8 +1156,11 @@ cmd_instance_remove() {
       if [ -n "${volumes// /}" ]; then
         say "Instance $name is already removed, but its data is still here: $volumes"
         say "To delete the data: install.sh instance remove $name --purge-data"
-      else
+      elif [ "$slots" = 1 ]; then
         say "Instance $name is already removed, but its sandboxes are still on this computer."
+        say "To delete them: install.sh instance remove $name --purge-data"
+      else
+        say "Instance $name is already removed, but Docker still holds parts of it."
         say "To delete them: install.sh instance remove $name --purge-data"
       fi
       return 0
@@ -1083,22 +1188,36 @@ cmd_instance_remove() {
     sandbox_down "$name" 1
     log_event "sandboxes of removed instance $name deleted"
   fi
-  if [ "${OPT_PURGE:-0}" = 1 ]; then
-    volumes=$(instance_volumes "$name" | tr '\n' ' ')
-    if [ -z "${volumes// /}" ]; then
-      if [ "$exists" = 1 ]; then
-        say "Removed instance $name. It had no data left to delete."
-      else
-        say "Deleted the sandboxes that instance $name left behind."
-      fi
-      return 0
+  [ -n "$(reg_names)" ] || last_one=1
+  if [ "${OPT_PURGE:-0}" != 1 ]; then
+    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
+    if [ "$last_one" = 1 ]; then
+      say "The shared speech-to-text service and its downloaded model are kept too."
     fi
+    say "To delete the data too: install.sh instance remove $name --purge-data"
+    return 0
+  fi
+  stt_detach "$name"
+  projects_purge "aman-$name" "$name-slots"
+  volumes=$(instance_volumes "$name" | tr '\n' ' ')
+  volumes=${volumes% }
+  if [ -n "$volumes" ]; then
     read -r -a purge_list <<<"$volumes"
     volumes_purge "${purge_list[@]}" || exit 1
-    log_event "instance $name purged"
-    say "Removed instance $name and deleted its data: $volumes"
+    line="Removed instance $name and deleted its data: $volumes"
   else
-    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
-    say "To delete the data too: install.sh instance remove $name --purge-data"
+    line="Removed instance $name. It had no data volumes left to delete"
+  fi
+  log_event "instance $name purged"
+  if [ "$PURGED_CONTAINERS" -gt 0 ] || [ "$PURGED_NETWORKS" -gt 0 ]; then
+    line="$line; also removed $PURGED_CONTAINERS containers and $PURGED_NETWORKS networks"
+  fi
+  if [ "$last_one" = 1 ]; then
+    machine_purge
+    line="$line; this was the last instance, so the shared speech-to-text service with its model and the installer's files in $AMAN_HOME were removed too"
+  fi
+  say "$line."
+  if [ "$last_one" = 1 ] && [ -d "$BACKUPS_DIR" ]; then
+    say "Your backups in $BACKUPS_DIR were kept. To delete them: rm -r $BACKUPS_DIR"
   fi
 }

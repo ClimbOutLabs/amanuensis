@@ -14,9 +14,11 @@ import {
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
-import { useCallback, useState } from 'react';
+import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
+import { useCallback, useEffect, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
+import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -250,6 +252,39 @@ function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
         ? part.result
         : JSON.stringify(part.result, null, 2);
   const mapsResult = parseMapsResult(resultString, part.toolName);
+  // A failed map a later map in the same answer replaces shrinks to one quiet line: the answer
+  // has moved on, and the full failure panel would only repeat what the new map already fixed.
+  const replaced = useAuiState(s => {
+    if (mapsResult.data !== null) {
+      return false;
+    }
+    const parts = s.message.parts;
+    const ownIndex = parts.findIndex(
+      candidate => candidate.type === 'tool-call' && candidate.toolCallId === part.toolCallId,
+    );
+    if (ownIndex === -1) {
+      return false;
+    }
+    return parts.slice(ownIndex + 1).some(candidate => {
+      if (candidate.type !== 'tool-call' || !isMapsToolName(candidate.toolName)) {
+        return false;
+      }
+      const later =
+        candidate.result === undefined
+          ? undefined
+          : typeof candidate.result === 'string'
+            ? candidate.result
+            : JSON.stringify(candidate.result, null, 2);
+      return parseMapsResult(later, candidate.toolName).data !== null;
+    });
+  });
+  if (replaced) {
+    return (
+      <p className="maps-card-replaced" data-testid="map-card-replaced">
+        This map did not work. A later map in this answer replaces it.
+      </p>
+    );
+  }
   if (part.status?.type === 'running' && mapsResult.data === null) {
     return (
       <div className="maps-card" data-testid="map-card-loading">
@@ -291,6 +326,12 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
   const elapsedMs = useToolCallElapsed();
+  // A specialist added in this chat shows in the persona list without a page reload.
+  const reloadPersonas = useOptionalPersonas()?.reload;
+  const specialistAdded = part.toolName === CREATE_PERSONA_TOOL_NAME && part.status?.type === 'complete';
+  useEffect(() => {
+    if (specialistAdded) void reloadPersonas?.();
+  }, [specialistAdded, reloadPersonas]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -402,7 +443,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
 
   if (isSandbox) {
     const { command, intent, summary, argsJson } = parseSandboxArgs(part.argsText, part.toolName);
-    const { exitCode, resultText, resultJson } = parseSandboxResult(resultString);
+    const { exitCode, resultText, resultJson, notices } = parseSandboxResult(resultString);
     return (
       <SandboxToolCallContainer
         name={part.toolName}
@@ -418,6 +459,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
+        notices={notices}
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />

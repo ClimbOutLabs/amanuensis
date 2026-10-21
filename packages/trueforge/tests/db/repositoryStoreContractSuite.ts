@@ -89,6 +89,49 @@ export function runRepositoryStoreContractSuite(
     ).toBeUndefined();
   });
 
+  it('keeps package downloads off until allowed, and honours the revision check', async () => {
+    const store = getStore();
+    const repository = await store.createRepository(repositoryInput(OWNER_A, 'downloads'));
+    expect(repository.package_downloads_allowed).toBe(false);
+
+    const allowed = await store.setPackageDownloadsAllowed({
+      ...OWNER_A,
+      repository_id: repository.id,
+      allowed: true,
+      expected_revision: repository.revision,
+    });
+    expect(allowed?.package_downloads_allowed).toBe(true);
+    expect(allowed?.revision).toBe(repository.revision + 1);
+    expect((await store.getRepository({ ...OWNER_A, repository_id: repository.id }))?.package_downloads_allowed).toBe(
+      true,
+    );
+
+    await expect(
+      store.setPackageDownloadsAllowed({
+        ...OWNER_A,
+        repository_id: repository.id,
+        allowed: false,
+        expected_revision: repository.revision,
+      }),
+    ).rejects.toBeInstanceOf(RepositoryRevisionConflictError);
+
+    const stopped = await store.setPackageDownloadsAllowed({
+      ...OWNER_A,
+      repository_id: repository.id,
+      allowed: false,
+      expected_revision: repository.revision + 1,
+    });
+    expect(stopped?.package_downloads_allowed).toBe(false);
+    expect(
+      await store.setPackageDownloadsAllowed({
+        ...OWNER_B,
+        repository_id: repository.id,
+        allowed: true,
+        expected_revision: undefined,
+      }),
+    ).toBeUndefined();
+  });
+
   it('binds and unbinds an owned session with its workspace cwd', async () => {
     const store = getStore();
     const repository = await store.createRepository(repositoryInput(OWNER_A, 'bound'));

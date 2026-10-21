@@ -5,11 +5,12 @@
  */
 import { createHash } from 'node:crypto';
 import { stableStringify } from '../../permissions/approvalTokens';
+import type { Tier3Mailbox } from '../../permissions/tierMailbox';
 
 export interface ReviewableDraft {
-  to: readonly string[];
-  cc: readonly string[];
-  bcc: readonly string[];
+  to: readonly Tier3Mailbox[];
+  cc: readonly Tier3Mailbox[];
+  bcc: readonly Tier3Mailbox[];
   subject: string;
   body: string;
   threadId: string;
@@ -18,6 +19,8 @@ export interface ReviewableDraft {
   references: string;
   /** The display name the message is sent under, which recipients see; empty when there is none. */
   fromName: string;
+  /** Whether a recipient's name was left off because it looked like an address, so the card says so. */
+  nameLeftOff: boolean;
 }
 
 /** Hash of everything a send delivers. */

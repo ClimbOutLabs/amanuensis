@@ -33,6 +33,7 @@ import {
   type BoundRepository,
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
+import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -72,6 +73,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
@@ -92,6 +94,7 @@ import {
   type TurnModelUsage,
 } from '../runtime/modelUsage';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
+import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
   profileLearningPassConfig,
@@ -125,9 +128,10 @@ import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { agentIfAccessible, canReadAgentBoundResource } from './agentAccess';
+import { canReadAgentBoundResource } from './agentAccess';
 
 /** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
 function turnHelperModelFqn(): string | undefined {
@@ -145,7 +149,7 @@ export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnap
     session_id: record.session_id,
     previous_turn_id: record.previous_turn_id,
     input: record.input,
-    state: record.state,
+    state: upgradeStoredTurnState(record.state),
     created_at: record.created_at.toISOString(),
   };
 }
@@ -360,6 +364,8 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Chat turns that have a model to answer with; absent, no specialist tool mounts. */
+  personas?: PersonaTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -397,6 +403,7 @@ function createTurnResolver(deps: {
     tokenFactoryBudget,
     modelUsage,
     schedules,
+    personas,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -592,6 +599,77 @@ function createTurnResolver(deps: {
                     store: repositoryStore,
                   });
                 },
+          loadPackageMirrorToken:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return undefined;
+                  }
+                  const repository = await repositoryStore.getRepository({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                  });
+                  if (repository === undefined) {
+                    return undefined;
+                  }
+                  if (!repository.package_downloads_allowed) {
+                    packageMirrorTokens.revokeRepository({
+                      tenant_id,
+                      created_by: userRef,
+                      repository_id: repository.id,
+                    });
+                    return undefined;
+                  }
+                  return packageMirrorTokens.issue({
+                    tenant_id,
+                    created_by: userRef,
+                    session_id: sessionId,
+                    repository_id: repository.id,
+                  });
+                },
+          loadPackageDownloadsAllowed:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return false;
+                  }
+                  const repository = await repositoryStore.getRepository({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                  });
+                  return repository?.package_downloads_allowed ?? false;
+                },
+          allowPackageDownloads:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return;
+                  }
+                  await repositoryStore.setPackageDownloadsAllowed({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                    allowed: true,
+                    expected_revision: undefined,
+                  });
+                },
           workspaceVerificationCoordinator: repositoryStore,
           workspaceLeaseOwnerId: configuration.EXECUTOR_ID,
           // run_code harvests persist as turn artifacts before cleanup.
@@ -717,6 +795,7 @@ function createTurnResolver(deps: {
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
+      personas,
       logger,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
@@ -1711,6 +1790,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       referencedAgent = agent;
     }
 
+    const chatRunner: ChatRunner | undefined =
+      referencedAgent !== undefined
+        ? { kind: 'saved', agent: referencedAgent }
+        : session.record.agent.type === 'inline'
+          ? { kind: 'plain', spec: session.record.agent.spec }
+          : undefined;
+    const scheduleOwner = createdBySubjectFromRequestContext(requestContext);
     const modelProviderStore = deps.resolveModelProviderStore(c, referencedAgent);
     const mcpServerStore = deps.resolveMcpServerStore(c, referencedAgent);
     const skillStore = deps.resolveSkillStore(c);
@@ -1995,24 +2081,40 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
+      personas:
+        chatRunner === undefined
+          ? undefined
+          : {
+              store: deps.personaStore,
+              modelProviderStore,
+              tenant_id: requestContext.tenant_id,
+              owner_id: userRef,
+              model_name: chatModelName(chatRunner),
+              session_id: session.session_id,
+              logger: deps.logger,
+            },
       schedules:
-        deps.schedules === undefined
+        deps.schedules === undefined || chatRunner === undefined
           ? undefined
           : {
               ...deps.schedules,
               tenant_id: requestContext.tenant_id,
-              owner: createdBySubjectFromRequestContext(requestContext),
-              // The same check the Schedules page makes: the person must be allowed to use the agent.
-              resolveAgent: async name =>
-                name === undefined
-                  ? referencedAgent
-                  : agentIfAccessible({
-                      authorizer: deps.authorizer,
-                      context: requestContext,
-                      action: 'use',
-                      agent: await agentStore.getAgent({ tenant_id: requestContext.tenant_id, name }),
-                    }),
-              assistantName: profile?.assistant_name ?? null,
+              owner: scheduleOwner,
+              // A schedule made here runs as whatever runs this turn: the chat's agent or setup, and its persona.
+              chatAssistant: resolveChatAssistant({
+                tenant_id: requestContext.tenant_id,
+                owner: scheduleOwner,
+                runner: chatRunner,
+                persona: persona?.kind === 'persona' ? persona.persona : undefined,
+                assistantName: profile?.assistant_name ?? null,
+                agentStore,
+              }),
+              runsAs: scheduleRunsAs({
+                tenant_id: requestContext.tenant_id,
+                agentStore,
+                personaStore: deps.personaStore,
+                personalizationStore: deps.personalizationStore,
+              }),
               logger: deps.logger,
             },
     });
@@ -2021,8 +2123,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
-    // Answering actions a scheduled run held runs just those calls; the chat is not asked anything new.
-    const stopAfterToolResponse = await session.answersOnlyHeldActions({
+    // Turning down held actions ends the turn with no model call. Approving one runs the call,
+    // and the model continues with its result.
+    const stopAfterToolResponse = await session.answersOnlyDeniedHeldActions({
       previous_turn_id: body.previous_turn_id,
       input: body.input,
     });

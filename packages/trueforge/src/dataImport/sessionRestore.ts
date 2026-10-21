@@ -5,7 +5,9 @@
  * carries the previous turn's threads forward and applies appends), so an
  * exported snapshot is decomposed per turn: threads new to the turn start
  * with their full context, retained threads contribute only the suffix past
- * the longest common prefix with the previous turn's exported snapshot, and
+ * the longest common prefix with the exported snapshot of the turn it
+ * continues (its previous_turn_id, so a chat whose first message was edited
+ * starts its second root from nothing), and
  * a retained thread whose context was rewritten (compaction) is repaired
  * with an overwrite after creation. Turns are terminated immediately after
  * creation, in export order, so the next turn's predecessor is never still
@@ -33,7 +35,7 @@ import { getHeapStatistics } from 'node:v8';
 
 import { formatArchiveBytes } from '../dataExport/archiveLimits';
 
-import { parseTurnCustom, type SessionCustom, type TurnCustom } from '../db/sessionCustom';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { detachConnectors } from './connectorImport';
 import { DataImportError } from './importError';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
@@ -163,7 +165,7 @@ async function restoreTurn(
       previous_turn_id: turn.previous_turn_id,
       state: { status: 'running' },
       input: turn.input,
-      custom: parseTurnCustom(turn.custom ?? null),
+      custom: turn.custom,
       created_at: new Date(turn.created_at),
       updated_at: new Date(turn.updated_at),
     },
@@ -281,6 +283,29 @@ async function restoreTurn(
   await store.updateTurnState({ session_id: sessionId, turn_id: turn.turn_id, state, turn_done_event: doneEvent });
 }
 
+type TurnEntry = ImportSessionEntry['turns'][number];
+
+/**
+ * The earlier turn of the chat that a turn continues, which the store builds it on. A turn without
+ * one is a root: the chat's first turn, or the new first turn after its first message was edited.
+ */
+function baseTurn(
+  turns: readonly TurnEntry[],
+  { index, indexById }: { index: number; indexById: ReadonlyMap<string, number> },
+): TurnEntry | undefined {
+  const baseId = turns[index]?.turn.previous_turn_id ?? null;
+  const baseIndex = baseId === null ? undefined : indexById.get(baseId);
+  return baseIndex !== undefined && baseIndex < index ? turns[baseIndex] : undefined;
+}
+
+function threadsOf(turn: TurnEntry | undefined): Map<string, ThreadSnapshot> {
+  return new Map(turn === undefined ? [] : Object.entries(turn.turn.snapshot.threads));
+}
+
+function turnIndexById(turns: readonly TurnEntry[]): Map<string, number> {
+  return new Map(turns.map(({ turn }, index) => [turn.turn_id, index]));
+}
+
 async function createRestoredSession(
   store: ISessionStore<SessionCustom, TurnCustom>,
   context: SessionRestoreContext,
@@ -311,7 +336,7 @@ async function createRestoredSession(
 async function finishRestoredSession(
   store: ISessionStore<SessionCustom, TurnCustom>,
   context: SessionRestoreContext,
-  { entry, turns }: { entry: ImportSessionEntry; turns: readonly ImportSessionEntry['turns'][number][] },
+  { entry, turns }: { entry: ImportSessionEntry; turns: readonly TurnEntry[] },
 ): Promise<void> {
   const session = entry.session;
   if (entry.turns.length === 0 && session.title !== null) {
@@ -363,16 +388,13 @@ export async function restoreSessions(
     const session = entry.session;
     await createRestoredSession(store, context, session);
     const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
-    let previousThreads = new Map<string, ThreadSnapshot>();
-    let isFirstTurn = true;
-    for (const turnEntry of entry.turns) {
+    const indexById = turnIndexById(entry.turns);
+    for (const [index, turnEntry] of entry.turns.entries()) {
       await restoreTurn(store, session, turnEntry, {
-        threads: previousThreads,
-        isFirstTurn,
+        threads: threadsOf(baseTurn(entry.turns, { index, indexById })),
+        isFirstTurn: index === 0,
         answered: continuedTurnIds.has(turnEntry.turn.turn_id),
       });
-      previousThreads = new Map(Object.entries(turnEntry.turn.snapshot.threads));
-      isFirstTurn = false;
     }
     await finishRestoredSession(store, context, { entry, turns: entry.turns });
   }
@@ -419,30 +441,26 @@ export async function replaySessions(
   for (const entry of sessions) {
     const session = entry.session;
     try {
-      const indexById = new Map(entry.turns.map(({ turn }, index) => [turn.turn_id, index]));
+      const indexById = turnIndexById(entry.turns);
       const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
       let store: ISessionStore<SessionCustom, TurnCustom> | undefined;
-      let landed: ImportSessionEntry['turns'][number][] = [];
-      let previousThreads = new Map<string, ThreadSnapshot>();
+      let landed: TurnEntry[] = [];
       for (const [index, turnEntry] of entry.turns.entries()) {
         assertHeapRoom(session.session_id);
         store = await openChat(session);
         landed = [];
-        const baseId = turnEntry.turn.previous_turn_id;
-        const baseIndex = baseId === null ? undefined : indexById.get(baseId);
-        const base = baseIndex !== undefined && baseIndex < index ? entry.turns[baseIndex] : undefined;
+        const base = baseTurn(entry.turns, { index, indexById });
         if (base !== undefined) {
           // Every thread of the base is new to this store, so it lands with its whole context.
           await restoreTurn(store, session, base, { threads: new Map(), isFirstTurn: false, answered: true });
           landed.push(base);
         }
         await restoreTurn(store, session, turnEntry, {
-          threads: previousThreads,
+          threads: threadsOf(base),
           isFirstTurn: index === 0,
           answered: continuedTurnIds.has(turnEntry.turn.turn_id),
         });
         landed.push(turnEntry);
-        previousThreads = new Map(Object.entries(turnEntry.turn.snapshot.threads));
       }
       await finishRestoredSession(store ?? (await openChat(session)), context, { entry, turns: landed });
     } catch (cause) {
@@ -450,7 +468,7 @@ export async function replaySessions(
         throw cause;
       }
       throw new DataImportError(
-        `Chat ${session.session_id} in this export could not be read back, so nothing was imported. The export may be damaged.`,
+        `Chat '${session.title ?? 'Untitled chat'}' in this export could not be read back, so nothing was imported. Export it again from the Aman it came from and import the new file.`,
         400,
         { cause },
       );
