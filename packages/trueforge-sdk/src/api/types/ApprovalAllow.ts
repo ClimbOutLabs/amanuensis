@@ -3,6 +3,8 @@
 import * as TrueForge from "../index.js";
 
 export interface ApprovalAllow {
+    /** Only for a mail send to addresses not yet on the Email list: add those addresses to the list, then send. */
+    mailRecipients?: "add";
     /** Omitted or once allows only this invocation; chat grants this exact tool for the current session; always allows this read-only connector tool for the caller until revoked. */
     scope?: TrueForge.ApprovalAllowScope;
     status: "allow";

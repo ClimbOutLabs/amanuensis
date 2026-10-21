@@ -7,6 +7,7 @@ export interface Repository {
     /** Stable repository identifier. */
     id: string;
     name: string;
+    packageDownloadsAllowed: boolean;
     /** Optimistic-concurrency revision. */
     revision: number;
     updatedAt: Date;

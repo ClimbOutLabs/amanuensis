@@ -5,6 +5,8 @@
  *     {}
  */
 export interface UpdateSentinelUserSettingsRequest {
+    /** New maps setting; omitted keeps the current value. */
+    mapsWithoutAsking?: boolean;
     /** New offline mode value; omitted keeps the current value. */
     offlineMode?: boolean;
     /** New search setting; omitted keeps the current value. */

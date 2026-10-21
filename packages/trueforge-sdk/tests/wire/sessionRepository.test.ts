@@ -318,4 +318,458 @@ describe("SessionRepositoryClient", () => {
             }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
           
+    test("list_github_repositories (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "repositories" : [ { "clone_url" : "clone_url" , "default_branch" : null , "full_name" : "full_name" , "name" : "name" , "private" : true , "size_kb" : 1 } ] } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.sessionRepository.listGithubRepositories("session_id");
+                                expect(response).toEqual({
+    data: {
+        repositories: [{
+                cloneUrl: "clone_url",
+                defaultBranch: null,
+                fullName: "full_name",
+                name: "name",
+                "private": true,
+                sizeKb: 1
+            }]
+    }
+});
+                              
+                    
+    });
+          
+    test("list_github_repositories (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.listGithubRepositories("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("list_github_repositories (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.listGithubRepositories("session_id")
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+          
+    test("list_github_repositories (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.listGithubRepositories("session_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("list_github_repositories (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.listGithubRepositories("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+          
+    test("list_github_repositories (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repositories").respondWith()
+            .statusCode(502).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.listGithubRepositories("session_id")
+            }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+          
+    test("get_github_repository (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "branches" : [ "branches" ] , "clone_url" : "clone_url" , "default_branch" : "default_branch" , "full_name" : "full_name" , "name" : "name" , "private" : true , "size_kb" : 1 } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.sessionRepository.getGithubRepository("session_id");
+                                expect(response).toEqual({
+    data: {
+        branches: ["branches"],
+        cloneUrl: "clone_url",
+        defaultBranch: "default_branch",
+        fullName: "full_name",
+        name: "name",
+        "private": true,
+        sizeKb: 1
+    }
+});
+                              
+                    
+    });
+          
+    test("get_github_repository (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+          
+    test("get_github_repository (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("get_github_repository (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+          
+    test("get_github_repository (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("get_github_repository (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+          
+    test("get_github_repository (7)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/repository/github-repository").respondWith()
+            .statusCode(502).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.getGithubRepository("session_id")
+            }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+          
+    test("start_work (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "branch" , "clone_url" : "clone_url" };
+        const rawResponseBody = { "data" : { "branch" : "branch" , "repository" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "package_downloads_allowed" : true , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } , "repository_id" : "repository_id" , "session_id" : "session_id" , "workspace_cwd" : "workspace_cwd" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.sessionRepository.startWork("session_id", {
+    branch: "branch",
+    cloneUrl: "clone_url"
+});
+                                expect(response).toEqual({
+    data: {
+        branch: "branch",
+        repository: {
+            cloneUrl: "clone_url",
+            createdAt: new Date("2024-01-15T09:30:00.000Z"),
+            defaultBranch: "default_branch",
+            id: "id",
+            name: "name",
+            packageDownloadsAllowed: true,
+            revision: 1,
+            updatedAt: new Date("2024-01-15T09:30:00.000Z")
+        },
+        repositoryId: "repository_id",
+        sessionId: "session_id",
+        workspaceCwd: "workspace_cwd"
+    }
+});
+                              
+                    
+    });
+          
+    test("start_work (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+          
+    test("start_work (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("start_work (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+          
+    test("start_work (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("start_work (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+          
+    test("start_work (7)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+          
+    test("start_work (8)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "branch" : "x" , "clone_url" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/repository/start-work").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(502).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessionRepository.startWork("session_id", {
+    branch: "x",
+    cloneUrl: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+          
 });

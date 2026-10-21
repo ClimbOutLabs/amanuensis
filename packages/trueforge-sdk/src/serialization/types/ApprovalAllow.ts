@@ -6,12 +6,14 @@ import * as serializers from "../index.js";
 import { ApprovalAllowScope } from "./ApprovalAllowScope.js";
 
 export const ApprovalAllow: core.serialization.ObjectSchema<serializers.ApprovalAllow.Raw, TrueForge.ApprovalAllow> = core.serialization.object({
+        "mailRecipients": core.serialization.property("mail_recipients", core.serialization.stringLiteral("add").optional()),
         "scope": ApprovalAllowScope.optional(),
         "status": core.serialization.stringLiteral("allow")
     });
 
 export declare namespace ApprovalAllow {
     export interface Raw {
+        mail_recipients?: "add" | null;
         scope?: ApprovalAllowScope.Raw | null;
         status: "allow";
     }
