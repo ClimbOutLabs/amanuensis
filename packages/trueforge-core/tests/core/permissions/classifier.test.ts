@@ -1301,6 +1301,22 @@ describe('connector reads can be always allowed', () => {
     expect(decision.secret_path_read).not.toBe(true);
   });
 
+  test('a first-party read-only tool with a path argument still runs silently, as before', async () => {
+    const decision = await classifyTier(
+      {
+        ...readAction({
+          tool_name: 'list-messages',
+          canonical_params: { account: 'work', path: '/home/u/notes/todo.md' },
+          mcp_hints: { read_only_hint: true, open_world_hint: false },
+        }),
+        mcp_first_party: true,
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
+  });
+
   test('a grant on one read does not cover another read, or the same read on another connector', async () => {
     const services = servicesGranting([grantFor('list-messages')]);
     const otherRead = await classifyTier(readAction({ tool_name: 'get-message' }), makeCtx({ services }));

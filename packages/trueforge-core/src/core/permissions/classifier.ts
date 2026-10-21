@@ -2236,8 +2236,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     action.tool_type === 'mcp' &&
     (closedWorldRead || grantableRead) &&
     !extraction.sends &&
-    !containsSecretPath(action.canonical_params) &&
-    !pathLike
+    !containsSecretPath(action.canonical_params)
   ) {
     if (closedWorldRead && action.mcp_first_party === true) {
       return tier1Decision({
@@ -2248,8 +2247,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: readsPrivateData,
       });
     }
+    // A path-like argument is never admitted by a standing grant; a first-party read is not grant-based.
     if (
       action.mcp_server_name !== undefined &&
+      !pathLike &&
       (await services.tool_grants.hasToolGrant({
         tenant_id: ctx.tenant_id,
         created_by: ctx.created_by,
