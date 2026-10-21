@@ -1,8 +1,8 @@
 import { isRecord } from '../util/records';
 
-/** Shown to the person when a reply's tool-call markup could not be rebuilt and the answer stops. */
+/** Shown in place of tool-call markup that could not be rebuilt into calls. */
 export const BROKEN_TOOL_MARKUP_MESSAGE =
-  'The model tried to use a tool in a broken way, so nothing was done. Try again, or pick another model.';
+  "The model's reply came back garbled. Try again, or pick another model in the model picker.";
 
 /** One tool call rebuilt from markup: the tool name and its arguments as a record. */
 export interface RecoveredToolCall {
@@ -13,6 +13,16 @@ export interface RecoveredToolCall {
 export type ToolMarkupOutcome =
   { status: 'clean' } | { status: 'recovered'; calls: RecoveredToolCall[] } | { status: 'broken' };
 
+/** Closing tags of the markup forms. Alone on a line they are stray markers the person must not see. */
+const STRAY_CLOSING_TAGS: readonly string[] = [
+  '</tool_calls>',
+  '</tool_call>',
+  '</invoke>',
+  '</｜DSML｜tool_calls>',
+  '</｜DSML｜invoke>',
+  '</function_results>',
+];
+
 /**
  * Text that can open leaked markup. Every one of these also appears in ordinary prose, which
  * names the tags when it explains them, so seeing one starts a candidate instead of a capture:
@@ -20,8 +30,8 @@ export type ToolMarkupOutcome =
  * shape of a real call is treated as markup. A candidate that settles as prose is released as
  * the text it always was, and one still forming when the reply ends is released whole. The DSML
  * form uses a fullwidth bar (U+FF5C) inside the brackets; that character is data the detector
- * matches, never text Aman writes itself. A closing tag on its own opens nothing: with no call
- * around it, it is prose.
+ * matches, never text Aman writes itself. A closing tag is a candidate too: alone on its line it is
+ * a stray marker and is hidden, while inside a sentence it is prose.
  */
 const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_calls',
@@ -30,6 +40,7 @@ const CANDIDATE_OPENERS: readonly string[] = [
   '[TOOL_CALLS]',
   '<｜DSML｜',
   '<function_results',
+  ...STRAY_CLOSING_TAGS,
 ];
 
 const ALL_OPENERS: readonly string[] = [...CANDIDATE_OPENERS];
@@ -37,7 +48,11 @@ const ALL_OPENERS: readonly string[] = [...CANDIDATE_OPENERS];
 /** The longest opener, so a stream tail shorter than this can always be held back safely. */
 const MAX_OPENER_LENGTH = Math.max(...ALL_OPENERS.map(opener => opener.length));
 
-type CandidateVerdict = { verdict: 'markup' } | { verdict: 'dead'; deadLength: number } | { verdict: 'undecided' };
+type CandidateVerdict =
+  | { verdict: 'markup' }
+  | { verdict: 'dead'; deadLength: number }
+  | { verdict: 'stray'; length: number }
+  | { verdict: 'undecided' };
 
 /** Whether one completed tag (its text from '<' through '>') carries a name attribute. */
 function tagHasName(tag: string): boolean {
@@ -168,10 +183,13 @@ function judgeShapedOpener(text: string): CandidateVerdict | undefined {
  * call for that form. Markup when that shape is present; dead, with the length of text that is
  * plain prose, when the shape can no longer form; undecided while either is still possible.
  */
-function judgeOwnShape(text: string): CandidateVerdict {
+function judgeOwnShape(text: string, startsLine: boolean): CandidateVerdict {
   const shaped = judgeShapedOpener(text);
   if (shaped !== undefined) {
     return shaped;
+  }
+  if (text.startsWith('</')) {
+    return judgeClosingTag(text, startsLine);
   }
   if (text.startsWith('[TOOL_CALLS]')) {
     // The Mistral form: the marker and then the list of calls itself.
@@ -218,7 +236,11 @@ function judgeOwnShape(text: string): CandidateVerdict {
     if (after === '') {
       return { verdict: 'undecided' };
     }
-    return after.startsWith('{') ? { verdict: 'markup' } : { verdict: 'dead', deadLength: tagEnd + 1 };
+    if (after.startsWith('{')) {
+      return { verdict: 'markup' };
+    }
+    // A wrapper that is closed further on is a call that went wrong, not prose: it is broken.
+    return text.includes('</tool_call>', tagEnd) ? { verdict: 'markup' } : { verdict: 'dead', deadLength: tagEnd + 1 };
   }
   if (text.startsWith('<invoke')) {
     // A lone invoke is a call only when its envelope completes: the parameters and then the
@@ -243,6 +265,27 @@ function judgeOwnShape(text: string): CandidateVerdict {
 }
 
 /**
+ * Judges a closing tag that starts a candidate. Alone on its line it is a stray marker, hidden
+ * together with the line break after it; anywhere else it is prose and is released as text.
+ */
+function judgeClosingTag(text: string, startsLine: boolean): CandidateVerdict {
+  const tag = STRAY_CLOSING_TAGS.find(candidate => text.startsWith(candidate));
+  if (tag === undefined) {
+    return { verdict: 'undecided' };
+  }
+  if (!startsLine) {
+    return { verdict: 'dead', deadLength: tag.length };
+  }
+  const rest = text.slice(tag.length);
+  const newlineAt = rest.indexOf('\n');
+  const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
+  if (/[^ \t\r]/.test(lineRest)) {
+    return { verdict: 'dead', deadLength: tag.length };
+  }
+  return { verdict: 'stray', length: tag.length + (newlineAt === -1 ? lineRest.length : newlineAt + 1) };
+}
+
+/**
  * Judges held candidate text (starting at a candidate opener). Its own opener's shape decides
  * first, so prose that merely names a tag is settled by the tag itself. A candidate whose own
  * shape is not markup can still hold a complete DSML or results-block shape further in: within
@@ -250,9 +293,12 @@ function judgeOwnShape(text: string): CandidateVerdict {
  * That shape settles the whole held text as markup, since a call does not stop being a call
  * because a wrapper or a half-formed attempt came first.
  */
-function judgeCandidate(text: string): CandidateVerdict {
-  const own = judgeOwnShape(text);
+function judgeCandidate({ text, startsLine }: { text: string; startsLine: boolean }): CandidateVerdict {
+  const own = judgeOwnShape(text, startsLine);
   if (own.verdict === 'markup') {
+    return own;
+  }
+  if (own.verdict === 'stray') {
     return own;
   }
   const limit = own.verdict === 'dead' ? own.deadLength : text.length;
@@ -319,6 +365,8 @@ export class ToolMarkupGuard {
   #fence: string | undefined;
   /** Where a candidate opener starts in #pending while its shape is judged, if one is open. */
   #candidateAt: number | undefined;
+  /** Whether the open candidate starts its line, which decides whether a closing tag is stray. */
+  #candidateStartsLine = false;
   /** Whether the scan is inside an indented code block, where nothing is markup. */
   #indented = false;
   /** Whether the next unconsumed character starts a line. */
@@ -351,7 +399,7 @@ export class ToolMarkupGuard {
       }
       if (this.#candidateAt !== undefined) {
         const candidate = this.#pending.slice(this.#candidateAt);
-        const judged = judgeCandidate(candidate);
+        const judged = judgeCandidate({ text: candidate, startsLine: this.#candidateStartsLine });
         if (judged.verdict === 'markup') {
           emit += this.#take(this.#candidateAt);
           this.#markup = this.#pending;
@@ -359,6 +407,13 @@ export class ToolMarkupGuard {
           this.#candidateAt = undefined;
           this.#inMarkup = true;
           return emit;
+        }
+        if (judged.verdict === 'stray') {
+          // A stray closing tag is hidden with its line break: the text before it is released.
+          emit += this.#take(this.#candidateAt);
+          this.#take(judged.length);
+          this.#candidateAt = undefined;
+          continue;
         }
         if (judged.verdict === 'dead') {
           // Prose after all: release the dead token and scan what follows it afresh.
@@ -408,7 +463,18 @@ export class ToolMarkupGuard {
         continue;
       }
       this.#candidateAt = event.at;
+      this.#candidateStartsLine = this.#startsLine(event.at);
     }
+  }
+
+  /** Whether the text at `at` begins a line: only spaces and tabs come between it and the line break. */
+  #startsLine(at: number): boolean {
+    const before = this.#pending.slice(0, at);
+    const lineBreak = before.lastIndexOf('\n');
+    if (lineBreak !== -1) {
+      return /^[ \t\r]*$/.test(before.slice(lineBreak + 1));
+    }
+    return this.#lineBlank && /^[ \t\r]*$/.test(before);
   }
 
   /** Releases the first `count` characters of the held text, noting where lines begin and end. */

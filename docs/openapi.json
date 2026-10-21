@@ -2631,6 +2631,18 @@
         ],
         "type": "object"
       },
+      "GetGithubRepositoryDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GithubRepositoryDetails"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetGoogleConnectionStatusResponse": {
         "properties": {
           "data": {
@@ -3184,6 +3196,118 @@
           "url",
           "ref",
           "description"
+        ],
+        "type": "object"
+      },
+      "GithubRepositoriesData": {
+        "additionalProperties": false,
+        "properties": {
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/GithubRepositoryOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories"
+        ],
+        "type": "object"
+      },
+      "GithubRepositoryDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "branches": {
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "clone_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "default_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "full_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "size_kb": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "full_name",
+          "clone_url",
+          "default_branch",
+          "size_kb",
+          "private",
+          "branches"
+        ],
+        "type": "object"
+      },
+      "GithubRepositoryOption": {
+        "additionalProperties": false,
+        "properties": {
+          "clone_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "default_branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "full_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "size_kb": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "full_name",
+          "clone_url",
+          "default_branch",
+          "size_kb",
+          "private"
         ],
         "type": "object"
       },
@@ -4269,6 +4393,18 @@
               "$ref": "#/components/schemas/AvailableSkill"
             },
             "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListGithubRepositoriesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GithubRepositoriesData"
           }
         },
         "required": [
@@ -6985,6 +7121,26 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "help_areas": {
+            "default": [],
+            "description": "The help areas the user picked for the Tour, in the order picked. Empty means none chosen.",
+            "example": [
+              "focus",
+              "family"
+            ],
+            "items": {
+              "enum": [
+                "focus",
+                "family",
+                "caring",
+                "new_country",
+                "work_money"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
           "learned_profile": {
             "default": null,
             "description": "Host-learned profile document (markdown). Maintained by the learning pass; editable by the user.",
@@ -7080,6 +7236,9 @@
           "address_as": "Sam",
           "assistant_identity": "A thoughtful local-first personal assistant.",
           "assistant_name": "Aman",
+          "help_areas": [
+            "focus"
+          ],
           "learned_profile": null,
           "learning_enabled": false,
           "pinned_preferences": [
@@ -7118,6 +7277,26 @@
               "string",
               "null"
             ]
+          },
+          "help_areas": {
+            "default": [],
+            "description": "The help areas the user picked for the Tour, in the order picked. Empty means none chosen.",
+            "example": [
+              "focus",
+              "family"
+            ],
+            "items": {
+              "enum": [
+                "focus",
+                "family",
+                "caring",
+                "new_country",
+                "work_money"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
           },
           "learned_profile": {
             "default": null,
@@ -9257,6 +9436,75 @@
         ],
         "type": "string"
       },
+      "StartRepositoryWorkData": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "repository_id": {
+            "description": "Stable repository identifier.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "description": "Absolute checkout path inside the configured sandbox provider.",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "repository_id",
+          "workspace_cwd",
+          "branch",
+          "repository"
+        ],
+        "type": "object"
+      },
+      "StartRepositoryWorkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "clone_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "clone_url",
+          "branch"
+        ],
+        "type": "object"
+      },
+      "StartRepositoryWorkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StartRepositoryWorkData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "TaskStateConfig": {
         "default": {},
         "properties": {
@@ -9637,6 +9885,9 @@
               "null"
             ]
           },
+          "persona": {
+            "$ref": "#/components/schemas/Tier3Persona"
+          },
           "plain_what": {
             "description": "One plain-language sentence describing what will happen. No jargon.",
             "type": "string"
@@ -9800,6 +10051,37 @@
           "address"
         ],
         "type": "object"
+      },
+      "Tier3Persona": {
+        "description": "The specialist a chat call adds, shown in full.",
+        "properties": {
+          "description": {
+            "description": "One line on what the specialist is for.",
+            "type": "string"
+          },
+          "instructions": {
+            "description": "The whole instruction text the specialist follows.",
+            "type": "string"
+          },
+          "model_name": {
+            "description": "The model the specialist answers with.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Specialist name in plain words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "instructions",
+          "model_name"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Tier3Schedule": {
         "description": "The schedule a chat call creates or deletes, shown in full.",
@@ -11912,6 +12194,9 @@
             "address_as": "Sam",
             "assistant_identity": "A thoughtful local-first personal assistant.",
             "assistant_name": "Aman",
+            "help_areas": [
+              "focus"
+            ],
             "learned_profile": null,
             "learning_enabled": false,
             "pinned_preferences": [
@@ -12419,7 +12704,9 @@
       "VerifyCommandProposalSourceKind": {
         "enum": [
           "agents_md",
-          "package_json"
+          "makefile",
+          "package_json",
+          "pyproject_toml"
         ],
         "type": "string"
       },
@@ -16148,6 +16435,93 @@
         "x-fern-sdk-method-name": "create"
       }
     },
+    "/api/v1/repositories/github/metadata": {
+      "get": {
+        "description": "Reads one public GitHub repo and its branches, for the repo picker. Private repos need the chat route.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "clone_url",
+            "required": false,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGithubRepositoryDetailsResponse"
+                }
+              }
+            },
+            "description": "Repo details and branches."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such repository, session, command, or proposal for this user."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The repo cannot be opened yet, with the reason and the next step."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "GitHub could not be reached."
+          }
+        },
+        "summary": "Look up a public GitHub repo",
+        "tags": [
+          "Repositories"
+        ],
+        "x-fern-sdk-group-name": [
+          "repositories"
+        ],
+        "x-fern-sdk-method-name": "get_github_metadata"
+      }
+    },
     "/api/v1/repositories/{repository_id}": {
       "get": {
         "parameters": [
@@ -18966,6 +19340,323 @@
           "session-repository"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/sessions/{session_id}/repository/github-repositories": {
+      "get": {
+        "description": "Uses the GitHub connector attached to this chat. Without one, the answer says to connect GitHub.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListGithubRepositoriesResponse"
+                }
+              }
+            },
+            "description": "Repos the person can pick from."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not the owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such repository, session, command, or proposal for this user."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The repo cannot be opened yet, with the reason and the next step."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "GitHub could not be reached."
+          }
+        },
+        "summary": "List the GitHub repos this chat can open",
+        "tags": [
+          "Repositories"
+        ],
+        "x-fern-sdk-group-name": [
+          "session-repository"
+        ],
+        "x-fern-sdk-method-name": "list_github_repositories"
+      }
+    },
+    "/api/v1/sessions/{session_id}/repository/github-repository": {
+      "get": {
+        "description": "Reads one GitHub repo and its branches, using this chat GitHub connector when one is attached.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "clone_url",
+            "required": false,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGithubRepositoryDetailsResponse"
+                }
+              }
+            },
+            "description": "Repo details and branches."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not the owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such repository, session, command, or proposal for this user."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The repo cannot be opened yet, with the reason and the next step."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "GitHub could not be reached."
+          }
+        },
+        "summary": "Look up one GitHub repo for this chat",
+        "tags": [
+          "Repositories"
+        ],
+        "x-fern-sdk-group-name": [
+          "session-repository"
+        ],
+        "x-fern-sdk-method-name": "get_github_repository"
+      }
+    },
+    "/api/v1/sessions/{session_id}/repository/start-work": {
+      "post": {
+        "description": "Checks the repo size and branch on GitHub, registers the repo, and binds the chat to the checkout path the clone will use.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRepositoryWorkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartRepositoryWorkResponse"
+                }
+              }
+            },
+            "description": "The registered repo, the bound checkout path, and the chosen branch."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not the owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such repository, session, command, or proposal for this user."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Repository name or revision conflict."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The repo cannot be opened yet, with the reason and the next step."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "GitHub could not be reached."
+          }
+        },
+        "summary": "Register a GitHub repo and bind this chat to its checkout",
+        "tags": [
+          "Repositories"
+        ],
+        "x-fern-sdk-group-name": [
+          "session-repository"
+        ],
+        "x-fern-sdk-method-name": "start_work"
       }
     },
     "/api/v1/sessions/{session_id}/turns": {

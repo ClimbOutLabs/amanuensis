@@ -28,6 +28,7 @@ import type {
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
 import type { ModelProviderManifest } from '../../schemas/modelProvider';
@@ -705,6 +706,7 @@ export interface PersonalizationProfileTable {
   address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JSONColumnType<string[], string[] | string, string[] | string>;
+  help_areas: JSONColumnType<HelpAreaId[], HelpAreaId[] | string, HelpAreaId[] | string>;
   /** Host-maintained learned document; null until the learning pass writes one. */
   learned_profile: string | null;
   /** User switch for the learning pass. */

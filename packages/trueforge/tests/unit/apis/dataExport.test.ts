@@ -333,6 +333,7 @@ describe('Data export route', () => {
       address_as: null,
       user_profile: 'Alice likes concise answers.',
       pinned_preferences: ['concise'],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: false,
     });

@@ -1,0 +1,294 @@
+import type {
+  AgentExecutionTrace,
+  AgentLocalToolTrace,
+  AgentRemoteMcpToolTrace,
+  AgentTracing,
+  CallToolResponse,
+} from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState, recordResultUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
+import type { SpaceRecord } from '../../../src/db/spaceStore';
+import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { SPACE_PICTURE_DATA_MAX_CHARS } from '../../../src/runtime/spaceLinks';
+
+const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
+  runInContext: operation => operation(),
+  startSubAgent: () => NOOP_EXECUTION_TRACE,
+  setOutput: () => undefined,
+  setMetrics: () => undefined,
+  setError: () => undefined,
+  setSuccess: () => undefined,
+  end: () => undefined,
+};
+const NOOP_LOCAL_TOOL_TRACE: AgentLocalToolTrace = { setOutput: () => undefined, setSandboxId: () => undefined };
+const NOOP_REMOTE_MCP_TOOL_TRACE: AgentRemoteMcpToolTrace = {
+  setOutput: () => undefined,
+  setNumberOfTools: () => undefined,
+};
+const NOOP_TRACING: AgentTracing = {
+  withInitSpan: operation => operation(),
+  startRootSpan: () => NOOP_EXECUTION_TRACE,
+  withLocalToolSpan: (_input, operation) => operation(NOOP_LOCAL_TOOL_TRACE),
+  withRemoteMcpToolSpan: (_input, operation) => operation(NOOP_REMOTE_MCP_TOOL_TRACE),
+};
+
+const AUTHORITY = { tenantId: 'default', userRef: 'user-a' };
+
+const COLLIE_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Border_Collie_working.jpg';
+const POODLE_URL = 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Standard_Poodle.jpg';
+
+const NOT_SEEN_PICTURE =
+  "This picture's link did not come from a search or page in this chat. Search for the picture first, then use a link from the results.";
+
+function textOf(response: CallToolResponse): string {
+  if (!('result' in response)) {
+    throw new Error('expected a space tool result');
+  }
+  const content = response.result.content[0];
+  return content?.type === 'text' ? content.text : '';
+}
+
+function makeStore(): SpaceToolStore {
+  const rows = new Map<string, SpaceRecord>();
+  let aggregate = 0;
+  const save = (record: SpaceRecord) => {
+    rows.set(record.id, record);
+    aggregate += 1;
+    return { record, aggregate_revision: aggregate };
+  };
+  return {
+    createSpace: async input =>
+      save({
+        tenant_id: AUTHORITY.tenantId,
+        created_by: AUTHORITY.userRef,
+        id: input.id,
+        name: input.name,
+        purpose: input.purpose,
+        status: input.status,
+        body: input.body,
+        format: input.format,
+        revision: 1,
+        created_at: '2026-10-21T00:00:00.000Z',
+        updated_at: '2026-10-21T00:00:00.000Z',
+      }),
+    updateSpace: async input => {
+      const current = rows.get(input.space_id);
+      if (current === undefined) {
+        throw new Error(`no space ${input.space_id}`);
+      }
+      return save({
+        ...current,
+        name: input.name,
+        purpose: input.purpose,
+        status: input.status,
+        body: input.body,
+        format: input.format,
+        revision: current.revision + 1,
+      });
+    },
+    revertSpace: async () => {
+      throw new Error('not used in these tests');
+    },
+    getSpace: async input => rows.get(input.space_id),
+    getSpaceRevision: async () => undefined,
+    listSpacesWithAggregate: async () => ({
+      records: [...rows.values()],
+      aggregate_revision: aggregate,
+      has_more: false,
+      next_offset: null,
+    }),
+  };
+}
+
+/** A search result as the designated provider returns it: each result's own `url` is what counts. */
+function searchResult(urls: string[]): string {
+  return JSON.stringify({ results: urls.map((url, index) => ({ title: `Result ${String(index + 1)}`, url })) });
+}
+
+function setup(webSearch: WebSearchTurnState, store: SpaceToolStore = makeStore()) {
+  const capability = spaceCapability({ store, authority: AUTHORITY, tracing: NOOP_TRACING, webSearch });
+  const toolSet = capability.systemToolSets?.[0];
+  if (toolSet === undefined) {
+    throw new Error('expected space tool set');
+  }
+  return (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
+}
+
+function createArgs(body: string) {
+  return { name: 'Dog breeds', purpose: 'Dog breeds with pictures.', status: 'active', format: 'markdown', body };
+}
+
+async function errorOf(response: CallToolResponse): Promise<string> {
+  const parsed = JSON.parse(textOf(response)) as { error?: string };
+  return parsed.error ?? '';
+}
+
+describe('space pictures and links come only from this chat', () => {
+  it('refuses a picture link the chat never returned, with the message the model acts on', async () => {
+    const call = setup(createWebSearchTurnState());
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs(`![Collie](https://images.wikimedia.org/invented/border-collie.jpg)`),
+    });
+    expect(await errorOf(response)).toBe(
+      "This picture's link did not come from a search or page in this chat. Search for the picture first, then use a link from the results.",
+    );
+  });
+
+  it('refuses a placeholder domain even when a search result returned it', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordResultUrls({ state: webSearch, texts: [searchResult(['https://example.com/collie.jpg'])] });
+    const call = setup(webSearch);
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs('<img src="https://example.com/collie.jpg" alt="Collie">'),
+    });
+    expect(await errorOf(response)).toContain('placeholder domain');
+    const sub = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs('<img src="https://cdn.example.org/collie.jpg" alt="Collie">'),
+    });
+    expect(await errorOf(sub)).toContain('placeholder domain');
+  });
+
+  it('keeps a picture link that a search result returned, exactly as returned', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL])] });
+    const call = setup(webSearch);
+    const created = JSON.parse(
+      textOf(await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${COLLIE_URL}" alt="Collie">`) })),
+    ) as { space: { body: string } };
+    expect(created.space.body).toContain(COLLIE_URL);
+  });
+
+  it('refuses a seen link with query data appended, since that is a different address', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL])] });
+    const call = setup(webSearch);
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs(`<img src="${COLLIE_URL}?email=person%40example.org" alt="Collie">`),
+    });
+    expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
+  });
+
+  it('refuses a picture link copied from an email body, since mail text is not a result URL', async () => {
+    const webSearch = createWebSearchTurnState();
+    // The model read this mail: the link is in the body text and in the Gmail tool's linked_images list.
+    // Neither is a result's own `url` field, so neither is recorded.
+    const mail = JSON.stringify({
+      bodyHtml: `<img src="${POODLE_URL}">`,
+      linked_images: [POODLE_URL],
+    });
+    recordResultUrls({ state: webSearch, texts: [mail] });
+    const call = setup(webSearch);
+    const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${POODLE_URL}" alt="Poodle">`) });
+    expect(await errorOf(response)).toBe(NOT_SEEN_PICTURE);
+  });
+
+  it('refuses an http picture even when a result returned it', async () => {
+    const webSearch = createWebSearchTurnState();
+    const plain = COLLIE_URL.replace('https://', 'http://');
+    recordResultUrls({ state: webSearch, texts: [searchResult([plain])] });
+    const call = setup(webSearch);
+    const response = await call(CREATE_SPACE_TOOL_NAME, { ...createArgs(`<img src="${plain}" alt="Collie">`) });
+    expect(await errorOf(response)).toContain('must use a secure https link');
+  });
+
+  it('refuses a data: picture over the size cap and keeps one under it', async () => {
+    const call = setup(createWebSearchTurnState());
+    const pad = 'A'.repeat(SPACE_PICTURE_DATA_MAX_CHARS);
+    const tooLarge = await call(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs(`<img src="data:image/png;base64,${pad}" alt="Big">`),
+    });
+    expect(await errorOf(tooLarge)).toContain('too large');
+    const small = JSON.parse(
+      textOf(
+        await call(CREATE_SPACE_TOOL_NAME, {
+          ...createArgs('<img src="data:image/png;base64,AAAA" alt="Dot">'),
+        }),
+      ),
+    ) as { space: { body: string } };
+    expect(small.space.body).toContain('data:image/png;base64,AAAA');
+  });
+
+  it('checks only links a write adds, so an unrelated block edit keeps a picture from an earlier turn', async () => {
+    const store = makeStore();
+    // Turn one: the search ran, and the skeleton used its picture.
+    const turnOne = createWebSearchTurnState();
+    recordResultUrls({ state: turnOne, texts: [searchResult([COLLIE_URL])] });
+    const created = JSON.parse(
+      textOf(
+        await setup(turnOne, store)(CREATE_SPACE_TOOL_NAME, {
+          ...createArgs(
+            [
+              '# Dog breeds',
+              '<!-- @block:one -->',
+              `![Collie](${COLLIE_URL})`,
+              '<!-- @block:two -->',
+              '(to fill)',
+            ].join('\n'),
+          ),
+        }),
+      ),
+    ) as { space: { id: string } };
+    // Turn two: no search ran, so the old picture is not in this turn's results. A text edit still goes through.
+    const updated = await setup(createWebSearchTurnState(), store)(UPDATE_SPACE_TOOL_NAME, {
+      space_id: created.space.id,
+      block_edits: [{ anchor: 'two', new_content: 'Border Collie, rank 1.' }],
+    });
+    expect(textOf(updated)).toContain('Updated space \\"Dog breeds\\"');
+  });
+
+  it('refuses a block edit that adds an invented picture to a space', async () => {
+    const webSearch = createWebSearchTurnState();
+    const call = setup(webSearch);
+    const created = JSON.parse(
+      textOf(await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\n<!-- @block:one -->\n(to fill)') })),
+    ) as { space: { id: string } };
+    const response = await call(UPDATE_SPACE_TOOL_NAME, {
+      space_id: created.space.id,
+      block_edits: [{ anchor: 'one', new_content: '![Collie](https://cdn.example.net/collie.jpg)' }],
+    });
+    expect(await errorOf(response)).toContain('placeholder domain');
+  });
+});
+
+describe('scripted run: dog breeds with pictures', () => {
+  it('searches for pictures, then builds the space from the result URLs only', async () => {
+    const webSearch = createWebSearchTurnState();
+    const call = setup(webSearch);
+
+    // Step 1: the search. The host records each result's own url, as the designated provider returns it.
+    recordResultUrls({ state: webSearch, texts: [searchResult([COLLIE_URL, POODLE_URL])] });
+
+    // Step 2: the skeleton, with the pictures from the search results.
+    const created = JSON.parse(
+      textOf(
+        await call(CREATE_SPACE_TOOL_NAME, {
+          name: 'Dog breeds',
+          purpose: 'Top dog breeds with pictures.',
+          status: 'active',
+          format: 'html',
+          body: [
+            '<div class="page-header"><h1>Dog breeds</h1></div>',
+            '<!-- @block:collie -->',
+            `<div class="card"><img src="${COLLIE_URL}" alt="Border Collie" width="160"><h3>Border Collie</h3></div>`,
+            '<!-- @block:poodle -->',
+            `<div class="card"><img src="${POODLE_URL}" alt="Poodle" width="160"><h3>Poodle</h3></div>`,
+          ].join('\n'),
+        }),
+      ),
+    ) as { summary: string; space: { id: string; body: string } };
+    expect(created.summary).toMatch(/^Created space "Dog breeds" \(id: [0-9a-z]+, revision 1\)\.$/);
+    expect(created.space.body).toContain(COLLIE_URL);
+    expect(created.space.body).toContain(POODLE_URL);
+
+    // Step 3: read it back by name, the way a model does after losing the id.
+    const read = JSON.parse(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))) as {
+      space: { body: string };
+    };
+    expect(read.space.body).not.toContain('example.');
+    expect(read.space.body).toContain(`src="${POODLE_URL}"`);
+  });
+});

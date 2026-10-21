@@ -1087,6 +1087,7 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         address_as: null,
         user_profile: null,
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         updated_by: 'bob',
@@ -1114,6 +1115,7 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         address_as: null,
         user_profile: null,
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         updated_by: 'bob',
@@ -2482,6 +2484,27 @@ describe('runDataImport checks persona and personalization text like the app doe
       });
       expect(await importError(target, tampered)).toMatchObject({ status: 400 });
       expect(await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports a personalization export from before the Tour question, reading no help areas', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-personalization-older');
+    try {
+      // Written before help_areas existed: the key is absent, not empty.
+      const older = await repack(archive, entries => {
+        const profile = recordAt(parseJson(entries.get('personalization.json'), 'personalization.json'), 'profile');
+        delete profile['help_areas'];
+        entries.set('personalization.json', Buffer.from(JSON.stringify(profile)));
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const stored = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(stored?.help_areas).toEqual([]);
+      expect(stored?.user_profile).not.toBeNull();
     } finally {
       await source.close();
       await target.close();

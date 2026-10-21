@@ -58,12 +58,16 @@ describe('buildLanguageModel', () => {
 
   // Token Factory has a single public endpoint, so the server default applies when the
   // provider record does not set its own (for example the regional endpoint).
-  it('builds tokenfactory against the default endpoint when no baseUrl is configured', () => {
+  it('builds tokenfactory against the default endpoint when no baseUrl is configured', async () => {
     expect(TOKEN_FACTORY_DEFAULT_BASE_URL).toBe('https://api.tokenfactory.nebius.com/v1');
-    const model: unknown = buildLanguageModel(makeConfig({ provider: 'tokenfactory' }));
-    if (typeof model !== 'object' || model === null) throw new Error('Expected model to be an object');
-    expect(Reflect.get(model, 'supportsStructuredOutputs')).toBe(true);
-    expect(Reflect.get(model, 'modelId')).toBe('test-model');
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 500 }));
+    const model = buildLanguageModel(makeConfig({ provider: 'tokenfactory' }));
+    expect(model.modelId).toBe('test-model');
+    await expect(
+      model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hi' }] }] }),
+    ).rejects.toThrow();
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(`${TOKEN_FACTORY_DEFAULT_BASE_URL}/chat/completions`);
+    fetchSpy.mockRestore();
   });
 
   it('throws for unknown provider string (exhaustive default branch)', () => {
