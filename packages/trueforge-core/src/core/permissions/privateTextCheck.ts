@@ -13,8 +13,8 @@ const MIN_PHRASE_CHARS = 16;
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
 const MIN_PHONE_DIGITS = 10;
-/** Fewest letters a full name needs before its joined form is matched inside the text. */
-const MIN_JOINED_NAME_CHARS = 6;
+/** Fewest letters a full name needs before it is matched in the text. */
+const MIN_NAME_CHARS = 6;
 /** A name is matched only when it has this many words: one word alone (a city, a surname, a common noun) is never a match. */
 const MIN_NAME_WORDS = 2;
 const MIN_EMAIL_CHARS = 10;
@@ -110,8 +110,8 @@ interface PrivateFacts {
   phoneDigits: Set<string>;
   /** Runs of six or more digits. */
   numbers: Set<string>;
-  /** Full names, compact, for names of two or more words. */
-  joinedNames: Set<string>;
+  /** Full names of two or more words, as whole words with spaces or run together as one word. Never a substring. */
+  nameForms: Set<string>;
   /** Copied phrases, compact, keyed by their first `MIN_PHRASE_CHARS` characters. */
   phrasesByPrefix: Map<string, string[]>;
 }
@@ -122,7 +122,7 @@ function privateFacts(privateTexts: readonly string[], mode: PrivateTextMode): P
     emails: new Set(),
     phoneDigits: new Set(),
     numbers: new Set(),
-    joinedNames: new Set(),
+    nameForms: new Set(),
     phrasesByPrefix: new Map(),
   };
   for (const raw of privateTexts) {
@@ -144,9 +144,10 @@ function privateFacts(privateTexts: readonly string[], mode: PrivateTextMode): P
       facts.numbers.add(match[0]);
     }
     for (const name of namesIn(text)) {
-      const joined = compactForm(name);
-      if (joined.length >= MIN_JOINED_NAME_CHARS) {
-        facts.joinedNames.add(joined);
+      const words = wordsOf(name);
+      if (compactForm(name).length >= MIN_NAME_CHARS) {
+        facts.nameForms.add(words.join(' '));
+        facts.nameForms.add(words.join(''));
       }
     }
     if (mode === 'search') {
@@ -218,12 +219,14 @@ export function privateTextLeak(input: {
       return 'number';
     }
   }
-  const compact = compactForm(text);
-  for (const name of facts.joinedNames) {
-    if (compact.includes(name)) {
+  // Padded with spaces so a name matches whole words only: `Ann Lee` is not inside `Dann Leeds`.
+  const words = ` ${wordsOf(text).join(' ')} `;
+  for (const form of facts.nameForms) {
+    if (words.includes(` ${form} `)) {
       return 'name';
     }
   }
+  const compact = compactForm(text);
   if (mode === 'search' && copiesPhrase(compact, facts.phrasesByPrefix)) {
     return 'phrase';
   }

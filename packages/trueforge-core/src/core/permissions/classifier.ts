@@ -132,7 +132,6 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
-  markPrivateDataRead,
   namesHostAtFetchLimit,
   privateTextForChecks,
   SEARCH_AFTER_READ_SILENT_REASON,
@@ -1618,6 +1617,14 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
 }
 
 /**
+ * Whether a decision is a mail or calendar read. The tool set marks each such call when it dispatches, not here,
+ * because a call is classified before it runs and again at dispatch.
+ */
+export function isPrivateReadDecision(decision: TierDecision): boolean {
+  return decision.reason === 'gmail_read' || decision.reason === 'calendar_read';
+}
+
+/**
  * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
  * read does not mark the chat as holding a secret.
  */
@@ -1838,7 +1845,6 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     });
   }
   if (isGmailReadToolName(action.tool_name)) {
-    markPrivateDataRead(ctx.web_search, action.tool_name);
     return tier1Decision({
       reason: 'gmail_read',
       reason_detail: 'Read your email.',
@@ -2010,7 +2016,6 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   if (!isCalendarReadToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
   }
-  markPrivateDataRead(ctx.web_search, action.tool_name);
   return tier1Decision({
     reason: 'calendar_read',
     reason_detail: 'Read your calendar.',

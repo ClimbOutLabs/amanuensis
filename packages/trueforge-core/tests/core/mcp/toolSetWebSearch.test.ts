@@ -18,7 +18,11 @@ import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { forUnattendedRun, type SentinelServices } from '../../../src/core/permissions/context';
-import { SILENT_SEARCH_LIMIT } from '../../../src/core/permissions/webSearch';
+import {
+  markPrivateDataRead,
+  recordPrivateReadText,
+  SILENT_SEARCH_LIMIT,
+} from '../../../src/core/permissions/webSearch';
 import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -534,6 +538,23 @@ describe('a search the user approved, and the text the next silent search is che
     await h.toolSet.callTool({ name: 'lookup', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
     expect(h.dispatched.map(call => call.args)).toEqual([{ query: secret.slice(0, 16) }]);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
+  });
+});
+
+describe('a search the user approved, and a phrase copied from mail split across it and a silent one', () => {
+  const MAIL =
+    'Please bring your booking reference 4417829 and call before Friday. The clinic is at 12 Example Street.';
+
+  it('asks when the second half of a copied phrase follows an approved search', async () => {
+    const h = harness({ searchProvider: true });
+    markPrivateDataRead(h.host.web_search);
+    recordPrivateReadText({ state: h.host.web_search, text: MAIL });
+    await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'please bring your booking' } }, { status: 'allow' });
+    const second = await runSearch(h, 'reference today');
+    expect(h.dispatched.map(call => call.args)).toEqual([{ query: 'please bring your booking' }]);
     expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
       true,
     );

@@ -356,7 +356,7 @@ describe('maps without asking', () => {
 
   it('says why a map asked when the setting is on but the chat is not clean', async () => {
     const ctx = makeCtx(maps_on);
-    markPrivateDataRead(ctx.web_search, 'maps-test-read');
+    markPrivateDataRead(ctx.web_search);
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
     expect(decision.tier).toBe(3);
     expect(decision.reason_detail).toBe(
@@ -398,7 +398,7 @@ describe('maps without asking', () => {
 
   it('asks again after the chat read email or calendar', async () => {
     const ctx = makeCtx(maps_on);
-    markPrivateDataRead(ctx.web_search, 'maps-test-read');
+    markPrivateDataRead(ctx.web_search);
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('maps_tool');

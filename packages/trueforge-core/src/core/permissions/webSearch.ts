@@ -60,11 +60,8 @@ export interface WebSearchTurnState {
   privateDataRead: boolean;
   /** Text of the mail and calendar results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
-  /**
-   * Mail and calendar tools marked this turn, by name. The same read is classified before it runs and again at
-   * dispatch with different arguments, so a count of calls would double. Each marked tool must have a result kept.
-   */
-  privateReadTools: Set<string>;
+  /** Mail and calendar calls dispatched this turn, by any thread. Each one must have its result kept as text. */
+  privateReadCalls: number;
   /** Mail and calendar results kept as text this turn, by any thread. */
   privateTextsKept: number;
   /** True when the private mark came from saved state or old context, whose text this turn never saw. */
@@ -81,7 +78,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     sentText: '',
     privateDataRead: false,
     privateTexts: [],
-    privateReadTools: new Set(),
+    privateReadCalls: 0,
     privateTextsKept: 0,
     privateTextLost: false,
     admission: Promise.resolve(),
@@ -238,12 +235,12 @@ export function countSilentFetches(input: { values: readonly string[]; state: We
 }
 
 /**
- * The one place that records and answers "has this session read private data". A tool that returns the user's
- * private content (mail, and later maps or calendar) marks it; the search provider's classifier reads it.
+ * The one place that records and answers "has this session read private data". Called once for each mail or
+ * calendar call that is dispatched, so the search provider's classifier sees every read before its result arrives.
  */
-export function markPrivateDataRead(state: WebSearchTurnState, tool_name: string): void {
+export function markPrivateDataRead(state: WebSearchTurnState): void {
   state.privateDataRead = true;
-  state.privateReadTools.add(tool_name);
+  state.privateReadCalls += 1;
 }
 
 /** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
@@ -277,10 +274,10 @@ export function recordPrivateReadText(input: { state: WebSearchTurnState; text: 
 
 /**
  * The text a search or map is checked against, or undefined when it is not all there: the mark came
- * from earlier history, or some mail or calendar read this turn has no result kept to compare with.
+ * from earlier history, or some dispatched mail or calendar call has no result kept to compare with.
  */
 export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
-  if (state.privateTextLost || state.privateTextsKept < state.privateReadTools.size) {
+  if (state.privateTextLost || state.privateTextsKept < state.privateReadCalls) {
     return undefined;
   }
   return state.privateTexts;

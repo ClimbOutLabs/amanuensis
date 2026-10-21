@@ -11,7 +11,11 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { appendOutboundTrace, collectOutboundStrings } from '../../../src/core/permissions/outboundGuard';
-import { createWebSearchTurnState, recordPrivateReadText } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  markPrivateDataRead,
+  recordPrivateReadText,
+} from '../../../src/core/permissions/webSearch';
 
 const MAIL = JSON.stringify({
   from: 'Maria Costa <maria.costa@harbour-clinic.example>',
@@ -89,6 +93,8 @@ function sentSilently(ctx: ClassifyContext, query: string): void {
 /** A mail read whose result the chat has received, as the post-call step records it. */
 async function readMail(ctx: ClassifyContext): Promise<void> {
   await classifyTier(MAIL_READ, ctx);
+  // The tool set marks a read when it dispatches and keeps its text when the result arrives.
+  markPrivateDataRead(ctx.web_search);
   recordPrivateReadText({ state: ctx.web_search, text: MAIL });
 }
 
@@ -171,6 +177,7 @@ describe('a web search after a mail read, checked against what the mail said', (
   it('asks, as before, when the mail text is not available to compare', async () => {
     const ctx = makeCtx();
     await classifyTier(MAIL_READ, ctx);
+    markPrivateDataRead(ctx.web_search);
     expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
   });
 
@@ -265,6 +272,7 @@ describe('a map after a mail read, checked against what the mail said', () => {
   it('asks when the mail text is not available to compare', async () => {
     const ctx = makeCtx({ services: withMaps() });
     await classifyTier(MAIL_READ, ctx);
+    markPrivateDataRead(ctx.web_search);
     expect(await classifyTier(mapsAction('render_map', { place_name: '12 Example Street' }), ctx)).toMatchObject({
       tier: 3,
       reason: 'maps_tool',
@@ -299,19 +307,17 @@ describe('ordinary searches and maps after a mail read run silently', () => {
     });
   });
 
-  it('asks when a second mail tool was read and its text was not kept', async () => {
+  it('asks when a second mail call was dispatched and its text was not kept', async () => {
     const ctx = makeCtx();
-    await classifyTier(MAIL_READ, ctx);
-    recordPrivateReadText({ state: ctx.web_search, text: MAIL });
-    await classifyTier({ ...MAIL_READ, tool_name: 'list_inbox_threads', canonical_params: {} }, ctx);
+    await readMail(ctx);
+    markPrivateDataRead(ctx.web_search);
     expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
   });
 
-  it('counts one read once when it is classified twice before its result arrives', async () => {
+  it('runs silently when a mail read is classified twice but never dispatched', async () => {
     const ctx = makeCtx();
     await classifyTier(MAIL_READ, ctx);
     await classifyTier(MAIL_READ, ctx);
-    recordPrivateReadText({ state: ctx.web_search, text: MAIL });
-    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 1, reason: 'mcp_search_after_read_checked' });
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 1, reason: 'mcp_search_provider' });
   });
 });

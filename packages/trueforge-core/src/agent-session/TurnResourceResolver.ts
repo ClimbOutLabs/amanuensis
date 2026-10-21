@@ -503,9 +503,9 @@ export class TurnResourceResolver<
         toolSets,
       },
       compactionModel,
-      // Every thread keeps the text of its mail and calendar results, so a restored sub-agent's read is checked too;
-      // only the root thread saves the "read private data" flag for the chat.
-      extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn, persisted: agentInfo === undefined })],
+      // Only the root thread holds the chat's private-read state. A sub-agent's mail and calendar reads reach the
+      // same turn state through its tool set, so the flag and the text checks still cover them.
+      extraCapabilities: agentInfo === undefined ? [privateDataReadCapability({ turn: this.webSearchTurn })] : [],
     };
   }
 
