@@ -365,6 +365,47 @@ describe('ToolMarkupGuard indented code blocks', () => {
   });
 });
 
+describe('ToolMarkupGuard stray closing tags', () => {
+  it('hides a stray closing tool-call line and keeps the answer around it', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Let me look.\n</tool_call>\nThe space is ready.');
+    expect(shown).toBe('Let me look.\nThe space is ready.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('hides a stray closing tag that streams in split pieces', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Let me look.\n</tool', '_call>\nNext.']) {
+      shown += guard.push(piece);
+    }
+    expect(shown + guard.heldText).toBe('Let me look.\nNext.');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('hides a stray closing tag at the very end of the reply', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.\n</tool_call>');
+    expect(shown + guard.heldText).toBe('Done.\n');
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('keeps a closing tag named inside a sentence as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Close the block with </tool_call> at the end.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toEqual({ status: 'clean' });
+  });
+
+  it('stops a wrapper with a closing tag and no call inside as broken markup', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Before. <tool_call>not json</tool_call>');
+    expect(shown).toBe('Before. ');
+    expect(guard.finish()).toEqual({ status: 'broken' });
+  });
+});
+
 describe('parseToolMarkup', () => {
   it('rebuilds a DSML call, with JSON parameters parsed and string parameters kept as text', () => {
     const outcome = parseToolMarkup(DSML_CREATE);

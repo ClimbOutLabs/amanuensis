@@ -361,7 +361,7 @@ call ui_confirm "Create the slot disks?" n
 == check-rows
 call ui_check_row ok "Open" "http://127.0.0.1:8791"
 call ui_check_more "http://192.168.1.20:8791"
-call ui_check_more "http://spark.local:8791"
+call ui_check_more "http://host.local:8791"
 call ui_check_row ok "Sign in" "you@example.com"
 call ui_check_row todo "Model" "not set: add one in Settings > Models"
 call ui_check_row warn "Run code" "not ready: the sandbox did not answer, see the problem above"
@@ -369,7 +369,7 @@ call ui_check_row skip "Demo" "off"
 -- color
   \e[32m✓\e[0m Open      http://127.0.0.1:8791
               http://192.168.1.20:8791
-              http://spark.local:8791
+              http://host.local:8791
   \e[32m✓\e[0m Sign in   you@example.com
   \e[36m›\e[0m Model     not set: add one in Settings > Models
   \e[33m!\e[0m Run code  not ready: the sandbox did not answer, see the problem
@@ -378,7 +378,7 @@ call ui_check_row skip "Demo" "off"
 -- nocolor
   ✓ Open      http://127.0.0.1:8791
               http://192.168.1.20:8791
-              http://spark.local:8791
+              http://host.local:8791
   ✓ Sign in   you@example.com
   › Model     not set: add one in Settings > Models
   ! Run code  not ready: the sandbox did not answer, see the problem
@@ -387,7 +387,7 @@ call ui_check_row skip "Demo" "off"
 -- plain
   ✓ Open      http://127.0.0.1:8791
               http://192.168.1.20:8791
-              http://spark.local:8791
+              http://host.local:8791
   ✓ Sign in   you@example.com
   › Model     not set: add one in Settings > Models
   ! Run code  not ready: the sandbox did not answer, see the problem
@@ -396,7 +396,7 @@ call ui_check_row skip "Demo" "off"
 -- ascii
   + Open      http://127.0.0.1:8791
               http://192.168.1.20:8791
-              http://spark.local:8791
+              http://host.local:8791
   + Sign in   you@example.com
   > Model     not set: add one in Settings > Models
   ! Run code  not ready: the sandbox did not answer, see the problem

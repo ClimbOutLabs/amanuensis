@@ -545,7 +545,11 @@ providers:
   models:
   - model_id: nvidia/nemotron-3-super-120b-a12b
     name: nemotron-3-super-120b-a12b
-    properties: {}
+    properties:
+      # Context from the Token Factory /v1/models listing. The output cap is not listed; 32,768 is
+      # the lower of the two published figures, so a reply is never asked for more than it can hold.
+      context_length: 262144
+      max_output_tokens: 32768
   - model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
     name: nvidia-nemotron-3-nano-30b-a3b
     properties: {}

@@ -209,8 +209,8 @@ describe('request guard: instance opened on several addresses', () => {
     'http://localhost:18791',
     'http://192.168.1.20:18791',
     'http://100.101.102.103:18791',
-    'http://spark.local:18791',
-    'http://spark.example.ts.net:18791',
+    'http://host.example.local:18791',
+    'http://host.example.ts.net:18791',
   ];
   const app = () => appFor({ port: 8790, publicBaseUrl: 'http://192.168.1.20:18791', allowedOrigins: ORIGINS });
 
@@ -222,10 +222,10 @@ describe('request guard: instance opened on several addresses', () => {
     '192.168.1.21:18791',
     '192.168.1.20:9999',
     '192.168.1.20',
-    'spark.local:9999',
-    'spark:18791',
+    'host.example.local:9999',
+    'host:18791',
     'evil.example:18791',
-    'spark.local.evil.example:18791',
+    'host.example.local.evil.example:18791',
     '10.0.0.5:18791',
   ])('rejects %s with 421', async host => {
     expect(await status({ app: app(), headers: { host } })).toBe(421);
@@ -237,8 +237,8 @@ describe('request guard: instance opened on several addresses', () => {
         app: app(),
         headers: {
           host: 'evil.example:18791',
-          'x-forwarded-host': 'spark.local:18791',
-          forwarded: 'host=spark.local:18791',
+          'x-forwarded-host': 'host.example.local:18791',
+          forwarded: 'host=host.example.local:18791',
         },
       }),
     ).toBe(421);
@@ -252,7 +252,7 @@ describe('request guard: instance opened on several addresses', () => {
     'http://192.168.1.21:18791',
     'https://192.168.1.20:18791',
     'http://evil.example:18791',
-    'http://spark:18791',
+    'http://host:18791',
   ])('rejects Origin %s on writes', async origin => {
     expect(await status({ app: app(), method: 'POST', headers: { host: '192.168.1.20:18791', origin } })).toBe(403);
   });

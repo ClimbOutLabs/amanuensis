@@ -4,9 +4,9 @@ import { normalize, senderColor, senderDisplayName } from "./sender-color.js";
 
 describe("normalize", () => {
   it("extracts the address from a Name <addr> form", () => {
-    expect(normalize("Brian Osborne <bosborne@equitystart.ai>")).toBe("bosborne@equitystart.ai");
-    expect(normalize("George Grigorian <ggrigorian@equitystart.ai>")).toBe(
-      "ggrigorian@equitystart.ai",
+    expect(normalize("Dana Whitfield <dana.whitfield@example.org>")).toBe("dana.whitfield@example.org");
+    expect(normalize("Sam Okafor <sam.okafor@example.org>")).toBe(
+      "sam.okafor@example.org",
     );
   });
 
@@ -22,7 +22,7 @@ describe("normalize", () => {
 
 describe("senderDisplayName", () => {
   it("returns the friendly name when present", () => {
-    expect(senderDisplayName("Brian Osborne <bosborne@equitystart.ai>")).toBe("Brian Osborne");
+    expect(senderDisplayName("Dana Whitfield <dana.whitfield@example.org>")).toBe("Dana Whitfield");
     expect(senderDisplayName('"Sarah No" <sarah.no@example.com>')).toBe("Sarah No");
   });
 
@@ -31,8 +31,8 @@ describe("senderDisplayName", () => {
   });
 
   it("strips outer quotes around display names", () => {
-    expect(senderDisplayName('"Armen Grigorian (via Google Workspace)" <ag@x.com>')).toBe(
-      "Armen Grigorian (via Google Workspace)",
+    expect(senderDisplayName('"Morgan Lee (via Google Workspace)" <morgan@x.com>')).toBe(
+      "Morgan Lee (via Google Workspace)",
     );
   });
 });
@@ -45,8 +45,8 @@ describe("senderColor", () => {
   });
 
   it("ignores case + display-name wrapping when picking a colour", () => {
-    const bare = senderColor(defaultTheme, "george@example.com");
-    const wrapped = senderColor(defaultTheme, "George Grigorian <GEORGE@example.com>");
+    const bare = senderColor(defaultTheme, "sam@example.com");
+    const wrapped = senderColor(defaultTheme, "Sam Okafor <SAM@example.com>");
     expect(wrapped).toBe(bare);
   });
 
