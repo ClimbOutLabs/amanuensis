@@ -233,7 +233,9 @@ describe('SentinelSettings', () => {
     const toggle = await screen.findByRole('switch', { name: 'Run code in the sandbox without asking' });
     expect(toggle).toBeChecked();
     expect(
-      screen.getByText('Work inside the sandbox runs without a card. Anything that leaves the sandbox still asks.'),
+      screen.getByText(
+        'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.',
+      ),
     ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
