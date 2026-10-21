@@ -100,7 +100,7 @@ test_the_next_line_is_safe_to_paste() {
   local line
   line=$(flat "$OUT" | grep -o "Next: aman import [^']*'[^']*'" || true)
   # Pasting the line hands the name to the import as written, and runs nothing from it.
-  # shellcheck disable=SC2329 # called by the pasted line
+  # shellcheck disable=SC2317,SC2329 # aman is called by the pasted line, through eval
   (cd "$SB" && aman() { printf '%s\n' "$@" >"$SB/pasted"; } && eval "${line#Next: }")
   # shellcheck disable=SC2016
   assert_eq "$(tail -n 1 "$SB/pasted" 2>/dev/null)" 'Kai $(touch PWNED)' "the pasted line passes the name as written"

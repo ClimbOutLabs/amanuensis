@@ -128,8 +128,9 @@ cmd_migrate() {
     die "The database of the old Aman is not running. Run docker compose up -d postgres in $folder, then run this again."
   memory=$(old_mount "$old_app" /data/memory)
   knowledge=$(old_mount "$old_app" /data/persona-knowledge)
-  [ -n "$memory" ] && [ -n "$knowledge" ] ||
+  if [ -z "$memory" ] || [ -z "$knowledge" ]; then
     die "The old Aman has no memory or knowledge folder, so this move cannot find them. Follow docs/migrate-from-compose.md to move by hand."
+  fi
   pg_image=$(D inspect --format '{{.Config.Image}}' "$old_pg")
 
   MIGRATE_ACTIVE=1
