@@ -124,7 +124,7 @@ describe('AmanTour', () => {
     expect(screen.getByRole('button', { name: 'Find forgotten subscriptions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reply to an email' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Help me with doctor's appointments/ })).toBeInTheDocument();
   });
 
   it('turns the buttons off and says why when no model is set', () => {
@@ -149,6 +149,6 @@ describe('visibleTourPrompts', () => {
   it('keeps the general prompts that need nothing, whatever the capabilities', () => {
     const visible = visibleTourPrompts(GENERAL_DAY_PROMPTS, NONE);
 
-    expect(visible.map(item => item.key)).toEqual(['clear-head', 'break-task', 'plan-day', 'meals']);
+    expect(visible.map(item => item.key)).toEqual(['clear-head', 'break-task', 'plan-day', 'meals', 'self-care']);
   });
 });

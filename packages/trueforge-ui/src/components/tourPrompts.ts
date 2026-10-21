@@ -62,13 +62,20 @@ const APPOINTMENT: TourPrompt = {
   label: "Help me with doctor's appointments",
   prompt:
     "Help me with my doctor's appointments. Find any coming up in my calendar and email, tell me what to bring and what to ask, and remind me of anything I still need to book.",
-  needs: ['calendar'],
+  needs: ['calendar', 'email'],
 };
 
 const MEALS: TourPrompt = {
   key: 'meals',
   label: "Plan this week's meals",
   prompt: "Plan this week's meals around what we already have, and make the shopping list.",
+};
+
+const SELF_CARE: TourPrompt = {
+  key: 'self-care',
+  label: 'Help me practice self-care',
+  prompt:
+    "I'd like to practice self-care today. Before you suggest anything, ask me three short questions, one at a time: how I'm feeling right now, how much time and energy I have today, and what usually helps me feel better. Then give me a few small, doable ideas for today.",
 };
 
 const FORGOTTEN_SUBSCRIPTIONS: TourPrompt = {
@@ -80,7 +87,14 @@ const FORGOTTEN_SUBSCRIPTIONS: TourPrompt = {
 };
 
 /** The general set: what every person sees when no area is chosen. */
-export const GENERAL_DAY_PROMPTS: readonly TourPrompt[] = [CLEAR_HEAD, BREAK_TASK, PLAN_DAY, APPOINTMENT, MEALS];
+export const GENERAL_DAY_PROMPTS: readonly TourPrompt[] = [
+  CLEAR_HEAD,
+  BREAK_TASK,
+  PLAN_DAY,
+  APPOINTMENT,
+  MEALS,
+  SELF_CARE,
+];
 
 /** The cards each help area offers, in the order they are tried. */
 export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly TourPrompt[] }> = {
@@ -100,6 +114,17 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         label: 'What did I forget?',
         prompt: 'Look at my email and calendar for anything I promised, owe, or need to reply to.',
         needs: ['email', 'calendar'],
+      },
+      {
+        key: 'calm-day',
+        label: 'Plan a calm day',
+        prompt:
+          'Help me plan a calm day. Ask what I have to do, then give me a short plan with breaks and only three must-dos.',
+      },
+      {
+        key: 'routine',
+        label: "Build a routine I'll keep",
+        prompt: 'Help me build a simple morning routine I can actually stick to, then remind me each morning at 8.',
       },
     ],
   },
@@ -121,6 +146,18 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         prompt: 'Who do I owe a reply, a thank-you, or a gift? Check my email and calendar.',
         needs: ['email'],
       },
+      {
+        key: 'chores',
+        label: 'Split the chores fairly',
+        prompt:
+          'Help me split the household chores fairly. Ask me who lives here and what needs doing, then make a weekly chart.',
+      },
+      {
+        key: 'birthday',
+        label: 'Plan a birthday',
+        prompt:
+          "Help me plan a birthday party. Ask me who it's for, the budget and the date, then make a to-do list and a timeline.",
+      },
     ],
   },
   caring: {
@@ -132,13 +169,25 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         prompt:
           "Help me keep track of someone's care: their medicines, appointments and questions for their doctor. Ask me who it is, then keep it all in one place.",
       },
-      APPOINTMENT,
       {
         key: 'care-visit',
         label: 'Prepare for a care visit',
         prompt:
           "I have a doctor's visit coming up for someone I care for. Help me write down what to tell the doctor and what to ask.",
       },
+      APPOINTMENT,
+      {
+        key: 'medicine',
+        label: 'Make a medicine schedule',
+        prompt:
+          'Make a simple daily medicine schedule for someone I care for. Ask me the medicines and times, and remind me when each one is due.',
+      },
+      {
+        key: 'family-update',
+        label: 'Write a family update',
+        prompt: 'Help me write a short, clear update for the family about how someone I care for is doing.',
+      },
+      SELF_CARE,
     ],
   },
   new_country: {
@@ -162,6 +211,23 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         prompt: 'Help me find a family doctor near where I live, and tell me how to register.',
         needs: ['maps'],
       },
+      {
+        key: 'newcomers',
+        label: 'What newcomers get wrong',
+        prompt: 'What do newcomers here often get wrong in everyday life? Ask me where I live first.',
+      },
+      {
+        key: 'language',
+        label: 'Practice the language',
+        prompt:
+          'Help me practice the local language for ten minutes. Ask me what I need it for, like the doctor or the bakery.',
+      },
+      {
+        key: 'neighborhood',
+        label: 'Choose a neighborhood',
+        prompt:
+          'Help me choose a neighborhood to live in. Ask me what matters to me, then compare a few options on rent, commute and feel.',
+      },
     ],
   },
   work_money: {
@@ -175,6 +241,23 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
         needs: ['email'],
       },
       PLAN_DAY,
+      {
+        key: 'budget',
+        label: 'Make a simple budget',
+        prompt: 'Help me make a simple monthly budget. Ask me what comes in and what goes out, and show it as a chart.',
+      },
+      {
+        key: 'meeting',
+        label: 'Get ready for a meeting',
+        prompt: 'Help me get ready for my next meeting: who is in it, what it is about, and three things I should say.',
+        needs: ['calendar'],
+      },
+      {
+        key: 'tricky-email',
+        label: 'Write a tricky email',
+        prompt:
+          'Help me write a polite but firm email about something that is bothering me at work. Ask me what happened first.',
+      },
     ],
   },
 };

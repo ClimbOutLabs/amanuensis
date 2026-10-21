@@ -25,21 +25,28 @@ describe('tryADayPrompts', () => {
       'plan-day',
       'appointment',
       'meals',
+      'self-care',
     ]);
   });
 
   it('keeps only the general cards this instance can run when no area is chosen', () => {
-    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual(['clear-head', 'break-task', 'plan-day', 'meals']);
+    expect(keysFor({ helpAreas: [], capabilities: NONE })).toEqual([
+      'clear-head',
+      'break-task',
+      'plan-day',
+      'meals',
+      'self-care',
+    ]);
   });
 
-  it('fills the row from one area, then from the general set', () => {
+  it('fills the row from one area with all six of its cards', () => {
     expect(keysFor({ helpAreas: ['focus'], capabilities: ALL })).toEqual([
       'clear-head',
       'break-task',
       'get-started',
       'forgot',
-      'plan-day',
-      'appointment',
+      'calm-day',
+      'routine',
     ]);
   });
 
@@ -48,8 +55,8 @@ describe('tryADayPrompts', () => {
       'family-week',
       'care-track',
       'meals',
-      'appointment',
       'care-visit',
+      'appointment',
       'owe-reply',
     ]);
   });
@@ -58,10 +65,10 @@ describe('tryADayPrompts', () => {
     expect(keysFor({ helpAreas: ['caring', 'family'], capabilities: ALL })).toEqual([
       'care-track',
       'family-week',
-      'appointment',
-      'meals',
       'care-visit',
-      'owe-reply',
+      'meals',
+      'appointment',
+      'medicine',
     ]);
   });
 
@@ -70,27 +77,44 @@ describe('tryADayPrompts', () => {
       'clear-head',
       'break-task',
       'get-started',
+      'calm-day',
+      'routine',
       'plan-day',
-      'meals',
     ]);
+  });
+
+  it('fills a shortfall from the other chosen area before the general set', () => {
+    expect(keysFor({ helpAreas: ['focus', 'work_money'], capabilities: NONE })).toEqual([
+      'clear-head',
+      'plan-day',
+      'break-task',
+      'budget',
+      'get-started',
+      'tricky-email',
+    ]);
+  });
+
+  it('shows the doctor appointments card when either calendar or email is available', () => {
+    expect(keysFor({ helpAreas: ['family'], capabilities: { ...NONE, email: true } })).toContain('appointment');
+    expect(keysFor({ helpAreas: ['family'], capabilities: { ...NONE, calendar: true } })).toContain('appointment');
   });
 
   it('shows the maps card only when maps is available', () => {
     expect(keysFor({ helpAreas: ['new_country'], capabilities: { ...ALL, maps: false } })).toEqual([
       'settle',
       'letter',
+      'newcomers',
+      'language',
+      'neighborhood',
       'clear-head',
-      'break-task',
-      'plan-day',
-      'appointment',
     ]);
     expect(keysFor({ helpAreas: ['new_country'], capabilities: ALL })).toEqual([
       'settle',
       'letter',
       'family-doctor',
-      'clear-head',
-      'break-task',
-      'plan-day',
+      'newcomers',
+      'language',
+      'neighborhood',
     ]);
   });
 
@@ -102,14 +126,25 @@ describe('tryADayPrompts', () => {
     expect(keys).not.toContain(MORNING_BRIEF.key);
   });
 
-  it('spreads the work and money cards with the general set', () => {
+  it('shows the six work and money cards in order', () => {
     expect(keysFor({ helpAreas: ['work_money'], capabilities: ALL })).toEqual([
       'subscriptions',
       'invoices',
       'plan-day',
+      'budget',
+      'meeting',
+      'tricky-email',
+    ]);
+  });
+
+  it('fills the work and money row from the general set when calendar and email are missing', () => {
+    expect(keysFor({ helpAreas: ['work_money'], capabilities: NONE })).toEqual([
+      'plan-day',
+      'budget',
+      'tricky-email',
       'clear-head',
       'break-task',
-      'appointment',
+      'meals',
     ]);
   });
 });
@@ -121,6 +156,7 @@ describe('visibleTourPrompts', () => {
       'break-task',
       'plan-day',
       'meals',
+      'self-care',
     ]);
   });
 });
