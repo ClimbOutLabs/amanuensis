@@ -1,11 +1,16 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability, ILLM, ModelMessageEvent } from '@truefoundry/trueforge-core/core';
-import { EventType, InstructionBuilder, ModelMessageEventSchema } from '@truefoundry/trueforge-core/core';
+import {
+  AMAN_GUIDE_NAME,
+  EventType,
+  InstructionBuilder,
+  ModelMessageEventSchema,
+} from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { findUsedKnowledgeHits } from '../../../src/personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
 import { personalizationDigest, type PersonalizationProfile } from '../../../src/personalization/profile';
-import { amanGuidePersonaId, IRIS_NAME } from '../../../src/personas/amanGuide/identity';
+import { amanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { buildPersonaContext, type Persona } from '../../../src/personas/persona';
 import {
   PersonaTurnResourceResolver,
@@ -456,7 +461,7 @@ describe('PersonaTurnResourceResolver', () => {
     expect(resolved.extraCapabilities ?? []).toHaveLength(0);
   });
   it('makes an Iris turn read-only, and leaves a persona the person named free to use tools', async () => {
-    const iris: Persona = { ...PERSONA, id: amanGuidePersonaId('u1'), created_by: 'u1', display_name: IRIS_NAME };
+    const iris: Persona = { ...PERSONA, id: amanGuidePersonaId('u1'), created_by: 'u1', display_name: AMAN_GUIDE_NAME };
     const irisResolver = makeResolver(iris).resolver;
     const irisResolved = await resolve(irisResolver, makeSpec());
     expect(irisResolved.definition.readOnly).toBe(true);

@@ -1,3 +1,4 @@
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
 import type {
   HelpApi,
   HelpHealthCheck,
@@ -7,7 +8,6 @@ import type {
   HelpHostReportState,
   Persona,
 } from '@truefoundry/trueforge-ui';
-import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-ui';
 
 const HEALTH_CHECK_URL = '/api/v1/help/health-check';
 const HEALTH_STATUSES: readonly HelpHealthStatus[] = ['pass', 'warn', 'fail', 'not_set_up'];

@@ -349,7 +349,7 @@ export { UserEditComposerContainer } from './containers/UserEditComposerContaine
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
 export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkOnRepoControls.js';
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
-export { AMAN_GUIDE_NAME, HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
+export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
   HelpHealthCheck,
   HelpHealthItem,

@@ -1,3 +1,4 @@
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
 /**
  * Help check as the app shows it. The wire shape comes from GET /api/v1/help/health-check; the server
  * schema is its canonical owner, and the frontend checks each response against these fields.
@@ -29,7 +30,6 @@ export interface HelpHealthCheck {
 }
 
 /** The guide's name. Naming her in a message is what invokes her. */
-export const AMAN_GUIDE_NAME = 'Iris';
 
 export const HELP_BUTTON_LABEL = "Help, I'm stuck";
 

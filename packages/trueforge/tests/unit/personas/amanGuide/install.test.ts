@@ -2,12 +2,13 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { personaKnowledgeLocation } from '../../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../../src/personaKnowledge/sqliteKnowledgeRepository';
-import { IRIS_NAME, amanGuidePersonaId } from '../../../../src/personas/amanGuide/identity';
+import { amanGuidePersonaId } from '../../../../src/personas/amanGuide/identity';
 import { AMAN_GUIDE_INSTRUCTIONS, ensureAmanGuide } from '../../../../src/personas/amanGuide/install';
 import { AMAN_GUIDE_TOPICS } from '../../../../src/personas/amanGuide/knowledgePack.generated';
 import { EMBEDDING_DIMENSIONS } from '../../../../src/runtime/memory/embeddingModel';
@@ -65,7 +66,7 @@ describe('ensureAmanGuide', () => {
     });
     expect(persona).toMatchObject({
       id: amanGuidePersonaId(USER),
-      display_name: IRIS_NAME,
+      display_name: AMAN_GUIDE_NAME,
       instructions: AMAN_GUIDE_INSTRUCTIONS,
       model_name: MODEL,
       aliases: [],
@@ -153,7 +154,7 @@ describe('ensureAmanGuide', () => {
       created_by: USER,
       updated_by: USER,
       id: 'my-own-guide',
-      display_name: IRIS_NAME,
+      display_name: AMAN_GUIDE_NAME,
       aliases: [],
       instructions: 'Mine.',
       model_name: MODEL,

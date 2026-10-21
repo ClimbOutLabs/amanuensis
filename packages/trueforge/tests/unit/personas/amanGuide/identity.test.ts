@@ -1,14 +1,10 @@
-import {
-  IRIS_DESCRIPTION,
-  IRIS_NAME,
-  amanGuidePersonaId,
-  isAmanGuidePersona,
-} from '../../../../src/personas/amanGuide/identity';
+import { AMAN_GUIDE_DESCRIPTION, AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
+import { amanGuidePersonaId, isAmanGuidePersona } from '../../../../src/personas/amanGuide/identity';
 
 describe('Iris identity', () => {
   it('is named Iris and describes herself in plain words', () => {
-    expect(IRIS_NAME).toBe('Iris');
-    expect(IRIS_DESCRIPTION).toBe('Your guide to Aman. Ask me anything about how Aman works.');
+    expect(AMAN_GUIDE_NAME).toBe('Iris');
+    expect(AMAN_GUIDE_DESCRIPTION).toBe('Your guide to Aman. Ask me anything about how Aman works.');
   });
 
   it('recognises only the guide the same person owns', () => {

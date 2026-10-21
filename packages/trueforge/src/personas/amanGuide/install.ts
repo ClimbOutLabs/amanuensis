@@ -1,3 +1,4 @@
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { PersonaNameConflictError, type IPersonaStore } from '../../db/personaStore';
@@ -5,11 +6,11 @@ import { blobPath, writeKnowledgeBlob } from '../../personaKnowledge/knowledgeIn
 import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from '../../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../runtime/memory/embeddingModel';
-import { IRIS_NAME, amanGuidePersonaId } from './identity';
+import { amanGuidePersonaId } from './identity';
 import { AMAN_GUIDE_TOPICS } from './knowledgePack.generated';
 
 export const AMAN_GUIDE_INSTRUCTIONS = [
-  `You are ${IRIS_NAME}, the guide to Aman. You explain Aman to the person and help them get started.`,
+  `You are ${AMAN_GUIDE_NAME}, the guide to Aman. You explain Aman to the person and help them get started.`,
   'Answer questions about Aman only from the Aman knowledge in this chat. Keep answers short and friendly, in plain words, one idea per sentence.',
   'When a Tour card, setting or connector would help, name it and say where to find it, such as "Settings, then Connectors".',
   'If the answer is not in your knowledge, say so plainly. Do not guess.',
@@ -18,7 +19,7 @@ export const AMAN_GUIDE_INSTRUCTIONS = [
 ].join('\n');
 
 /** Marks the knowledge documents this module wrote, so a refresh replaces only them and never a person's own upload. */
-const GUIDE_SOURCE_PREFIX = `${IRIS_NAME}, build `;
+const GUIDE_SOURCE_PREFIX = `${AMAN_GUIDE_NAME}, build `;
 
 interface GuideKnowledgeInput {
   knowledgeDir: string;
@@ -111,20 +112,20 @@ export async function ensureAmanGuide(input: {
       await personaStore.createPersona({
         ...key,
         updated_by: userId,
-        display_name: IRIS_NAME,
+        display_name: AMAN_GUIDE_NAME,
         aliases: [],
         instructions: AMAN_GUIDE_INSTRUCTIONS,
         model_name: modelName,
       });
     } else if (
-      existing.display_name !== IRIS_NAME ||
+      existing.display_name !== AMAN_GUIDE_NAME ||
       existing.instructions !== AMAN_GUIDE_INSTRUCTIONS ||
       existing.model_name !== modelName
     ) {
       await personaStore.updatePersona({
         ...key,
         updated_by: userId,
-        display_name: IRIS_NAME,
+        display_name: AMAN_GUIDE_NAME,
         aliases: existing.aliases,
         instructions: AMAN_GUIDE_INSTRUCTIONS,
         model_name: modelName,
@@ -132,7 +133,7 @@ export async function ensureAmanGuide(input: {
     }
   } catch (error) {
     if (error instanceof PersonaNameConflictError) {
-      logger.warn(`${IRIS_NAME} was not installed: the name "${IRIS_NAME}" is already in use.`);
+      logger.warn(`${AMAN_GUIDE_NAME} was not installed: the name "${AMAN_GUIDE_NAME}" is already in use.`);
       return;
     }
     throw error;
