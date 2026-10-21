@@ -22,6 +22,7 @@ function baseCard(): SentinelApprovalCard {
     email: null,
     calendar_event: null,
     schedule: null,
+    persona: null,
   };
 }
 

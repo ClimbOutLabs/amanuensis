@@ -625,17 +625,23 @@ describe('classifyTier connector tools and standing grants', () => {
     ['a bare credentials name under a path key', { path: 'credentials' }],
     ['a credentials backup under a path key', { path: 'credentials.backup.json' }],
     ['a Windows path to an SSH key', { path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+    ['a git credentials file', { path: '/home/u/.git-credentials' }],
+    ['a client secret file', { path: '/home/u/client_secret.json' }],
+    ['an application default credentials file', { path: '/home/u/application_default_credentials.json' }],
+    ['a token text file', { path: '/home/u/github_token.txt' }],
   ])('a granted tool still asks for %s', async (_, canonical_params) => {
     const { services } = grantedServices();
     const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
     expect(decision.tier).toBe(3);
     expect(decision.sensitive_read).toBe(true);
+    expect(decision.secret_path_read).toBe(true);
     expect(decision.reason).not.toBe(TOOL_GRANT_REASON);
   });
 
   test.each([
     ['a file in a folder named secretary', { path: '/work/secretary/notes.md' }],
     ['a file named tokenizer', { path: '/repo/src/tokenizer.ts' }],
+    ['a file in a folder named keyboard', { path: '/work/keyboard/layout.md' }],
   ])('a granted tool still runs silently for %s', async (_, canonical_params) => {
     const { services } = grantedServices();
     const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));

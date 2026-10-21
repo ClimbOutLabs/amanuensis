@@ -426,12 +426,12 @@ describe('provider plumbing fields on the designated provider', () => {
   });
 
   it('holds a plumbing value that carries a secret, whatever it is named', async () => {
-    const h = harness({ searchProvider: true, plumbingFields, secrets: ['invented-server-secret-9f2c'] });
-    expect((await info(h, { objective: 'loom', session_id: 'invented-server-secret-9f2c' })).tier).toBe(3);
+    const h = harness({ searchProvider: true, plumbingFields, secrets: ['invented-server-value-9f2c'] });
+    expect((await info(h, { objective: 'loom', session_id: 'invented-server-value-9f2c' })).tier).toBe(3);
   });
 
   it('masks a key held in a plumbing field and still lists the other plumbing in the details', async () => {
-    const key = 'invented-server-secret-9f2c';
+    const key = 'invented-server-value-9f2c';
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
@@ -447,7 +447,7 @@ describe('provider plumbing fields on the designated provider', () => {
   });
 
   it('hides the whole query when a key is split between the query and a plumbing field', async () => {
-    const key = 'invented-server-secret-9f2c';
+    const key = 'invented-server-value-9f2c';
     const [head, tail] = [key.slice(0, 16), key.slice(16)];
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: tail, search_queries: [head] });

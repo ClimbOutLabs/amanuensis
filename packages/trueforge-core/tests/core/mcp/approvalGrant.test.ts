@@ -661,6 +661,13 @@ describe('secret-path detection covers every argument of an unannotated connecto
     ['a bare credentials name under a path key', { attachment_path: 'credentials' }],
     ['a credentials backup under a path key', { attachment_path: 'credentials.backup.json' }],
     ['a Windows path to an SSH key', { attachment_path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+    ['a git credentials file', { attachment_path: '/home/u/.git-credentials' }],
+    ['a client secret file', { attachment_path: '/home/u/client_secret.json' }],
+    [
+      'an application default credentials file',
+      { attachment_path: '/home/u/.config/gcloud/application_default_credentials.json' },
+    ],
+    ['a token text file', { attachment_path: '/home/u/notes/github_token.txt' }],
   ])('refuses chat and always scope for %s', async (_, args) => {
     const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
     expect(info.secret_path_read).toBe(true);
@@ -695,7 +702,11 @@ describe('secret-path detection covers every argument of an unannotated connecto
       name: 'get_attachment',
       arguments: { note: 'my token budget and secret santa plans' },
     });
-    for (const info of [file, text]) {
+    const similar = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { attachment_path: '/home/u/keyboard/tokenizer/secretary.md' },
+    });
+    for (const info of [file, text, similar]) {
       expect(info.secret_path_read).not.toBe(true);
       expect(allowsChatApproval(info)).toBe(true);
       expect(allowsToolGrant(info)).toBe(true);
