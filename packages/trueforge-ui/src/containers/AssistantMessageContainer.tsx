@@ -16,7 +16,7 @@ import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
-import { ModelUsageLine } from '../atoms/agent-chat/ModelUsageLine.js';
+import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
@@ -116,7 +116,8 @@ function buildInternalsSummary({
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
   if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
   if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
-  return segments.join(' · ');
+  // An answer with nothing else to list still gets a toggle for its model usage.
+  return segments.length > 0 ? segments.join(' · ') : 'Details';
 }
 
 type GroupKey = `group-agentSteps-${number}` | 'group-reasoning';
@@ -158,7 +159,7 @@ export function AssistantMessageContainer() {
   const memoryContext = useMemoryTurnContext(turnId);
   const { hasError: memoryContextHasError, retry: retryMemoryContext } = useMemoryTurnContextStatus();
   const ingestionStatusLine = useDocumentIngestionStatusLine(turnId);
-  // Display only: the server records usage whether or not the line is shown.
+  // Display only: the server records usage whether or not the line is shown in the answer's details.
   const { visible: modelUsageVisible } = useModelUsageVisible();
   const recordedUsage = useModelUsageSummary(turnId);
   const modelUsage = modelUsageVisible && !isMessageRunning ? recordedUsage : undefined;
@@ -170,7 +171,7 @@ export function AssistantMessageContainer() {
 
   // Progressive disclosure inputs: errors and approvals surface with an amber
   // dot and auto-expand while the turn is running; a clean completed run with no tools, no
-  // thinking, no memory, and no errors renders no internals row at all. Completed turns with
+  // thinking, no memory, no usage, and no errors renders no internals row at all. Completed turns with
   // errors keep the dot and the summary row but follow the chat-level switch (collapsed by
   // default) instead of forcing the content open.
   const recall = memoryContext?.recall;
@@ -210,8 +211,15 @@ export function AssistantMessageContainer() {
       phase === 'waiting-for-approval';
     const showMemory = isHost && hasMemory;
     const showUsage = isHost && helperUsage !== undefined;
+    const usageOverview = isHost ? modelUsage : undefined;
     const trivial =
-      !isLive && run.toolCount === 0 && run.thinkingCount === 0 && !showMemory && !showUsage && !attention;
+      !isLive &&
+      run.toolCount === 0 &&
+      run.thinkingCount === 0 &&
+      !showMemory &&
+      !showUsage &&
+      usageOverview === undefined &&
+      !attention;
     if (trivial) return null;
 
     // A paused-for-approval turn is not "running" but still needs a live label —
@@ -260,6 +268,7 @@ export function AssistantMessageContainer() {
             {children}
           </AgentStepsContainer>
         )}
+        {usageOverview !== undefined && <ModelUsageOverview summary={usageOverview} />}
       </AgentInternalsDisclosure>
     );
   };
@@ -317,7 +326,6 @@ export function AssistantMessageContainer() {
         }}
       </MessagePrimitive.GroupedParts>
       <TurnImages />
-      {modelUsage !== undefined && <ModelUsageLine summary={modelUsage} />}
     </>
   );
 

@@ -250,14 +250,6 @@ export interface ChatImageTable {
   created_at: string;
 }
 
-/** Silent remote image fetches a turn has started. PRIMARY KEY (session_id, turn_id); session cascade. */
-export interface ChatImageTurnAllowanceTable {
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  silent_attempts: number;
-}
-
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
 /** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
@@ -783,7 +775,6 @@ export interface Database {
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
-  chat_image_turn_allowance: ChatImageTurnAllowanceTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
