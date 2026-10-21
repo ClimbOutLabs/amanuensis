@@ -5,6 +5,9 @@
 # A stale hash only makes the server wait or refuse, never let a send through.
 set -eu
 
+# The list file is the only source of recipients. An env list would let the sidecar send to addresses the file lacks.
+unset MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS
+
 policy=${MCP_EMAIL_SERVER_CONFIG_PATH:?set MCP_EMAIL_SERVER_CONFIG_PATH to the send list file}
 status=${AMAN_MAIL_STATUS_FILE:?set AMAN_MAIL_STATUS_FILE to the loaded-list status file}
 

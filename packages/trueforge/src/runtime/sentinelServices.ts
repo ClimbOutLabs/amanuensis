@@ -7,7 +7,12 @@ import {
   type ToolGrantStore,
 } from '@truefoundry/trueforge-core/core';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
-import { addAllowedRecipients, readAllowedRecipientsFile, waitForSidecarLoadedHash } from './mailAllowedRecipients';
+import {
+  addAllowedRecipients,
+  readAllowedRecipientsFile,
+  waitForCurrentSidecarList,
+  waitForSidecarLoadedHash,
+} from './mailAllowedRecipients';
 import { sentinelSettingsServices } from './sentinelSettingsServices';
 
 /**
@@ -53,6 +58,15 @@ export function createSentinelServices(stores: {
         return 'refused';
       }
       return (await waitForSidecarLoadedHash({ statusPath: mailPolicyStatusPath, hash })) ? 'loaded' : 'not_loaded';
+    },
+    mail_list_loaded: async () => {
+      const { mailPolicyPath, mailPolicyStatusPath } = stores;
+      if (mailPolicyPath === undefined || mailPolicyStatusPath === undefined) {
+        return 'not_loaded';
+      }
+      return (await waitForCurrentSidecarList({ path: mailPolicyPath, statusPath: mailPolicyStatusPath }))
+        ? 'loaded'
+        : 'not_loaded';
     },
     ...sentinelSettingsServices(stores.settings),
   };

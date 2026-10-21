@@ -1,57 +1,25 @@
-import {
-  NEW_RECIPIENT_REFUSED,
-  newRecipientsOfMailCall,
-} from '../../../../src/core/email/mailConnector/sendListApproval';
+import { isMailSend, NEW_RECIPIENT_REFUSED } from '../../../../src/core/email/mailConnector/sendListApproval';
 
-const send = (args: Record<string, unknown>) => ({
-  tool_name: 'send_email',
-  mcp_server_name: 'Email',
-  arguments: JSON.stringify(args),
+describe('isMailSend', () => {
+  it('is true for a send through the Email connector under its real name', () => {
+    expect(isMailSend({ mcp_server_name: 'Email', tool_name: 'send_email' })).toBe(true);
+    expect(isMailSend({ mcp_server_name: 'Email', tool_name: 'forward_email' })).toBe(true);
+  });
+
+  it('is false for a read, for another server, and for a missing name', () => {
+    expect(isMailSend({ mcp_server_name: 'Email', tool_name: 'list_emails_metadata' })).toBe(false);
+    expect(isMailSend({ mcp_server_name: 'mail', tool_name: 'send_email' })).toBe(false);
+    expect(isMailSend({ mcp_server_name: undefined, tool_name: 'send_email' })).toBe(false);
+    expect(isMailSend({ mcp_server_name: 'Email', tool_name: undefined })).toBe(false);
+  });
+
+  it('is false for a model-facing clash name, which is never the real tool name', () => {
+    expect(isMailSend({ mcp_server_name: 'Email', tool_name: 'send_email1' })).toBe(false);
+  });
 });
 
-describe('newRecipientsOfMailCall', () => {
-  it('names each recipient the send would reach that is not on the list', () => {
-    expect(
-      newRecipientsOfMailCall(
-        send({ recipients: ['Stranger@Example.net', 'dana@example.com'], cc: ['x@example.org'] }),
-        ['dana@example.com'],
-      ),
-    ).toEqual(['stranger@example.net', 'x@example.org']);
-  });
-
-  it('is empty when every recipient is listed', () => {
-    expect(newRecipientsOfMailCall(send({ recipients: ['dana@example.com'] }), ['dana@example.com'])).toEqual([]);
-  });
-
-  it('reads only the call arguments, so the list alone decides what is new', () => {
-    expect(newRecipientsOfMailCall(send({ recipients: ['dana@example.com'] }), [])).toEqual(['dana@example.com']);
-  });
-
-  it('is empty for any tool that is not a mail send, and for a send on another connector', () => {
-    expect(
-      newRecipientsOfMailCall(
-        { tool_name: 'save_draft', mcp_server_name: 'Email', arguments: '{"recipients":["a@b.co"]}' },
-        [],
-      ),
-    ).toEqual([]);
-    expect(
-      newRecipientsOfMailCall(
-        { tool_name: 'send_email', mcp_server_name: 'Other', arguments: '{"recipients":["a@b.co"]}' },
-        [],
-      ),
-    ).toEqual([]);
-  });
-
-  it('treats arguments that are not an object as naming no recipient', () => {
-    expect(
-      newRecipientsOfMailCall({ tool_name: 'send_email', mcp_server_name: 'Email', arguments: '[1,2]' }, []),
-    ).toEqual([]);
-    expect(
-      newRecipientsOfMailCall({ tool_name: 'send_email', mcp_server_name: 'Email', arguments: 'not json' }, []),
-    ).toEqual([]);
-  });
-
-  it('says in plain words that nothing was sent and the draft is kept', () => {
+describe('send list messages', () => {
+  it('say the draft is still there and what to do next', () => {
     expect(NEW_RECIPIENT_REFUSED).toMatch(/nothing was sent/);
     expect(NEW_RECIPIENT_REFUSED).toMatch(/draft is still here/);
   });

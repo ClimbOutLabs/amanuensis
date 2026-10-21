@@ -82,6 +82,28 @@ describe('the Email send list add', () => {
     }
   });
 
+  it('reports the list loaded only when the sidecar has recorded the hash of the file as it is now', async () => {
+    const { services, close } = await servicesWith({ mailPolicyPath: policyPath, mailPolicyStatusPath: statusPath });
+    try {
+      await writeFile(statusPath, `${allowedRecipientsFileHash(renderAllowedRecipientsFile([]))}\n`);
+      await expect(services.mail_list_loaded(alice)).resolves.toBe('loaded');
+
+      await writeFile(policyPath, renderAllowedRecipientsFile(['dana@example.com']));
+      await expect(services.mail_list_loaded(alice)).resolves.toBe('not_loaded');
+    } finally {
+      await close();
+    }
+  }, 30_000);
+
+  it('reports not loaded when no send list is configured', async () => {
+    const { services, close } = await servicesWith({ mailPolicyPath: undefined, mailPolicyStatusPath: undefined });
+    try {
+      await expect(services.mail_list_loaded(alice)).resolves.toBe('not_loaded');
+    } finally {
+      await close();
+    }
+  });
+
   it('refuses every add when no send list is configured', async () => {
     const { services, close } = await servicesWith({ mailPolicyPath: undefined, mailPolicyStatusPath: undefined });
     try {

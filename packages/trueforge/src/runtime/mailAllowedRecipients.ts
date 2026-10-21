@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'crypto';
 import { open, readFile, rename, rm } from 'fs/promises';
 
+import { normalizeMailAddress } from '@truefoundry/trueforge-core/core/email/mailConnector/recipientList';
+
 /**
  * An exact mailbox made of ASCII letters, digits and `._%+-`, then `@`, then dot-separated domain labels.
  * Anything outside that set is refused, so no glob character, quote, backslash or space can reach the file.
@@ -16,9 +18,9 @@ export const MAIL_INDEX_DB_LOCATION = '/data/db.sqlite3';
 /** The one shape the server reads back. Any other content reads as an empty list. */
 const FILE_SHAPE = /^db_location = "([^"]*)"\nallowed_recipients = \[(.*)\]\n?$/;
 
-/** Returns the lowercased address, or null when the value is not one exact mailbox. */
+/** Returns the normalized address, or null when the value is not one exact mailbox. */
 export function exactRecipientAddress(raw: string): string | null {
-  const address = raw.trim().toLowerCase();
+  const address = normalizeMailAddress(raw);
   return EXACT_ADDRESS.test(address) ? address : null;
 }
 
@@ -174,6 +176,26 @@ export async function waitForSidecarLoadedHash({
     loaded = await sidecarLoadedHash(statusPath);
   }
   return loaded === hash;
+}
+
+/**
+ * Waits until the sidecar runs the list the file holds right now. Returns false when there is no readable file,
+ * since then nothing can be confirmed loaded.
+ */
+export async function waitForCurrentSidecarList({
+  path,
+  statusPath,
+}: {
+  path: string;
+  statusPath: string;
+}): Promise<boolean> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return false;
+  }
+  return waitForSidecarLoadedHash({ statusPath, hash: allowedRecipientsFileHash(text) });
 }
 
 async function sidecarLoadedHash(statusPath: string): Promise<string | null> {

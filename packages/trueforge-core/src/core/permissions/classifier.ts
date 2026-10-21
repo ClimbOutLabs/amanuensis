@@ -25,7 +25,8 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { isMailReadToolName, MAIL_CONNECTOR_NAME, MAIL_SEND_TOOL_NAMES } from '../email/mailConnector/toolContract';
+import { isMailSend } from '../email/mailConnector/sendListApproval';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -142,6 +143,7 @@ import {
 } from './trackedExecutables';
 import {
   hasReadPrivateData,
+  markPrivateDataRead,
   namesHostAtFetchLimit,
   privateTextForChecks,
   SEARCH_AFTER_READ_SILENT_REASON,
@@ -1806,8 +1808,7 @@ async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyC
   const { action, ctx } = input;
   if (
     action.tool_type !== 'mcp' ||
-    action.mcp_server_name !== MAIL_CONNECTOR_NAME ||
-    !MAIL_SEND_TOOL_NAMES.some(name => name === action.tool_name)
+    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
   ) {
     return [];
   }
@@ -1835,10 +1836,6 @@ function demoRefusesConnector(input: {
 }
 
 /**
- * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
- * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
- */
-/**
  * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
  * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
  * connector that happens to be named Email.
@@ -1859,6 +1856,10 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
   });
 }
 
+/**
+ * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
+ * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
+ */
 async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
     return autoDenyDecision({

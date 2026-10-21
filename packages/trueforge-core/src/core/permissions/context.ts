@@ -48,10 +48,18 @@ export interface SentinelServices {
     input: { tenant_id: string; created_by: string },
     addresses: readonly string[],
   ) => Promise<MailAddRecipientsResult>;
+  /**
+   * Waits until the sidecar runs the Email list the server holds. Checked before every approved mail send, so a
+   * send never runs on a list the sidecar has not loaded. Fails closed by default.
+   */
+  mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
 }
 
 /** `loaded`: the sidecar runs the new list. `not_loaded`: it did not in time. `refused`: an address is not allowed. */
 export type MailAddRecipientsResult = 'loaded' | 'not_loaded' | 'refused';
+
+/** `loaded`: the sidecar runs the server's list. `not_loaded`: it does not, or there is no list. */
+export type MailListLoadedResult = 'loaded' | 'not_loaded';
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
 export interface SentinelCallIdentity {
@@ -87,6 +95,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     demoSendAllowlist: null,
     mail_listed_addresses: () => Promise.resolve([]),
     mail_add_recipients: () => Promise.resolve('not_loaded'),
+    mail_list_loaded: () => Promise.resolve('not_loaded'),
   };
 }
 

@@ -34,6 +34,7 @@ describe('mail-email entrypoint wrapper', () => {
   let policy: string;
   let status: string;
   let starts: string;
+  let envLog: string;
   let wrapper: ChildProcess | undefined;
 
   beforeEach(async () => {
@@ -41,12 +42,16 @@ describe('mail-email entrypoint wrapper', () => {
     policy = join(dir, 'allowed_recipients.toml');
     status = join(dir, 'status', 'loaded.sha256');
     starts = join(dir, 'starts.log');
+    envLog = join(dir, 'env.log');
     await writeFile(policy, LIST_V1);
     await mkdir(join(dir, 'status'));
     // A stand-in server: it logs each start and then runs as the only process, so a signal reaches it.
     const bin = join(dir, 'bin');
     await mkdir(bin);
-    await writeFile(join(bin, 'mcp-email-server'), `#!/bin/sh\necho start >> "${starts}"\nexec sleep 1000\n`);
+    await writeFile(
+      join(bin, 'mcp-email-server'),
+      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\nexec sleep 1000\n`,
+    );
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   });
 
@@ -57,12 +62,13 @@ describe('mail-email entrypoint wrapper', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  function startWrapper(): ChildProcess {
+  function startWrapper(extraEnv: Record<string, string> = {}): ChildProcess {
     wrapper = spawn('sh', [ENTRYPOINT, 'streamable-http', '--port', '9557'], {
       env: {
         PATH: `${join(dir, 'bin')}:${process.env['PATH'] ?? ''}`,
         MCP_EMAIL_SERVER_CONFIG_PATH: policy,
         AMAN_MAIL_STATUS_FILE: status,
+        ...extraEnv,
       },
       stdio: 'ignore',
     });
@@ -87,6 +93,12 @@ describe('mail-email entrypoint wrapper', () => {
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2));
     expect(await startCount()).toBeGreaterThanOrEqual(2);
   }, 30_000);
+
+  it('starts the server without an env recipient list, so the list file always decides', async () => {
+    startWrapper({ MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS: 'stranger@example.net' });
+    await eventually(async () => (await readOrEmpty(envLog)) !== '');
+    expect(await readOrEmpty(envLog)).toBe('unset');
+  }, 20_000);
 
   it('stops the server when it is told to stop', async () => {
     const child = startWrapper();

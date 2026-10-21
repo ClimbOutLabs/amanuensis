@@ -70,11 +70,15 @@ type CallToolMock = jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<Too
 /** The Email connector's name; the classifier checks new recipients only on a call from this server. */
 const MAIL_SERVER = 'Email';
 
-function makeSource(callTool: CallToolMock, serverName = 'mail'): ToolSource {
+function makeSource(callTool: CallToolMock, serverName = 'mail', clashingSend = false): ToolSource {
   const schema = { type: 'object' as const, properties: {} };
+  // A second tool with the same name registers as `send_email1`, the name the model sees after a clash.
+  const sendTool = { name: 'send_email', description: 'Send an email', inputSchema: schema, preload: true };
   const tools =
     serverName === MAIL_SERVER
-      ? [{ name: 'send_email', description: 'Send an email', inputSchema: schema, preload: true }]
+      ? clashingSend
+        ? [sendTool, sendTool]
+        : [sendTool]
       : [
           { name: 'send_note', description: 'Send a note', inputSchema: schema, preload: true },
           {
@@ -116,6 +120,7 @@ interface Harness {
   base: SentinelServices;
   callTool: CallToolMock;
   mailAdd: MailAddMock;
+  mailLoaded: jest.Mock<Promise<'loaded' | 'not_loaded'>, unknown[]>;
   audit: AuditRecordInput[];
   llmCreate: jest.Mock;
   build: (input: {
@@ -133,13 +138,14 @@ function makeHarness(
     searchProvider?: boolean;
     secrets?: readonly string[];
     /** Sends go through the Email connector; `listed` is the Email list and `add` answers each add. */
-    mail?: { listed: readonly string[]; add: MailAddRecipientsResult };
+    mail?: { listed: readonly string[]; add: MailAddRecipientsResult; clash?: boolean };
   } = {},
 ): Harness {
   const audit: AuditRecordInput[] = [];
   const mailAdd: MailAddMock = jest.fn<ReturnType<MailAddMock>, Parameters<MailAddMock>>(() =>
     Promise.resolve(options.mail?.add ?? 'loaded'),
   );
+  const mailLoaded = jest.fn<Promise<'loaded' | 'not_loaded'>, unknown[]>(() => Promise.resolve('loaded'));
   const base: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     audit: {
@@ -152,6 +158,7 @@ function makeHarness(
     outboundSecrets: () => Promise.resolve(options.secrets ?? []),
     mail_listed_addresses: () => Promise.resolve(options.mail?.listed ?? []),
     mail_add_recipients: mailAdd,
+    mail_list_loaded: mailLoaded,
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -166,12 +173,13 @@ function makeHarness(
     audit,
     callTool,
     mailAdd,
+    mailLoaded,
     llmCreate,
     build: input => {
       const services = input.unattended ? forUnattendedRun(base) : base;
       const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1', services });
       const toolSet = new ToolSet({
-        source: makeSource(callTool, options.mail === undefined ? 'mail' : MAIL_SERVER),
+        source: makeSource(callTool, options.mail === undefined ? 'mail' : MAIL_SERVER, options.mail?.clash === true),
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
         preload: true,
         sentinel,
@@ -569,8 +577,10 @@ describe('approving a held mail send to an address not on the Email list', () =>
   }
 
   /** The unattended run holds the send; the harness then answers it. */
-  async function heldSend(listed: readonly string[]) {
-    const h = makeHarness([() => toolCallsStream([mailSendCall])], { mail: { listed, add: 'loaded' } });
+  async function heldSend(listed: readonly string[], options: { call?: CallSpec; clash?: boolean } = {}) {
+    const h = makeHarness([() => toolCallsStream([options.call ?? mailSendCall])], {
+      mail: { listed, add: 'loaded', clash: options.clash === true },
+    });
     const { thread } = await runBrief(h);
     return { h, context: heldContext(thread) };
   }
@@ -591,6 +601,22 @@ describe('approving a held mail send to an address not on the Email list', () =>
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
     expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'send_email', arguments: MAIL_SEND_ARGS },
+      expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
+    );
+  });
+
+  it('a send under a clashing name adds the addresses on its card, then sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, name: 'send_email1' },
+      clash: true,
+    });
+    await answer(h, context, [approve('call-mail')]);
+
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'send_email', arguments: MAIL_SEND_ARGS },
       expect.objectContaining({ status: 'allow' }),
@@ -622,6 +648,20 @@ describe('approving a held mail send to an address not on the Email list', () =>
     expect(h.callTool).not.toHaveBeenCalled();
 
     // The refused answer was not recorded, so the same card can still be approved.
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry after the sidecar did not load the list waits for it again before it sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+
+    h.mailAdd.mockResolvedValueOnce('not_loaded');
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
     await answer(h, context, [approve('call-mail')]);
     expect(h.callTool).toHaveBeenCalledTimes(1);
   });
