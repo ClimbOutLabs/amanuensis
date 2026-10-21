@@ -92,7 +92,7 @@ describe('buildDemoWorld content', () => {
     expect(scheduleManifest.task).toContain('Do not send or save anything');
     expect(scheduleManifest.task).not.toContain('Draft a reply');
     expect(scheduleManifest.task).not.toContain('Needs your OK');
-    expect(scheduleManifest.task).toContain('Rua da Emenda 45, 1200-169 Lisboa');
+    expect(scheduleManifest.task).toContain('Travessa das Gaivotas 4, 1200-000 Lisboa');
   });
 
   it('seeds the two personas with a knowledge vault each', () => {
@@ -158,6 +158,6 @@ describe('buildDemoWorld content', () => {
     expect(tasksBody(world)).toContain(
       'GP appointment Thursday, October 22, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
     );
-    expect(noteBody(world, 'short-term-rental')).toContain('Rua da Emenda 45, 1200-169 Lisboa, in Chiado');
+    expect(noteBody(world, 'short-term-rental')).toContain('Travessa das Gaivotas 4, 1200-000 Lisboa, in Chiado');
   });
 });

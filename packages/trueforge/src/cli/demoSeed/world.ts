@@ -72,6 +72,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       'Keep answers short and warm.',
       'Always mention the penicillin allergy when a doctor comes up.',
     ],
+    help_areas: ['new_country', 'work_money'],
     learned_profile: null,
     learning_enabled: false,
   };

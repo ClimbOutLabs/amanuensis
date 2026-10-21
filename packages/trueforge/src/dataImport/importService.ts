@@ -1606,6 +1606,7 @@ async function importArchive<TTransaction>(
             address_as: personalization.address_as ?? ownerName,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
+            help_areas: personalization.help_areas,
             learned_profile: personalization.learned_profile,
             learning_enabled: personalization.learning_enabled,
             updated_by: subjectId,

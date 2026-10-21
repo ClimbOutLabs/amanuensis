@@ -75,6 +75,7 @@ async function setAssistantName(server: ApprovalTestServer, assistantName: strin
     address_as: null,
     user_profile: null,
     pinned_preferences: [],
+    help_areas: [],
     learned_profile: null,
   });
 }
@@ -208,6 +209,7 @@ describe('persona switching inside one conversation', () => {
         address_as: null,
         user_profile: 'The user prefers plain English.',
         pinned_preferences: ['Keep advice practical.'],
+        help_areas: [],
         learned_profile: 'The user values calm explanations.',
       });
 

@@ -10,6 +10,7 @@ const profile = {
   address_as: 'Sam',
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -95,6 +96,18 @@ test('personalization API sends a toggled switch even to a server that never sen
   await api.updateProfile({ ...loaded, learning_enabled: true });
 
   assert.deepEqual(savedProfiles, [{ profile: { ...profileWithoutSwitch, learning_enabled: true } }]);
+});
+
+test('personalization API keeps the help areas in the order saved and rejects an unknown area', async () => {
+  const api = createPersonalizationApi(async () =>
+    Response.json({ data: { ...profile, help_areas: ['work_money', 'focus'] } }),
+  );
+  assert.deepEqual((await api.getProfile())?.help_areas, ['work_money', 'focus']);
+
+  const unknown = createPersonalizationApi(async () =>
+    Response.json({ data: { ...profile, help_areas: ['gardening'] } }),
+  );
+  await assert.rejects(unknown.getProfile(), /personalization response was invalid/i);
 });
 
 test('personalization API rejects malformed preference data instead of exposing it to the UI', async () => {

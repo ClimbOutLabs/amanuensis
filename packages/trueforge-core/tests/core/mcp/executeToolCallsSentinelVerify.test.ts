@@ -20,6 +20,7 @@ import { actionIdFor, toJsonSafeParams } from '../../../src/core/permissions/app
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from '../permissions/approvalTokenFixtures';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function mockToolSet(): { toolSet: IToolSet; callTool: jest.Mock } {
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'ok' })));
@@ -98,6 +99,7 @@ async function dispatchApproved(input: {
     memoState: createToolCallMemoState(),
     sentinel: {
       services: input.services,
+      web_search: createWebSearchTurnState(),
       identity: {
         tenant_id: 't1',
         created_by: 'u1',
