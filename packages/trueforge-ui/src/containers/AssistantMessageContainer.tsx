@@ -16,7 +16,7 @@ import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { ModelUsageDetails } from '../atoms/agent-chat/ModelUsageDetails.js';
-import { ModelUsageLine } from '../atoms/agent-chat/ModelUsageLine.js';
+import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
@@ -211,14 +211,14 @@ export function AssistantMessageContainer() {
       phase === 'waiting-for-approval';
     const showMemory = isHost && hasMemory;
     const showUsage = isHost && helperUsage !== undefined;
-    const usageLine = isHost ? modelUsage : undefined;
+    const usageOverview = isHost ? modelUsage : undefined;
     const trivial =
       !isLive &&
       run.toolCount === 0 &&
       run.thinkingCount === 0 &&
       !showMemory &&
       !showUsage &&
-      usageLine === undefined &&
+      usageOverview === undefined &&
       !attention;
     if (trivial) return null;
 
@@ -268,7 +268,7 @@ export function AssistantMessageContainer() {
             {children}
           </AgentStepsContainer>
         )}
-        {usageLine !== undefined && <ModelUsageLine summary={usageLine} />}
+        {usageOverview !== undefined && <ModelUsageOverview summary={usageOverview} />}
       </AgentInternalsDisclosure>
     );
   };
