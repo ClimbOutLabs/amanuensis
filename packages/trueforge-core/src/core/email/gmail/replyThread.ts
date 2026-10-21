@@ -33,9 +33,14 @@ function readableAddress(from: string): string | null {
   if (address === null || address.length > MAX_ADDRESS_CHARS) {
     return null;
   }
-  // A bare word is not an address: an address has a local part, one "@" and a domain.
+  // A bare word is not an address: an address has a local part, one "@" and a domain, and the domain has
+  // a dot in it with something on both sides of every dot.
   const at = address.indexOf('@');
-  return at > 0 && at === address.lastIndexOf('@') && at < address.length - 1 ? address : null;
+  if (at <= 0 || at !== address.lastIndexOf('@')) {
+    return null;
+  }
+  const labels = address.slice(at + 1).split('.');
+  return labels.length > 1 && labels.every(label => label.length > 0) ? address : null;
 }
 
 /** The sender's address only, so a display name cannot add words or a second address to the card. */

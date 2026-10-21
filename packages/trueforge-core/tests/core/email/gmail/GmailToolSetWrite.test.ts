@@ -211,6 +211,34 @@ describe('draft_email', () => {
       expect(text(response)).toContain('could not read the address of the person who sent the message being answered');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
     });
+
+    const unusableSenders: { name: string; from: string }[] = [
+      { name: 'a domain with no dot in it', from: 'a@b' },
+      { name: 'a domain that is only a dot', from: 'a@.' },
+      { name: 'a domain starting with a dot', from: 'a@.com' },
+      { name: 'a domain ending with a dot', from: 'a@b.' },
+      { name: 'a domain with two dots in a row', from: 'a@b..com' },
+    ];
+
+    it.each(unusableSenders)('refuses a reply with no "to" when the sender address has $name', async ({ from }) => {
+      const sender = message({
+        id: 'orig',
+        threadId: 't5',
+        from,
+        extraHeaders: [{ name: 'Message-ID', value: '<orig@mail.example.com>' }],
+      });
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [route('/messages/orig', sender), created],
+      });
+      const response = await tools.callTool({
+        name: 'draft_email',
+        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+      });
+      expect(text(response)).toContain('no recipient');
+      expect(text(response)).toContain('could not read the address of the person who sent the message being answered');
+      expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
+    });
   });
 
   it('refuses a plain draft with no recipient and says what to add', async () => {
