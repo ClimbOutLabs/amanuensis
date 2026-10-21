@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
@@ -283,6 +284,8 @@ export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
   /** Answers already given, by tool call id. Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
+  /** The words the owner typed with a "Change it" answer, by tool call id. Absent when the host reads none. */
+  changeRequests?: Record<string, string> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -604,15 +607,30 @@ function answersFromEvent(event: unknown): [string, ApprovalAnswer][] {
   return answers;
 }
 
+/** The words the owner typed for a "Change it" answer, by tool call id. */
+function changeRequestsFromEvent(event: unknown): [string, string][] {
+  if (!isRecord(event) || event.type !== 'turn.created' || !Array.isArray(event.input)) return [];
+  const requests: [string, string][] = [];
+  for (const item of event.input) {
+    if (!isRecord(item) || item.type !== 'user.tool_approval' || !isRecord(item.approval)) continue;
+    const toolCallId = optionalString(item, 'tool_call_id') ?? optionalString(item, 'toolCallId');
+    const words = changeRequestText(optionalString(item.approval, 'reason'));
+    if (toolCallId !== undefined && words !== undefined) requests.push([toolCallId, words]);
+  }
+  return requests;
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
+  const changeRequests: Record<string, string> = {};
   for (const event of events) {
     for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
+    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[toolCallId] = words;
   }
-  return { approvals: [...approvals.values()], answers };
+  return { approvals: [...approvals.values()], answers, changeRequests };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {
