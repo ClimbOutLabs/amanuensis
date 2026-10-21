@@ -215,6 +215,23 @@ services:
       - '9557'
     restart: unless-stopped
 
+  # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private to the
+  # Compose network: `expose` only, never `ports`. The server reaches it as http://calendar-caldav:9558/mcp.
+  # Calendar credentials come only from this optional file, which is git-ignored.
+  calendar-caldav:
+    build:
+      context: ./ops/calendar-sidecar
+    env_file:
+      - path: ./.env.calendar
+        required: false
+    environment:
+      # Only these tools are offered. Writes need the confirm token, not an interactive prompt.
+      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
+      ELICITATION: 'false'
+    expose:
+      - '9558'
+    restart: unless-stopped
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build

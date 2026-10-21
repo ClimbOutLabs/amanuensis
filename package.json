@@ -76,6 +76,7 @@
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs tests/slots-live.test.mjs",
     "test:slots-live": "node scripts/slots-live.mjs",
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs installer/tests/qr.test.mjs installer/tests/pki.test.mjs",
+    "test:calendar-sidecar": "npm --prefix ops/calendar-sidecar ci --ignore-scripts && npm --prefix ops/calendar-sidecar test",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
     "smoke:local-sandbox:lima": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox:lima",
     "smoke:tokenfactory": "pnpm --filter @truefoundry/trueforge smoke:tokenfactory",

@@ -1,0 +1,6 @@
+# Keep credentials and local installs out of the build context.
+node_modules
+.env
+.env.*
+*.log
+test
