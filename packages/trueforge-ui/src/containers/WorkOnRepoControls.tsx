@@ -311,7 +311,7 @@ export function WorkOnRepoControls({ sessionId, isRunning, turnFailed = false, s
     setStartError(null);
     sawCloneTurnRef.current = false;
     sendMessage(
-      `Clone ${selected.clone_url} into a new folder named ${selected.name} in the workspace, then check out the ${chosenBranch} branch. Run the clone yourself in this chat as one plain command: git clone ${selected.clone_url} ${selected.name}. Then run git -C ${selected.name} checkout ${chosenBranch}. Do not hand this to a sub-agent.`,
+      `Clone ${selected.clone_url} into a new folder named ${selected.name} in the workspace, then check out the ${chosenBranch} branch. Run this one command yourself in this chat: git clone --branch ${chosenBranch} ${selected.clone_url} ${selected.name}. Do not hand this to a sub-agent.`,
     );
     setPendingStart({
       cloneUrl: selected.clone_url,
