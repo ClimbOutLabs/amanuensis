@@ -184,7 +184,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Sandbox</p>
           <p className="mt-1 text-sm text-text-secondary">
             {sandboxWithoutAsking
-              ? 'Work inside the sandbox runs without a card. Anything that leaves the sandbox still asks.'
+              ? 'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.'
               : 'Work inside the sandbox asks before it runs.'}
           </p>
           {sandboxError !== null && (
