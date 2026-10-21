@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
+import { dayPartForHour } from './dayPart.js';
 import { ensureStyles } from './ensureStyles.js';
 import { resolvePresetTokens } from './presets/index.js';
 import {
@@ -213,6 +214,7 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
         className={cn('aui-theme-root h-full min-h-0', mode === 'dark' && 'dark', theme?.className)}
         data-theme={mode}
         data-preset={preset}
+        data-day={dayPartForHour(new Date().getHours())}
         style={rootStyle}
       >
         {children}

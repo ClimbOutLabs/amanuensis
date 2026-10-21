@@ -73,7 +73,7 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
     <div
       data-role="host-pending-approvals"
       role="alert"
-      className="aui-pending-approvals-root border-warning-bg bg-warning-bg/10 text-warning-bg m-2 rounded-md border p-3"
+      className="aui-pending-approvals-root border-gold-line bg-gold-soft text-text-primary m-2 rounded-md border p-3"
     >
       <div className="text-sm font-medium">Action needed</div>
       <p className="mt-1 text-sm">
