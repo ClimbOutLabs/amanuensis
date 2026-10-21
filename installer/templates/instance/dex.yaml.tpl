@@ -30,7 +30,8 @@ enablePasswordDB: true
 staticPasswords:
   - email: '@@OWNER_EMAIL@@'
     hashFromEnv: DEX_USER_PASSWORD_HASH
-    username: 'owner'
+    # The name the app shows. The userID stays 'owner': it is the fixed key the sign-in service knows this person by.
+    username: '@@OWNER_NAME@@'
     userID: 'owner'
 
 staticClients:

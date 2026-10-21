@@ -13,6 +13,7 @@ test_enter_keeps_main() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -28,6 +29,7 @@ test_a_typed_name_is_used() {
   sandbox_new
   run_install_tty "Name for this instance=>work
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -44,6 +46,7 @@ test_a_bad_name_is_refused_and_asked_again() {
   run_install_tty "Name for this instance=>Work Notes
 Name for this instance=>work
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>n"
   assert_eq "$RC" 0
@@ -57,6 +60,7 @@ test_name_flag_skips_the_question() {
   t_begin "--name gives the name, so the question is not asked"
   sandbox_new
   run_install_tty "Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS" --name work
@@ -77,7 +81,7 @@ test_yes_skips_the_question_and_uses_main() {
 }
 
 test_no_terminal_skips_the_question() {
-  t_begin "input that is not a terminal asks no name: the first line answers the email question and the instance is main"
+  t_begin "input that is not a terminal asks no name: the first line answers the email question, and the instance is main"
   sandbox_new
   with_input "owner@example.invalid
 y
@@ -89,6 +93,8 @@ $SENTINEL_PASSWORD
   clear_input
   assert_rc 0
   assert_not_contains "$OUT$ERR" "Name for this instance"
+  assert_not_contains "$OUT$ERR" "What should Aman call you?"
+  assert_flat_contains "$OUT" "Aman will call you owner. You can change that later in Personalization."
   assert_file "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
 }

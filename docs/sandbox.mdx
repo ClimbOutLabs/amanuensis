@@ -28,6 +28,7 @@ That means:
 ## The Docker sandbox
 
 Code the assistant writes with `run_code` (Python and Node.js) runs in an isolated Docker container with no network access. **Settings → Sandbox** shows whether it can run right now: ready, or off with the reason (Docker not available to the server, image not downloaded, image signature not verified, and so on) and what to do about it. Use **Re-check** after you fix the cause. The image and the limits for each run (time, memory, disk) come from the server configuration and change only with a restart.
+A script the assistant writes in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it. Package installs work only in a chat bound to a repository where downloads are allowed, and only on a sandbox that can reach the package gateway (sandbox slots). The Docker sandbox has no network for packages, so an install there is refused before any approval prompt.
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
 

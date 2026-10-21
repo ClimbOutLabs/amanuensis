@@ -115,6 +115,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
+import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -669,6 +670,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   await prepareMailPolicyAtBoot({
     url: configuration.MAIL_EMAIL_MCP_URL,
     policyPath: configuration.MAIL_POLICY_FILE,
+    logger,
+  });
+  await seedOwnerNameAtBoot({
+    owner_name: configuration.OWNER_NAME,
+    oidc: configuration.OIDC,
+    globalSettingsStore,
+    personalizationStore,
+    tenant_id: TENANT_ID,
     logger,
   });
   const tokenFactoryBudget = createTokenFactoryBudget({

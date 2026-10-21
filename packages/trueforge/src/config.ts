@@ -1619,6 +1619,11 @@ export interface SharedServerConfiguration {
    */
   DEMO_GOOGLE_ACCOUNT: string;
   /**
+   * What the installer was told to call the owner. Seeds the Personalization name once, only where it is empty.
+   * Env: `OWNER_NAME`. Default empty, which seeds nothing.
+   */
+  OWNER_NAME: string;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -2268,6 +2273,7 @@ const shared: SharedServerConfiguration = {
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
   DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
+  OWNER_NAME: (getEnv('OWNER_NAME') ?? '').trim(),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),

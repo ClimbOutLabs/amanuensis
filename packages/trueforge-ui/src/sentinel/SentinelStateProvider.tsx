@@ -20,6 +20,10 @@ export type SentinelState = {
   answerFor: (toolCallId: string) => ApprovalAnswer | undefined;
   /** Remembers an answer given in this tab until a reload reads it back from the server. */
   recordAnswer: (toolCallId: string, answer: ApprovalAnswer) => void;
+  /** The words the owner typed with a "Change it" answer, if this tool call got one. */
+  changeRequestFor: (toolCallId: string) => string | undefined;
+  /** Remembers the words of a "Change it" answer given in this tab. */
+  recordChangeRequest: (toolCallId: string, words: string) => void;
 };
 
 const SentinelStateContext = createContext<SentinelState | null>(null);
@@ -35,6 +39,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
   const [approvals, setApprovals] = useState<Map<string, SentinelApprovalInfo>>(new Map());
   const [answers, setAnswers] = useState<Map<string, ApprovalAnswer>>(new Map());
+  const [changeRequests, setChangeRequests] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(info.toolCallId, info)));
@@ -43,6 +48,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     setApprovals(new Map());
     setAnswers(new Map());
+    setChangeRequests(new Map());
     if (api == null || sessionId == null) return;
     let cancelled = false;
     void api
@@ -57,6 +63,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
           return merged;
         });
         setAnswers(previous => new Map([...Object.entries(context.answers ?? {}), ...previous]));
+        setChangeRequests(previous => new Map([...Object.entries(context.changeRequests ?? {}), ...previous]));
       })
       .catch((error: unknown) => {
         // Best-effort: live events still populate the map, but a failed read leaves a reloaded tab
@@ -80,8 +87,11 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
       answerFor: toolCallId => answers.get(toolInvocationRawId(toolCallId)),
       recordAnswer: (toolCallId, answer) =>
         setAnswers(previous => new Map(previous).set(toolInvocationRawId(toolCallId), answer)),
+      changeRequestFor: toolCallId => changeRequests.get(toolInvocationRawId(toolCallId)),
+      recordChangeRequest: (toolCallId, words) =>
+        setChangeRequests(previous => new Map(previous).set(toolInvocationRawId(toolCallId), words)),
     }),
-    [approvals, answers],
+    [approvals, answers, changeRequests],
   );
 
   return <SentinelStateContext.Provider value={state}>{children}</SentinelStateContext.Provider>;
