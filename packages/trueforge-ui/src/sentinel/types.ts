@@ -197,14 +197,28 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
-/** Plain-word outcome labels for the owner. `logged` covers held actions and noted sensitive reads. */
+/**
+ * Plain-word outcome labels for the owner. `logged` is shared by two kinds of row, so a row's own
+ * label comes from `sentinelAuditLabel`; this entry names the outcome in the filter.
+ */
 export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
-  logged: 'Held or noted',
+  logged: 'Done without asking, or held for you',
   ran: 'Ran',
   approved: 'Approved',
   denied: 'Denied',
   auto_denied: 'Refused',
 };
+
+/**
+ * The label for one audit row. A `logged` row is a Tier 1 call that ran without asking, or a Tier 2
+ * or Tier 3 call held for the owner; only the stored tier tells them apart.
+ */
+export function sentinelAuditLabel(entry: Pick<SentinelAuditEntry, 'outcome' | 'tier'>): string {
+  if (entry.outcome === 'logged') {
+    return entry.tier === 1 ? 'Done without asking' : 'Held for you';
+  }
+  return SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome];
+}
 
 function parseAuditOutcome(value: unknown): SentinelAuditOutcome | undefined {
   for (const outcome of SENTINEL_AUDIT_OUTCOMES) {
