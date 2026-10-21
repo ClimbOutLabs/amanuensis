@@ -36,6 +36,7 @@ describe('stripAssistantAbilityNotes', () => {
     "I won't have access to email.",
     "I haven't been able to read email.",
     "Aman hasn't been able to read email.",
+    "The assistant hasn't been able to send email.",
     'I lack access to the calendar.',
     'Aman lacks access to the calendar.',
   ])('drops a future or perfect tense ability note about Aman: %s', note => {
@@ -60,6 +61,14 @@ describe('stripAssistantAbilityNotes', () => {
     'The user lacks access to the shared drive.',
   ])('keeps a future or perfect tense fact about the person: %s', fact => {
     expect(stripAssistantAbilityNotes(fact)).toBe(fact);
+  });
+
+  it.each([
+    'I am able to read email.',
+    'I will send the email tomorrow.',
+    'I have been reading your email all morning.',
+  ])('keeps a positive or plain statement about Aman: %s', statement => {
+    expect(stripAssistantAbilityNotes(statement)).toBe(statement);
   });
 
   it('drops a future tense ability note inside a turn summary and keeps the other sentences', () => {

@@ -40,9 +40,9 @@ const CONTRACTIONS: readonly (readonly [RegExp, string])[] = [
 ];
 
 const ABILITY_SUBJECT = '(?:i|aman|the assistant|assistant)';
-const GAP_WORD = '(?:am|is|are|was|were|has|have|do|does|not|will|be|currently|still)';
+const GAP_WORD = '(?:am|is|are|was|were|has|have|do|does|not|will|be|been|currently|still)';
 const ABILITY_MARKER =
-  '(?:cannot|could not|unable to|not (?:be|been) able to|not able to|have (?:access|permission)|no (?:access|permission) to|(?:lack|lacks) access|failed to|having trouble)';
+  '(?:cannot|could not|unable to|not (?:be |been )?able to|have (?:access|permission)|no (?:access|permission) to|(?:lack|lacks) access|failed to|having trouble)';
 const ABILITY_CLAUSE = new RegExp(`\\b${ABILITY_SUBJECT}\\b(?:\\s+${GAP_WORD})*\\s*${ABILITY_MARKER}\\b`);
 const ABILITY_FRAGMENT = /^(?:unable to|not able to|could not|cannot|no (?:access|permission) to)\b/;
 
