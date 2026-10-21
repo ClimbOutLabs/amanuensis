@@ -851,13 +851,14 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
+    const sandbox = definition.readOnly ? undefined : input.sandbox;
     const capabilities = threadCapabilities({
       spec: input.spec,
       definition,
       compactionModel,
       isChild,
-      sandbox: input.sandbox,
-      sandboxAvailable: Boolean(input.sandbox),
+      sandbox,
+      sandboxAvailable: Boolean(sandbox),
       tracing: input.tracing,
       logger: input.resolver.logger,
       compactionContext: input.resolver.compactionContext,
@@ -869,7 +870,7 @@ export class SessionHandle<
       definition,
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
-      sandbox: input.sandbox,
+      sandbox,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
@@ -911,7 +912,9 @@ export class SessionHandle<
       throwIfSignalAborted(params.signal);
       // The checkout may have changed since the parent thread was built. The
       // shared sandbox is already configured by createTurn at this point.
-      const refresh = input.sandbox?.refreshBoundRepositoryState({ signal: params.signal });
+      const refresh = params.parentDefinition.readOnly
+        ? undefined
+        : input.sandbox?.refreshBoundRepositoryState({ signal: params.signal });
       if (refresh !== undefined) {
         await awaitWithAbort({ operation: refresh, signal: params.signal });
       }
@@ -935,6 +938,8 @@ export class SessionHandle<
       const childDefinition: AgentDefinition = {
         ...definition,
         toolSets: params.parentDefinition.toolSets ?? definition.toolSets,
+        // A sub-agent of a read-only agent stays read-only, whatever definition it was resolved with.
+        readOnly: params.parentDefinition.readOnly === true || definition.readOnly === true,
         // The delegated task goes in as the initial user message; the sub-agent
         // system prompt is SUB_AGENT_IDENTITY (added by AgentThread.buildInstruction).
         instruction: undefined,
@@ -949,13 +954,14 @@ export class SessionHandle<
         // Sub-agents should return free-form summaries to the parent, not the user-facing structured response.
         responseFormat: undefined,
       };
+      const sandbox = childDefinition.readOnly ? undefined : input.sandbox;
       const capabilities = threadCapabilities({
         spec: input.spec,
         definition: childDefinition,
         compactionModel,
         isChild: true,
-        sandbox: input.sandbox,
-        sandboxAvailable: Boolean(input.sandbox),
+        sandbox,
+        sandboxAvailable: Boolean(sandbox),
         tracing: input.tracing,
         logger: input.resolver.logger,
         compactionContext: input.resolver.compactionContext,
@@ -968,7 +974,7 @@ export class SessionHandle<
         definition: childDefinition,
         threadId: params.threadId,
         title: params.request.name,
-        sandbox: input.sandbox,
+        sandbox,
         parent: params.parent,
         agentInfo: params.request,
         capabilities,

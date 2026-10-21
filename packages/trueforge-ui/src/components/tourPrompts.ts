@@ -265,6 +265,12 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
 /** The "What Aman can do" list: one card per capability, each a tap away from a chat. */
 export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
+    // Naming the guide invokes it, so the reply comes from Iris, the guide persona.
+    key: 'get-to-know',
+    label: 'Get to know Aman',
+    prompt: 'Iris, introduce yourself and show me how to get started.',
+  },
+  {
     key: 'email',
     label: 'Handle your email',
     prompt: 'Go through my unread email and tell me what needs a reply first.',

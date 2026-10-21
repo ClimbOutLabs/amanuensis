@@ -50,6 +50,11 @@ export class Controller {
     this.#logger = params.logger;
   }
 
+  /** True after start() and before stop(); the help check reads it to say whether schedules run. */
+  isRunning(): boolean {
+    return this.#state.size > 0 && !this.#abortController.signal.aborted;
+  }
+
   /** Shared abort signal; aborted by {@link stop}. */
   get signal(): AbortSignal {
     return this.#abortController.signal;

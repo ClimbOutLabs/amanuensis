@@ -1090,6 +1090,11 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_GIT_BRIDGE_DIR: string;
   /**
+   * The latest full check written by the installer on the computer (`aman doctor`, install, upgrade,
+   * refresh). Read only; the app never runs host commands. Derived: `{app data dir}/host-report.json`.
+   */
+  HOST_REPORT_PATH: string;
+  /**
    * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
    * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
    * CURL_CA_BUNDLE. Nothing else of the environment reaches git.
@@ -1885,6 +1890,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
+  HOST_REPORT_PATH: path.join(appDataDir, 'host-report.json'),
   SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
     Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
   ),

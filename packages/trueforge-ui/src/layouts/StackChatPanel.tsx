@@ -12,6 +12,7 @@ import { cn } from '../atoms/lib/cn.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
+import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -75,6 +76,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
 
   return (
     <div className={cn('relative flex h-full min-h-0 flex-col', className)}>
+      <HelpNewChatBridge />
       {settingsOpen ? (
         <div className="min-h-0 flex-1">
           <Suspense
@@ -126,6 +128,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
       ) : (
         <>
           <PageHeader
+            helpAction
             start={
               <>
                 {showNewActions ? (

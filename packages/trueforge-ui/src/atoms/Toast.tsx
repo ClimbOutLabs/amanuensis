@@ -15,9 +15,11 @@ export type ToastProps = {
   onOpenChange: (open: boolean) => void;
   variant?: 'error' | 'success';
   className?: string;
+  /** A control under the message, such as the help button on an error. */
+  action?: ReactNode;
 };
 
-export function Toast({ title, description, open, onOpenChange, variant = 'error', className }: ToastProps) {
+export function Toast({ title, description, open, onOpenChange, variant = 'error', className, action }: ToastProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -86,6 +88,7 @@ export function Toast({ title, description, open, onOpenChange, variant = 'error
             {description}
           </div>
         ) : null}
+        {action ? <div className="mt-2">{action}</div> : null}
       </div>
     </div>
   );
