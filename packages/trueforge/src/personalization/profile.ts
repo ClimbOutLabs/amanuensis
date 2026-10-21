@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+
 export const PERSONALIZATION_CONTEXT_VERSION = 'personalization-context/v1';
 export const PERSONALIZATION_MAX_CONTEXT_CHARACTERS = 6_000;
 /** Hard bound on the learned document; the learning pass drops oversized rewrites whole. */
@@ -15,6 +17,8 @@ export interface PersonalizationProfileContent {
   address_as: string | null;
   user_profile: string | null;
   pinned_preferences: string[];
+  /** The areas the user picked, in the order picked. Shapes the Tour's cards only, never the prompt. */
+  help_areas: HelpAreaId[];
   /** Host-maintained learned document (markdown); null until the learning pass writes one. */
   learned_profile: string | null;
   /**
@@ -71,6 +75,7 @@ export function normalizePersonalizationContent(input: PersonalizationProfileCon
     address_as: normalized(input.address_as),
     user_profile: normalized(input.user_profile),
     pinned_preferences: input.pinned_preferences.map(preference => preference.trim()).filter(Boolean),
+    help_areas: input.help_areas,
     learned_profile: normalized(input.learned_profile),
     learning_enabled: input.learning_enabled,
   };
@@ -104,11 +109,11 @@ export function personalizationDigest(input: PersonalizationProfileContent): str
  * True when an upsert would leave the stored profile exactly as it is, which the stores treat
  * as a no-op that neither writes nor advances the revision.
  *
- * The digest cannot answer this alone. It identifies the model-relevant source profile, and
- * `learning_enabled` is a host control that never reaches the prompt, so a write that only
- * toggles the switch hashes identically to the row it would replace. Folding the flag into the
- * digest instead would misrepresent the source profile and would change every digest already
- * stored. Comparing the flag beside the digest keeps both honest.
+ * The digest cannot answer this alone. It identifies the model-relevant source profile, while
+ * `learning_enabled` and `help_areas` never reach the prompt, so a write that only changes one of
+ * them hashes identically to the row it would replace. Folding them into the digest instead would
+ * misrepresent the source profile and would change every digest already stored. Comparing them
+ * beside the digest keeps both honest.
  */
 export function isPersonalizationUnchanged(params: {
   existing: PersonalizationProfile;
@@ -116,7 +121,9 @@ export function isPersonalizationUnchanged(params: {
 }): boolean {
   return (
     params.existing.digest === personalizationDigest(params.next) &&
-    params.existing.learning_enabled === params.next.learning_enabled
+    params.existing.learning_enabled === params.next.learning_enabled &&
+    params.existing.help_areas.length === params.next.help_areas.length &&
+    params.existing.help_areas.every((area, index) => area === params.next.help_areas[index])
   );
 }
 

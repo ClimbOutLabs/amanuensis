@@ -91,6 +91,7 @@ async function setup(
       address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: false,
     });

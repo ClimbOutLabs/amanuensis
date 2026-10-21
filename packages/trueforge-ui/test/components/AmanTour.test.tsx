@@ -2,20 +2,23 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { AmanTour } from '@/components/AmanTour.js';
 import {
-  AmanTour,
   CAPABILITY_PROMPTS,
-  TRY_A_DAY_PROMPTS,
+  GENERAL_DAY_PROMPTS,
+  tryADayPrompts,
   visibleTourPrompts,
   type TourCapabilities,
-} from '@/components/AmanTour.js';
+} from '@/components/tourPrompts.js';
 
-const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true };
-const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false };
+const ALL: TourCapabilities = { email: true, calendar: true, sandbox: true, maps: true };
+const NONE: TourCapabilities = { email: false, calendar: false, sandbox: false, maps: false };
+const GENERAL_CARDS = tryADayPrompts({ helpAreas: [], capabilities: ALL });
 
 function renderTour(overrides: Partial<ComponentProps<typeof AmanTour>> = {}) {
   const props = {
     capabilities: ALL,
+    helpAreas: [],
     canSend: true,
     onSend: vi.fn(),
     onHide: vi.fn(),
@@ -55,17 +58,37 @@ describe('AmanTour', () => {
   it('sends each day card its exact prompt', () => {
     const { onSend } = renderTour();
 
-    for (const item of TRY_A_DAY_PROMPTS) {
+    for (const item of GENERAL_CARDS) {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(item.label) }));
       expect(onSend).toHaveBeenLastCalledWith(item.prompt);
     }
-    expect(onSend).toHaveBeenCalledTimes(TRY_A_DAY_PROMPTS.length);
+    expect(onSend).toHaveBeenCalledTimes(GENERAL_CARDS.length);
+  });
+
+  it('shows the morning brief first and the general set when no area is chosen', () => {
+    renderTour();
+
+    const labels = screen.getAllByRole('button').map(button => button.textContent ?? '');
+    const dayStart = labels.findIndex(label => label.startsWith('Your morning brief'));
+    expect(dayStart).toBeGreaterThanOrEqual(0);
+    expect(labels[dayStart + 1]).toMatch(/^Check for scams/);
+    expect(GENERAL_CARDS).toHaveLength(6);
+  });
+
+  it('builds the day cards from the chosen areas, in the order chosen', () => {
+    renderTour({ helpAreas: ['focus'] });
+    const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
+
+    expect(days.getByRole('button', { name: /Help me clear my head/ })).toBeInTheDocument();
+    expect(days.getByRole('button', { name: /Help me get started/ })).toBeInTheDocument();
+    expect(days.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
+    expect(days.getAllByRole('button')).toHaveLength(6);
   });
 
   it('shows the prompt text on each day card so people see what will be sent', () => {
     renderTour();
 
-    for (const item of TRY_A_DAY_PROMPTS) {
+    for (const item of GENERAL_CARDS) {
       expect(screen.getByRole('button', { name: new RegExp(item.label) })).toHaveTextContent(item.prompt);
     }
   });
@@ -86,7 +109,8 @@ describe('AmanTour', () => {
 
     expect(days.queryByRole('button', { name: /Check for scams/ })).not.toBeInTheDocument();
     expect(days.queryByRole('button', { name: /Reply to an email/ })).not.toBeInTheDocument();
-    expect(days.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
+    expect(days.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
+    expect(days.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Your morning brief/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Handle your email' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
@@ -101,7 +125,7 @@ describe('AmanTour', () => {
     expect(screen.getByRole('button', { name: 'Handle your email' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Check for scams/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Help me with doctor's appointments/ })).not.toBeInTheDocument();
   });
 
   it('turns the buttons off and says why when no model is set', () => {
@@ -124,8 +148,8 @@ describe('AmanTour', () => {
 
 describe('visibleTourPrompts', () => {
   it('keeps the prompts that need nothing, whatever the capabilities', () => {
-    const visible = visibleTourPrompts(TRY_A_DAY_PROMPTS, NONE);
+    const visible = visibleTourPrompts(GENERAL_DAY_PROMPTS, NONE);
 
-    expect(visible.map(item => item.key)).toEqual(['brief', 'plan-day']);
+    expect(visible.map(item => item.key)).toEqual(['plan-day']);
   });
 });
