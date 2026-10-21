@@ -656,24 +656,9 @@ export class PackageMirrorGateway {
     let tempPath: string | undefined;
     try {
       if (input.cacheTarget !== undefined) {
+        // The entry is committed before the guest sees the end of the body, so an immediate repeat is a cache hit.
         tempPath = `${input.cacheTarget.bodyPath}.part-${String(process.pid)}-${String(Date.now())}`;
-        const fileStream = createWriteStream(tempPath);
-        await pipeline(
-          input.raw,
-          counter,
-          new Transform({
-            transform: (chunk: Buffer, _encoding, callback) => {
-              fileStream.write(chunk);
-              callback(null, chunk);
-            },
-            flush: callback => {
-              fileStream.end(() => {
-                callback();
-              });
-            },
-          }),
-          input.res,
-        );
+        await pipeline(input.raw, counter, createWriteStream(tempPath));
         await rename(tempPath, input.cacheTarget.bodyPath);
         tempPath = undefined;
         await writeFile(
@@ -681,6 +666,7 @@ export class PackageMirrorGateway {
           JSON.stringify({ status: input.status, contentType: input.contentType ?? null }),
         );
         void this.#enforceCacheCap();
+        await pipeline(createReadStream(input.cacheTarget.bodyPath), input.res);
       } else {
         await pipeline(input.raw, counter, input.res);
       }
