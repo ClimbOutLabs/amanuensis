@@ -295,9 +295,10 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
   },
   {
-    key: 'documents',
-    label: 'Keep living documents',
-    prompt: 'Start a packing list for a weekend trip that we can keep updating.',
+    key: 'spaces',
+    label: 'Keep pages in Spaces',
+    prompt:
+      'Make a space called Home projects: a board with To do, Doing and Done that you keep up to date as we talk. Then tell me where to find it.',
   },
   {
     key: 'specialists',

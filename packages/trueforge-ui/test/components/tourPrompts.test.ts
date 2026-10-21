@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 import {
+  CAPABILITY_PROMPTS,
   GENERAL_DAY_PROMPTS,
   MORNING_BRIEF,
   tryADayPrompts,
@@ -158,5 +159,17 @@ describe('visibleTourPrompts', () => {
       'meals',
       'self-care',
     ]);
+  });
+});
+
+describe('CAPABILITY_PROMPTS', () => {
+  it('offers one Spaces card with no capability requirement, and no documents card', () => {
+    const spaces = CAPABILITY_PROMPTS.filter(item => item.key === 'spaces');
+
+    expect(spaces).toHaveLength(1);
+    expect(spaces[0]).toMatchObject({ label: 'Keep pages in Spaces' });
+    expect(spaces[0]?.needs).toBeUndefined();
+    expect(CAPABILITY_PROMPTS.map(item => item.key)).not.toContain('documents');
+    expect(visibleTourPrompts(CAPABILITY_PROMPTS, NONE).map(item => item.key)).toContain('spaces');
   });
 });

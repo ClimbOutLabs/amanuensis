@@ -115,6 +115,7 @@ describe('AmanTour', () => {
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Learn new skills' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run things on a schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep pages in Spaces' })).toBeInTheDocument();
   });
 
   it('keeps the email prompts for an email grant alone and the calendar prompts for a calendar grant alone', () => {
