@@ -298,7 +298,7 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     key: 'spaces',
     label: 'Keep pages in Spaces',
     prompt:
-      'Make a space called Home projects: a board with To do, Doing and Done that you keep up to date as we talk. Then tell me where to find it.',
+      'Make a space called Dog breeds. It\'s a page I can come back to while I pick a dog. For each breed show: size, energy level, grooming, how it does with kids and other pets, apartment-friendly or not, common health issues, and typical lifespan. Start with 8 popular family breeds as cards I can compare at a glance. Add a "My shortlist" section at the top that stays empty until I tell you which ones I like. Keep it up to date as we talk. Then tell me where to find it.',
   },
   {
     key: 'specialists',
