@@ -201,11 +201,7 @@ export type ApprovalResubmission<TTurnCustom extends object> =
  */
 function isSameApprovalDecision(recorded: ApprovalDecision, submitted: ApprovalDecision): boolean {
   if (recorded.status === 'allow') {
-    return (
-      submitted.status === 'allow' &&
-      (recorded.scope ?? 'once') === (submitted.scope ?? 'once') &&
-      recorded.mail_recipients === submitted.mail_recipients
-    );
+    return submitted.status === 'allow' && (recorded.scope ?? 'once') === (submitted.scope ?? 'once');
   }
   return submitted.status === 'deny';
 }
