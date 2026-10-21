@@ -7128,6 +7128,26 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "help_areas": {
+            "default": [],
+            "description": "The help areas the user picked for the Tour, in the order picked. Empty means none chosen.",
+            "example": [
+              "focus",
+              "family"
+            ],
+            "items": {
+              "enum": [
+                "focus",
+                "family",
+                "caring",
+                "new_country",
+                "work_money"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
           "learned_profile": {
             "default": null,
             "description": "Host-learned profile document (markdown). Maintained by the learning pass; editable by the user.",
@@ -7223,6 +7243,9 @@
           "address_as": "Sam",
           "assistant_identity": "A thoughtful local-first personal assistant.",
           "assistant_name": "Aman",
+          "help_areas": [
+            "focus"
+          ],
           "learned_profile": null,
           "learning_enabled": false,
           "pinned_preferences": [
@@ -7261,6 +7284,26 @@
               "string",
               "null"
             ]
+          },
+          "help_areas": {
+            "default": [],
+            "description": "The help areas the user picked for the Tour, in the order picked. Empty means none chosen.",
+            "example": [
+              "focus",
+              "family"
+            ],
+            "items": {
+              "enum": [
+                "focus",
+                "family",
+                "caring",
+                "new_country",
+                "work_money"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
           },
           "learned_profile": {
             "default": null,
@@ -12163,6 +12206,9 @@
             "address_as": "Sam",
             "assistant_identity": "A thoughtful local-first personal assistant.",
             "assistant_name": "Aman",
+            "help_areas": [
+              "focus"
+            ],
             "learned_profile": null,
             "learning_enabled": false,
             "pinned_preferences": [

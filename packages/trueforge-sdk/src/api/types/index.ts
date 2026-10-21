@@ -309,6 +309,8 @@ export * from "./PersonaKnowledgeDocument.js";
 export * from "./PersonalizationContext.js";
 export * from "./PersonalizationProfile.js";
 export * from "./PersonalizationProfileContent.js";
+export * from "./PersonalizationProfileContentHelpAreasItem.js";
+export * from "./PersonalizationProfileHelpAreasItem.js";
 export * from "./PreviousTurnIdInput.js";
 export * from "./ProfileLearnedPersistedEvent.js";
 export * from "./ProvisioningPersistedEvent.js";
