@@ -156,7 +156,9 @@ import_run() {
 
 cmd_instance_import() {
   local name=${OPT_NAME:-} file=${OPT_IMPORT_FILE:-} owner
-  [ -n "$name" ] && [ -n "$file" ] || usage_die "usage: install.sh instance import NAME FILE"
+  if [ -z "$name" ] || [ -z "$file" ]; then
+    usage_die "usage: install.sh instance import NAME FILE"
+  fi
   valid_name "$name" || usage_die "invalid instance name"
   [ -f "$file" ] || die "There is no file at $file."
   require_installed

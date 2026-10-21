@@ -650,7 +650,9 @@ check_tls() {
     fix=$3
   }
   for name in $(list_instances); do
-    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+      continue
+    fi
     any=1
   done
   [ "$any" = 1 ] || return 0
@@ -663,7 +665,9 @@ check_tls() {
   release="${AMAN_HOME}/release/release.json"
   image=$(json_value "$release" app_image)
   for name in $(list_instances); do
-    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+      continue
+    fi
     if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
       info=$(bounded 30 docker run --rm --network none --user "$(id -u):$(id -g)" -v "${AMAN_HOME}/tls:/tls:ro" -v "$(lib_file pki.mjs):/pki.mjs:ro" \
         --entrypoint node "$image" /pki.mjs info /tls/ca "/tls/leaf/$name" 2>/dev/null)
@@ -1649,7 +1653,9 @@ renew_tls_if_due() {
     [ -f "$conf" ] || continue
     name=${conf##*/}
     name=${name%.conf}
-    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    if [ "$(registry_value "$name" tls)" != local ] || [ -z "$(registry_value "$name" tls_port)" ]; then
+      continue
+    fi
     ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
     case "$ends" in '' | *[![:digit:]]*) continue ;; esac
     if [ $((ends - now)) -le $((60 * 86400)) ]; then due=1; fi
