@@ -182,7 +182,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(text).toBe('ok');
-    expect(server.callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} }, undefined);
+    expect(server.callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} }, undefined, undefined);
   });
 });
 

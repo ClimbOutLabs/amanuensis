@@ -1,3 +1,5 @@
+import type { RawToolCall } from '../../llm/LLMTypes';
+import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { isPrivateReadToolName } from '../../permissions/privateReadTools';
 import {
   hasReadPrivateData,
@@ -6,10 +8,26 @@ import {
 } from '../../permissions/webSearch';
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
+import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../../runtime/DeferredTool';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 
 export const PRIVATE_DATA_READ_STATE_KEY = 'tfy.private_data_read';
+
+/**
+ * The name a call is recorded under. A call the model made through the call_tool wrapper is recorded under
+ * the tool the wrapper names, so wrapped and direct calls to the same tool count the same way; a wrapper
+ * whose arguments do not parse keeps the wrapper's name, which reads no private data.
+ */
+function recordedToolName(call: RawToolCall): string {
+  if (call.function.name !== CALL_TOOL_NAME && !call.function.name.endsWith(`__${CALL_TOOL_NAME}`)) {
+    return call.function.name;
+  }
+  const wrapperArgs = parseToolCallArguments(call);
+  return wrapperArgs === undefined
+    ? call.function.name
+    : (tryParseCallToolWrapper(wrapperArgs)?.tool_name ?? call.function.name);
+}
 
 /**
  * Whether the conversation so far called a tool that reads private data. The saved flag can be missing for a
@@ -21,7 +39,7 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
     message =>
       isLLMContextMessage(message) &&
       message.role === 'assistant' &&
-      (message.tool_calls ?? []).some(call => isPrivateReadToolName(call.function.name)),
+      (message.tool_calls ?? []).some(call => isPrivateReadToolName(recordedToolName(call))),
   );
 }
 
