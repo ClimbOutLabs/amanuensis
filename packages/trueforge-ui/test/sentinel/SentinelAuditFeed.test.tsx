@@ -78,6 +78,13 @@ describe('SentinelAuditFeed', () => {
         tier: 1,
         action_type: 'file_read',
       }),
+      makeEntry({
+        id: 'entry-6',
+        outcome: 'logged',
+        description: 'Wrote the release notes',
+        tier: 3,
+        action_type: 'file_write',
+      }),
     ]);
     render(
       <SentinelApiProvider api={api}>
@@ -91,7 +98,8 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText('Refused')).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === ' · Offline mode was on.')).toBeInTheDocument();
     expect(screen.getByText('Ran')).toBeInTheDocument();
-    expect(screen.getByText('Held or noted')).toBeInTheDocument();
+    expect(screen.getByText('Done without asking')).toBeInTheDocument();
+    expect(screen.getByText('Held for you')).toBeInTheDocument();
   });
 
   it('renders an Always allow toggle for each Tier 2 kind, off by default', async () => {
