@@ -225,6 +225,41 @@ export function parseMailEmailMcpUrl(raw: string | undefined): string | undefine
 }
 
 /**
+ * Parses `CALENDAR_CONNECTOR_URL`: the Calendar connector's MCP endpoint. Unset or blank means no calendar
+ * sidecar. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseCalendarConnectorUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(
+      `CALENDAR_CONNECTOR_URL must be an http(s) URL such as http://calendar-caldav:9558/mcp, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
+ */
+export function firstPartyOriginsFor({
+  raw,
+  calendarUrl,
+}: {
+  raw: string | undefined;
+  calendarUrl: string | undefined;
+}): string[] {
+  const origins = parseFirstPartyMcpOrigins(raw);
+  const calendarOrigin = calendarUrl === undefined ? undefined : normalizedOrigin(calendarUrl);
+  if (calendarOrigin !== undefined && !origins.includes(calendarOrigin)) {
+    origins.push(calendarOrigin);
+  }
+  return origins;
+}
+
+/**
  * Source reference the running build came from. A Docker `ARG` that the build was
  * never given still reaches the process as an empty string, so blank counts as unset.
  */
@@ -1017,6 +1052,12 @@ export interface SharedServerConfiguration {
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
    */
   MAIL_EMAIL_MCP_URL: string | undefined;
+  /**
+   * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
+   * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
+   * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
+   */
+  CALENDAR_CONNECTOR_URL: string | undefined;
   /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
@@ -1835,8 +1876,12 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
-  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+  FIRST_PARTY_MCP_ORIGINS: firstPartyOriginsFor({
+    raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
+    calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+  }),
   MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

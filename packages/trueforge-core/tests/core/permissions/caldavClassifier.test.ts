@@ -26,7 +26,7 @@ function caldavAction(
     tool_name,
     canonical_params,
     tool_type: 'mcp',
-    mcp_server_name: 'caldav',
+    mcp_server_name: 'Calendar',
     mcp_first_party: true,
     mcp_hints: { read_only_hint: false, open_world_hint: false },
     ...extra,

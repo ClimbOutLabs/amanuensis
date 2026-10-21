@@ -3,7 +3,7 @@
  * The name is the MCP server name the classifier keys on, so only the mounted connector gets
  * these rules.
  */
-export const CALDAV_SERVER_NAME = 'caldav';
+export const CALDAV_SERVER_NAME = 'Calendar';
 
 /** The only tools the sidecar exposes. Anything else on the server is refused. */
 export const CALDAV_TOOL_NAMES = [
