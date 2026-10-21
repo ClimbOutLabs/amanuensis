@@ -206,8 +206,9 @@ function pairMatches({ certFile, keyFile }) {
 /**
  * Makes the root certificate and its key unless a good one exists. The root may vouch only for private addresses and
  * the names given here, only for web servers, and not for any authority below it: a root that lacks a name asked for,
- * has older limits, or is about to end is made again, and `rotated` says so, since every device must then trust the
- * new one. The key is readable by its owner only.
+ * has older limits, is about to end, or is broken (only its certificate or only its key left) is made again, and
+ * `rotated` says so whenever anything of an earlier one was there, since every device must then trust the new one.
+ * The key is readable by its owner only.
  */
 export function ensureCa({ caDir, names = [], now = new Date() }) {
   const certFile = path.join(caDir, 'root.crt');
@@ -224,6 +225,10 @@ export function ensureCa({ caDir, names = [], now = new Date() }) {
       return { created: false, rotated: false, notAfter: current.validToDate, fingerprint: fingerprintOf(current) };
     }
   }
+  // Anything left of an earlier authority means devices may already trust it, so replacing it is a rotation.
+  const hadAuthority = [certFile, keyFile, namesFile(caDir), path.join(caDir, 'root.fingerprint')].some(file =>
+    fs.existsSync(file),
+  );
   const extras = [...new Set([...(stored ?? []), ...asked].map(candidate => candidate.toLowerCase()))].sort();
   const { publicKey, privateKey } = makeKey();
   const notBefore = new Date(now.getTime() - DAY_MS);
@@ -253,7 +258,7 @@ export function ensureCa({ caDir, names = [], now = new Date() }) {
   });
   const created = new crypto.X509Certificate(pem);
   writeFile({ file: path.join(caDir, 'root.fingerprint'), text: `${fingerprintOf(created)}\n`, mode: 0o644 });
-  return { created: true, rotated: exists, notAfter, fingerprint: fingerprintOf(created) };
+  return { created: true, rotated: hadAuthority, notAfter, fingerprint: fingerprintOf(created) };
 }
 
 function namesOf(cert) {

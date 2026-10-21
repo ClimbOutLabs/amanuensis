@@ -1083,9 +1083,13 @@ installer_state_remove() {
   # A --home that points at a source checkout must keep its own lib, bin and release folders.
   [ -e "$AMAN_HOME/.git" ] || [ -d "$AMAN_HOME/installer" ] && return 0
   [ -d "$STATE_DIR" ] && [ ! -L "$AMAN_HOME" ] && [ ! -L "$STATE_DIR" ] || return 0
-  for entry in instances machine tls lib bin release runtime; do
+  for entry in instances machine lib bin release runtime; do
     rm -rf -- "${AMAN_HOME:?}/$entry"
   done
+  # The authority belongs to this computer, not to the instances, so it stays: a device that trusts this
+  # computer keeps trusting it when an instance is installed again. Only the instances' own certificates
+  # and trust pages go.
+  rm -rf -- "${AMAN_HOME:?}/tls/leaf" "${AMAN_HOME:?}/tls/trust"
   find "$STATE_DIR" -mindepth 1 -maxdepth 1 ! -name install.log ! -name lock -exec rm -rf -- {} +
 }
 
@@ -1214,6 +1218,9 @@ cmd_instance_remove() {
     line="$line; this was the last instance, so the shared speech-to-text service with its model and the installer's files in $AMAN_HOME were removed too"
   fi
   say "$line."
+  if [ "$last_one" = 1 ] && [ -f "$(tls_ca_dir)/root.crt" ]; then
+    say "This computer's trust certificate was kept, so your devices will still trust Aman when you install it again."
+  fi
   if [ "$last_one" = 1 ] && [ -d "$BACKUPS_DIR" ]; then
     say "Your backups in $BACKUPS_DIR were kept. To delete them: rm -r $BACKUPS_DIR"
   fi

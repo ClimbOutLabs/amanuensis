@@ -406,6 +406,20 @@ describe('the local certificate authority', () => {
     assert.equal(ensureCa({ caDir, names: NAMES }).created, false);
   });
 
+  it('counts a replacement as a rotation when only part of the authority is left', () => {
+    const { caDir } = fresh();
+    ensureCa({ caDir, names: NAMES });
+    rmSync(path.join(caDir, 'root.key'));
+    const noKey = ensureCa({ caDir, names: NAMES });
+    assert.equal(noKey.created, true);
+    assert.equal(noKey.rotated, true, 'a certificate left without its key was still an authority devices may trust');
+    rmSync(path.join(caDir, 'root.crt'));
+    const noCert = ensureCa({ caDir, names: NAMES });
+    assert.equal(noCert.created, true);
+    assert.equal(noCert.rotated, true, 'a key left without its certificate was still part of an authority');
+    assert.equal(ensureCa({ caDir, names: NAMES }).created, false);
+  });
+
   it('writes the fingerprint of the root where the installer can read it, in the form devices show', () => {
     const { caDir } = fresh();
     const result = ensureCa({ caDir, names: NAMES });

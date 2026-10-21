@@ -68,7 +68,7 @@ tls_all_names() { # name of the instance being set up
 
 # Makes the authority (once for this computer) and the certificate for the instance's addresses (again when they
 # change or it is close to its end). The authority is made again, with every device needing to trust it again, only
-# when it lacks a name that is now needed or has older limits (from an earlier version); TLS_AUTHORITY_REPLACED says
+# when it lacks a name that is now needed, has older limits (from an earlier version), or is broken; TLS_AUTHORITY_REPLACED says
 # so for the closing lines, and every other instance gets a certificate under the new one. A failure is fatal because
 # the instance would be unreachable.
 TLS_AUTHORITY_REPLACED=0
