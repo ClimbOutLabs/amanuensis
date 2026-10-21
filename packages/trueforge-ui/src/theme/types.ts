@@ -78,7 +78,16 @@ export type SemanticTokens = {
   chart7: string;
   chart8: string;
   // Kept internals
+  /** Keyboard focus ring. Gold ink in light mode, bright gold in dark. */
   focusRing: string;
+  /** The one highlight: fills, marks, the pending badge. Never text in light mode. */
+  gold: string;
+  /** Gold as words and lines: links, active nav, the focus ring's partner in light mode. */
+  goldInk: string;
+  /** Soft gold fill behind a selected or pending card. */
+  goldSoft: string;
+  /** Edge for a gold-soft fill, where a bright edge alone would be too faint. */
+  goldLine: string;
   radius: string;
   composerRadius: string;
   overlay: string;
@@ -286,6 +295,10 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   chart7: '--chart-7',
   chart8: '--chart-8',
   focusRing: '--focus-ring',
+  gold: '--gold',
+  goldInk: '--gold-ink',
+  goldSoft: '--gold-soft',
+  goldLine: '--gold-line',
   radius: '--radius',
   composerRadius: '--composer-radius',
   overlay: '--overlay',

@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
+import { HelpStuckButton } from '../help/HelpStuckButton.js';
+import { rememberErrorText } from '../help/lastError.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 import { EXPIRED_REQUEST_DESCRIPTION, EXPIRED_REQUEST_TITLE, isStaleApprovalError } from '../utils/staleApproval.js';
@@ -102,6 +104,7 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
       ...content,
       ...(options === undefined ? {} : { title: options.title }),
     };
+    rememberErrorText([item.title, item.description].filter(Boolean).join(': '));
     setToasts(prev => [...prev, item].slice(-MAX_VISIBLE_TOASTS));
   }, []);
 
@@ -131,6 +134,7 @@ export function ToasterProvider({ children }: { children: ReactNode }) {
             title={toast.title}
             description={toast.description ?? ''}
             variant={toast.variant}
+            action={toast.variant === 'error' ? <HelpStuckButton /> : undefined}
             open
             onOpenChange={open => {
               if (!open) dismiss(toast.id);

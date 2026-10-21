@@ -24,6 +24,23 @@ function assistantCalling(name: string): ContextMessage {
   };
 }
 
+function assistantCallingWithArguments(name: string, args: string): ContextMessage {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      { id: 'call-1', type: 'function', function: { name, arguments: args }, tool_info: makeUnknownToolInfo(name) },
+    ],
+  };
+}
+
+function assistantCallingThroughWrapper(input: { server: string; tool: string }): ContextMessage {
+  return assistantCallingWithArguments(
+    'call_tool',
+    JSON.stringify({ mcp_server: input.server, tool_name: input.tool, input: {} }),
+  );
+}
+
 async function collect(iterable: Iterable<unknown> | AsyncIterable<unknown>): Promise<unknown[]> {
   const out: unknown[] = [];
   for await (const item of iterable) {
@@ -93,6 +110,44 @@ describe('privateDataReadCapability', () => {
       const { turn, run } = preLLM([assistantCalling('web_search')]);
       expect(await run()).toEqual([]);
       expect(hasReadPrivateData(turn)).toBe(false);
+    });
+
+    it('also counts a mail read the model reached through the call_tool wrapper', async () => {
+      const { turn, run } = preLLM([assistantCallingThroughWrapper({ server: 'gmail', tool: 'read_email' })]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('also counts a calendar read the model reached through the call_tool wrapper', async () => {
+      const { turn, run } = preLLM([
+        assistantCallingThroughWrapper({ server: 'google_calendar', tool: 'list_events' }),
+      ]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('also counts a wrapped read when the wrapper name is qualified by its server', async () => {
+      const wrapped = assistantCallingWithArguments(
+        'deferred-tools__call_tool',
+        JSON.stringify({ mcp_server: 'gmail', tool_name: 'list_inbox_threads', input: {} }),
+      );
+      const { turn, run } = preLLM([wrapped]);
+      expect(await run()).toEqual(SAVED);
+      expect(hasReadPrivateData(turn)).toBe(true);
+    });
+
+    it('does nothing for a wrapped call naming a tool that does not read private data', async () => {
+      const { turn, run } = preLLM([assistantCallingThroughWrapper({ server: 'search', tool: 'web_search' })]);
+      expect(await run()).toEqual([]);
+      expect(hasReadPrivateData(turn)).toBe(false);
+    });
+
+    it('does nothing for a wrapper whose arguments name no tool or do not parse', async () => {
+      for (const message of [assistantCalling('call_tool'), assistantCallingWithArguments('call_tool', '{not json')]) {
+        const { turn, run } = preLLM([message]);
+        expect(await run()).toEqual([]);
+        expect(hasReadPrivateData(turn)).toBe(false);
+      }
     });
   });
 

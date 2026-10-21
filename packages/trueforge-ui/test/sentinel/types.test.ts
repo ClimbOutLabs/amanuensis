@@ -10,6 +10,7 @@ import {
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
+  sentinelAuditLabel,
 } from '@/sentinel/types.js';
 
 describe('parseToolTier', () => {
@@ -477,7 +478,20 @@ describe('held actions', () => {
 
   it('reads the held flag, the always-allow offer and the expiry', () => {
     const [info] = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [heldRef] });
-    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.alwaysAllowOffered).toBe(true);
+  });
+
+  it('offers always allow for a held mail read the owner may grant, and never for a held send', () => {
+    const mailRead = {
+      ...heldRef,
+      tool_call_id: 'call-read',
+      tool_name: 'list-messages',
+      tier3_card: { plain_what: 'Run list-messages on Apple Mail.' },
+    };
+    const send = { ...heldRef, tool_call_id: 'call-send', tool_name: 'send-email', can_always_allow: false };
+    const parsed = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [mailRead, send] });
+    expect(parsed.map(info => info.alwaysAllowOffered)).toEqual([true, false]);
   });
 
   it('reads the same fields after the SDK camel-cases them', () => {
@@ -509,7 +523,8 @@ describe('held actions', () => {
       { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
     );
     const [info] = extractSentinelFromEvent(parsed);
-    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
+    expect(info?.alwaysAllowOffered).toBe(true);
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
@@ -522,7 +537,8 @@ describe('held actions', () => {
       type: 'tool.approval_required',
       tool_calls: [{ ...heldRef, can_always_allow: undefined, expires_at: undefined }],
     });
-    expect(held?.held).toEqual({ alwaysAllowOffered: false, expiresAt: null });
+    expect(held?.held).toEqual({ expiresAt: null });
+    expect(held?.alwaysAllowOffered).not.toBe(true);
   });
 
   it('reads the answers a session already recorded from the inputs of its turns', () => {
@@ -629,6 +645,19 @@ describe('parseAuditEntries', () => {
   });
 });
 
+describe('sentinelAuditLabel', () => {
+  it('says a silent Tier 1 run went ahead without asking, and a held Tier 2 or 3 call is held', () => {
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done without asking');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Held for you');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Held for you');
+  });
+
+  it('keeps the plain label for every other outcome', () => {
+    expect(sentinelAuditLabel({ outcome: 'ran', tier: 2 })).toBe('Ran');
+    expect(sentinelAuditLabel({ outcome: 'auto_denied', tier: 3 })).toBe('Refused');
+  });
+});
+
 describe('parseUserSettings', () => {
   it('defaults to offline off, nothing relaxed and searches running without asking', () => {
     const defaults = {
@@ -636,6 +665,7 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
@@ -655,6 +685,7 @@ describe('parseUserSettings', () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 
@@ -668,12 +699,19 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
   });
 
+  it('reads the sandbox setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { sandbox_without_asking: false } }).sandbox_without_asking).toBe(false);
+    expect(parseUserSettings({ data: {} }).sandbox_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { sandbox_without_asking: 'no' } }).sandbox_without_asking).toBe(true);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
   });
 });

@@ -15,7 +15,7 @@ import {
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
 } from './searchHoldText';
-import type { AutoDenyReason, Tier, TierDecision } from './tier';
+import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
 import { SEARCH_AFTER_READ_SILENT_REASON } from './webSearch';
 
 /** Recorded outcome, per tier. */
@@ -59,7 +59,8 @@ export async function recordClassificationAudit(input: {
     decision.reason === MAPS_SILENT_REASON ||
     decision.reason === MAPS_AFTER_READ_SILENT_REASON ||
     decision.reason === SEARCH_AFTER_READ_SILENT_REASON;
-  if (decision.tier === 1 && (decision.sensitive_read || silentRun)) {
+  const silentSandboxRun = SANDBOX_SILENT_REASONS.has(decision.reason);
+  if (decision.tier === 1 && (decision.sensitive_read || silentRun || silentSandboxRun)) {
     outcome = 'logged';
   } else if (decision.tier === 3 && decision.auto_deny !== null) {
     outcome = 'auto_denied';

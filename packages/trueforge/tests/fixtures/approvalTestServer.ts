@@ -176,6 +176,7 @@ function buildApp(input: {
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,

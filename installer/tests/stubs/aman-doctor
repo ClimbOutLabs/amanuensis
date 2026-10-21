@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Stand-in for the doctor shim: prints a fixed document and exits as STUB_DOCTOR_EXIT says.
 printf 'doctor %s\n' "$*" >>"$STUB_LOG"
+# The installer names the command the report is saved for; the real doctor writes it.
+if [ -n "${AMAN_REPORT_COMMAND:-}" ]; then printf 'report %s\n' "$AMAN_REPORT_COMMAND" >>"$STUB_LOG"; fi
 # The sandbox check has its own exit code so a failing sandbox is told apart from a failing machine.
 # shellcheck source=../../lib/ui.sh
 . "$(dirname "$0")/../lib/ui.sh"

@@ -86,6 +86,7 @@ test('user settings read and patch the server envelope', async () => {
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
       maps_without_asking: true,
+      sandbox_without_asking: true,
     },
   }));
   assert.deepEqual(await api.getUserSettings(), {
@@ -93,6 +94,7 @@ test('user settings read and patch the server envelope', async () => {
     tier2_auto_allow: ['file_write'],
     search_without_asking: false,
     maps_without_asking: true,
+    sandbox_without_asking: true,
   });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');

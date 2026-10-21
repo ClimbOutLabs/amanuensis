@@ -1,5 +1,5 @@
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the tour only offers prompts that will work here. */
 export type TourCapabilities = {
@@ -265,6 +265,12 @@ export const HELP_AREAS: Record<HelpAreaId, { label: string; cards: readonly Tou
 /** The "What Aman can do" list: one card per capability, each a tap away from a chat. */
 export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
+    // Naming the guide invokes it, so the reply comes from Iris, the guide persona.
+    key: 'get-to-know',
+    label: 'Get to know Aman',
+    prompt: 'Iris, introduce yourself and show me how to get started.',
+  },
+  {
     key: 'email',
     label: 'Handle your email',
     prompt: 'Go through my unread email and tell me what needs a reply first.',
@@ -355,8 +361,8 @@ function interleave(queues: readonly (readonly TourPrompt[])[]): TourPrompt[] {
 
 /**
  * The six Try a day cards, under the morning brief. Areas share the cards evenly in the order
- * chosen, and any shortfall, including a missing capability, is filled from the general set.
- * With no area chosen, the general set alone.
+ * chosen. A shortfall, such as a card whose capability is missing, is filled first from the
+ * general set, then from the areas not chosen, so the row is always full.
  */
 export function tryADayPrompts({
   helpAreas,
@@ -367,5 +373,8 @@ export function tryADayPrompts({
 }): TourPrompt[] {
   const areaQueues = helpAreas.map(id => visibleTourPrompts(HELP_AREAS[id].cards, capabilities));
   const general = visibleTourPrompts(GENERAL_DAY_PROMPTS, capabilities);
-  return uniqueByKey([...interleave(areaQueues), ...general]).slice(0, DAY_CARD_SLOTS);
+  const otherAreas = HELP_AREA_IDS.filter(id => !helpAreas.includes(id)).flatMap(id =>
+    visibleTourPrompts(HELP_AREAS[id].cards, capabilities),
+  );
+  return uniqueByKey([...interleave(areaQueues), ...general, ...otherAreas]).slice(0, DAY_CARD_SLOTS);
 }
