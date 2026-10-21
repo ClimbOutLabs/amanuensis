@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
 
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
+
 export type PersonalizationProfile = {
   assistant_name: string | null;
   assistant_identity: string | null;
@@ -12,6 +14,8 @@ export type PersonalizationProfile = {
   address_as: string | null;
   user_profile: string | null;
   pinned_preferences: string[];
+  /** The areas the person picked for the Tour, in the order picked; empty when none. */
+  help_areas: HelpAreaId[];
   /** Host-learned markdown document; null until the learning pass writes one. */
   learned_profile: string | null;
   /**
@@ -42,6 +46,7 @@ export const EMPTY_PERSONALIZATION_PROFILE: PersonalizationProfile = {
   address_as: null,
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
 };
 

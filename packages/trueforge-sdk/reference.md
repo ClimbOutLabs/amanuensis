@@ -1411,6 +1411,7 @@ await client.personalization.createOrUpdateProfile({
         addressAs: "Sam",
         assistantIdentity: "A thoughtful local-first personal assistant.",
         assistantName: "Aman",
+        helpAreas: ["focus"],
         learningEnabled: false,
         pinnedPreferences: ["Use short bullet points."],
         userName: "Sam Rivera",
@@ -2368,6 +2369,79 @@ await client.repositories.get("repository_id");
 <dd>
 
 **repository_id:** `string` — Stable repository identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RepositoriesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.repositories.<a href="/src/api/resources/repositories/client/Client.ts">setPackageDownloads</a>(repository_id, { ...params }) -> TrueForge.GetRepositoryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+When allowed, the sandbox may download this repo's packages from the public package sites through download-only mirrors. Nothing can be published back.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.repositories.setPackageDownloads("repository_id", {
+    allowed: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**repository_id:** `string` — Stable repository identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SetPackageDownloadsRequest`
 
 </dd>
 </dl>
