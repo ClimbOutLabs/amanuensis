@@ -99,7 +99,7 @@ describe('AmanFirstRunGuide', () => {
       },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
     expect(screen.getByTestId('aman-first-run-progress')).toHaveTextContent('2 of 3 done.');
     const items = screen.getAllByRole('listitem');
     expect(items.map(item => item.getAttribute('data-done'))).toEqual(['true', 'true', 'false']);
@@ -133,7 +133,7 @@ describe('AmanFirstRunGuide', () => {
 
   it('has no dismiss control when the host cannot remember one', async () => {
     renderGuide({ setup: { modelName: null, settingsHref: '/settings' } });
-    expect(await screen.findByRole('heading', { name: 'Welcome to Aman' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Personalization' })).toHaveAttribute('href', '/settings');
   });
