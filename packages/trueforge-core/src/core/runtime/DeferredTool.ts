@@ -166,7 +166,8 @@ export class DeferredTool extends LocalToolMCP {
         The following MCP servers have deferred tool loading. Their tools are NOT pre-loaded.
         ${deferredList}
 
-        The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.`,
+        The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.
+        Built-in tools are called directly by name, never through ${LIST_TOOLS_NAME}.`,
     );
   }
 
@@ -315,28 +316,25 @@ export class DeferredTool extends LocalToolMCP {
     };
   }
 
-  private serverNotFoundResponse(callerTool: string, mcpServer: string): CallToolResponse {
+  /**
+   * Short and plain: the servers that exist, then where built-in tools live. Built-in tools are never on a server,
+   * so models that look for one through list_tools need the reminder, not a structured rejection.
+   */
+  private serverNotFoundResponse(mcpServer: string): CallToolResponse {
+    const servers = [...this.serverMap.keys()];
+    const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
     return toolResultResponse({
       text: JSON.stringify({
-        error: structuredEditRejection({
-          tool: callerTool,
-          what: 'the mcp_server',
-          received: `'${mcpServer}'`,
-          expected: 'the name of a configured MCP server',
-          hint: `Configured servers: ${boundedNameList([...this.serverMap.keys()])}.`,
-        }),
+        error: `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, not through list_tools.`,
       }),
       isError: true,
     });
   }
 
-  private async resolveServerTools(
-    mcpServer: string,
-    callerTool: string = LIST_TOOLS_NAME,
-  ): Promise<CallToolResponse | ResolvedServerTools> {
+  private async resolveServerTools(mcpServer: string): Promise<CallToolResponse | ResolvedServerTools> {
     const server = this.resolveServer(mcpServer);
     if (!server) {
-      return this.serverNotFoundResponse(callerTool, mcpServer);
+      return this.serverNotFoundResponse(mcpServer);
     }
 
     const listResponse = await server.listTools();
@@ -388,7 +386,7 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolInfo(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
-      const resolved = await this.resolveServerTools(input.mcp_server, GET_TOOL_INFO_NAME);
+      const resolved = await this.resolveServerTools(input.mcp_server);
       if (!isResolvedServerTools(resolved)) {
         return resolved;
       }
@@ -448,7 +446,7 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolOutputSchema(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
-      const resolved = await this.resolveServerTools(input.mcp_server, GET_TOOL_OUTPUT_SCHEMA_NAME);
+      const resolved = await this.resolveServerTools(input.mcp_server);
       if (!isResolvedServerTools(resolved)) {
         return resolved;
       }
@@ -562,7 +560,7 @@ export class DeferredTool extends LocalToolMCP {
       ) => {
         const server = this.resolveServer(input.mcp_server);
         if (!server) {
-          return this.serverNotFoundResponse(CALL_TOOL_NAME, input.mcp_server);
+          return this.serverNotFoundResponse(input.mcp_server);
         }
 
         if (ALIASABLE_META_TOOL_NAMES.has(input.tool_name)) {
@@ -585,7 +583,7 @@ export class DeferredTool extends LocalToolMCP {
         }
 
         try {
-          const resolved = await this.resolveServerTools(input.mcp_server, CALL_TOOL_NAME);
+          const resolved = await this.resolveServerTools(input.mcp_server);
           if (!isResolvedServerTools(resolved)) {
             return resolved;
           }
