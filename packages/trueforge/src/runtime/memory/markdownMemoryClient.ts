@@ -29,6 +29,7 @@ import {
   ensureWritableDataDir,
   isDataDirConfigurationError,
 } from '../../utils/dataDir';
+import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import type { EmbeddingSubsystemResolver, RankedMemory } from './embeddingRetrieval';
 import {
   timeoutFailure,
@@ -296,6 +297,10 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (params.items.length === 0) {
         return { ok: true };
       }
+      // Ability notes about Aman never reach the log (see assistantAbilityNotes).
+      const items = params.items
+        .map(item => ({ ...item, content: stripAssistantAbilityNotes(item.content) }))
+        .filter(item => item.content !== '');
       // Names MEMORY_MARKDOWN_DIR in the error instead of a bare EACCES; the
       // caller's catch converts it into a failed outcome, never a throw.
       await ensureWritableDataDir({ dir: this.dailyDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
@@ -304,10 +309,17 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (seen.has(params.operationId)) {
         return { ok: true };
       }
+      if (items.length === 0) {
+        // Everything retained was an ability note: store nothing, but record the
+        // operation so the caller's verification pass sees it as completed.
+        seen.add(params.operationId);
+        await this.writeOperationIds(seen);
+        return { ok: true };
+      }
 
       // Group items by day so one retain spanning midnight lands in both files.
       const byDay = new Map<string, RetainItem[]>();
-      for (const item of params.items) {
+      for (const item of items) {
         const day = this.dayOf(item.timestamp);
         const list = byDay.get(day);
         if (list === undefined) {
