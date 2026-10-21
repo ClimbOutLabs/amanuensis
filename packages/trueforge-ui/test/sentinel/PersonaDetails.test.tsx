@@ -32,15 +32,13 @@ const TRAVEL_PLANNER_CARD = {
 } satisfies SentinelApprovalCard;
 
 function renderCard(card: SentinelApprovalCard) {
-  render(
-    <PermissionApprovalCard toolName="create_persona" card={card} tier={3} onApprove={vi.fn()} onDeny={vi.fn()} />,
-  );
+  render(<PermissionApprovalCard card={card} onApprove={vi.fn()} onDeny={vi.fn()} />);
 }
 
 describe('the specialist approval card', () => {
-  it('states the one sentence that says what will be added', () => {
+  it('asks the question in plain words, and the stub says it is a new specialist', () => {
     renderCard(TRAVEL_PLANNER_CARD);
-    expect(screen.getByText(TRAVEL_PLANNER_CARD.plain_what)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Add the specialist "Travel planner"?' })).toBeInTheDocument();
     expect(screen.getByText('New specialist')).toBeInTheDocument();
   });
 
@@ -52,7 +50,7 @@ describe('the specialist approval card', () => {
     expect(region).toHaveTextContent('For: Plans trips in detail, with a day-by-day route.');
     expect(region).toHaveTextContent('Answers with: openai/gpt-5.2');
 
-    const details = screen.getByText('Details').closest('details');
+    const details = screen.getByRole('region', { name: 'Specialist instructions' }).closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
     expect(screen.getByRole('region', { name: 'Specialist instructions' })).toHaveTextContent(

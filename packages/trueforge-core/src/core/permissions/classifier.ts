@@ -2758,7 +2758,9 @@ function connectorApprovalCard(input: {
   const { action, extraction } = input;
   const { fields } = extraction;
   return {
-    plain_what: extraction.connector_what ?? `Aman doesn't know this tool yet: ${escapeDisplayText(action.tool_name)}.`,
+    plain_what:
+      extraction.connector_what ??
+      `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone:
       extraction.connector_what === null

@@ -249,7 +249,7 @@ describe('an unattended run', () => {
     // The run's last message names what it held, so the owner knows to look at the list.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: Aman doesn't know this tool yet: send_note. Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: This is a new tool from mail. Check what it will do before you allow it. Approve it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
