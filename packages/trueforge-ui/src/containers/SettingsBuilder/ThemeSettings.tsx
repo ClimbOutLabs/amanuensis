@@ -84,7 +84,7 @@ const ThemeSettings = () => {
         <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card-bg p-3">
           <div className="min-w-0">
             <p id="model-usage-display-label" className="text-sm font-medium text-text-primary">
-              Show model and cost under answers
+              Show model and cost in answer details
             </p>
             <p id="model-usage-display-hint" className="mt-0.5 text-xs text-text-secondary">
               The model, provider, tokens and cost of each answer, with the helper calls behind it. Hiding it only
