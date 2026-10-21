@@ -557,6 +557,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     address_as: fresh.address_as,
     user_profile: fresh.user_profile,
     pinned_preferences: fresh.pinned_preferences,
+    help_areas: fresh.help_areas,
     learned_profile: next,
     learning_enabled: fresh.learning_enabled,
   };

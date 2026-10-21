@@ -235,6 +235,7 @@ describe('sandbox command admission', () => {
     'echo hi 2>&-',
     'echo hi >&-',
     'echo hi 2>/dev/null',
+    'echo hi 2> /dev/null',
   ])('treats file descriptor duplication as structured, including before other punctuation: %s', command => {
     expect(sandboxCommandUsesUnstructuredOperation(command)).toBe(false);
   });
@@ -320,6 +321,19 @@ describe('sandbox command admission', () => {
     expect(sandboxCommandEffect('find . -name "*.ts" | xargs grep -l "AgentChatServer" 2>/dev/null | head -10')).toBe(
       'inspect',
     );
+  });
+
+  it.each([
+    'ls /workspace 2> /dev/null',
+    'cat notes.txt 2>> /dev/null | head -5',
+    'find . -name "*.py" 2>  /dev/null | head -3',
+  ])('keeps a read-only command with a spaced null-device redirect inspect-only: %s', command => {
+    expect(sandboxCommandEffect(command)).toBe('inspect');
+  });
+
+  it('still refuses a spaced redirect to a real file, and a null-device redirect on a mutating command', () => {
+    expect(sandboxCommandEffect('ls 2> errors.log')).toBe('execute');
+    expect(sandboxCommandEffect('pnpm install 2> /dev/null')).toBe('execute');
   });
 
   it.each(['12>&1', '123>/dev/null', '123>>/dev/null'])('handles grouped numeric redirection fds: %s', redirect => {

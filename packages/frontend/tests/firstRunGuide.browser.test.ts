@@ -128,6 +128,18 @@ test('first-run screens render in light and dark at desktop and phone width', { 
         assert.ok(await page.getByRole('button', { name: 'Read files and run code' }).isVisible());
         await shoot('connected');
 
+        // The Tour with the setup card open: the chosen area fills the day cards, and the question shows its choice.
+        await open('tour-focus');
+        await page.getByRole('button', { name: /Help me clear my head/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.ok(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isChecked());
+        await shoot('tour-focus');
+        // Nothing chosen: the general set, with the morning brief first.
+        await open('tour-none');
+        await page.getByRole('button', { name: /Help me plan my day/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        assert.equal(await page.getByRole('button', { name: /What did I forget/ }).count(), 0);
+        assert.ok(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isVisible());
+        assert.ok(!(await page.getByRole('checkbox', { name: 'Focus and getting started' }).isChecked()));
+        await shoot('tour-none');
         // Hidden on request: the plain greeting, with a way back to the tour.
         await open('hidden');
         await page.getByRole('button', { name: 'Show the tour' }).waitFor({ timeout: RENDER_TIMEOUT_MS });

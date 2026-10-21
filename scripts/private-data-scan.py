@@ -7,6 +7,9 @@ Exit 0 = clean. Exit 1 = private data found (DO NOT PUSH).
 Usage:
   python3 private-data-scan.py <directory>
   python3 private-data-scan.py --diff <git-diff-file>
+
+Person-specific patterns are read from PRIVATE_DATA_PATTERNS_FILE, or from
+scripts/private-data-patterns.local.txt (git-ignored), one regex per line.
 """
 
 import re
@@ -28,15 +31,51 @@ PATTERNS = [
     ("Private key block", r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     ("Bearer token", r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{20,}"),
     ("Email address", r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
-    # Personal identifiers (Sidd's info - add more as needed)
-    ("Personal full name", r"(?i)siddharth\s+choure"),
     ("Home path with username", r"/home/[a-z_][a-z0-9_-]*/"),
     ("macOS user path", r"/Users/[A-Z][a-z]+/"),
 ]
 
+# Person-specific patterns (names, addresses, handles) stay out of this public file.
+# Lines starting with '#' and blank lines are ignored.
+PERSONAL_PATTERNS_PATH = os.path.abspath(
+    os.environ.get("PRIVATE_DATA_PATTERNS_FILE")
+    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "private-data-patterns.local.txt")
+)
+
+def load_personal_patterns(path):
+    """Return ("Personal pattern", regex) pairs from the local file, or [] if it is missing."""
+    if not os.path.isfile(path):
+        print(f"Note: no personal patterns file at {path}; person-specific checks are off.", file=sys.stderr)
+        return []
+    patterns = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            regex = line.strip()
+            if regex and not regex.startswith("#"):
+                patterns.append(("Personal pattern", regex))
+    return patterns
+
+PATTERNS = PATTERNS + load_personal_patterns(PERSONAL_PATTERNS_PATH)
+
 # File extensions to skip (binaries, lockfiles with hashes are OK)
 SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".webm"}
 SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "poetry.lock"}
+
+# Reserved for documentation and testing (RFC 2606, RFC 6761), plus single-letter
+# placeholders such as a@b.com. Addresses on these domains are not personal data.
+PLACEHOLDER_EMAIL_DOMAINS = {
+    "example.com", "example.org", "example.net", "acme.com", "company.com",
+    "partner.com", "customer.com", "domain.com", "host.com", "other.com", "elsewhere.com",
+}
+PLACEHOLDER_EMAIL_TLDS = {"example", "invalid", "test", "localhost"}
+
+def is_placeholder_email(address):
+    labels = address.rsplit("@", 1)[1].lower().split(".")
+    return (
+        labels[-1] in PLACEHOLDER_EMAIL_TLDS
+        or ".".join(labels[-2:]) in PLACEHOLDER_EMAIL_DOMAINS
+        or len(labels[-2]) == 1
+    )
 
 # Allowlist: (pattern_name, file_substring) - known false positives by file path
 ALLOWLIST = [
@@ -45,12 +84,17 @@ ALLOWLIST = [
     ("Email address", "example.com"),
     ("Email address", "test.com"),
     ("Generic secret assignment", "build-sandbox-image.sh"),  # shell var fetching Docker token at runtime
+    ("Private IPv4", "/test"),      # network fixtures in tests
+    ("Tailscale IP", "/test"),
 ]
 
 # Content allowlist: (pattern_name, content_substring) - known false positives by line content
 CONTENT_ALLOWLIST = [
     ("Email address", "acme.com"),  # RFC example domain in docs
     ("Email address", "example.com"),
+    ("Tailscale hostname", "example.ts.net"),  # placeholder tailnet names
+    ("Tailscale hostname", "tailnet-name.ts.net"),
+    ("Home path with username", "/home/user/"),  # placeholder home path
 ]
 
 def scan_file(path):
@@ -65,6 +109,10 @@ def scan_file(path):
         with open(path, "r", encoding="utf-8", errors="strict") as f:
             for i, line in enumerate(f, 1):
                 for name, pattern in PATTERNS:
+                    if name == "Email address" and all(
+                        is_placeholder_email(address) for address in re.findall(pattern, line)
+                    ):
+                        continue
                     if re.search(pattern, line):
                         # Check path-based allowlist
                         allowed = any(
@@ -92,6 +140,8 @@ def scan_directory(root):
         dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", "dist", "build", ".next", "__pycache__"}]
         for fn in filenames:
             fp = os.path.join(dirpath, fn)
+            if os.path.abspath(fp) == PERSONAL_PATTERNS_PATH:
+                continue
             findings = scan_file(fp)
             if findings:
                 all_findings[fp] = findings

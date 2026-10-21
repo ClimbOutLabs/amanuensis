@@ -12,7 +12,7 @@ import {
   type ToolSource,
 } from '../mcp/IMCPServer';
 import { defineTool, type ToolDefinition } from '../mcp/LocalToolMCP';
-import { deniedToolCallText } from '../mcp/ToolSet';
+import { deniedToolCallResponse } from '../mcp/ToolSet';
 import { FETCHED_PAGE_TEXT_MAX_CHARS, type FetchedPageScope, type FetchedPageStore } from './fetchedPages';
 import {
   extractCreditsFor,
@@ -109,7 +109,7 @@ export class TavilySource implements ToolSource {
     context?: ToolInvocationContext,
   ): Promise<CallToolResponse> {
     if (approvalDecision?.status === 'deny') {
-      return toolResultResponse({ text: deniedToolCallText(approvalDecision.reason), isError: true });
+      return deniedToolCallResponse(approvalDecision.reason);
     }
     const tool = this.#tools.find(candidate => candidate.name === params.name);
     if (tool === undefined) {

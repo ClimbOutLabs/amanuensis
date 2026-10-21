@@ -5,6 +5,7 @@ import * as core from "../../../../../core/index.js";
 import * as serializers from "../../../../index.js";
 
 export const UpdateSentinelUserSettingsRequest: core.serialization.Schema<serializers.UpdateSentinelUserSettingsRequest.Raw, TrueForge.UpdateSentinelUserSettingsRequest> = core.serialization.object({
+        "mapsWithoutAsking": core.serialization.property("maps_without_asking", core.serialization.boolean().optional()),
         "offlineMode": core.serialization.property("offline_mode", core.serialization.boolean().optional()),
         "searchWithoutAsking": core.serialization.property("search_without_asking", core.serialization.boolean().optional()),
         "tier2AutoAllow": core.serialization.property("tier2_auto_allow", core.serialization.list(core.serialization.stringLiteral("file_write")).optional())
@@ -12,6 +13,7 @@ export const UpdateSentinelUserSettingsRequest: core.serialization.Schema<serial
 
 export declare namespace UpdateSentinelUserSettingsRequest {
     export interface Raw {
+        maps_without_asking?: boolean | null;
         offline_mode?: boolean | null;
         search_without_asking?: boolean | null;
         tier2_auto_allow?: "file_write"[] | null;
