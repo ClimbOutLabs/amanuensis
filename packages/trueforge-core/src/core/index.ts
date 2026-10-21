@@ -493,7 +493,6 @@ export {
   SILENT_SEARCH_LIMIT,
   createWebSearchTurnState,
   recordResultUrls,
-  remoteImageAskReason,
   unreturnedUrls,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
