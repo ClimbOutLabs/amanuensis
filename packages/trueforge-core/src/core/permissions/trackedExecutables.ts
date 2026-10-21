@@ -288,6 +288,24 @@ export function writeTargetTouchesSandboxTools(input: {
   );
 }
 
+/**
+ * True when a write would create a path that does not exist on the host yet. Anything that exists (a file,
+ * a folder, a dangling link) is not new, and a remote sandbox cannot be checked from the server, so nothing
+ * there is new.
+ */
+export function isNewWriteTarget(input: { p: string; cwd: string; resolution?: PathResolution | undefined }): boolean {
+  if (input.resolution === 'remote') {
+    return false;
+  }
+  const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
+  try {
+    lstatSync(absolute);
+    return false;
+  } catch (error) {
+    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+  }
+}
+
 /** A dangling symlink cannot be resolved, so its destination is unknown: fail closed. */
 function isDanglingSymlink(input: { p: string; cwd: string }): boolean {
   const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);

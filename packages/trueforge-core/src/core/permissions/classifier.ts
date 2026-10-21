@@ -82,6 +82,7 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
+import { scriptFileLoadsOnlyStandardCode } from './scriptImports';
 import {
   heldBecause,
   SEARCH_SERVER_FALLBACK,
@@ -120,6 +121,7 @@ import {
   contentDigest,
   extractExecutedFileOperand,
   isInsideWorkspace,
+  isNewWriteTarget,
   isUnderRoot,
   lexicalPath,
   sha256FileContent,
@@ -912,6 +914,17 @@ function sandboxRunPlacement({
   ) {
     return null;
   }
+  // A script that loads other code (an import of a non-standard module, a dynamic import, a child process)
+  // can run files from the workspace, so only a script that stays within the standard library runs silently.
+  if (
+    !scriptFileLoadsOnlyStandardCode({
+      runtime: program === 'node' ? 'node' : 'python',
+      file: identity,
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return null;
+  }
   return {
     reason: 'sandbox_command',
     reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
@@ -1275,6 +1288,19 @@ function namedWriteTargets(paths: readonly string[]): string {
   return hidden > 0 ? `${shown.join(', ')} and ${String(hidden)} more` : shown.join(', ');
 }
 
+/** A write target a silent write may touch: a file Aman created in this conversation, or a path that does not exist yet. */
+function silentWriteTarget(input: { p: string; cwd: string; ctx: ClassifyContext }): boolean {
+  const { p, cwd, ctx } = input;
+  const identity = canonicalWriteIdentity({ p, cwd, resolution: ctx.path_resolution });
+  if (
+    identity !== null &&
+    ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
+  ) {
+    return true;
+  }
+  return isNewWriteTarget({ p, cwd, resolution: ctx.path_resolution });
+}
+
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
   const targets = sandboxWriteTargets({ action, ctx, identityCwd });
@@ -1381,7 +1407,14 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     });
   }
   // A write that stayed inside the workspace and missed every limit above runs silently when the user lets it.
-  if (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+  // Only a new file, or one Aman created in this conversation, may do so: an edit to an existing file asks.
+  const everyTargetIsSilentlyWritable = absolute.every(target =>
+    silentWriteTarget({ p: target, cwd: targets.cwd, ctx }),
+  );
+  if (
+    everyTargetIsSilentlyWritable &&
+    (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+  ) {
     return tier1Decision({
       reason: 'sandbox_file_write',
       reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
