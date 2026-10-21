@@ -32,7 +32,7 @@ const TRAVEL_PLANNER_CARD = {
 } satisfies SentinelApprovalCard;
 
 function renderCard(card: SentinelApprovalCard) {
-  render(<PermissionApprovalCard card={card} onApprove={vi.fn()} onDeny={vi.fn()} />);
+  render(<PermissionApprovalCard othersWaiting={0} card={card} onApprove={vi.fn()} onDeny={vi.fn()} />);
 }
 
 describe('the specialist approval card', () => {

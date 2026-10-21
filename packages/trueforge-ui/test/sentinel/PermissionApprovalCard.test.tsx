@@ -144,7 +144,8 @@ describe('PermissionApprovalCard', () => {
   it('breaks long recipient values and folds them behind Show all', () => {
     const recipients = Array.from({ length: 60 }, (_, index) => `person${String(index)}@example.com`).join(', ');
     renderCard({ recipient: recipients });
-    const folded = screen.getAllByText(/^person0@example\.com.*\.\.\.$/)[0];
+    const folded = screen.getAllByText(/^person0@example\.com.*\.\.\.$/).at(0);
+    if (folded === undefined) throw new Error('recipients were not folded');
     expect(folded.className).toContain('break-words');
     expect(folded.parentElement?.className).toContain('min-w-0');
     expect(folded.textContent).not.toContain('person59@example.com');

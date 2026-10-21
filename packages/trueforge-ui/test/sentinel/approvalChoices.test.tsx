@@ -31,7 +31,15 @@ const buttonNames = () => screen.getAllByRole('button').map(button => button.tex
 
 describe('approval choices', () => {
   it('shows the safe verb, the quiet no, and Approve for this chat in Details, and never Always deny', () => {
-    render(<PermissionApprovalCard card={card} onApprove={vi.fn()} onApproveForChat={vi.fn()} onDeny={vi.fn()} />);
+    render(
+      <PermissionApprovalCard
+        othersWaiting={0}
+        card={card}
+        onApprove={vi.fn()}
+        onApproveForChat={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
     expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
     expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
