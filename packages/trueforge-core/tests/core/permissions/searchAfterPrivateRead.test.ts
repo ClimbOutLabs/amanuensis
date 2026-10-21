@@ -271,3 +271,39 @@ describe('a map after a mail read, checked against what the mail said', () => {
     });
   });
 });
+
+describe('ordinary searches and maps after a mail read run silently', () => {
+  const withMaps = (services: Partial<SentinelServices> = {}) => ({
+    mapsWithoutAsking: () => Promise.resolve(true),
+    ...services,
+  });
+
+  it.each(['Lisbon restaurants', 'Costa coffee roasters', 'Park hotels in Lisbon', 'Lisbon metro timetable'])(
+    'runs the search "%s" silently',
+    async query => {
+      const ctx = makeCtx();
+      await readMail(ctx);
+      expect(await classifyTier(searchFor(query), ctx)).toMatchObject({
+        tier: 1,
+        reason: 'mcp_search_after_read_checked',
+      });
+    },
+  );
+
+  it.each(['Lisbon', 'Park Clinic, Lisbon'])('runs the map for "%s" silently', async place => {
+    const ctx = makeCtx({ services: withMaps() });
+    await readMail(ctx);
+    expect(await classifyTier(mapsAction('render_map', { place_name: place }), ctx)).toMatchObject({
+      tier: 1,
+      reason: 'maps_after_read_checked',
+    });
+  });
+
+  it('asks when one of two mail reads left no text to compare', async () => {
+    const ctx = makeCtx();
+    await classifyTier(MAIL_READ, ctx);
+    recordPrivateReadText({ state: ctx.web_search, text: MAIL });
+    await classifyTier(MAIL_READ, ctx);
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
+  });
+});

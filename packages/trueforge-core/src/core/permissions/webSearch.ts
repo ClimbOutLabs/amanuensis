@@ -60,8 +60,10 @@ export interface WebSearchTurnState {
   privateDataRead: boolean;
   /** Text of the mail and calendar results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
-  /** True once at least one mail or calendar result was received as text, by any thread of the turn. */
-  privateTextCaptured: boolean;
+  /** Mail and calendar reads marked this turn, by any thread. Each one must have its result kept as text. */
+  privateReadMarks: number;
+  /** Mail and calendar results kept as text this turn, by any thread. */
+  privateTextsKept: number;
   /** True when the private mark came from saved state or old context, whose text this turn never saw. */
   privateTextLost: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
@@ -76,7 +78,8 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     sentText: '',
     privateDataRead: false,
     privateTexts: [],
-    privateTextCaptured: false,
+    privateReadMarks: 0,
+    privateTextsKept: 0,
     privateTextLost: false,
     admission: Promise.resolve(),
   };
@@ -237,6 +240,7 @@ export function countSilentFetches(input: { values: readonly string[]; state: We
  */
 export function markPrivateDataRead(state: WebSearchTurnState): void {
   state.privateDataRead = true;
+  state.privateReadMarks += 1;
 }
 
 /** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
@@ -255,7 +259,7 @@ const MAX_PRIVATE_TEXT_CHARS = 2_000_000;
 /** Keeps the text a mail or calendar result returned, for the checks on later searches and maps. */
 export function recordPrivateReadText(input: { state: WebSearchTurnState; text: string }): void {
   const { state, text } = input;
-  state.privateTextCaptured = true;
+  state.privateTextsKept += 1;
   if (state.privateTextLost) {
     return;
   }
@@ -270,10 +274,10 @@ export function recordPrivateReadText(input: { state: WebSearchTurnState; text: 
 
 /**
  * The text a search or map is checked against, or undefined when it is not all there: the mark came
- * from earlier history, or no mail or calendar result was received this turn to compare with.
+ * from earlier history, or some mail or calendar read this turn has no result kept to compare with.
  */
 export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
-  if (state.privateTextLost || !state.privateTextCaptured) {
+  if (state.privateTextLost || state.privateTextsKept < state.privateReadMarks) {
     return undefined;
   }
   return state.privateTexts;

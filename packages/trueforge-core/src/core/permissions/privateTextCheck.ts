@@ -13,11 +13,10 @@ const MIN_PHRASE_CHARS = 16;
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
 const MIN_PHONE_DIGITS = 10;
-/** Shortest name part matched as a whole word. Shorter ones are initials and particles such as `da`. */
-const MIN_NAME_PART_CHARS = 3;
 /** Fewest letters a full name needs before its joined form is matched inside the text. */
 const MIN_JOINED_NAME_CHARS = 6;
-const MIN_NAME_CHARS = 3;
+/** A name is matched only when it has this many words: one word alone (a city, a surname, a common noun) is never a match. */
+const MIN_NAME_WORDS = 2;
 const MIN_EMAIL_CHARS = 10;
 const MIN_ENCODED_TOKEN_CHARS = 20;
 
@@ -27,9 +26,17 @@ const DIGIT_RUN = /\d{6,}/g;
 const PHONE_CANDIDATE = /\+?\d(?:[\s().-]?\d){6,}/g;
 const WORD = /[\p{L}\p{N}]+/gu;
 const ENCODED_TOKEN = /[A-Za-z0-9+/]{20,}={0,2}/g;
-/** A header such as `From: Name <address>`, or the same field in JSON: `"from": "Name <address>"`. */
-const NAMED_HEADER = /"?\b(?:from|to|cc|bcc|organizer)"?\s*[:=]\s*"?([^\n\r"]*)/gi;
+/**
+ * A From, To or Cc line of a mail, at the start of its line. Body text such as `Directions to: Park Clinic`
+ * is not a header and is not read for names.
+ */
+const HEADER_LINE = /^[ \t]*(?:from|to|cc)[ \t]*:([^\n\r]*)/gim;
+/** The same fields as JSON members, `"from": "Name <address>"`. The key must be quoted, so body text is not read as one. */
+const JSON_HEADER = /"(?:from|to|cc)"[ \t]*:[ \t]*"([^"\n\r]*)"/gi;
+/** A calendar attendee's or organizer's display name in JSON. */
 const DISPLAY_NAME = /"displayName"\s*:\s*"([^"]*)"/gi;
+/** One recipient of a header list: quoted text (which may hold a comma) or the text up to the next comma. */
+const RECIPIENT = /(?:"[^"]*"|[^,"])+/g;
 /** An address written in words: `maria dot costa at harbour dot example`. */
 const SPELLED_AT = /\s*\bat\b\s*/gi;
 const SPELLED_DOT = /\s*\bdot\b\s*/gi;
@@ -43,21 +50,39 @@ function addressForm(folded: string): string {
   return folded.replace(SPELLED_AT, '@').replace(SPELLED_DOT, '.');
 }
 
-/** Names of the people a mail header or calendar attendee list names, with any address removed. */
+/**
+ * Full names of the people a From, To or Cc header or a calendar display name gives, with any address
+ * removed. A `Last, First` name also comes back in first-last order.
+ */
 function namesIn(text: string): string[] {
+  const recipients: string[] = [];
+  for (const match of text.matchAll(HEADER_LINE)) {
+    recipients.push(...((match[1] ?? '').match(RECIPIENT) ?? []));
+  }
+  for (const match of text.matchAll(JSON_HEADER)) {
+    recipients.push(...((match[1] ?? '').match(RECIPIENT) ?? []));
+  }
   const names: string[] = [];
-  for (const match of text.matchAll(NAMED_HEADER)) {
-    for (const entry of (match[1] ?? '').split(',')) {
-      const angle = entry.indexOf('<');
-      const name = (angle < 0 ? entry : entry.slice(0, angle)).replace(/^[\s"']+|[\s"']+$/g, '');
-      if (name.length >= MIN_NAME_CHARS && !name.includes('@')) {
-        names.push(name);
-      }
+  for (const recipient of recipients) {
+    const angle = recipient.indexOf('<');
+    const name = (angle < 0 ? recipient : recipient.slice(0, angle)).replace(/^[\s"']+|[\s"']+$/g, '').trim();
+    if (name.includes('@') || wordsOf(name).length < MIN_NAME_WORDS) {
+      continue;
+    }
+    names.push(name);
+    if (name.includes(',')) {
+      names.push(
+        name
+          .split(',')
+          .map(part => part.trim())
+          .reverse()
+          .join(' '),
+      );
     }
   }
   for (const match of text.matchAll(DISPLAY_NAME)) {
     const name = (match[1] ?? '').trim();
-    if (name.length >= MIN_NAME_CHARS) {
+    if (wordsOf(name).length >= MIN_NAME_WORDS) {
       names.push(name);
     }
   }
@@ -87,8 +112,6 @@ interface PrivateFacts {
   numbers: Set<string>;
   /** Full names, compact, for names of two or more words. */
   joinedNames: Set<string>;
-  /** Name parts matched as whole words. */
-  nameWords: Set<string>;
   /** Copied phrases, compact, keyed by their first `MIN_PHRASE_CHARS` characters. */
   phrasesByPrefix: Map<string, string[]>;
 }
@@ -100,7 +123,6 @@ function privateFacts(privateTexts: readonly string[], mode: PrivateTextMode): P
     phoneDigits: new Set(),
     numbers: new Set(),
     joinedNames: new Set(),
-    nameWords: new Set(),
     phrasesByPrefix: new Map(),
   };
   for (const raw of privateTexts) {
@@ -125,11 +147,6 @@ function privateFacts(privateTexts: readonly string[], mode: PrivateTextMode): P
       const joined = compactForm(name);
       if (joined.length >= MIN_JOINED_NAME_CHARS) {
         facts.joinedNames.add(joined);
-      }
-      for (const part of wordsOf(name)) {
-        if (part.length >= MIN_NAME_PART_CHARS) {
-          facts.nameWords.add(part);
-        }
       }
     }
     if (mode === 'search') {
@@ -202,14 +219,8 @@ export function privateTextLeak(input: {
     }
   }
   const compact = compactForm(text);
-  const words = new Set(wordsOf(text));
   for (const name of facts.joinedNames) {
     if (compact.includes(name)) {
-      return 'name';
-    }
-  }
-  for (const part of facts.nameWords) {
-    if (words.has(part)) {
       return 'name';
     }
   }

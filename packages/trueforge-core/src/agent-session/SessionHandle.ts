@@ -1,7 +1,6 @@
 /**
  * Bound session handle: starts turns via {@link SessionHandle.createTurn}.
  */
-import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
 import type { ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
@@ -960,10 +959,7 @@ export class SessionHandle<
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
         boundRepository: input.resolver.boundRepository,
-        extraCapabilities: [
-          privateDataReadCapability({ turn: input.resolver.webSearchTurn, persisted: false }),
-          ...(extraCapabilities ?? []),
-        ],
+        extraCapabilities,
       });
       throwIfSignalAborted(params.signal);
       return new AgentThread({

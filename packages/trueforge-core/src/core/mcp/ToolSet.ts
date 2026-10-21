@@ -11,6 +11,7 @@ import {
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
+import { isMapsToolName } from '../permissions/mapsToolNames';
 import {
   countSilentFetches,
   isSearchAskReason,
@@ -404,13 +405,21 @@ export class ToolSet implements IToolSet {
       });
     }
 
+    if (this.sentinel !== undefined && (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))) {
+      // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
+      // against it. A silent map was recorded when it was classified, so only approved maps are added here.
+      const turn = this.sentinel.web_search;
+      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
+      if (sent !== undefined) {
+        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+      }
+    }
     if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
-        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
         countSilentFetches({ values: sent.values, state: turn });
       }
     }

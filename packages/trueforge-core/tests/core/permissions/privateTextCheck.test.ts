@@ -322,17 +322,115 @@ describe('privateTextLeak with glued words and look-alike letters', () => {
   });
 });
 
-describe('privateTextLeak with short name parts', () => {
-  it('finds a short name part as a whole word', () => {
-    expect(privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lee tapas'), privateTexts: [LEE] })).toBe(
-      'name',
-    );
+const LAST_FIRST = 'From: "Costa, Maria" <maria.costa@harbour-clinic.example>\nLunch on Friday.';
+const BODY_DIRECTIONS = 'From: Lee Park <lee@example.test>\nDirections to: Park Clinic, Lisbon.';
+const CITY_SENDER = 'From: Lisbon Metro <metro@example.test>\nYour pass is ready.';
+
+describe('privateTextLeak keeps single words and surnames passing', () => {
+  it('passes one name part on its own, such as a surname or a first name', () => {
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lee tapas'), privateTexts: [LEE] }),
+    ).toBeNull();
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('costa reviews'), privateTexts: [MAIL] }),
+    ).toBeNull();
   });
 
-  it('passes a word that only begins with the short name part', () => {
+  it('passes a word that only begins with a name part', () => {
     expect(
       privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Leeds tapas'), privateTexts: [LEE] }),
     ).toBeNull();
+  });
+
+  it('finds a full name that has a short part', () => {
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lee Park tapas'), privateTexts: [LEE] }),
+    ).toBe('name');
+  });
+
+  it('finds a Last, First sender name in first-last order', () => {
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing('maria costa clinic'),
+        privateTexts: [LAST_FIRST],
+      }),
+    ).toBe('name');
+  });
+
+  it('passes a city in a sender name when the search names only the city', () => {
+    expect(
+      privateTextLeak({ earlier: '', mode: 'search', strings: outgoing('Lisbon tapas'), privateTexts: [CITY_SENDER] }),
+    ).toBeNull();
+    expect(
+      privateTextLeak({ earlier: '', mode: 'maps', strings: outgoing('Lisbon'), privateTexts: [CITY_SENDER] }),
+    ).toBeNull();
+  });
+
+  it('passes a place named after Directions to: in the body, which is not a header', () => {
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing('Park Clinic Lisbon'),
+        privateTexts: [BODY_DIRECTIONS],
+      }),
+    ).toBeNull();
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'maps',
+        strings: outgoing('Park Clinic, Lisbon'),
+        privateTexts: [BODY_DIRECTIONS],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('privateTextLeak reads digits and escapes in any form', () => {
+  const withDigits = (digits: string, zero: number): string =>
+    [...digits].map(digit => String.fromCodePoint(zero + Number(digit))).join('');
+
+  it('finds a number written in Arabic-Indic digits', () => {
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing(`booking ${withDigits('4417829', 0x0660)} status`),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('number');
+  });
+
+  it('finds a number written in Devanagari digits and in bold mathematical digits', () => {
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing(`booking ${withDigits('4417829', 0x0966)} status`),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('number');
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing(`booking ${withDigits('4417829', 0x1d7ce)} status`),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('number');
+  });
+
+  it('finds an email address with its at sign escaped twice', () => {
+    expect(
+      privateTextLeak({
+        earlier: '',
+        mode: 'search',
+        strings: outgoing('maria.costa%2540harbour-clinic.example reviews'),
+        privateTexts: [MAIL],
+      }),
+    ).toBe('contact');
   });
 });
 

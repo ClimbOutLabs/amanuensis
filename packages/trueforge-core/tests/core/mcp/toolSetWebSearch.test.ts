@@ -513,6 +513,33 @@ describe('the loop breaker', () => {
   });
 });
 
+describe('a map the user approved, and the text the next silent search is checked against', () => {
+  it('holds a server secret split between an approved map and a silent search', async () => {
+    const secret = 'synthetic-server-secret-value-0003';
+    const mapTool: ToolSchema = { name: 'render_map', description: 'Shows a map.', inputSchema: schema };
+    const h = harness({ searchProvider: true, secrets: [secret], tools: [searchTool, mapTool] });
+    await h.toolSet.callTool({ name: 'render_map', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
+    const second = await runSearch(h, secret.slice(16));
+    expect(h.dispatched.map(call => call.name)).toEqual(['render_map']);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
+  });
+});
+
+describe('a search the user approved, and the text the next silent search is checked against', () => {
+  it('holds a server secret split between an approved search and a silent one', async () => {
+    const secret = 'synthetic-server-secret-value-0002';
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    await h.toolSet.callTool({ name: 'lookup', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
+    const second = await runSearch(h, secret.slice(16));
+    expect(h.dispatched.map(call => call.args)).toEqual([{ query: secret.slice(0, 16) }]);
+    expect(isApprovalRequiredResponse(second) || (isCallToolResponseResult(second) && second.result.isError === true)).toBe(
+      true,
+    );
+  });
+});
+
 describe('links', () => {
   const page = 'https://news.example.org/2024/06/oslo-weather';
   const results = (name: string): string =>
@@ -863,11 +890,11 @@ describe('a secret sent in pieces over several searches', () => {
     expect(held.pre_dispatch_failure).toBeUndefined();
   });
 
-  it('is not remembered from a search the user approved, so one approval does not hold the rest of the turn', async () => {
+  it('is remembered from a search the user approved, so a later search in the turn is checked against it', async () => {
     const h = harness({ searchProvider: true, secrets: [secret] });
     await h.toolSet.callTool({ name: 'lookup', arguments: { query: `debug ${secret}` } }, { status: 'allow' });
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'weather in Oslo' } });
-    expect(next.tier).toBe(1);
+    expect(next.tier).toBe(3);
   });
 
   it('starts over with the next turn', async () => {
