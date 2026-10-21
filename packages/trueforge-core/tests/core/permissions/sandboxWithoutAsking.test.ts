@@ -58,14 +58,16 @@ function writeScript({
   workspace,
   name,
   authored,
+  content = 'print(1)\n',
 }: {
   services: SentinelServices;
   workspace: string;
   name: string;
   authored: boolean;
+  content?: string;
 }): void {
   const file = join(workspace, name);
-  writeFileSync(file, 'print(1)\n');
+  writeFileSync(file, content);
   if (authored) {
     services.tracked_store.track({ scope: trackedScope(workspace), file_identity: realpathSync(file) });
   }
@@ -214,6 +216,138 @@ describe('a script runs silently only when Aman wrote it in this conversation', 
         expect(decision.tier).toBe(3);
         expect(decision.card).not.toBeNull();
       })(),
+  );
+});
+
+describe('a write to a file Aman did not create keeps its card', () => {
+  test(
+    'writing a file that already exists in the workspace asks',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'README.md'), 'repo text');
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'README.md'), content: 'changed' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(2);
+      expect(decision.card).not.toBeNull();
+    }),
+  );
+
+  test(
+    'a new file in the workspace still runs without a card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'brand_new.py'), content: 'print(1)' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_file_write');
+    }),
+  );
+
+  test(
+    'a file Aman created earlier in the conversation runs without a card',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'notes.py', authored: true });
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'notes.py'), content: 'print(2)' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.card).toBeNull();
+    }),
+  );
+});
+
+describe('a script that loads other code keeps its card, even when Aman wrote it', () => {
+  test(
+    'a python3 script importing a repo module asks',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'repo_helper.py', authored: false, content: 'x = 1\n' });
+      writeScript({ services, workspace, name: 'agent_main.py', authored: true, content: 'import repo_helper\n' });
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 agent_main.py', cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+    }),
+  );
+
+  test(
+    'a node script requiring a repo module asks',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'repo_helper.js', authored: false, content: 'module.exports = 1;\n' });
+      writeScript({
+        services,
+        workspace,
+        name: 'agent_main.js',
+        authored: true,
+        content: "const h = require('./repo_helper.js');\nconsole.log(h);\n",
+      });
+      const decision = await classifyTier(
+        action('exec', { command: 'node agent_main.js', cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+    }),
+  );
+
+  test.each([
+    ['a python3 script that uses importlib', 'agent_main.py', 'import importlib\nimportlib.import_module("x")\n'],
+    ['a python3 script that starts a program', 'agent_main.py', 'import subprocess\nsubprocess.run(["ls"])\n'],
+    ['a node script that starts a program', 'agent_main.js', "require('child_process').execSync('ls');\n"],
+    ['a node script with a dynamic require', 'agent_main.js', 'const m = process.argv[2];\nrequire(m);\n'],
+  ])('%s asks', (_label, name, content) =>
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name, authored: true, content });
+      const command = name.endsWith('.js') ? `node ${name}` : `python3 ${name}`;
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+    })(),
+  );
+
+  test(
+    'a python3 script that imports only the standard library runs without a card',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'agent_main.py', authored: true, content: 'import json, os.path\n' });
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 agent_main.py', cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_command');
+    }),
+  );
+
+  test(
+    'a node script that requires only built-in modules runs without a card',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({
+        services,
+        workspace,
+        name: 'agent_main.js',
+        authored: true,
+        content: "const fs = require('node:fs');\nconsole.log(fs.existsSync('.'));\n",
+      });
+      const decision = await classifyTier(
+        action('exec', { command: 'node agent_main.js', cwd: workspace }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_command');
+    }),
   );
 });
 
@@ -428,11 +562,12 @@ describe('a write through a symlink is checked where it lands', () => {
   test(
     'a link that stays inside the workspace still runs without a card',
     withWorkspace(async workspace => {
-      writeFileSync(join(workspace, 'target.txt'), 'kept');
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'target.txt', authored: true });
       symlinkSync(join(workspace, 'target.txt'), join(workspace, 'inside.txt'));
       const decision = await classifyTier(
         action('write_file', { path: join(workspace, 'inside.txt'), content: 'changed' }),
-        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        makeCtx({ services, workspace }),
       );
       expect(decision.tier).toBe(1);
       expect(decision.reason).toBe('sandbox_file_write');
@@ -444,8 +579,9 @@ describe('a write through a symlink is checked where it lands', () => {
     withWorkspace(async workspace =>
       withOutside(async outside => {
         const path = join(workspace, 'note.txt');
-        writeFileSync(path, 'first');
-        const ctx = makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace });
+        const services = servicesWith({ sandbox_without_asking: true });
+        writeScript({ services, workspace, name: 'note.txt', authored: true });
+        const ctx = makeCtx({ services, workspace });
         const params = { path, content: 'second' };
         const decision = await classifyTier(action('write_file', params), ctx);
         expect(decision.tier).toBe(1);

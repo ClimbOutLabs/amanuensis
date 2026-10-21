@@ -5,6 +5,7 @@ import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
   isGitControlPath,
+  isNewWriteTarget,
   isSandboxToolPath,
   skipWrapperPrefix,
   writeTargetTouchesGitControl,
@@ -134,5 +135,41 @@ describe('writeTargetTouchesGitControl', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isNewWriteTarget', () => {
+  test('a path that does not exist yet is new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      expect(isNewWriteTarget({ p: 'fresh.py', cwd: dir })).toBe(true);
+      expect(isNewWriteTarget({ p: 'sub/fresh.py', cwd: dir })).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an existing file is not new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      writeFileSync(join(dir, 'README.md'), 'text');
+      expect(isNewWriteTarget({ p: 'README.md', cwd: dir })).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a dangling symlink is not new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      symlinkSync(join(dir, 'missing.txt'), join(dir, 'link.txt'));
+      expect(isNewWriteTarget({ p: 'link.txt', cwd: dir })).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a remote sandbox path is never new, because the server cannot see it', () => {
+    expect(isNewWriteTarget({ p: 'fresh.py', cwd: '/workspace', resolution: 'remote' })).toBe(false);
   });
 });
