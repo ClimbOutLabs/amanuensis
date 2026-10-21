@@ -9,6 +9,7 @@ import {
   type TierDecision,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import { isMapsToolName } from '../permissions/mapsToolNames';
@@ -35,6 +36,7 @@ import {
   toolResultResponse,
   type AgentToolSchema,
   type AuthRequiredResponse,
+  type CallToolResolvedResponse,
   type CallToolResponse,
   type IToolSet,
   type ListToolsResponse,
@@ -55,10 +57,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * The tool result a denied call produces. Shared with OpenToolCallCloser, which writes it
  * for a call that was denied and then never dispatched, so the model reads one wording
- * either way.
+ * either way. A "Change it" answer is not an error, so it reaches the model as the request itself.
  */
 export function deniedToolCallText(reason: string | undefined): string {
+  if (reason !== undefined && isChangeRequestReason(reason)) {
+    return reason;
+  }
   return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+}
+
+/**
+ * The response a denied call produces. A "Change it" answer is plain text, not an error payload,
+ * so the model reads the request exactly as written.
+ */
+export function deniedToolCallResponse(reason: string | undefined): CallToolResolvedResponse {
+  return toolResultResponse({ text: deniedToolCallText(reason), isError: !isChangeRequestReason(reason) });
 }
 
 /**
@@ -381,10 +394,7 @@ export class ToolSet implements IToolSet {
     }
 
     if (decision?.status === 'deny') {
-      return toolResultResponse({
-        text: deniedToolCallText(decision.reason),
-        isError: true,
-      });
+      return deniedToolCallResponse(decision.reason);
     }
 
     if (this.sentinel !== undefined && (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))) {

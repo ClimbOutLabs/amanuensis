@@ -49,7 +49,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallText } from './ToolSet';
+import { deniedToolCallResponse } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -1300,7 +1300,7 @@ export async function executeToolCalls({
         return {
           toolCall,
           toolInfo,
-          response: toolResultResponse({ text: deniedToolCallText(approvalDecision.reason), isError: true }),
+          response: deniedToolCallResponse(approvalDecision.reason),
           failure: true,
           completedAt: new Date().toISOString(),
           memoized: false,

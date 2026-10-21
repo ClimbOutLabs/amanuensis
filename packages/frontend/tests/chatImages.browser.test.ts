@@ -48,7 +48,7 @@ function gradientPng(): Buffer {
   ]);
 }
 
-/** Serves the image route the way the server does: an inert, same-origin PNG. */
+/** Serves the image route the way the server does: an inert, same-origin PNG, or a 404 for the broken id. */
 function chatImageRoute(png: Buffer): Plugin {
   return {
     name: 'chat-image-route',
@@ -56,6 +56,12 @@ function chatImageRoute(png: Buffer): Plugin {
       server.middlewares.use((req, res, next) => {
         if (req.url === undefined || !/^\/api\/chat-images\/sessions\/[^/]+\/images\/[0-9a-f]{32}$/.test(req.url)) {
           next();
+          return;
+        }
+        // The fixture's BROKEN_ID is 'd' repeated.
+        if (req.url.endsWith(`/${'d'.repeat(32)}`)) {
+          res.writeHead(404);
+          res.end();
           return;
         }
         res.writeHead(200, {
@@ -67,6 +73,20 @@ function chatImageRoute(png: Buffer): Plugin {
       });
     },
   };
+}
+
+/** Clicks each button with this name in turn; a button that disappears after its click is one already shown. */
+async function showEach(page: Page, name: string): Promise<void> {
+  const button = page.getByRole('button', { name, exact: true });
+  for (let left = await button.count(); left > 0; left -= 1) {
+    await button.first().click();
+    await page.waitForFunction(
+      ([label, expected]) =>
+        [...document.querySelectorAll('button')].filter(each => each.textContent === label).length < expected,
+      [name, left],
+      { timeout: RENDER_TIMEOUT_MS },
+    );
+  }
 }
 
 async function waitForImages(page: Page, count: number): Promise<void> {
@@ -159,14 +179,17 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         timeout: RENDER_TIMEOUT_MS,
       });
 
-      // A silent reply image and a stored sandbox image show at once, re-encoded and same-origin.
-      await waitForImages(page, 2);
+      // Only the sandbox chart shows before anyone asks; every web picture waits behind a line.
+      await waitForImages(page, 1);
       await page.waitForLoadState('networkidle', { timeout: RENDER_TIMEOUT_MS });
-      await page.getByText('Show this image from example.org?').waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.getByText('Show 3 images from this email?').waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.getByText("The sender's servers will see that the email was opened.").waitFor();
-      await page.getByText('This image is too large to show. Ask for a smaller copy.').waitFor();
-      await page.getByText('Sketch (image not shown)').waitFor();
+      await page.getByText('Image from example.com hidden').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+      assert.equal(await page.getByText('Image from example.com hidden').count(), 3, `${viewport.name}: reply lines`);
+      await page.getByText('Images hidden', { exact: true }).waitFor();
+      assert.equal(
+        await page.locator('img[data-testid="aui-chat-image"]').count(),
+        1,
+        `${viewport.name}: before asking`,
+      );
       assert.ok(
         (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
         `${viewport.name}: chat images overflow horizontally`,
@@ -176,10 +199,41 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         await page.screenshot({ path: join(screenshotDir, `chat-images-${viewport.name}.png`), fullPage: true });
       }
 
-      // Approving the cards loads their images through the same route, still nothing remote.
-      await page.getByRole('button', { name: 'Show image', exact: true }).click();
-      await page.getByRole('button', { name: 'Show images', exact: true }).click();
+      // Showing the reply pictures loads the harbor photo; the broken copy leaves nothing behind.
+      await showEach(page, 'Show image');
+      await page.getByText('This image is too large to show. Ask for a smaller copy.').waitFor();
+      await waitForImages(page, 2);
+      assert.equal(
+        await page.locator('a[href*="/images/dddddddd"]').count(),
+        0,
+        `${viewport.name}: broken image left a link`,
+      );
+      assert.equal(
+        await page.evaluate(
+          () => [...document.querySelectorAll('img')].filter(img => img.complete && img.naturalWidth === 0).length,
+        ),
+        0,
+        `${viewport.name}: a broken image box is still on the page`,
+      );
+      await page.getByText('Sketch (image not shown)').waitFor();
+
+      // Showing the email's pictures loads them as thumbnails in one row.
+      await showEach(page, 'Show images');
       await waitForImages(page, 4);
+      assert.equal(
+        await page.locator('[data-testid="aui-email-images"] img').count(),
+        2,
+        `${viewport.name}: email thumbnails`,
+      );
+      const widths = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLImageElement>('img[data-testid="aui-chat-image"]')].map(
+          img => img.getBoundingClientRect().width,
+        ),
+      );
+      for (const width of widths) {
+        // 10rem at the default 16px root, with a little room for borders.
+        assert.ok(width >= 150 && width <= 170, `${viewport.name}: thumbnail is ${String(width)}px wide`);
+      }
       if (screenshotDir !== undefined) {
         await page.screenshot({
           path: join(screenshotDir, `chat-images-${viewport.name}-approved.png`),

@@ -19,6 +19,7 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
+import { isChangeRequestReason } from '../core/permissions/changeRequest';
 import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
@@ -659,7 +660,8 @@ export class SessionHandle<
     if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
       return false;
     }
-    if (!items.every(item => item.approval.status === 'deny')) {
+    // A "Change it" denial hands the model the person's words, so the turn continues to a model call.
+    if (!items.every(item => item.approval.status === 'deny' && !isChangeRequestReason(item.approval.reason))) {
       return false;
     }
     const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });

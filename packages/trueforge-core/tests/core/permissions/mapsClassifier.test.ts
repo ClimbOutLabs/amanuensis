@@ -351,7 +351,7 @@ describe('maps without asking', () => {
 
   it('gives the always-Tier-3 detail when the setting is off', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(maps_off));
-    expect(decision.reason_detail).toBe('Maps tools are always Tier 3 by policy.');
+    expect(decision.reason_detail).toBe('Maps always ask first, so Aman is checking with you.');
   });
 
   it('says why a map asked when the setting is on but the chat is not clean', async () => {
@@ -360,7 +360,7 @@ describe('maps without asking', () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
     expect(decision.tier).toBe(3);
     expect(decision.reason_detail).toBe(
-      'Maps asked this time because this chat read private data or the request holds text that must not leave.',
+      'This chat has private data or text that must not leave, so Aman is checking before using maps.',
     );
   });
 

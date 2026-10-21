@@ -59,7 +59,9 @@ describe('web search after the turn read the calendar', () => {
     const decision = await classifyTier(SEARCH, ctx);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('mcp_search_after_private_read');
-    expect(decision.card?.plain_what).toContain('calendar');
+    expect(decision.card?.plain_what).toContain(
+      'This chat has read your private data, so Aman is checking before searching.',
+    );
     expect(decision.card?.why_asked_again).toBeNull();
   });
 
@@ -88,7 +90,9 @@ describe('web search after the turn read mail', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('mcp_search_after_private_read');
     expect(isSearchAskReason(decision.reason)).toBe(true);
-    expect(decision.card?.plain_what).toContain('read your email');
+    expect(decision.card?.plain_what).toContain(
+      'This chat has read your private data, so Aman is checking before searching.',
+    );
     expect(decision.card?.why_asked_again).toBeNull();
   });
 

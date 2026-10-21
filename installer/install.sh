@@ -102,6 +102,7 @@ OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
 OPT_EMAIL=
+OPT_YOUR_NAME=
 OPT_PUBLIC_URL=
 OPT_LOGIN_URL=
 OPT_PORT=
@@ -161,6 +162,7 @@ Options
                         (an instance that has never started is started once first, so the file can be checked)
   --name NAME           name of the first instance (default main)
   --email ADDRESS       the email you sign in with
+  --your-name NAME      what Aman should call you (default: asked, or the start of your email)
   --instance NAME       which instance demo-seed and password apply to (default: the only one)
   --password-stdin      read the password from the first line of the input instead of asking for it
   --token-factory-key-stdin  read the Token Factory key from the input (the line after the password with --password-stdin); never put the key on the command line
@@ -180,7 +182,7 @@ Options
                         https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
-  --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
+  --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
   --print-root-steps    show the admin steps that install Docker, and stop
@@ -234,12 +236,12 @@ parse_args() {
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
-      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
+      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
+      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -272,6 +274,10 @@ set_option() {
     --name) OPT_NAME=$2 ;;
     --instance) OPT_INSTANCE=$2 ;;
     --email) OPT_EMAIL=$2 ;;
+    --your-name)
+      [ -n "$2" ] || usage_die "$(display_name_problem "")"
+      OPT_YOUR_NAME=$2
+      ;;
     --public-url) OPT_PUBLIC_URL=$2 ;;
     --login-url) OPT_LOGIN_URL=$2 ;;
     --port) OPT_PORT=$2 ;;
@@ -312,6 +318,9 @@ check_demo_options() {
   fi
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
+  fi
+  if [ -n "$OPT_YOUR_NAME" ] && [ "$COMMAND" != install ] && [ "$COMMAND:$SUBCOMMAND" != instance:add ]; then
+    usage_die "--your-name applies to install and instance add"
   fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."

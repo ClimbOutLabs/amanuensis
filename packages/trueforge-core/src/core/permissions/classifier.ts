@@ -90,11 +90,12 @@ import {
 import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
 import {
-  heldBecause,
+  GUARD_RULE_SAY,
+  HOLD_SAY,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
-  SERVER_SECRET_REASON,
+  withHoldSay,
 } from './searchHoldText';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
@@ -143,7 +144,6 @@ import {
   privateTextForChecks,
   SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_SILENT_REASON,
-  SILENT_FETCHES_PER_HOST,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
   type SearchAskReason,
@@ -1418,7 +1418,8 @@ async function holdSearchCall(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
   reason: SearchAskReason;
-  why: string;
+  /** The one sentence that says why Aman is asking. */
+  say: string;
   /** The card's one line, with any held key masked. */
   summary: string;
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
@@ -1443,13 +1444,8 @@ async function holdSearchCall(input: {
     card: {
       plain_what:
         tavily === null
-          ? searchHoldCardText({
-              summary: escapeDisplayText(shown),
-              why: input.why,
-            })
-          : input.why === ''
-            ? tavily
-            : `${tavily.replace(/\.$/, '')}${heldBecause(input.why)}`,
+          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say })
+          : withHoldSay(tavily, input.say),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -1462,7 +1458,7 @@ async function holdSearchCall(input: {
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
-    reason_detail: input.why === '' ? 'Searches are set to ask.' : `Web search held: ${input.why}.`,
+    reason_detail: input.say,
     sensitive_read: false,
     approval_token_id: await mintPlainToken({
       ctx,
@@ -1471,7 +1467,7 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
-  return { ...decision, audit_description: searchHoldAuditText({ server, why: input.why }) };
+  return { ...decision, audit_description: searchHoldAuditText({ server, say: input.say }) };
 }
 
 /**
@@ -1505,8 +1501,8 @@ async function classifySearchProviderTool(input: {
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
-  const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, summary, params: action.canonical_params, fields: extraction.fields });
+  const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
+    holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
     const masked = maskServerSecrets({
@@ -1522,7 +1518,7 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      why: SERVER_SECRET_REASON,
+      say: HOLD_SAY.secret,
       summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
       params: masked,
       fields: {
@@ -1539,19 +1535,16 @@ async function classifySearchProviderTool(input: {
     return heldWithoutKey(secrets);
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', '');
+    return held('mcp_search_setting_ask', HOLD_SAY.search_setting);
   }
   if (!verdict.ok) {
-    return held('mcp_search_guard', describeOutboundRule(verdict.rule));
+    return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
   }
   const readMode = hasReadPrivateData(ctx.web_search);
   if (readMode) {
     const texts = privateTextForChecks(ctx.web_search);
     if (texts === undefined || strings === undefined) {
-      return held(
-        'mcp_search_after_private_read',
-        'this chat read your email, calendar or documents, and a search could carry it out',
-      );
+      return held('mcp_search_after_private_read', HOLD_SAY.private_read);
     }
     const leak = privateTextLeak({
       mode: 'search',
@@ -1562,33 +1555,24 @@ async function classifySearchProviderTool(input: {
     if (leak !== null) {
       return ctx.services.unattended
         ? privateTextSkipped(leak)
-        : held(
-            'mcp_search_after_private_read',
-            `it would share ${leakWords(leak)} from your email, calendar or documents`,
-          );
+        : held('mcp_search_after_private_read', HOLD_SAY.private_read);
     }
   }
   // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
   if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
-    return held(
-      'mcp_search_after_private_read',
-      'this chat read something private, like a key or a secrets file, and a search could carry it out',
-    );
+    return held('mcp_search_after_private_read', HOLD_SAY.private_read);
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
+    return held('mcp_search_limit', HOLD_SAY.search_limit);
   }
   if (
     strings !== undefined &&
     unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
   ) {
-    return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+    return held('mcp_search_unreturned_url', HOLD_SAY.unseen_link);
   }
   if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
-    return held(
-      'mcp_search_host_limit',
-      `this turn already fetched ${String(SILENT_FETCHES_PER_HOST)} pages from that site without asking`,
-    );
+    return held('mcp_search_host_limit', HOLD_SAY.site_limit);
   }
   return tier1Decision({
     reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
@@ -1638,13 +1622,6 @@ function isCheckedPrivateRead(action: SentinelAction): boolean {
     (action.mcp_server_name === GMAIL_SERVER_ID || action.mcp_server_name === CALENDAR_SERVER_ID)
   );
 }
-
-/** Detail for a maps call that asks although the user let maps run without asking, because the chat is not clean. */
-const MAPS_ASKED_DETAIL =
-  'Maps asked this time because this chat read private data or the request holds text that must not leave.';
-
-/** Detail for a maps call that always asks, because the user has not let maps run without asking. */
-const MAPS_ALWAYS_ASKS_DETAIL = 'Maps tools are always Tier 3 by policy.';
 
 /**
  * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
@@ -2554,7 +2531,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
           reason: 'offline_mode',
-          reason_detail: 'Maps need network access, which is disabled while offline.',
+          reason_detail: HOLD_SAY.maps_offline,
           sensitive_read: false,
         });
       }
@@ -2586,7 +2563,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: 'maps_tool',
-        reason_detail: runsWithoutAsking ? MAPS_ASKED_DETAIL : MAPS_ALWAYS_ASKS_DETAIL,
+        reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

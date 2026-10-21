@@ -8,7 +8,7 @@
  * secret the model encodes some other way past every rule below is outside what a deterministic scan can see.
  */
 
-import { SERVER_SECRET_REASON } from './searchHoldText';
+import { SERVER_SECRET_REASON } from './searchHoldText.js';
 
 /** Most characters one string of the arguments (a query, an objective) may carry in a silent call. */
 export const OUTBOUND_MAX_CHARS = 200;

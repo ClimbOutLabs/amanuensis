@@ -17,6 +17,7 @@ import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permis
 import type { WebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../../../src/runtime/MemoryTurnResourceResolver';
 import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
@@ -24,6 +25,7 @@ import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqli
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { INERT_WEB_SEARCH_TOOL, startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
 import { installRecordedMail, MAIL_SENDER_NAME } from '../../fixtures/recordedMail';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -167,6 +169,11 @@ describe('a web search after the chat read mail', () => {
         sessionId: 's1',
         turnId: 't1',
         logger: createLogger({ silent: true }),
+      },
+      {
+        sessionStore: new SqliteSessionStore(env.db),
+        budget: uncappedTokenFactoryBudget,
+        authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
     );
   }

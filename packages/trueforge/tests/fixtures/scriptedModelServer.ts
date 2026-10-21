@@ -19,6 +19,8 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
+export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
 /** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
@@ -126,6 +128,13 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
   return undefined;
 }
 
+/** The text of the last tool result in the conversation, if a tool has answered. */
+function lastToolResultText(messages: ChatMessage[]): string | undefined {
+  const results = messages.filter(message => message.role === 'tool');
+  const last = results[results.length - 1];
+  return last === undefined ? undefined : messageText(last.content);
+}
+
 /** The `run:<tool>` directive still awaiting a tool result, or undefined when none is open. */
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
@@ -185,6 +194,9 @@ function argumentsJsonForTool({
 }): string {
   if (name === 'call_tool') {
     return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
+  }
+  if (name === 'usage_summary') {
+    return '{}';
   }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }
@@ -420,7 +432,12 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const rejectingJudge =
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
-    const replyText = rejectingJudge ? '{"helpful":[]}' : FINAL_TEXT;
+    const quoteToolResult = parsed.messages.some(message =>
+      messageText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+    );
+    const replyText = rejectingJudge
+      ? '{"helpful":[]}'
+      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ?? FINAL_TEXT);
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });

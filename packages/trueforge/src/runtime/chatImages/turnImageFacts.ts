@@ -2,7 +2,6 @@ import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-c
 import { CHAT_IMAGE_MAX_PER_EMAIL } from '@truefoundry/trueforge-core/core/chatImages';
 import { htmlImageLinks } from '@truefoundry/trueforge-core/core/email/gmail/htmlText';
 import { READ_EMAIL_TOOL_NAME } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
-import { isPrivateReadToolName } from '@truefoundry/trueforge-core/core/permissions/privateReadTools';
 
 /** What a turn's stored events say about the images it may show. Nothing here comes from the client. */
 export interface TurnImageFacts {
@@ -10,12 +9,8 @@ export interface TurnImageFacts {
   uploads: string[];
   /** Text of every assistant message in the turn. */
   replyTexts: string[];
-  /** Results of searches the designated provider ran without asking. */
-  silentSearchResults: string[];
   /** Web image links of each email the turn read, by tool call id. */
   emailImageLinks: Map<string, string[]>;
-  /** The turn called a tool that reads private data (mail), so web images ask like searches do. */
-  readPrivateData: boolean;
 }
 
 const PAGE_SIZE = 200;
@@ -101,11 +96,8 @@ export async function readTurnImageFacts(input: {
   const facts: TurnImageFacts = {
     uploads: [],
     replyTexts: [],
-    silentSearchResults: [],
     emailImageLinks: new Map(),
-    readPrivateData: false,
   };
-  const silentSearchCalls = new Set<string>();
   const emailCalls = new Set<string>();
   for (const event of events) {
     if (event.type === 'turn.created') {
@@ -121,21 +113,11 @@ export async function readTurnImageFacts(input: {
     } else if (event.type === 'model.message') {
       facts.replyTexts.push(assistantText(event.content));
       for (const call of event.tool_calls ?? []) {
-        const name = call.tool_info.name;
-        if (call.tool_info.type === 'mcp' && call.tool_info.silent_search_query !== undefined) {
-          silentSearchCalls.add(call.id);
-        }
-        if (name === READ_EMAIL_TOOL_NAME) {
+        if (call.tool_info.name === READ_EMAIL_TOOL_NAME) {
           emailCalls.add(call.id);
-        }
-        if (isPrivateReadToolName(name)) {
-          facts.readPrivateData = true;
         }
       }
     } else if (event.type === 'tool.response.v2' || event.type === 'tool.response') {
-      if (silentSearchCalls.has(event.tool_call_id)) {
-        facts.silentSearchResults.push(event.content);
-      }
       if (emailCalls.has(event.tool_call_id)) {
         const links = emailImageLinks(toolResultPayload(event.content));
         if (links.length > 0) {
