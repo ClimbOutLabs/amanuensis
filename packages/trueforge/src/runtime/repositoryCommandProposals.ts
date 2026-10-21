@@ -87,11 +87,126 @@ function agentsCommands(content: string): { purpose: VerifyCommandPurpose; comma
   return commands;
 }
 
-function sourceCommands(source: RepositoryCommandSource): { purpose: VerifyCommandPurpose; command: string }[] {
-  if (source.source_kind === 'package_json') {
-    return packageJsonCommands(source.content);
+interface TomlSection {
+  name: string;
+  entries: Map<string, string>;
+}
+
+/**
+ * Bounded section scan of a TOML file: enough to find tool tables and simple
+ * string entries without a full parser. Anything it cannot read plainly is
+ * skipped, so a missed shape only means fewer proposals.
+ */
+function tomlSections(content: string): TomlSection[] {
+  const sections: TomlSection[] = [];
+  let current: TomlSection | undefined;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const header = /^\[([^\]]+)\]$/.exec(line);
+    if (header?.[1] !== undefined) {
+      current = {
+        name: header[1]
+          .split('.')
+          .map(part =>
+            part
+              .trim()
+              .replace(/^["']|["']$/g, '')
+              .toLowerCase(),
+          )
+          .join('.'),
+        entries: new Map(),
+      };
+      sections.push(current);
+      continue;
+    }
+    if (current === undefined) {
+      continue;
+    }
+    const entry = /^([A-Za-z0-9_-]+)\s*=\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)')$/.exec(line);
+    const key = entry?.[1];
+    const value = entry?.[2] ?? entry?.[3];
+    if (key !== undefined && value !== undefined) {
+      current.entries.set(key.toLowerCase(), value);
+    }
   }
-  return agentsCommands(source.content);
+  return sections;
+}
+
+const HATCH_SCRIPT_PURPOSES: ReadonlyMap<string, VerifyCommandPurpose> = new Map([
+  ['build', 'build'],
+  ['test', 'test'],
+  ['check', 'verify'],
+  ['lint', 'verify'],
+  ['verify', 'verify'],
+]);
+
+function pyprojectCommands(content: string): { purpose: VerifyCommandPurpose; command: string }[] {
+  const sections = tomlSections(content);
+  const commands: { purpose: VerifyCommandPurpose; command: string }[] = [];
+  // Explicit hatch scripts are declarations, so they claim their purpose first;
+  // tool table inference below only fills purposes nobody declared.
+  const claimed = new Set<VerifyCommandPurpose>();
+  for (const section of sections) {
+    if (section.name !== 'tool.hatch.envs.default.scripts') {
+      continue;
+    }
+    for (const [script, purpose] of HATCH_SCRIPT_PURPOSES) {
+      const command = section.entries.get(script);
+      if (command !== undefined && command.trim().length > 0) {
+        commands.push({ purpose, command });
+        claimed.add(purpose);
+      }
+    }
+  }
+  const hasSection = (prefix: string): boolean =>
+    sections.some(section => section.name === prefix || section.name.startsWith(`${prefix}.`));
+  if (!claimed.has('test') && hasSection('tool.pytest')) {
+    commands.push({ purpose: 'test', command: 'pytest' });
+  }
+  if (!claimed.has('verify') && hasSection('tool.ruff')) {
+    commands.push({ purpose: 'verify', command: 'ruff check .' });
+  }
+  if (!claimed.has('verify') && hasSection('tool.mypy')) {
+    commands.push({ purpose: 'verify', command: 'mypy .' });
+  }
+  return commands;
+}
+
+const MAKEFILE_TARGET_PURPOSES: ReadonlyMap<string, VerifyCommandPurpose> = new Map([
+  ['build', 'build'],
+  ['test', 'test'],
+  ['check', 'verify'],
+  ['lint', 'verify'],
+  ['verify', 'verify'],
+]);
+
+function makefileCommands(content: string): { purpose: VerifyCommandPurpose; command: string }[] {
+  const commands: { purpose: VerifyCommandPurpose; command: string }[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const target = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])/.exec(line);
+    const name = target?.[1];
+    if (name === undefined || name.includes('%')) {
+      continue;
+    }
+    const purpose = MAKEFILE_TARGET_PURPOSES.get(name.toLowerCase());
+    if (purpose !== undefined) {
+      commands.push({ purpose, command: `make ${name}` });
+    }
+  }
+  return commands;
+}
+
+function sourceCommands(source: RepositoryCommandSource): { purpose: VerifyCommandPurpose; command: string }[] {
+  switch (source.source_kind) {
+    case 'package_json':
+      return packageJsonCommands(source.content);
+    case 'pyproject_toml':
+      return pyprojectCommands(source.content);
+    case 'makefile':
+      return makefileCommands(source.content);
+    case 'agents_md':
+      return agentsCommands(source.content);
+  }
 }
 
 function proposalId(input: {
@@ -110,8 +225,15 @@ function proposalId(input: {
   return `proposal-${digest}`;
 }
 
+const SOURCE_KIND_ORDER: Record<RepositoryCommandSource['source_kind'], string> = {
+  agents_md: '0',
+  package_json: '1',
+  pyproject_toml: '2',
+  makefile: '3',
+};
+
 function sourceOrder(source: RepositoryCommandSource): string {
-  return `${source.source_kind === 'agents_md' ? '0' : '1'}\u0000${source.source_path}`;
+  return `${SOURCE_KIND_ORDER[source.source_kind]}\u0000${source.source_path}`;
 }
 
 /**

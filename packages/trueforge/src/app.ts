@@ -96,11 +96,12 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
-import type { resolveSandboxProvider } from './runtime/sessionResources';
+import { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
+import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
 
 const BEARER_AUTH_SCHEME = 'BearerAuth';
@@ -862,6 +863,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
         resolveRequestContext,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveWorkspaceDir: async ({ c, session_id }) => {
+          const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+          const provider = await resolver({
+            tenant_id: TENANT_ID,
+            store: deps.resolveSandboxProviderStore(c),
+            logger: deps.logger,
+            sessionId: session_id,
+          });
+          return provider?.getWorkspaceDir();
+        },
       }),
       authMiddleware,
     ),
