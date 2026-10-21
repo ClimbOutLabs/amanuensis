@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
-import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
@@ -90,7 +89,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: debug synthetic-key-000111',
         why_asked_again: 'Held for approval: it contains a secret this server holds.',
       });
-      expect(card?.plain_what).toBe(`Search the web through finder${heldBecause(SERVER_SECRET_REASON)}`);
+      expect(card?.plain_what).toBe(
+        'Search the web through finder. This search contains something that looks like a password or key.',
+      );
       expect(card?.outbound_text).toBeNull();
       expect(card?.why_asked_again).toBeNull();
     });
@@ -101,9 +102,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: oslo weather',
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
-      // A card saved before the wording changed keeps its own sentence and gets the reason after it.
+      // A card saved before the wording changed gets the plain reason after its sentence.
       expect(card?.plain_what).toBe(
-        `Search the web through finder for: oslo weather${heldBecause('this turn already ran 8 searches without asking')}`,
+        'Search the web through finder for: oslo weather. Aman is checking with you before searching.',
       );
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();

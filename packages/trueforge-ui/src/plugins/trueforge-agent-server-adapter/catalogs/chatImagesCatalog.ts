@@ -40,6 +40,7 @@ export type TurnImagesResult = z.infer<typeof TurnImagesResultSchema>;
 
 const TurnImageListSchema = z.object({
   artifacts: z.array(z.object({ path: z.string(), name: z.string() })),
+  tool_images: z.array(z.object({ path: z.string(), name: z.string() })),
   emails: z.array(z.object({ tool_call_id: z.string(), count: z.number().int().positive() })),
 });
 export type TurnImageList = z.infer<typeof TurnImageListSchema>;

@@ -14,11 +14,7 @@
  * server sent an explicit `tier`.
  */
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
-import {
-  heldBecause,
-  savedSearchHoldReason,
-  SERVER_SECRET_REASON,
-} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -339,19 +335,19 @@ const SEARCH_QUERY_MARKER = ' for: ';
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
-  const because = savedSearchHoldReason(card.why_asked_again);
-  if (because === undefined) return card;
-  if (because === SERVER_SECRET_REASON) {
+  const saved = savedSearchHold(card.why_asked_again);
+  if (saved === undefined) return card;
+  if (saved.secret) {
     const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: `${heading}${heldBecause(SERVER_SECRET_REASON)}`,
+      plain_what: withHoldSay(heading, saved.say),
       why_asked_again: null,
       outbound_text: null,
     };
   }
-  return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
+  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
 }
 
 function stringList(value: unknown): string[] | undefined {

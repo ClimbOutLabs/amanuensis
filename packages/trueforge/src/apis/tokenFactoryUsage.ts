@@ -1,4 +1,5 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { sumKnownCostUsd } from '@truefoundry/trueforge-core/core/util/usageCost';
 
 import configuration from '../config';
 import { getTokenFactoryUsageRoute } from '../routes/tokenFactoryUsageRoutes';
@@ -37,7 +38,7 @@ export function describeTokenFactoryDay({
     cap_tokens: day.cap_tokens ?? null,
     used_tokens: day.used_tokens,
     remaining_tokens: day.cap_tokens === undefined ? null : Math.max(day.cap_tokens - day.used_tokens, 0),
-    cost_usd: costs.every(cost => cost !== null) ? costs.reduce((sum, cost) => sum + cost, 0) : null,
+    cost_usd: sumKnownCostUsd(costs),
     models,
   };
 }

@@ -49,7 +49,7 @@ import {
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
-import { InstructionBuilder, ROOT_AGENT_IDENTITY } from '../InstructionBuilder';
+import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
   type CompletionUsage,
@@ -192,6 +192,7 @@ import {
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
+  WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
@@ -1603,7 +1604,7 @@ export class AgentThread {
   }
 
   private buildInstruction(userInstruction?: string): string {
-    const identity = this.parent ? SUB_AGENT_IDENTITY : ROOT_AGENT_IDENTITY;
+    const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
     // Ambient, not a tool: a model that must remember to ask for the date will
     // instead assume one from training and reason years into the past, which a
@@ -1661,6 +1662,7 @@ export class AgentThread {
       createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
+    capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
     capabilities.addSection('check-before-asking', CHECK_BEFORE_ASKING_PROMPT);
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
