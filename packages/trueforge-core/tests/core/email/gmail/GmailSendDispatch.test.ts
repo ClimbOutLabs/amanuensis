@@ -4,6 +4,7 @@ import type { ApprovalDecision } from '../../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
+import { createWebSearchTurnState } from '../../../../src/core/permissions/webSearch';
 import { DeferredTool } from '../../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, OBJECT_INPUT_SCHEMA } from '../../harnessMocks';
@@ -54,6 +55,7 @@ describe('an approved send at dispatch', () => {
       memoState: createToolCallMemoState(),
       sentinel: {
         services: sentinel.services,
+        web_search: createWebSearchTurnState(),
         identity: {
           tenant_id: sentinel.tenant_id,
           created_by: sentinel.created_by,
