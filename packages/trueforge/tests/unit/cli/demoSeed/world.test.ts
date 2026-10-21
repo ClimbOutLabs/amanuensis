@@ -1,3 +1,4 @@
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { parseDateOnly, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { dayInZone } from '../../../../src/cli/demoSeed/calendar';
 import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
@@ -85,12 +86,12 @@ describe('buildDemoWorld content', () => {
     const { scheduleManifest } = worldOn(MONDAY, DEFAULT_DEMO_TIME_ZONE);
 
     expect(scheduleManifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon', status: 'active' });
-    expect(scheduleManifest.task).toContain('calendar for today and my inbox');
+    // The canonical brief comes first; the seed adds only its home address and reply lines after it.
+    expect(scheduleManifest.task.startsWith(MORNING_BRIEF_PROMPT)).toBe(true);
     expect(scheduleManifest.task).toContain('write a short suggested reply in the brief');
     expect(scheduleManifest.task).toContain('Do not send or save anything');
     expect(scheduleManifest.task).not.toContain('Draft a reply');
     expect(scheduleManifest.task).not.toContain('Needs your OK');
-    expect(scheduleManifest.task).toContain('Flag upcoming appointments and what to bring');
     expect(scheduleManifest.task).toContain('Rua da Emenda 45, 1200-169 Lisboa');
   });
 
