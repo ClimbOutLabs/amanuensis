@@ -107,6 +107,8 @@ export interface RunCodeCallOptions {
  */
 export interface RunCodeBackend {
   runCode(rawInput: unknown, options: RunCodeCallOptions | undefined): Promise<RunCodeResult>;
+  /** Whether the driver can reach the package gateway, so a package download can succeed. */
+  readonly packageGatewayCapable: boolean;
   /**
    * Backend-owned scrub for dispatch-level throws. The backend owns its
    * host paths (runRoot/dataDir); the agent runtime must never see them raw,
@@ -165,6 +167,10 @@ export class RunCodeService implements RunCodeBackend {
 
   get driverKind(): IsolationDriver['kind'] {
     return this.driver.kind;
+  }
+
+  get packageGatewayCapable(): boolean {
+    return this.driver.packageGatewayCapable;
   }
 
   /**

@@ -504,7 +504,7 @@ function sandboxImplementationPlanScope(input: {
   return parsed.success ? parsed.data : undefined;
 }
 
-export type RepositoryCommandSourceKind = 'agents_md' | 'package_json';
+export type RepositoryCommandSourceKind = 'agents_md' | 'makefile' | 'package_json' | 'pyproject_toml';
 
 export interface RepositoryCommandSource {
   source_kind: RepositoryCommandSourceKind;
@@ -885,6 +885,8 @@ const REPOSITORY_COMMAND_SOURCE_FILES: readonly {
 }[] = [
   { source_kind: 'agents_md', source_path: 'AGENTS.md' },
   { source_kind: 'package_json', source_path: 'package.json' },
+  { source_kind: 'pyproject_toml', source_path: 'pyproject.toml' },
+  { source_kind: 'makefile', source_path: 'Makefile' },
 ];
 
 function repositorySourceAbsolutePath(workspaceCwd: string, sourcePath: string): string {
@@ -1364,14 +1366,12 @@ function execNetworkSentences({ offline }: { offline: boolean }): string {
 }
 
 export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Execute shell commands in a persistent sandbox environment.
-Use the cwd argument for the checked-out repository. Setting HOME does not change the working directory.
-IMPORTANT: Never list, print, or expose environment variables.
-Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
-For large output, pass output.head_lines, output.tail_lines, and/or output.grep to bound the model-visible result.
+  return `Execute shell commands in a persistent sandbox environment. Use cwd for the checked-out repository; setting HOME does not change the working directory. Never list, print, or expose environment variables.
+Use write_file to create a file, apply_patch for source edits, and replace_text for one exact replacement. Do not bypass them with sed, Perl, Python, heredocs, or temporary patch files.
+For large output, pass output.head_lines, output.tail_lines, and/or output.grep.
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
-exec MUST NOT be used to run python/node code — use run_code. Interpreter invocations in exec are rejected by a harness guard; use the run_code tool instead.
-Result status is "ok" (success), "exited" (command ran, non-zero exit — check exit_code), or "failed" (host could not run it).
+exec MUST NOT run python or node code: use run_code. Interpreter invocations are rejected by a harness guard.
+Result status is "ok" (success), "exited" (non-zero exit; check exit_code), or "failed" (the host could not run it).
 ${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
 `;
 }
@@ -1412,10 +1412,9 @@ export function createSandboxRunCodeDescription({
   packageDownloads: boolean;
   workspaceDir: string;
 }): string {
-  return `Run Python or Node.js code in an isolated, offline sandbox.
-language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}, such as ${workspaceDir}/size.py). A script_path run reads a copy of that one file, which is never changed; no other workspace file is visible to the run. Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256; bytes never inline into context; download from the UI). To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>) (e.g. [chart](run_code/chart.png)); that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
+  return `Run Python or Node.js code in an isolated, offline sandbox. language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). Code runs with cwd=/scratch; read inputs from /ingress/<name> and write result files under /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's own result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline, packageDownloads })}
-files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
+files_in is for content you compose yourself. Never re-upload an /ingress file via files_in.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
@@ -1763,7 +1762,7 @@ function sandboxExecPreflightFailure(input: {
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
   hasNetwork: boolean;
-  packageDownloadsPossible: boolean;
+  packageGatewayAvailable: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1782,7 +1781,7 @@ function sandboxExecPreflightFailure(input: {
   if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
-  if (!input.packageDownloadsPossible && commandInstallsPypiOrNpmPackages(input.command)) {
+  if (!input.packageGatewayAvailable && commandInstallsPypiOrNpmPackages(input.command)) {
     return PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
   }
   if (input.purpose === undefined) {
@@ -2066,6 +2065,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly execGuardResolveCache = new Map<string, string | undefined>();
   /** Code-execution backend behind `run_code`; undefined when no isolation driver is configured. */
   private readonly runCodeService: RunCodeBackend | undefined;
+  /** The person's download setting for the bound repository, read before each tool-list read and call. */
+  private packageDownloadsAllowedForChat = false;
   /** host sink for harvested run_code file bytes; undefined when the host wires no persistence. */
   private readonly runCodeHarvestSink: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   /**
@@ -2227,7 +2228,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
-        packageDownloadsPossible: this.packageDownloadsPossible(),
+        packageGatewayAvailable: this.packageGatewayAvailable(),
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2862,6 +2863,11 @@ export class Sandbox extends LocalToolMCP {
     return out;
   }
 
+  override async listTools() {
+    await this.refreshPackageDownloadsAllowed();
+    return super.listTools();
+  }
+
   protected getTools() {
     const base =
       this.boundRepository === undefined
@@ -3108,16 +3114,15 @@ export class Sandbox extends LocalToolMCP {
     sandboxInstructions.addSection(
       'repository-work',
       dedent`
-        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor.
-        If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
-        Create the task branch immediately after cloning, before broad inspection. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
+        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
+        Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
         Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
         Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
         Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
         Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
-        Resolve repository facts from the local checkout before asking the user. Do not ask whether an API, schema, backend capability, file, or existing implementation exists when local inspection can answer it. Ask only for genuinely missing external information or a product decision whose alternatives would materially change the result.
-        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that local checkout and sandbox tools, not GitHub connectors, for source inspection, editing, commands, and verification.
-        Once the evidence identifies a narrow integration gap, make the smallest plausible change and let the typechecker or focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions that the repository already provides. If the requested concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
+        Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
+        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
+        Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
         Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
         A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
       `,
@@ -3832,12 +3837,42 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Whether a package download can ever succeed in this chat. The package mirrors serve only a bound
-   * repository; whether the person has allowed downloads for it is a separate question that the
-   * approval card asks.
+   * Whether a package download can ever succeed in this chat: a bound repository, a token loader and
+   * a driver that can reach the package gateway. The install refusal reads this, not the person's
+   * allowance, so the first install still reaches the approval card that asks for it.
+   */
+  private packageGatewayAvailable(): boolean {
+    return (
+      this.loadPackageMirrorToken !== undefined &&
+      this.boundRepository !== undefined &&
+      this.runCodeService?.packageGatewayCapable === true
+    );
+  }
+
+  /**
+   * Whether a package download can succeed right now: the gateway is available and the person has
+   * allowed downloads for the bound repository. The run_code description reads this. The token
+   * check at dispatch still decides each command.
    */
   private packageDownloadsPossible(): boolean {
-    return this.loadPackageMirrorToken !== undefined && this.boundRepository !== undefined;
+    return this.packageGatewayAvailable() && this.packageDownloadsAllowedForChat;
+  }
+
+  /** Reads the download setting into the cache. A failed read keeps downloads off, never on. */
+  private async refreshPackageDownloadsAllowed(): Promise<void> {
+    const load = this.loadPackageDownloadsAllowed;
+    if (load === undefined || this.boundRepository === undefined) {
+      this.packageDownloadsAllowedForChat = false;
+      return;
+    }
+    try {
+      this.packageDownloadsAllowedForChat = await load();
+    } catch (error) {
+      this.packageDownloadsAllowedForChat = false;
+      this.logger.warn('Could not read the package download setting; downloads stay off', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -5103,7 +5138,7 @@ export class Sandbox extends LocalToolMCP {
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
-      packageDownloadsPossible: this.packageDownloadsPossible(),
+      packageGatewayAvailable: this.packageGatewayAvailable(),
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {

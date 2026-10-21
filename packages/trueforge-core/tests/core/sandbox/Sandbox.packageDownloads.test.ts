@@ -1,5 +1,6 @@
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
+import type { RunCodeBackend } from '../../../src/core/sandbox/driver/RunCodeService';
 import { PACKAGE_GIT_DEPENDENCY_MESSAGE } from '../../../src/core/sandbox/packageMirrors';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, type BoundRepository } from '../../../src/core/sandbox/Sandbox';
@@ -13,6 +14,13 @@ const BOUND_REPOSITORY: BoundRepository = {
   revision: 1,
   workspace_cwd: '/work',
   commands: [],
+};
+
+/** A run_code driver that can reach the package gateway, so an install can reach the approval card. */
+const PACKAGE_GATEWAY_RUN_CODE_SERVICE: RunCodeBackend = {
+  packageGatewayCapable: true,
+  runCode: () => Promise.reject(new Error('run_code is not used in these tests')),
+  scrubDispatchErrorText: text => text,
 };
 
 const PACKAGE_CARD_WHAT = "Aman wants to download this project's packages from the public package sites (PyPI).";
@@ -78,6 +86,7 @@ function makeSandbox(input: {
     loadPackageMirrorToken: async () => (input.allowed() ? 'mirror-token' : undefined),
     loadPackageDownloadsAllowed: async () => input.allowed(),
     allowPackageDownloads: input.allowPackageDownloads,
+    runCodeService: PACKAGE_GATEWAY_RUN_CODE_SERVICE,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,

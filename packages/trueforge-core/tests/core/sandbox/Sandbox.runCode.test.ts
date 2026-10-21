@@ -9,6 +9,7 @@ import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSche
 import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import {
+  type BoundRepository,
   createSandboxRunCodeDescription,
   Sandbox,
   SANDBOX_EXEC_TOOL_NAME,
@@ -16,6 +17,7 @@ import {
 } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
 import { realCommandExec } from './realCommandExec';
 
 function readyExec(result = 'ok'): Promise<ExecResult> {
@@ -58,6 +60,7 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
 
 function makeRunCodeService(
   runCodeImpl?: (rawInput: unknown, options?: RunCodeCallOptions) => Promise<RunCodeResult>,
+  packageGatewayCapable = false,
 ): {
   service: RunCodeBackend;
   runCode: jest.Mock;
@@ -80,6 +83,7 @@ function makeRunCodeService(
     service: {
       runCode,
       scrubDispatchErrorText: (text: string): string => text,
+      packageGatewayCapable,
     },
     runCode,
   };
@@ -357,6 +361,70 @@ describe('Sandbox exec interpreter guard', () => {
   });
 });
 
+const DOWNLOAD_BOUND_REPOSITORY: BoundRepository = {
+  repository_id: 'repo-1',
+  revision: 1,
+  workspace_cwd: '/work',
+  commands: [],
+};
+
+/** The run_code description the person's model sees in a chat with these download settings. */
+async function runCodeDescriptionFor(input: {
+  allowed: boolean;
+  packageGatewayCapable: boolean;
+  network: 'none' | undefined;
+}): Promise<string> {
+  const { service } = makeRunCodeService(undefined, input.packageGatewayCapable);
+  const sandbox = new Sandbox({
+    provider: makeProvider({ network: input.network }),
+    boundRepository: DOWNLOAD_BOUND_REPOSITORY,
+    loadBoundRepository: async () => DOWNLOAD_BOUND_REPOSITORY,
+    workspaceVerificationCoordinator: new TestDurableWorkspaceCoordinator(),
+    workspaceLeaseOwnerId: 'test-replica',
+    loadPackageMirrorToken: async () => (input.allowed ? 'mirror-token' : undefined),
+    loadPackageDownloadsAllowed: async () => input.allowed,
+    allowPackageDownloads: async () => undefined,
+    runCodeService: service,
+    blockDestructiveToolsInCodeMode: true,
+    mcpRequestTimeoutMs: 60_000,
+    mcpConnectTimeoutMs: 5_000,
+    logger: makeSilentLogger(),
+    tracing: NOOP_AGENT_TRACING,
+  });
+  const listed = await sandbox.listTools();
+  const description = listed.result.tools.find(tool => tool.name === SANDBOX_RUN_CODE_TOOL_NAME)?.description;
+  if (description === undefined) {
+    throw new Error('Expected run_code in the tool list');
+  }
+  return description;
+}
+
+describe('Sandbox run_code package download sentence', () => {
+  it('says packages cannot be downloaded when the chat has not allowed downloads', async () => {
+    const description = await runCodeDescriptionFor({ allowed: false, packageGatewayCapable: true, network: 'none' });
+    expect(description).toContain('Packages cannot be downloaded here');
+    expect(description).not.toContain('can be downloaded');
+  });
+
+  it('says packages cannot be downloaded on a driver that cannot reach the package gateway, even when allowed', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: false, network: 'none' });
+    expect(description).toContain('Packages cannot be downloaded here');
+    expect(description).not.toContain('can be downloaded');
+  });
+
+  it('says packages can be downloaded when the chat allowed them and the driver reaches the gateway', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: true, network: 'none' });
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('cannot be downloaded');
+  });
+
+  it('says packages can be downloaded on a networked sandbox when the chat allowed them and the driver reaches the gateway', async () => {
+    const description = await runCodeDescriptionFor({ allowed: true, packageGatewayCapable: true, network: undefined });
+    expect(description).toContain('Packages can be downloaded for this chat');
+    expect(description).not.toContain('no installs at runtime');
+  });
+});
+
 describe('Sandbox run_code package downloads wording', () => {
   it('says packages can be downloaded when downloads are allowed for the chat', () => {
     const description = createSandboxRunCodeDescription({
@@ -460,8 +528,8 @@ describe('Sandbox run_code script_path', () => {
       workspaceDir: '/workspace',
     });
     expect(description).toContain('script_path');
-    expect(description).toContain('/workspace/size.py');
-    expect(description).toContain('which is never changed');
+    expect(description).toContain('/workspace');
+    expect(description).toContain('the run reads a copy of it');
   });
 
   it('reads a normal file under the workspace, and a link that stays inside it', async () => {

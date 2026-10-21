@@ -31,7 +31,7 @@ function findChromiumExecutable(): string {
 
 const RENDER_TIMEOUT_MS = 45_000;
 const VIEWPORTS = [
-  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'desktop', width: 1440, height: 900 },
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
@@ -121,7 +121,9 @@ test('first-run screens render in light and dark at desktop and phone width', { 
 
         // Every capability granted: the full prompt set is on screen.
         await open('connected');
-        await page.getByRole('button', { name: /Check for scams/ }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page
+          .getByRole('button', { name: /Find forgotten subscriptions/ })
+          .waitFor({ timeout: RENDER_TIMEOUT_MS });
         assert.ok(await page.getByRole('button', { name: 'Handle your email' }).isVisible());
         assert.ok(await page.getByRole('button', { name: 'Read files and run code' }).isVisible());
         await shoot('connected');
