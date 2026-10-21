@@ -129,6 +129,7 @@ async function dispatch(input: {
     memoState: createToolCallMemoState(),
     sentinel: {
       services: sentinel.services,
+      web_search: sentinel.web_search,
       identity: {
         tenant_id: sentinel.tenant_id,
         created_by: sentinel.created_by,

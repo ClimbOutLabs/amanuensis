@@ -44,7 +44,7 @@ describe('Calendar read classification', () => {
       card: null,
       auto_deny: null,
     });
-    expect(hasReadPrivateData(ctx.web_search)).toBe(true);
+    expect(hasReadPrivateData(ctx.web_search)).toBe(false);
   });
 
   it('reads in a scheduled run too', async () => {

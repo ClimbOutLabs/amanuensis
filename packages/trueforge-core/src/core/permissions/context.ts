@@ -150,19 +150,26 @@ export function createSentinelHostContext(input: {
   };
 }
 
+/** What one tool dispatch needs from the sentinel: shared services, this call's identity, and the turn's search state. */
+export interface SentinelDispatchContext {
+  services: SentinelServices;
+  identity: SentinelCallIdentity;
+  /** Where each private read's result is recorded before the model sees it. */
+  web_search: WebSearchTurnState;
+}
+
 /**
- * Converts a SentinelHostContext to the { services, identity } shape expected
+ * Converts a SentinelHostContext to the { services, identity, web_search } shape expected
  * by executeToolCalls. Per-call fields not available at the host level
  * (repository_id, workspace_cwd, agent_intent) default to null.
  */
-export function toDispatchSentinelContext(
-  host: SentinelHostContext | undefined,
-): { services: SentinelServices; identity: SentinelCallIdentity } | undefined {
+export function toDispatchSentinelContext(host: SentinelHostContext | undefined): SentinelDispatchContext | undefined {
   if (host === undefined) {
     return undefined;
   }
   return {
     services: host.services,
+    web_search: host.web_search,
     identity: {
       tenant_id: host.tenant_id,
       created_by: host.created_by,

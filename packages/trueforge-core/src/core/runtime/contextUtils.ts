@@ -79,7 +79,7 @@ When the user's message names no concrete task, such as a greeting, an announcem
  * to check those places first, not a per-question special case.
  */
 export const CHECK_BEFORE_ASKING_PROMPT = dedent`
-Before asking the user a question, check whether you already have the answer. Look in this conversation, in your memory, and in your spaces, where the tasks and lists you keep for the user live. If one of them holds the answer, use it and carry on instead of asking. Ask only when none of them do, or when the question is a choice only the user can make.
+Before asking the user something, check this conversation, your memory, and your spaces (where the lists and tasks you keep live). If the answer is there, use it. Ask only when it is not, or when only the user can make the choice.
 `;
 
 /**

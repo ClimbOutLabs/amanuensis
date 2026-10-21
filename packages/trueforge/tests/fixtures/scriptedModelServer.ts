@@ -11,7 +11,7 @@
  * a tool that takes one (default `inert`).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
+import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -28,6 +28,12 @@ export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
 export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
 /** Searches with Tavily, reads two result pages, then pins the places it found, then answers. */
 export const FIND_PLACES_DIRECTIVE = 'find_places';
+/**
+ * Lists the inbox, then runs one web search for the text after `search:` (to the end of the line),
+ * then maps the address the inbox names, then answers. Built for scheduled runs, which have no one to ask.
+ */
+export const BRIEF_DIRECTIVE = 'brief';
+export const SEARCH_DIRECTIVE_PREFIX = 'search:';
 /** Calls the unannotated connector tool three times in one model message, then answers. */
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
@@ -222,6 +228,25 @@ function callToolServer(messages: ChatMessage[]): string {
   return server;
 }
 
+/** The text after the latest `search:` directive, up to the end of its line; empty when none is given. */
+function searchDirectiveText(messages: ChatMessage[]): string {
+  let text = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(messageText(message.content))?.[1]?.trim() ?? '';
+    }
+  }
+  return text;
+}
+
+function briefSteps(messages: ChatMessage[]): { match: string; argumentsJson: string }[] {
+  return [
+    { match: 'list_inbox_threads', argumentsJson: JSON.stringify({ query: 'in:inbox' }) },
+    { match: 'tavily_search', argumentsJson: JSON.stringify({ query: searchDirectiveText(messages) }) },
+    { match: 'render_map', argumentsJson: JSON.stringify({ place_name: HARBOUR_ADDRESS }) },
+  ];
+}
+
 function sandboxArgumentsJson(purpose: 'verify' | 'commit'): string {
   return JSON.stringify({
     intent: purpose === 'verify' ? 'Verify the repository before committing' : 'Commit the verified repository state',
@@ -365,6 +390,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
       ];
       requestedTool = steps[progress.toolResults];
+    } else if (progress.directive === BRIEF_DIRECTIVE) {
+      requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }
