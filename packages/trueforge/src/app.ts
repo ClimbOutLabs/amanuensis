@@ -91,6 +91,8 @@ import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { getPersonaKnowledgeIndexer } from './personaKnowledge/knowledgeIndexer';
+import { ensureAmanGuide } from './personas/amanGuide/install';
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
@@ -98,9 +100,10 @@ import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import type { resolveSandboxProvider } from './runtime/sessionResources';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
-import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
+import { envManagedModelProviderNames, readDefaultChatModel } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
+import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
 
 const BEARER_AUTH_SCHEME = 'BearerAuth';
@@ -718,6 +721,33 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Installs the Aman guide for a person on first sight and refreshes it on upgrade. It waits for a
+  // default model, since the guide answers with one.
+  const ensureAmanGuideFor = async ({ userId }: { userId: string }): Promise<void> => {
+    const modelName = await readDefaultChatModel({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    if (modelName === undefined) {
+      return;
+    }
+    const indexer = getPersonaKnowledgeIndexer({
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      logger: deps.logger,
+    });
+    await ensureAmanGuide({
+      personaStore: deps.personaStore,
+      tenantId: TENANT_ID,
+      userId,
+      modelName,
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      enqueue: input => {
+        indexer.enqueue(input);
+      },
+      logger: deps.logger,
+    });
+  };
   app.route(
     '/api/v1/personas',
     withAuth(
@@ -726,6 +756,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
         knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        ensureAmanGuide: ensureAmanGuideFor,
       }),
       authMiddleware,
     ),

@@ -61,12 +61,15 @@ export interface PersonasRouterDeps {
   resolveRequestContext: ResolveRequestContext;
   /** Deleting a persona also removes its knowledge library database and pending upload blobs. */
   knowledgeDir: string;
+  /** Installs or refreshes the built-in Aman guide for the requester, so the list shows it current. */
+  ensureAmanGuide: (input: { userId: string }) => Promise<void>;
 }
 
 /** Persona CRUD (mounted at /api/v1/personas). */
 export function createPersonasRouter(deps: PersonasRouterDeps) {
   const listHandler: RouteHandler<typeof listPersonasRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
+    await deps.ensureAmanGuide({ userId: requestContext.subject.id });
     const personas = await deps.personaStore.listPersonas({
       tenant_id: TENANT_ID,
       created_by: requestContext.subject.id,
