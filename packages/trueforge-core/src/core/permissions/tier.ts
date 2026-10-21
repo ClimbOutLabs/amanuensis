@@ -16,10 +16,20 @@ export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).de
 /** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
 export const SANDBOX_COMMAND_REASON = 'sandbox_command';
 export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
+export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
+export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
 export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_COMMAND_REASON,
   SANDBOX_PACKAGE_INSTALL_REASON,
+  SANDBOX_FILE_WRITE_REASON,
+  SANDBOX_RUN_CODE_REASON,
 ]);
+
+/**
+ * Environment for a silent Python run. PYTHONSAFEPATH keeps the script's folder and the working directory off
+ * sys.path, so a repo file cannot shadow the standard library or an installed package. Python 3.11 and later.
+ */
+export const SILENT_RUN_PYTHON_ENV: Readonly<Record<string, string>> = { PYTHONSAFEPATH: '1' };
 
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated

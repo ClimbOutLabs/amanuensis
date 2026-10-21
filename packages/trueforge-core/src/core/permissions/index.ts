@@ -13,6 +13,7 @@ export {
   canonicalShellForm,
   classifyHostToolCall,
   classifyTier,
+  isSilentPythonHostRun,
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
@@ -45,6 +46,7 @@ export type { RunnerWorkflow } from './runner';
 export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 export {
   AUTO_DENY_REASONS,
+  SILENT_RUN_PYTHON_ENV,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,
   TierSchema,

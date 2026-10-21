@@ -1,14 +1,21 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os, { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordClassificationAudit, type AuditRecordInput } from '../../../src/core/permissions/audit';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  classifyTier,
+  isSilentPythonRun,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import { SILENT_RUN_PYTHON_ENV } from '../../../src/core/permissions/tier';
 import type { TrackedExecutableScope } from '../../../src/core/permissions/trackedExecutables';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -78,13 +85,18 @@ function action(tool_name: string, canonical_params: Record<string, unknown>): S
   return { tool_name, canonical_params, tool_type: 'truefoundry-system', mcp_hints: {} };
 }
 
+/** Runs a test in a fresh workspace, with an empty home folder so the machine's own hook files cannot leak in. */
 function withWorkspace(run: (workspace: string) => Promise<void>): () => Promise<void> {
   return async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'sandbox-no-cards-'));
+    const home = mkdtempSync(join(tmpdir(), 'sandbox-home-'));
+    const homedir = jest.spyOn(os, 'homedir').mockReturnValue(home);
     try {
       await run(workspace);
     } finally {
+      homedir.mockRestore();
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   };
 }
@@ -108,7 +120,7 @@ describe('in-sandbox work with the switch on runs without a card', () => {
     'run_code is Tier 1 with its own reason',
     withWorkspace(async workspace => {
       const decision = await classifyTier(
-        action('run_code', { code: 'print(1)' }),
+        action('run_code', { code: 'print(1)', language: 'python' }),
         makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
       );
       expect(decision.tier).toBe(1);
@@ -118,11 +130,14 @@ describe('in-sandbox work with the switch on runs without a card', () => {
   );
 
   test.each([
-    ['npm install --ignore-scripts humanize', 'sandbox_package_install'],
-    ['pnpm add --ignore-scripts humanize', 'sandbox_package_install'],
-    ['yarn add --ignore-scripts humanize', 'sandbox_package_install'],
-  ])('%s runs without a card', (command, reason) =>
+    ['npm install --ignore-scripts humanize', 'sandbox_package_install', null],
+    ['pnpm add --ignore-scripts humanize', 'sandbox_package_install', 'pnpm@11.16.0'],
+    ['yarn add --ignore-scripts humanize', 'sandbox_package_install', 'yarn@4.5.0'],
+  ])('%s runs without a card', (command, reason, declared) =>
     withWorkspace(async workspace => {
+      if (declared !== null) {
+        writeFileSync(join(workspace, 'package.json'), JSON.stringify({ packageManager: declared }));
+      }
       const decision = await classifyTier(
         action('exec', { command, cwd: workspace }),
         makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
@@ -137,7 +152,7 @@ describe('in-sandbox work with the switch on runs without a card', () => {
     'a scheduled run runs code without a card',
     withWorkspace(async workspace => {
       const decision = await classifyTier(
-        action('run_code', { code: 'print(1)' }),
+        action('run_code', { code: 'print(1)', language: 'python' }),
         makeCtx({
           services: forUnattendedRun(servicesWith({ sandbox_without_asking: true })),
           workspace,
@@ -216,6 +231,7 @@ describe('a package install runs silently only when it runs no install scripts',
           return Promise.resolve();
         },
       };
+      writeFileSync(join(workspace, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.16.0' }));
       const command = 'pnpm add --ignore-scripts humanize';
       const decision = await classifyTier(
         action('exec', { command, cwd: workspace }),
@@ -696,5 +712,267 @@ describe('a write through a symlink is checked where it lands', () => {
         expect(error).toBeDefined();
       })(),
     ),
+  );
+});
+
+describe('an install keeps its card when a hook file sits above it or in the home folder', () => {
+  test.each(['.pnpmfile.cjs', '.pnpmfile.mjs', '.npmrc', '.yarnrc', '.yarnrc.yml', 'pnpm-workspace.yaml'])(
+    'a %s in the workspace root keeps the card for an install run in a sub folder',
+    name =>
+      withWorkspace(async workspace => {
+        const sub = join(workspace, 'packages', 'app');
+        mkdirSync(sub, { recursive: true });
+        writeFileSync(join(workspace, name), 'ignore-scripts=false\n');
+        const decision = await classifyTier(
+          action('exec', { command: 'npm install --ignore-scripts humanize', cwd: sub }),
+          makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        );
+        expect(decision.tier).toBe(3);
+      })(),
+  );
+
+  test.each(['.pnpmfile.mjs', '.yarnrc.yml', 'pnpm-workspace.yaml'])(
+    'a %s in the install folder keeps the card',
+    name =>
+      withWorkspace(async workspace => {
+        writeFileSync(join(workspace, name), 'x\n');
+        const decision = await classifyTier(
+          action('exec', { command: 'npm install --ignore-scripts humanize', cwd: workspace }),
+          makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        );
+        expect(decision.tier).toBe(3);
+      })(),
+  );
+
+  test(
+    'a hook file in the home folder keeps the card',
+    withWorkspace(async workspace => {
+      writeFileSync(join(os.homedir(), '.npmrc'), 'ignore-scripts=false\n');
+      const decision = await classifyTier(
+        action('exec', { command: 'npm install --ignore-scripts humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+});
+
+describe('a pnpm or yarn install runs silently only when the workspace declares that version', () => {
+  test.each(['pnpm add --ignore-scripts humanize', 'yarn add --ignore-scripts humanize'])(
+    '%s keeps its card when no package.json is found',
+    command =>
+      withWorkspace(async workspace => {
+        const decision = await classifyTier(
+          action('exec', { command, cwd: workspace }),
+          makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+        );
+        expect(decision.tier).toBe(3);
+      })(),
+  );
+
+  test.each([
+    ['pnpm add --ignore-scripts humanize', { packageManager: 'yarn@4.5.0' }],
+    ['pnpm add --ignore-scripts humanize', { name: 'app' }],
+    ['yarn add --ignore-scripts humanize', { packageManager: 'pnpm@11.16.0' }],
+  ])('%s keeps its card when the package.json names another version: %j', (command, manifest) =>
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'package.json'), JSON.stringify(manifest));
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    })(),
+  );
+
+  test(
+    'a pnpm install with a declared version runs silently',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.16.0' }));
+      const decision = await classifyTier(
+        action('exec', { command: 'pnpm add --ignore-scripts humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_package_install');
+    }),
+  );
+
+  test(
+    'a pnpm install keeps its card on a remote sandbox, where the version cannot be read',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.16.0' }));
+      const decision = await classifyTier(
+        action('exec', { command: 'pnpm add --ignore-scripts humanize', cwd: workspace }),
+        {
+          ...makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+          path_resolution: 'remote',
+        },
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+});
+
+describe('run_code runs silently only for code Aman wrote in this chat', () => {
+  test.each([
+    ['inline code that imports a package', { code: 'import requests\n', language: 'python' }],
+    ['inline code that starts a program', { code: 'import subprocess\n', language: 'python' }],
+    ['inline code that names no language', { code: 'print(1)' }],
+    ['a call with both code and script_path', { code: 'print(1)', script_path: 'x.py', language: 'python' }],
+  ])('%s keeps its card', (_label, params) =>
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', params),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    })(),
+  );
+
+  test(
+    'a script_path Aman did not write keeps its card, even when the script is plain standard code',
+    withWorkspace(async workspace => {
+      writeScript({
+        services: servicesWith({ sandbox_without_asking: true }),
+        workspace,
+        name: 'repo_tool.py',
+        authored: false,
+      });
+      const decision = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'repo_tool.py'), language: 'python' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test(
+    'a script_path Aman wrote this session runs silently',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'agent_tool.py', authored: true });
+      const decision = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'agent_tool.py'), language: 'python' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_run_code');
+    }),
+  );
+
+  test(
+    'run_code keeps its card in a workspace whose hook files would turn install scripts on',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, '.npmrc'), 'ignore-scripts=false\n');
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)', language: 'python' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test(
+    'run_code and write_file ask with the switch off',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: false });
+      const run = await classifyTier(
+        action('run_code', { code: 'print(1)', language: 'python' }),
+        makeCtx({ services, workspace }),
+      );
+      const write = await classifyTier(
+        action('write_file', { path: join(workspace, 'new.py'), content: 'print(1)' }),
+        makeCtx({ services, workspace }),
+      );
+      expect(run.tier).toBe(3);
+      expect(write.tier).not.toBe(1);
+    }),
+  );
+});
+
+describe('run_code and write_file in the sandbox appear in the activity list', () => {
+  test(
+    'a silent write and a silent run are both recorded as logged',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      const written: AuditRecordInput[] = [];
+      services.audit = {
+        record: input => {
+          written.push(input);
+          return Promise.resolve();
+        },
+      };
+      const ctx = makeCtx({ services, workspace });
+      const calls: { tool_name: string; params: Record<string, unknown> }[] = [
+        { tool_name: 'write_file', params: { path: join(workspace, 'humanize_demo.py'), content: 'print(1)' } },
+        { tool_name: 'run_code', params: { code: 'print(1)', language: 'python' } },
+      ];
+      for (const { tool_name, params } of calls) {
+        const decision = await classifyTier(action(tool_name, params), ctx);
+        await recordClassificationAudit({
+          services,
+          identity: {
+            tenant_id: 't1',
+            created_by: 'u1',
+            conversation_id: 'conv-1',
+            repository_id: null,
+            workspace_cwd: workspace,
+            agent_intent: null,
+          },
+          tool_name,
+          decision,
+        });
+      }
+      expect(written).toEqual([
+        expect.objectContaining({ tool_name: 'write_file', outcome: 'logged' }),
+        expect.objectContaining({ tool_name: 'run_code', outcome: 'logged' }),
+      ]);
+    }),
+  );
+});
+
+describe('silent Python runs cannot import a repo file that shadows the standard library', () => {
+  test(
+    'the silent run environment keeps the script folder off sys.path',
+    withWorkspace(async workspace => {
+      writeFileSync(join(workspace, 'json.py'), '# a repo file that shadows the standard library\n');
+      writeFileSync(join(workspace, 'agent_tool.py'), 'import json\nprint(json.__file__)\n');
+      const run = (env: Record<string, string>): string =>
+        spawnSync('python3', [join(workspace, 'agent_tool.py')], {
+          cwd: workspace,
+          env: { ...process.env, ...env },
+          encoding: 'utf8',
+        }).stdout.trim();
+      // Control: without the isolation the repo's json.py is the module that loads.
+      expect(run({})).toBe(join(workspace, 'json.py'));
+      expect(run(SILENT_RUN_PYTHON_ENV)).not.toBe(join(workspace, 'json.py'));
+    }),
+  );
+
+  test(
+    'a silent python script is still silent, and the isolation is only for silent runs',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'agent_tool.py', authored: true, content: 'import json\n' });
+      const silent = await isSilentPythonRun({
+        command: 'python3 agent_tool.py',
+        cwd: workspace,
+        ctx: makeCtx({ services, workspace }),
+      });
+      expect(silent).toBe(true);
+      const carded = await isSilentPythonRun({
+        command: 'python3 repo_tool.py',
+        cwd: workspace,
+        ctx: makeCtx({ services, workspace }),
+      });
+      expect(carded).toBe(false);
+      const notPython = await isSilentPythonRun({
+        command: 'node agent_tool.js',
+        cwd: workspace,
+        ctx: makeCtx({ services, workspace }),
+      });
+      expect(notPython).toBe(false);
+    }),
   );
 });
