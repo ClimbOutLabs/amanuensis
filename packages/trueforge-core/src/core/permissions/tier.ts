@@ -26,12 +26,6 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Environment for a silent Python run. PYTHONSAFEPATH keeps the script's folder and the working directory off
- * sys.path, so a repo file cannot shadow the standard library or an installed package. Python 3.11 and later.
- */
-export const SILENT_RUN_PYTHON_ENV: Readonly<Record<string, string>> = { PYTHONSAFEPATH: '1' };
-
-/**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
  * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
  * hosting server declares about the tool.

@@ -46,8 +46,6 @@ import {
   classifyContextFor,
   classifyHostToolCall,
   isNewWriteTarget,
-  isSilentPythonHostRun,
-  SILENT_RUN_PYTHON_ENV,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -4928,34 +4926,6 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * The environment a silent Python run gets, so a repo file cannot shadow the standard library. The silent
-   * run is judged again here, right before it starts, with the same inputs the classification used.
-   */
-  private async silentPythonEnv({
-    command,
-    cwd,
-  }: {
-    command: string;
-    cwd: string | null;
-  }): Promise<Record<string, string>> {
-    const sentinel = this.sentinelContext;
-    if (sentinel === undefined) {
-      return {};
-    }
-    const silent = await isSilentPythonHostRun({
-      sentinel,
-      repository_id: this.boundRepository?.repository_id ?? null,
-      workspace_cwd:
-        this.boundRepository?.workspace_cwd ?? sentinel.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
-      path_resolution: this.provider.filesystem,
-      ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
-      command,
-      cwd,
-    });
-    return silent ? SILENT_RUN_PYTHON_ENV : {};
-  }
-
-  /**
    * Sentinel: record agent-created or agent-modified files as tracked
    * executables, so a later attempt to execute them escalates for approval.
    * Best effort and host-side: paths that do not resolve on the host (for
@@ -5244,8 +5214,7 @@ export class Sandbox extends LocalToolMCP {
     const gitPrep =
       this.prepareHostAuthenticatedGit({ sandboxId: rawId, exec: resolvedInput, approvedRemotes }) ??
       this.prepareAllowlistedExec({ sandboxId: rawId, exec: resolvedInput });
-    const pythonEnv = await this.silentPythonEnv({ command: resolvedInput.command, cwd: resolvedInput.cwd ?? null });
-    const env = { ...mcpClientEnv, ...pythonEnv, ...gitPrep.env };
+    const env = { ...mcpClientEnv, ...gitPrep.env };
     const execInput = gitPrep.exec;
 
     const dispatchMarker = { dispatched: false };

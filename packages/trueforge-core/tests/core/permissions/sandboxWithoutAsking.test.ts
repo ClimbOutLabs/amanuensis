@@ -1,21 +1,14 @@
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os, { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordClassificationAudit, type AuditRecordInput } from '../../../src/core/permissions/audit';
-import {
-  classifyTier,
-  isSilentPythonRun,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import { SILENT_RUN_PYTHON_ENV } from '../../../src/core/permissions/tier';
 import type { TrackedExecutableScope } from '../../../src/core/permissions/trackedExecutables';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -928,51 +921,6 @@ describe('run_code and write_file in the sandbox appear in the activity list', (
         expect.objectContaining({ tool_name: 'write_file', outcome: 'logged' }),
         expect.objectContaining({ tool_name: 'run_code', outcome: 'logged' }),
       ]);
-    }),
-  );
-});
-
-describe('silent Python runs cannot import a repo file that shadows the standard library', () => {
-  test(
-    'the silent run environment keeps the script folder off sys.path',
-    withWorkspace(async workspace => {
-      writeFileSync(join(workspace, 'json.py'), '# a repo file that shadows the standard library\n');
-      writeFileSync(join(workspace, 'agent_tool.py'), 'import json\nprint(json.__file__)\n');
-      const run = (env: Record<string, string>): string =>
-        spawnSync('python3', [join(workspace, 'agent_tool.py')], {
-          cwd: workspace,
-          env: { ...process.env, ...env },
-          encoding: 'utf8',
-        }).stdout.trim();
-      // Control: without the isolation the repo's json.py is the module that loads.
-      expect(run({})).toBe(join(workspace, 'json.py'));
-      expect(run(SILENT_RUN_PYTHON_ENV)).not.toBe(join(workspace, 'json.py'));
-    }),
-  );
-
-  test(
-    'a silent python script is still silent, and the isolation is only for silent runs',
-    withWorkspace(async workspace => {
-      const services = servicesWith({ sandbox_without_asking: true });
-      writeScript({ services, workspace, name: 'agent_tool.py', authored: true, content: 'import json\n' });
-      const silent = await isSilentPythonRun({
-        command: 'python3 agent_tool.py',
-        cwd: workspace,
-        ctx: makeCtx({ services, workspace }),
-      });
-      expect(silent).toBe(true);
-      const carded = await isSilentPythonRun({
-        command: 'python3 repo_tool.py',
-        cwd: workspace,
-        ctx: makeCtx({ services, workspace }),
-      });
-      expect(carded).toBe(false);
-      const notPython = await isSilentPythonRun({
-        command: 'node agent_tool.js',
-        cwd: workspace,
-        ctx: makeCtx({ services, workspace }),
-      });
-      expect(notPython).toBe(false);
     }),
   );
 });

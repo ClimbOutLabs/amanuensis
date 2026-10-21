@@ -1104,52 +1104,6 @@ async function runCodePlacement({
   return scriptFileLoadsOnlyStandardCode({ runtime, file: identity, resolution: ctx.path_resolution }) ? detail : null;
 }
 
-/**
- * True when this shell command runs silently in the sandbox right now and its program is Python. Judged again
- * at dispatch, so the Python isolation applies only to a run that would be silent.
- */
-export async function isSilentPythonRun({
-  command,
-  cwd,
-  ctx,
-}: {
-  command: string;
-  cwd: string | null;
-  ctx: ClassifyContext;
-}): Promise<boolean> {
-  if (!(await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))) {
-    return false;
-  }
-  const parsed = parseSimpleCommand(command);
-  const program = parsed?.argv[0];
-  if (program !== 'python' && program !== 'python3') {
-    return false;
-  }
-  return (await sandboxRunPlacement({ command, parsed, ctx, cwd }))?.reason === SANDBOX_COMMAND_REASON;
-}
-
-/** The dispatch-time form of `isSilentPythonRun`, built from the same inputs as `classifyHostToolCall`. */
-export async function isSilentPythonHostRun(input: {
-  sentinel: SentinelHostContext;
-  repository_id: string | null;
-  workspace_cwd: string | null;
-  path_resolution?: PathResolution | undefined;
-  file_digest?: FileDigest | undefined;
-  command: string;
-  cwd: string | null;
-}): Promise<boolean> {
-  const ctx = classifyContextFor({
-    host: input.sentinel,
-    repository_id: input.repository_id,
-    workspace_cwd: input.workspace_cwd,
-  });
-  return isSilentPythonRun({
-    command: input.command,
-    cwd: input.cwd,
-    ctx: { ...ctx, path_resolution: input.path_resolution, file_digest: input.file_digest },
-  });
-}
-
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
