@@ -7,7 +7,7 @@ import {
   type ToolGrantStore,
 } from '@truefoundry/trueforge-core/core';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
-import { readAllowedRecipientsFile } from './mailAllowedRecipients';
+import { addAllowedRecipients, readAllowedRecipientsFile, waitForSidecarLoadedHash } from './mailAllowedRecipients';
 import { sentinelSettingsServices } from './sentinelSettingsServices';
 
 /**
@@ -27,6 +27,8 @@ export function createSentinelServices(stores: {
   demoSendAllowlist: readonly string[];
   /** The Email send list the server writes; unset when no sidecar is configured, so nothing is listed. */
   mailPolicyPath: string | undefined;
+  /** Where the sidecar records the list it loaded; the server waits on it after a change. */
+  mailPolicyStatusPath: string | undefined;
 }): SentinelServices {
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
@@ -39,6 +41,19 @@ export function createSentinelServices(stores: {
       stores.mailPolicyPath === undefined
         ? Promise.resolve([])
         : readAllowedRecipientsFile({ path: stores.mailPolicyPath }),
+    mail_add_recipients: async (_input, addresses) => {
+      const { mailPolicyPath, mailPolicyStatusPath } = stores;
+      if (mailPolicyPath === undefined || mailPolicyStatusPath === undefined) {
+        return 'refused';
+      }
+      let hash: string;
+      try {
+        hash = await addAllowedRecipients({ path: mailPolicyPath, addresses: [...addresses] });
+      } catch {
+        return 'refused';
+      }
+      return (await waitForSidecarLoadedHash({ statusPath: mailPolicyStatusPath, hash })) ? 'loaded' : 'not_loaded';
+    },
     ...sentinelSettingsServices(stores.settings),
   };
 }

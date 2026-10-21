@@ -17,6 +17,12 @@ import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
 import {
+  NEW_RECIPIENT_NEEDS_CHOICE,
+  NEW_RECIPIENT_REFUSED,
+  newRecipientsOfMailCall,
+  SEND_LIST_STILL_UPDATING,
+} from '../email/mailConnector/sendListApproval';
+import {
   AgentHarnessError,
   InvalidAgentSendInputError,
   McpConnectionError,
@@ -1761,6 +1767,8 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
+        // Mail to new addresses is checked before anything is recorded, like a held action below.
+        await this.prepareMailRecipientAdds({ approvals, pendingById, heldById });
         // Checked before anything is recorded, so a refused action leaves the chat untouched.
         const heldReplay = await this.prepareHeldReplay({
           approvals: approvals.filter(approval => heldById.has(approval.tool_call_id)),
@@ -1908,6 +1916,54 @@ export class AgentThread {
    * with the exact stored arguments, classified again and re-stamped with its hold-time token, so
    * it runs through the ordinary dispatch checks. A refusal throws and leaves the chat untouched.
    */
+  /**
+   * An approved mail send to addresses not on the Email list runs only when the owner chose "Add and send" on
+   * its card. The addresses join the list and the sidecar must load them first. Any failure throws before the
+   * approval is recorded, so the draft stays pending for the owner.
+   */
+  private async prepareMailRecipientAdds(input: {
+    approvals: readonly UserToolApprovalMessage[];
+    pendingById: ReadonlyMap<string, InternalEnrichedToolCall>;
+    heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
+  }): Promise<void> {
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      return;
+    }
+    const ctx = { tenant_id: sentinel.tenant_id, created_by: sentinel.created_by };
+    for (const approval of input.approvals) {
+      if (approval.approval.status !== 'allow') {
+        continue;
+      }
+      const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
+      if (call === undefined) {
+        continue;
+      }
+      const listed = await sentinel.services.mail_listed_addresses(ctx);
+      const added = newRecipientsOfMailCall(
+        {
+          tool_name: call.function.name,
+          mcp_server_name: call.tool_info.mcp_server_name,
+          arguments: call.function.arguments,
+        },
+        listed,
+      );
+      if (added.length === 0) {
+        continue;
+      }
+      if (approval.approval.mail_recipients !== 'add') {
+        throw new InvalidAgentSendInputError(NEW_RECIPIENT_NEEDS_CHOICE);
+      }
+      const result = await sentinel.services.mail_add_recipients(ctx, added);
+      if (result === 'refused') {
+        throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
+      }
+      if (result === 'not_loaded') {
+        throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+      }
+    }
+  }
+
   private async prepareHeldReplay(input: {
     approvals: readonly UserToolApprovalMessage[];
     heldById: ReadonlyMap<string, InternalEnrichedToolCall>;

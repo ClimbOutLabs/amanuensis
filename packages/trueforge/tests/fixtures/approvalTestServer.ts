@@ -128,6 +128,7 @@ function buildApp(input: {
     demoMode: false,
     demoSendAllowlist: [],
     mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),

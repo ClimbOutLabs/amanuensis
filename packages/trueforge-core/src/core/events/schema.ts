@@ -86,6 +86,12 @@ export const AgentApprovalDecisionAllowSchema = z
         'Omitted or once allows only this invocation; chat grants this exact tool for the current session; ' +
           'always allows this read-only connector tool for the caller until revoked.',
       ),
+    mail_recipients: z
+      .literal('add')
+      .optional()
+      .describe(
+        'Only for a mail send to addresses not yet on the Email list: add those addresses to the list, then send.',
+      ),
   })
   .openapi('ApprovalAllow');
 

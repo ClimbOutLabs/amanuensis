@@ -720,6 +720,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
+    mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({
