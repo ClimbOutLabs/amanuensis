@@ -13,8 +13,7 @@ export interface AgentStepsContainerProps {
   /**
    * Render the step rows without the accordion card. Used when an ancestor
    * (e.g. AgentInternalsDisclosure) already owns the summary row and its
-   * visibility — which follows the chat-level switch, with no per-turn expand
-   * control — so the trace does not end up nested inside two accordions.
+   * show/hide toggle, so the trace does not end up nested inside two accordions.
    */
   bare?: boolean;
 }
