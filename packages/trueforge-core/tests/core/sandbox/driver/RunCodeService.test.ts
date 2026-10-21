@@ -27,6 +27,7 @@ const OK_RESULT: DriverRunResult = {
 
 class FakeDriver implements IsolationDriver {
   readonly kind = 'docker' as const;
+  readonly packageGatewayCapable = false;
   readiness: DriverReadiness = { ready: true };
   runBehavior: (params: DriverRunParams) => Promise<DriverRunResult> = () => Promise.resolve({ ...OK_RESULT });
   runs: DriverRunParams[] = [];
