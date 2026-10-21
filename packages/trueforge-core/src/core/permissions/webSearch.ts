@@ -60,7 +60,7 @@ export interface WebSearchTurnState {
   privateDataRead: boolean;
   /** Text of the mail and calendar results this turn received, so a later search can be checked against it. */
   privateTexts: string[];
-  /** True once at least one mail or calendar result was received as text. */
+  /** True once at least one mail or calendar result was received as text, by any thread of the turn. */
   privateTextCaptured: boolean;
   /** True when the private mark came from saved state or old context, whose text this turn never saw. */
   privateTextLost: boolean;

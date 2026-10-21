@@ -169,6 +169,11 @@ function normalizeForScan(text: string): string {
     .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
 }
 
+/** The form every scan compares: look-alikes folded, then percent escapes decoded once. */
+export function scanForm(text: string): string {
+  return decodeOnce(normalizeForScan(text));
+}
+
 /** Percent-escapes decoded once; an escape that does not decode (a stray `%`) stays as written. */
 function decodeOnce(text: string): string {
   return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
@@ -186,7 +191,7 @@ function withoutUrlOrigin(text: string): string {
 }
 
 /** Letters and digits only, lower-cased: spacing, punctuation and case cannot hide a secret. */
-function compactForm(text: string): string {
+export function compactForm(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
@@ -272,7 +277,7 @@ function lowerToUpperTransitions(word: string): number {
 }
 
 /** A long run of letters only: a word or an identifier (`internationalization`, `IllegalArgumentException`). */
-function looksLikeWord(run: string): boolean {
+export function looksLikeWord(run: string): boolean {
   return /^[A-Za-z]+$/.test(run) && lowerToUpperTransitions(run) <= Math.floor(run.length / 6);
 }
 

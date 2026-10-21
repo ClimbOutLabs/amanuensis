@@ -1,4 +1,4 @@
-import type { OutboundStrings } from './outboundGuard';
+import { compactForm, looksLikeWord, scanForm, type OutboundStrings } from './outboundGuard';
 
 export type PrivateTextMode = 'search' | 'maps';
 
@@ -7,13 +7,18 @@ export type PrivateTextLeak = 'contact' | 'number' | 'name' | 'phrase' | 'token'
 
 /** Five words in a row copied from the private text is a phrase; four is not. */
 const COPIED_WORDS = 5;
+/** A phrase must be this long without its spacing, so a run of short common words cannot trip the check. */
+const MIN_PHRASE_CHARS = 16;
 /** Fewest digits a phone number has, when written with a leading plus sign. */
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
 const MIN_PHONE_DIGITS = 10;
-/** Shortest name part worth matching on its own, so a short common word never trips the check. */
-const MIN_NAME_PART_CHARS = 4;
+/** Shortest name part matched as a whole word. Shorter ones are initials and particles such as `da`. */
+const MIN_NAME_PART_CHARS = 3;
+/** Fewest letters a full name needs before its joined form is matched inside the text. */
+const MIN_JOINED_NAME_CHARS = 6;
 const MIN_NAME_CHARS = 3;
+const MIN_EMAIL_CHARS = 10;
 const MIN_ENCODED_TOKEN_CHARS = 20;
 
 const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/giu;
@@ -25,13 +30,17 @@ const ENCODED_TOKEN = /[A-Za-z0-9+/]{20,}={0,2}/g;
 /** A header such as `From: Name <address>`, or the same field in JSON: `"from": "Name <address>"`. */
 const NAMED_HEADER = /"?\b(?:from|to|cc|bcc|organizer)"?\s*[:=]\s*"?([^\n\r"]*)/gi;
 const DISPLAY_NAME = /"displayName"\s*:\s*"([^"]*)"/gi;
-
-function normalized(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
-}
+/** An address written in words: `maria dot costa at harbour dot example`. */
+const SPELLED_AT = /\s*\bat\b\s*/gi;
+const SPELLED_DOT = /\s*\bdot\b\s*/gi;
 
 function digitsOf(text: string): string {
   return text.replace(/\D/g, '');
+}
+
+/** The address the words of a folded text spell out, so `at` and `dot` read as the marks they stand for. */
+function addressForm(folded: string): string {
+  return folded.replace(SPELLED_AT, '@').replace(SPELLED_DOT, '.');
 }
 
 /** Names of the people a mail header or calendar attendee list names, with any address removed. */
@@ -59,100 +68,157 @@ function wordsOf(text: string): string[] {
   return text.toLowerCase().match(WORD) ?? [];
 }
 
-/** Every run of `size` words in the text, joined by single spaces. */
-function wordRuns(text: string, size: number): string[] {
+/** Every run of `size` words in the text, each run joined without spacing, as `compactForm` reads text. */
+function wordRunsCompact(text: string, size: number): string[] {
   const words = wordsOf(text);
   const runs: string[] = [];
   for (let start = 0; start + size <= words.length; start += 1) {
-    runs.push(words.slice(start, start + size).join(' '));
+    runs.push(words.slice(start, start + size).join(''));
   }
   return runs;
+}
+
+interface PrivateFacts {
+  /** Addresses, compact, with the separators and spelled-out marks removed. */
+  emails: Set<string>;
+  /** Phone numbers as digits only. */
+  phoneDigits: Set<string>;
+  /** Runs of six or more digits. */
+  numbers: Set<string>;
+  /** Full names, compact, for names of two or more words. */
+  joinedNames: Set<string>;
+  /** Name parts matched as whole words. */
+  nameWords: Set<string>;
+  /** Copied phrases, compact, keyed by their first `MIN_PHRASE_CHARS` characters. */
+  phrasesByPrefix: Map<string, string[]>;
+}
+
+/** Facts read from the private texts, folded the same way as the outgoing text is. */
+function privateFacts(privateTexts: readonly string[], mode: PrivateTextMode): PrivateFacts {
+  const facts: PrivateFacts = {
+    emails: new Set(),
+    phoneDigits: new Set(),
+    numbers: new Set(),
+    joinedNames: new Set(),
+    nameWords: new Set(),
+    phrasesByPrefix: new Map(),
+  };
+  for (const raw of privateTexts) {
+    const text = scanForm(raw);
+    for (const match of addressForm(text).matchAll(EMAIL)) {
+      const email = compactForm(match[0]);
+      if (email.length >= MIN_EMAIL_CHARS) {
+        facts.emails.add(email);
+      }
+    }
+    for (const match of text.matchAll(PHONE_CANDIDATE)) {
+      const digits = digitsOf(match[0]);
+      const international = match[0].startsWith('+') && digits.length >= MIN_INTERNATIONAL_PHONE_DIGITS;
+      if (international || digits.length >= MIN_PHONE_DIGITS) {
+        facts.phoneDigits.add(digits);
+      }
+    }
+    for (const match of text.matchAll(DIGIT_RUN)) {
+      facts.numbers.add(match[0]);
+    }
+    for (const name of namesIn(text)) {
+      const joined = compactForm(name);
+      if (joined.length >= MIN_JOINED_NAME_CHARS) {
+        facts.joinedNames.add(joined);
+      }
+      for (const part of wordsOf(name)) {
+        if (part.length >= MIN_NAME_PART_CHARS) {
+          facts.nameWords.add(part);
+        }
+      }
+    }
+    if (mode === 'search') {
+      for (const run of wordRunsCompact(text, COPIED_WORDS)) {
+        if (run.length >= MIN_PHRASE_CHARS) {
+          const prefix = run.slice(0, MIN_PHRASE_CHARS);
+          facts.phrasesByPrefix.set(prefix, [...(facts.phrasesByPrefix.get(prefix) ?? []), run]);
+        }
+      }
+    }
+  }
+  return facts;
+}
+
+/** Whether a copied phrase starts at any point of the compact text. Looks up each position by its prefix, so it stays fast. */
+function copiesPhrase(compact: string, phrasesByPrefix: ReadonlyMap<string, readonly string[]>): boolean {
+  for (let start = 0; start + MIN_PHRASE_CHARS <= compact.length; start += 1) {
+    const candidates = phrasesByPrefix.get(compact.slice(start, start + MIN_PHRASE_CHARS));
+    if (candidates?.some(phrase => compact.startsWith(phrase, start))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A long run that is not ordinary text: it has a digit, or it is letters with no word shape. */
+function isEncodedToken(token: string): boolean {
+  if (token.length < MIN_ENCODED_TOKEN_CHARS) {
+    return false;
+  }
+  return /\d/.test(token) || (/^[A-Za-z]+$/.test(token) && !looksLikeWord(token));
 }
 
 /**
  * The first kind of private content the outgoing strings carry, or null when they carry none. Checks
  * whether a search or map copies the mail or calendar text this chat read. A map may name a street
  * address from it, since routing there is the point; a search may not copy phrases or names.
+ *
+ * Both sides are folded the same way first: look-alike letters, percent escapes, case, spacing and
+ * punctuation. `earlier` is the text this turn already sent, so a copy split across calls is seen whole.
  */
 export function privateTextLeak(input: {
   mode: PrivateTextMode;
   strings: OutboundStrings;
+  earlier: string;
   privateTexts: readonly string[];
 }): PrivateTextLeak | null {
   const { mode, privateTexts } = input;
-  const outgoing = [...input.strings.values, ...input.strings.scalars, ...input.strings.plumbing];
   if (privateTexts.length === 0) {
     return null;
   }
-  const emails = new Set<string>();
-  const phoneDigits = new Set<string>();
-  const numbers = new Set<string>();
-  const names = new Set<string>();
-  const phrases = new Set<string>();
-  for (const text of privateTexts) {
-    for (const match of text.matchAll(EMAIL)) {
-      emails.add(match[0].toLowerCase());
-    }
-    for (const match of text.matchAll(PHONE_CANDIDATE)) {
-      const digits = digitsOf(match[0]);
-      const international = match[0].startsWith('+') && digits.length >= MIN_INTERNATIONAL_PHONE_DIGITS;
-      if (international || digits.length >= MIN_PHONE_DIGITS) {
-        phoneDigits.add(digits);
-      }
-    }
-    for (const match of text.matchAll(DIGIT_RUN)) {
-      numbers.add(match[0]);
-    }
-    for (const name of namesIn(text)) {
-      names.add(normalized(name));
-      for (const part of wordsOf(name)) {
-        if (part.length >= MIN_NAME_PART_CHARS) {
-          names.add(part);
-        }
-      }
-    }
-    if (mode === 'search') {
-      for (const run of wordRuns(text, COPIED_WORDS)) {
-        phrases.add(run);
-      }
+  const outgoing = [...input.strings.values, ...input.strings.scalars, ...input.strings.plumbing].map(scanForm);
+  const text = [input.earlier, ...outgoing].join(' ');
+  const facts = privateFacts(privateTexts, mode);
+  const address = compactForm(addressForm(text));
+  for (const email of facts.emails) {
+    if (address.includes(email)) {
+      return 'contact';
     }
   }
-
-  for (const value of outgoing) {
-    const lower = value.toLowerCase();
-    const flat = normalized(value);
-    const digits = digitsOf(value);
-    for (const email of emails) {
-      if (lower.includes(email)) {
-        return 'contact';
-      }
+  const digits = digitsOf(text);
+  for (const phone of facts.phoneDigits) {
+    if (digits.includes(phone)) {
+      return 'contact';
     }
-    for (const phone of phoneDigits) {
-      if (digits.includes(phone)) {
-        return 'contact';
-      }
+  }
+  for (const run of facts.numbers) {
+    if (digits.includes(run)) {
+      return 'number';
     }
-    for (const run of numbers) {
-      if (value.includes(run)) {
-        return 'number';
-      }
+  }
+  const compact = compactForm(text);
+  const words = new Set(wordsOf(text));
+  for (const name of facts.joinedNames) {
+    if (compact.includes(name)) {
+      return 'name';
     }
-    for (const name of names) {
-      if (flat.includes(name)) {
-        return 'name';
-      }
+  }
+  for (const part of facts.nameWords) {
+    if (words.has(part)) {
+      return 'name';
     }
-    if (mode === 'search') {
-      for (const run of wordRuns(value, COPIED_WORDS)) {
-        if (phrases.has(run)) {
-          return 'phrase';
-        }
-      }
-    }
-    for (const match of value.matchAll(ENCODED_TOKEN)) {
-      if (match[0].length >= MIN_ENCODED_TOKEN_CHARS && /\d/.test(match[0])) {
-        return 'token';
-      }
+  }
+  if (mode === 'search' && copiesPhrase(compact, facts.phrasesByPrefix)) {
+    return 'phrase';
+  }
+  for (const match of text.matchAll(ENCODED_TOKEN)) {
+    if (isEncodedToken(match[0])) {
+      return 'token';
     }
   }
   return null;

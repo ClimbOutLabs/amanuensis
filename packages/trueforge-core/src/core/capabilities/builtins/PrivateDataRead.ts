@@ -35,10 +35,11 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
 }
 
 /**
- * Keeps "this chat read private data" for the life of the session. The turn's search state starts clean every
- * turn, so the flag is saved once it is set and put back at the start of the next turn.
+ * Keeps the text of each mail or calendar result for the checks, on every thread of the turn. The root thread
+ * (`persisted`) also keeps "this chat read private data" for the life of the session: the turn's search state
+ * starts clean every turn, so the flag is saved once it is set and put back at the start of the next turn.
  */
-export function privateDataReadCapability(input: { turn: WebSearchTurnState }): AgentCapability {
+export function privateDataReadCapability(input: { turn: WebSearchTurnState; persisted: boolean }): AgentCapability {
   let saved = false;
   // Result messages already kept for the checks, so each one is read once per turn.
   const kept = new Set<string>();
@@ -67,22 +68,26 @@ export function privateDataReadCapability(input: { turn: WebSearchTurnState }): 
   }
   async function* saveWhenSet() {
     await Promise.resolve();
-    if (saved || !hasReadPrivateData(input.turn)) {
+    if (!input.persisted || saved || !hasReadPrivateData(input.turn)) {
       return;
     }
     saved = true;
     yield { type: InternalEventType.CAPABILITY_STATE, key: PRIVATE_DATA_READ_STATE_KEY, state: true };
   }
   return {
-    state: {
-      key: PRIVATE_DATA_READ_STATE_KEY,
-      load: state => {
-        if (state === true) {
-          saved = true;
-          markPrivateDataReadFromHistory(input.turn);
+    ...(input.persisted
+      ? {
+          state: {
+            key: PRIVATE_DATA_READ_STATE_KEY,
+            load: state => {
+              if (state === true) {
+                saved = true;
+                markPrivateDataReadFromHistory(input.turn);
+              }
+            },
+          },
         }
-      },
-    },
+      : {}),
     preLLMProcessors: [
       {
         processPreLLM: execution => {

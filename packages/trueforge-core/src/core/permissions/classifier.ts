@@ -1545,7 +1545,12 @@ async function classifySearchProviderTool(input: {
         'this chat read your email or calendar, and a search could carry it out',
       );
     }
-    const leak = privateTextLeak({ mode: 'search', strings, privateTexts: texts });
+    const leak = privateTextLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
     if (leak !== null) {
       return ctx.services.unattended
         ? privateTextSkipped(leak)
@@ -1655,7 +1660,12 @@ async function classifyMapsSilently(input: {
   }
   if (texts !== undefined && strings !== undefined) {
     // A map may name a street address from the mail, so only the words of a search are checked for copies.
-    const leak = privateTextLeak({ mode: 'maps', strings, privateTexts: texts });
+    const leak = privateTextLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
     if (leak !== null) {
       return ctx.services.unattended ? privateTextSkipped(leak) : undefined;
     }

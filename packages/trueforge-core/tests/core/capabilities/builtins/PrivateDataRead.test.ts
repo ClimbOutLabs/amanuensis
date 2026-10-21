@@ -41,19 +41,19 @@ const SAVED = [{ type: 'internal.capability.state', key: PRIVATE_DATA_READ_STATE
 describe('privateDataReadCapability', () => {
   it('puts a saved flag back at the start of the next turn', () => {
     const turn = createWebSearchTurnState();
-    privateDataReadCapability({ turn }).state?.load(true);
+    privateDataReadCapability({ turn, persisted: true }).state?.load(true);
     expect(hasReadPrivateData(turn)).toBe(true);
   });
 
   it('ignores a saved value that is not true', () => {
     const turn = createWebSearchTurnState();
-    privateDataReadCapability({ turn }).state?.load(false);
+    privateDataReadCapability({ turn, persisted: true }).state?.load(false);
     expect(hasReadPrivateData(turn)).toBe(false);
   });
 
   it('saves the flag once, after the tool call that set it', async () => {
     const turn = createWebSearchTurnState();
-    const [processor] = privateDataReadCapability({ turn }).postToolCallProcessors ?? [];
+    const [processor] = privateDataReadCapability({ turn, persisted: true }).postToolCallProcessors ?? [];
     expect(await collect(processor?.processPostToolCall(execution([])) ?? [])).toEqual([]);
     markPrivateDataRead(turn);
     expect(await collect(processor?.processPostToolCall(execution([])) ?? [])).toEqual(SAVED);
@@ -63,7 +63,7 @@ describe('privateDataReadCapability', () => {
   describe('a thread that was forked, rewound or cut off before the flag was saved', () => {
     const preLLM = (context: ContextMessage[]) => {
       const turn = createWebSearchTurnState();
-      const [processor] = privateDataReadCapability({ turn }).preLLMProcessors ?? [];
+      const [processor] = privateDataReadCapability({ turn, persisted: true }).preLLMProcessors ?? [];
       return { turn, run: () => collect(processor?.processPreLLM(execution(context)) ?? []) };
     };
 
@@ -102,7 +102,7 @@ describe('privateDataReadCapability', () => {
     }
 
     const postToolCall = async (turn: ReturnType<typeof createWebSearchTurnState>, context: ContextMessage[]) => {
-      const [processor] = privateDataReadCapability({ turn }).postToolCallProcessors ?? [];
+      const [processor] = privateDataReadCapability({ turn, persisted: true }).postToolCallProcessors ?? [];
       await collect(processor?.processPostToolCall(execution(context)) ?? []);
     };
 
@@ -129,17 +129,35 @@ describe('privateDataReadCapability', () => {
 
     it('has no text to check against when the mark was only restored from saved state', async () => {
       const turn = createWebSearchTurnState();
-      privateDataReadCapability({ turn }).state?.load(true);
+      privateDataReadCapability({ turn, persisted: true }).state?.load(true);
       await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
       expect(privateTextForChecks(turn)).toBeUndefined();
     });
 
     it('has no text to check against when the mail call was only in the context before this turn', async () => {
       const turn = createWebSearchTurnState();
-      const [preLLM] = privateDataReadCapability({ turn }).preLLMProcessors ?? [];
+      const [preLLM] = privateDataReadCapability({ turn, persisted: true }).preLLMProcessors ?? [];
       await collect(preLLM?.processPreLLM(execution([assistantCalling('read_email')])) ?? []);
       await postToolCall(turn, [assistantCalling('read_email'), resultOf(MAIL)]);
       expect(privateTextForChecks(turn)).toBeUndefined();
     });
+  });
+});
+
+describe('private read text from a sub-agent and from a read that never returned', () => {
+  const MAIL = 'From: Maria Costa <maria.costa@harbour-clinic.example>';
+  const resultOf = (content: string): ContextMessage => ({ role: 'tool', tool_call_id: 'call-1', content });
+
+  it('keeps the mail text a sub-agent read, and saves no flag for that thread', async () => {
+    const turn = createWebSearchTurnState();
+    const capability = privateDataReadCapability({ turn, persisted: false });
+    expect(capability.state).toBeUndefined();
+    const [processor] = capability.postToolCallProcessors ?? [];
+    markPrivateDataRead(turn);
+    const yielded = await collect(
+      processor?.processPostToolCall(execution([assistantCalling('read_email'), resultOf(MAIL)])) ?? [],
+    );
+    expect(yielded).toEqual([]);
+    expect(privateTextForChecks(turn)).toEqual([MAIL]);
   });
 });

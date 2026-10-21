@@ -503,8 +503,8 @@ export class TurnResourceResolver<
         toolSets,
       },
       compactionModel,
-      // The root thread carries the session's "read private data" flag across turns.
-      ...(agentInfo ? {} : { extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn })] }),
+      // Every thread records the mail and calendar text it reads; only the root thread saves the flag across turns.
+      extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn, persisted: !agentInfo })],
     };
   }
 

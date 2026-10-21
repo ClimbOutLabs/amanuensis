@@ -10,6 +10,7 @@ import {
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
+import { appendOutboundTrace, collectOutboundStrings } from '../../../src/core/permissions/outboundGuard';
 import { createWebSearchTurnState, recordPrivateReadText } from '../../../src/core/permissions/webSearch';
 
 const MAIL = JSON.stringify({
@@ -77,6 +78,14 @@ function mapsAction(tool_name: string, canonical_params: Record<string, unknown>
   };
 }
 
+/** A silent search that went out, as the tool set records its text after the call runs. */
+function sentSilently(ctx: ClassifyContext, query: string): void {
+  const strings = collectOutboundStrings({ query });
+  if (strings !== undefined) {
+    ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
+  }
+}
+
 /** A mail read whose result the chat has received, as the post-call step records it. */
 async function readMail(ctx: ClassifyContext): Promise<void> {
   await classifyTier(MAIL_READ, ctx);
@@ -137,6 +146,17 @@ describe('a web search after a mail read, checked against what the mail said', (
     const ctx = makeCtx();
     await readMail(ctx);
     expect(await classifyTier(searchFor('please bring your booking reference tapas'), ctx)).toMatchObject({
+      tier: 3,
+      reason: 'mcp_search_after_private_read',
+    });
+  });
+
+  it('asks when a phrase is split across two searches', async () => {
+    const ctx = makeCtx();
+    await readMail(ctx);
+    expect(await classifyTier(searchFor('please bring your'), ctx)).toMatchObject({ tier: 1 });
+    sentSilently(ctx, 'please bring your');
+    expect(await classifyTier(searchFor('booking reference tapas'), ctx)).toMatchObject({
       tier: 3,
       reason: 'mcp_search_after_private_read',
     });
