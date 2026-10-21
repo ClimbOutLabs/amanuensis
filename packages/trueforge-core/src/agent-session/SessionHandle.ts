@@ -45,7 +45,7 @@ import type { CreateDynamicSubAgentThread } from '../core/runtime/CreateDynamicS
 import type { Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../core/util/abort';
-import { builtinsFromSpec } from './builtinsFromSpec';
+import { threadCapabilities } from './builtinsFromSpec';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { SessionRecord } from './models/SessionRecord';
 import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
@@ -849,22 +849,20 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
-    const capabilities = [
-      ...builtinsFromSpec({
-        spec: input.spec,
-        definition,
-        compactionModel,
-        isChild,
-        sandbox: input.sandbox,
-        sandboxAvailable: Boolean(input.sandbox),
-        tracing: input.tracing,
-        logger: input.resolver.logger,
-        compactionContext: input.resolver.compactionContext,
-        compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
-        boundRepository: input.resolver.boundRepository,
-      }),
-      ...(extraCapabilities ?? []),
-    ];
+    const capabilities = threadCapabilities({
+      spec: input.spec,
+      definition,
+      compactionModel,
+      isChild,
+      sandbox: input.sandbox,
+      sandboxAvailable: Boolean(input.sandbox),
+      tracing: input.tracing,
+      logger: input.resolver.logger,
+      compactionContext: input.resolver.compactionContext,
+      compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+      boundRepository: input.resolver.boundRepository,
+      extraCapabilities,
+    });
     return new AgentThread({
       definition,
       threadId: input.threadId,
@@ -949,22 +947,20 @@ export class SessionHandle<
         // Sub-agents should return free-form summaries to the parent, not the user-facing structured response.
         responseFormat: undefined,
       };
-      const capabilities = [
-        ...builtinsFromSpec({
-          spec: input.spec,
-          definition: childDefinition,
-          compactionModel,
-          isChild: true,
-          sandbox: input.sandbox,
-          sandboxAvailable: Boolean(input.sandbox),
-          tracing: input.tracing,
-          logger: input.resolver.logger,
-          compactionContext: input.resolver.compactionContext,
-          compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
-          boundRepository: input.resolver.boundRepository,
-        }),
-        ...(extraCapabilities ?? []),
-      ];
+      const capabilities = threadCapabilities({
+        spec: input.spec,
+        definition: childDefinition,
+        compactionModel,
+        isChild: true,
+        sandbox: input.sandbox,
+        sandboxAvailable: Boolean(input.sandbox),
+        tracing: input.tracing,
+        logger: input.resolver.logger,
+        compactionContext: input.resolver.compactionContext,
+        compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+        boundRepository: input.resolver.boundRepository,
+        extraCapabilities,
+      });
       throwIfSignalAborted(params.signal);
       return new AgentThread({
         definition: childDefinition,

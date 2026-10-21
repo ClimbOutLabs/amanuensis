@@ -35,6 +35,8 @@ export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
 export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
+export { measurePromptRequest } from './runtime/promptReport';
+export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
 export {
   extractBase64,
   isAgentInputUserMessage,
