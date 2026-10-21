@@ -10,12 +10,12 @@ import {
 const SECRET_BEARER = 'SECRET_TOKEN_abc123';
 const SECRET_API_KEY = 'sk-live-FAKEKEY1234567890';
 const SECRET_AUTH_HEADER = `Authorization: Bearer ${SECRET_BEARER}`;
-const HOME_PATH = 'C:\\Users\\jordan\\secret-project';
+const HOME_PATH = 'C:\\Users\\alex\\secret-project';
 
 /** Planted personal data — likewise must never appear in the bundle. */
-const PERSONAL_NAME = 'Jordan Casillas';
-const PERSONAL_EMAIL = 'jordan.casillas@example.com';
-const PERSONAL_FACT = 'Jordan lives at 221 Baker Street and their dog is named Comet';
+const PERSONAL_NAME = 'Alex Rivera';
+const PERSONAL_EMAIL = 'alex.rivera@example.com';
+const PERSONAL_FACT = 'Alex lives at 14 Example Terrace and their dog is named Comet';
 
 const PLANTED_SECRETS = [SECRET_BEARER, SECRET_API_KEY, SECRET_AUTH_HEADER, HOME_PATH];
 const PLANTED_PERSONAL = [PERSONAL_NAME, PERSONAL_EMAIL, PERSONAL_FACT];

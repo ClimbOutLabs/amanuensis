@@ -22,7 +22,7 @@ describe('publicHttpsBase', () => {
     'https://[::1]',
     'https://mybox',
     'https://aman.local',
-    'https://nas.lan',
+    'https://files.example.internal',
     'https://aman.internal',
     'https://aman.home.arpa',
     'https://box.tailnet-name.ts.net',

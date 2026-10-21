@@ -67,7 +67,6 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -202,6 +201,7 @@ import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThread
 import {
   collectKnownEventIds,
   guardModelReply,
+  LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
@@ -629,6 +629,12 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
+}
+
+function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
+  const rest = { ...message };
+  delete rest.tool_calls;
+  return rest;
 }
 
 /**
@@ -3161,13 +3167,6 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
-    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
-    if (result.value.tool_markup === 'broken') {
-      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
-      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-    }
-
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
     // per-reply call cap stops the turn before anything in it is classified or run. An
@@ -3265,6 +3264,11 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
+    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
+    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    if (finishReason === 'length') {
+      assistantMessage = withoutToolCalls(assistantMessage);
+    }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
     // model is still silent.
@@ -3400,7 +3404,7 @@ export class AgentThread {
     });
 
     if (finishReason === 'length') {
-      const errorContent = completion?.error_message ?? 'max_tokens breached';
+      const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }

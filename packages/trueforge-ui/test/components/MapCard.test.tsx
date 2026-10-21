@@ -310,7 +310,7 @@ describe('MapCard', () => {
       ...placeData,
       kind: 'route',
       pins: [],
-      from_name: 'Rua da Emenda 45',
+      from_name: 'Travessa das Gaivotas 4',
       to_name: 'R. de Sao Bernardo 92',
       from_lat: 38.7106,
       from_lng: -9.1426,

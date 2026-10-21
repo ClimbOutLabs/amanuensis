@@ -172,7 +172,7 @@ Options
   --reset               with instance demo-seed, remove the example data instead of adding it
   --local-only          open Aman on this computer only (by default it also opens for other devices on your private network)
   --backups daily|off   back up every day (default) or never, without asking
-  --address HOST        also open Aman at this name or private address; repeat for more (for example --address spark.local)
+  --address HOST        also open Aman at this name or private address; repeat for more (for example --address host.local)
   --public-url URL      the https address of Aman behind your own reverse proxy; the ports then stay on this computer
   --login-url URL       the https address of the sign-in service behind the same proxy
   --home-network        on a cloud server, still open Aman at its private addresses (other customers share them, so the default there is this computer only)
