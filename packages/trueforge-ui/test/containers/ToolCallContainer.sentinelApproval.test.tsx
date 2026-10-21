@@ -39,6 +39,7 @@ function card(plain_what: string): SentinelApprovalCard {
     email: null,
     calendar_event: null,
     schedule: null,
+    persona: null,
   };
 }
 
