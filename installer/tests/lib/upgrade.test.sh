@@ -293,6 +293,14 @@ repo_remote_advance() {
   rm -rf "$work"
 }
 
+# Gives the checkout an origin holding a different branch only, so the checkout's own branch is
+# not on it, and the checkout tracks nothing.
+repo_remote_without_own_branch() {
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add origin "$SB/origin.git"
+  git -C "$REPO" push -q origin "HEAD:refs/heads/other-branch"
+}
+
 # The data volume exists (Docker made it when the app first started) but holds no database.
 no_database_yet() {
   mkdir -p "$SB_STATE/no_db"
@@ -403,11 +411,51 @@ test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached() {
   sandbox_drop
 }
 
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch() {
+  t_begin "upgrade behind with no upstream advises a pull naming the source and branch, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch head_before builds
+  branch=$(git -C "$REPO" branch --show-current)
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C $REPO pull origin $branch"
+  assert_flat_contains "$OUT" "aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
+  t_begin "upgrade says the branch is not on origin when the checkout's branch is missing there, and carries on"
+  sandbox_new
+  install_machine
+  repo_remote_without_own_branch
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "on the branch $branch, which is not on origin"
+  assert_not_contains "$OUT$ERR" "could not be reached"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
 test_noop_when_current
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
 test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
 test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there
 test_backup_and_upgrade_force_cope_with_an_instance_without_a_database
 test_owner_path_remove_upgrade_install
 test_install_rerun_updates_instead_of_reusing_old_images

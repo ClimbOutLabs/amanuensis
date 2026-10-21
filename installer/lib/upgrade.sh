@@ -4,6 +4,9 @@
 
 UPGRADE_STAGE=idle
 UPGRADE_BACKUP=
+# What upgrade_checkout_behind adds to the pull command it advises when the checkout's branch
+# does not track its source, so the command names the source and branch a plain pull would need.
+UPGRADE_PULL_ARGS=
 
 upgrade_rollback() {
   local name failed=0 rc=1
@@ -100,9 +103,9 @@ upgrade_switch() {
 # Whether the checkout is missing commits that its source has. The tags an upgrade compares come
 # from this checkout alone, so a checkout that fell behind its source looks current until the
 # source is asked. Fetching just the branch the checkout is on is enough to tell; nothing is
-# ever pulled. A checkout that cannot be compared (no git, no source) is not behind, and a
-# source that cannot be reached warns and counts as not behind, so an offline computer still
-# upgrades with the code it has.
+# ever pulled. A checkout that cannot be compared (no git, no source) is not behind. A
+# comparison that fails warns with the reason it found and counts as not behind, so an offline
+# computer still upgrades with the code it has.
 upgrade_checkout_behind() {
   git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || return 1
   local branch remote tracked source_ref
@@ -111,15 +114,25 @@ upgrade_checkout_behind() {
   if [ -n "$tracked" ]; then
     remote=${tracked%%/*}
     source_ref=${tracked#*/}
+    UPGRADE_PULL_ARGS=
   elif [ -n "$branch" ]; then
     remote=origin
     source_ref=$branch
+    UPGRADE_PULL_ARGS=" $remote $source_ref"
   else
     return 1
   fi
   git -C "$REPO_ROOT" remote get-url "$remote" >/dev/null 2>&1 || return 1
   if ! GIT_TERMINAL_PROMPT=0 git -C "$REPO_ROOT" fetch --quiet "$remote" "+refs/heads/$source_ref:refs/remotes/$remote/$source_ref" 2>/dev/null; then
-    warn "Aman could not check for a newer version, because $remote could not be reached. The upgrade carries on with the code already on this computer. To check again, fix the connection and run: aman upgrade --check"
+    # The fetch failed. Asking the source to list the branch tells a branch it does not have
+    # apart from a source that cannot be reached, so the warning names the real reason.
+    local listing_rc=0
+    GIT_TERMINAL_PROMPT=0 git -C "$REPO_ROOT" ls-remote --exit-code --heads "$remote" "refs/heads/$source_ref" >/dev/null 2>&1 || listing_rc=$?
+    if [ "$listing_rc" = 2 ]; then
+      warn "Aman could not check for a newer version, because this copy is on the branch $source_ref, which is not on $remote. The upgrade carries on with the code already on this computer. To check for a newer version, switch this copy to a branch that is on $remote, then run: aman upgrade --check"
+    else
+      warn "Aman could not check for a newer version, because $remote could not be reached. The upgrade carries on with the code already on this computer. To check again, fix the connection and run: aman upgrade --check"
+    fi
     return 1
   fi
   [ -n "$(git -C "$REPO_ROOT" rev-list "HEAD..refs/remotes/$remote/$source_ref" 2>/dev/null)" ]
@@ -134,7 +147,7 @@ cmd_upgrade() {
   if upgrade_checkout_behind; then
     say "A newer version of Aman is available."
     say "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
-    say "To get the newer version, run: git -C $REPO_ROOT pull"
+    say "To get the newer version, run: git -C $REPO_ROOT pull$UPGRADE_PULL_ARGS"
     say "Then run: aman upgrade"
     return 0
   fi
