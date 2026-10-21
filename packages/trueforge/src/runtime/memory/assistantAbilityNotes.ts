@@ -34,12 +34,15 @@ const CONTRACTIONS: readonly (readonly [RegExp, string])[] = [
   [/\bdon't\b/g, 'do not'],
   [/\bdoesn't\b/g, 'does not'],
   [/\bdidn't\b/g, 'did not'],
+  [/\bwon't\b/g, 'will not'],
+  [/\bhaven't\b/g, 'have not'],
+  [/\bhasn't\b/g, 'has not'],
 ];
 
 const ABILITY_SUBJECT = '(?:i|aman|the assistant|assistant)';
-const GAP_WORD = '(?:am|is|are|was|were|has|have|do|does|not|currently|still)';
+const GAP_WORD = '(?:am|is|are|was|were|has|have|do|does|not|will|be|currently|still)';
 const ABILITY_MARKER =
-  '(?:cannot|could not|unable to|not able to|have (?:access|permission)|no (?:access|permission) to|failed to|having trouble)';
+  '(?:cannot|could not|unable to|not (?:be|been) able to|not able to|have (?:access|permission)|no (?:access|permission) to|(?:lack|lacks) access|failed to|having trouble)';
 const ABILITY_CLAUSE = new RegExp(`\\b${ABILITY_SUBJECT}\\b(?:\\s+${GAP_WORD})*\\s*${ABILITY_MARKER}\\b`);
 const ABILITY_FRAGMENT = /^(?:unable to|not able to|could not|cannot|no (?:access|permission) to)\b/;
 
@@ -74,6 +77,9 @@ function filterLine(line: string): string | undefined {
   const kept = sentences.filter(sentence => !isAssistantAbilityNote(sentence));
   if (kept.length === 0) {
     return undefined;
+  }
+  if (kept.length === sentences.length) {
+    return line;
   }
   return prefix + kept.join(' ');
 }

@@ -26,6 +26,23 @@ describe('stripAssistantAbilityNotes', () => {
   });
 
   it.each([
+    "I won't be able to read email.",
+    "I won't be able to read email until you reconnect the account.",
+    "Aman won't be able to check the calendar.",
+    'Aman will not be able to send email.',
+    'I will not be able to read email.',
+    'I will be unable to read email.',
+    'The assistant will be unable to read email.',
+    "I won't have access to email.",
+    "I haven't been able to read email.",
+    "Aman hasn't been able to read email.",
+    'I lack access to the calendar.',
+    'Aman lacks access to the calendar.',
+  ])('drops a future or perfect tense ability note about Aman: %s', note => {
+    expect(stripAssistantAbilityNotes(note)).toBe('');
+  });
+
+  it.each([
     "The user can't check email during work hours.",
     'Alex cannot read small print without glasses.',
     'The user is unable to access her old account.',
@@ -34,6 +51,49 @@ describe('stripAssistantAbilityNotes', () => {
     "The user told Aman he can't swim.",
   ])('keeps a fact about the person: %s', fact => {
     expect(stripAssistantAbilityNotes(fact)).toBe(fact);
+  });
+
+  it.each([
+    "The user won't be able to attend Friday.",
+    'The user will not be able to check email while traveling.',
+    "Alex hasn't been able to reach her old account.",
+    'The user lacks access to the shared drive.',
+  ])('keeps a future or perfect tense fact about the person: %s', fact => {
+    expect(stripAssistantAbilityNotes(fact)).toBe(fact);
+  });
+
+  it('drops a future tense ability note inside a turn summary and keeps the other sentences', () => {
+    const content =
+      "Turn summary: The mail check failed. I won't be able to read email until the account is reconnected. The user moved lunch to 1pm.";
+    expect(stripAssistantAbilityNotes(content)).toBe(
+      'Turn summary: The mail check failed. The user moved lunch to 1pm.',
+    );
+  });
+
+  it('drops a future tense ability note from the assistant side of a verbatim turn only', () => {
+    const content = "User: Please read my email.\n\nAssistant: I won't be able to read email until you sign in again.";
+    expect(stripAssistantAbilityNotes(content)).toBe('User: Please read my email.');
+  });
+
+  it("keeps the person's own future tense statement in a verbatim turn", () => {
+    const item = buildRetainItem({
+      sessionId: 's1',
+      turnId: 't3',
+      userText: "I won't be able to check email on Friday.",
+      assistantText: 'Noted. I moved the reminder to Monday.',
+      completedAt: '2026-09-19T12:00:00.000Z',
+    });
+    if (item === undefined) {
+      throw new Error('expected a retain item');
+    }
+    const result = stripAssistantAbilityNotes(item.content);
+    expect(result).toContain("I won't be able to check email on Friday.");
+    expect(result).toContain('I moved the reminder to Monday.');
+  });
+
+  it('leaves a line with no ability note byte-identical, doubled spaces included', () => {
+    const content = 'The user moved lunch to 1pm.  The dentist appointment moved to Friday.';
+    expect(stripAssistantAbilityNotes(content)).toBe(content);
   });
 
   it('keeps an enthusiasm idiom that is not an inability note', () => {
