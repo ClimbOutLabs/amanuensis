@@ -18,7 +18,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  // SQLite cannot DROP COLUMN under STRICT without a table rebuild; irreversible.
-  void db;
-  return Promise.reject(new Error('20261021_000010_personalization_help_areas is not reversible'));
+  // The column has no index, key or constraint that blocks DROP COLUMN, so it is removed in place.
+  await db.transaction().execute(async trx => {
+    await sql`
+      ALTER TABLE personalization_profile
+        DROP COLUMN help_areas
+    `.execute(trx);
+  });
 }
