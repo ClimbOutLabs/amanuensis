@@ -367,6 +367,7 @@ test_no_question_about_the_address() {
   fixture_full_machine
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y

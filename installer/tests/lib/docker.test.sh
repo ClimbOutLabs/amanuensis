@@ -179,6 +179,7 @@ test_install_offer_declined() {
 
 
 
+
 y
 n
 "
@@ -262,6 +263,7 @@ test_group_decline_stops_without_sudo() {
   STUB_DOCKER_DENIED=1
   : >"$SB_STATE/group_members"
   with_input "n
+
 
 
 

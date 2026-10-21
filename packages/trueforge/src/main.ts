@@ -116,6 +116,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
+import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -671,6 +672,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   await registerCalendarConnectorAtBoot({
     url: configuration.CALENDAR_CONNECTOR_URL,
     mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await seedOwnerNameAtBoot({
+    owner_name: configuration.OWNER_NAME,
+    oidc: configuration.OIDC,
+    globalSettingsStore,
+    personalizationStore,
     tenant_id: TENANT_ID,
     logger,
   });

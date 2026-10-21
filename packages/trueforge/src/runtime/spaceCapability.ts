@@ -52,7 +52,9 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**
  * Server-assigned anchor for the implicit whole-body block of a space that declares no
@@ -1242,6 +1244,8 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
+  personas?: PersonaTurnContext | undefined;
 }
 
 /**
@@ -1255,6 +1259,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       ...ConstructorParameters<typeof MemoryTurnResourceResolver>,
       space: SpaceTurnContext,
       toolImages: ToolImagesOptions,
+      usage: UsageSummaryTurnContext,
     ]
   ) {
     const [
@@ -1268,14 +1273,17 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       switchNotice,
       space,
       toolImages,
+      usage,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
     this.#toolImages = toolImages;
+    this.#usage = usage;
   }
 
   readonly #space: SpaceTurnContext;
   readonly #toolImages: ToolImagesOptions;
+  readonly #usage: UsageSummaryTurnContext;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -1293,6 +1301,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const google = await this.#google(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
+    const personas = this.#space.personas;
     return {
       ...resolved,
       extraCapabilities: [
@@ -1304,8 +1313,10 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
           timezone: this.clientTimezone,
         }),
+        usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
         ...(google === undefined ? [] : [google]),
+        ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
           : [

@@ -60,6 +60,7 @@ test_the_question_is_asked_once() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Connect a calendar?=>n
 Back up automatically=>n
 Go ahead?=>y
@@ -77,6 +78,7 @@ Go ahead?=>y"
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Connect a calendar?=>n
 Back up automatically=>
 Go ahead?=>y

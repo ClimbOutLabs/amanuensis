@@ -6,6 +6,7 @@ set -euo pipefail
 
 ANSWERS="Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
