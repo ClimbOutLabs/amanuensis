@@ -937,7 +937,7 @@ export class SessionHandle<
         ...definition,
         toolSets: params.parentDefinition.toolSets ?? definition.toolSets,
         // A sub-agent of a read-only agent stays read-only, whatever definition it was resolved with.
-        readOnly: params.parentDefinition.readOnly || definition.readOnly,
+        readOnly: params.parentDefinition.readOnly === true || definition.readOnly === true,
         // The delegated task goes in as the initial user message; the sub-agent
         // system prompt is SUB_AGENT_IDENTITY (added by AgentThread.buildInstruction).
         instruction: undefined,
