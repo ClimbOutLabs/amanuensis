@@ -58,13 +58,15 @@ function normalizeError(error: unknown): ToastContent {
     }
   }
 
-  // A dropped transport (sleeping phone, network change) is not a mystery:
-  // name it so the user knows the chat will re-sync on its own.
+  // A dropped transport (sleeping phone, network change) is not a mystery, and neither is a device
+  // that does not trust this computer's certificate yet: the browser reports both the same way,
+  // so the words name the checks for both.
   const message = getErrorMessage(error, '');
   if (isNetworkFailureMessage(message)) {
     return {
       title: 'Connection lost',
-      description: 'Check your connection. The chat re-syncs automatically when it returns.',
+      description:
+        'Check your connection, then reload the page. If it still cannot connect, this device may not trust this computer yet: open the /trust page on this device and follow its steps.',
     };
   }
 
