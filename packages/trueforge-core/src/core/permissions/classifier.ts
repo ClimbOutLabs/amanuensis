@@ -1617,11 +1617,11 @@ function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
 }
 
 /**
- * Whether a decision is a mail or calendar read. The tool set marks each such call when it dispatches, not here,
+ * Whether a decision reason is a mail or calendar read. The tool set marks each such call when it dispatches, not here,
  * because a call is classified before it runs and again at dispatch.
  */
-export function isPrivateReadDecision(decision: TierDecision): boolean {
-  return decision.reason === 'gmail_read' || decision.reason === 'calendar_read';
+export function isPrivateReadReason(reason: string | undefined): boolean {
+  return reason === 'gmail_read' || reason === 'calendar_read';
 }
 
 /**

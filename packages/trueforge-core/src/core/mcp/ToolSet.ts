@@ -8,7 +8,7 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
-import { isPrivateReadDecision } from '../permissions/classifier';
+import { isPrivateReadReason } from '../permissions/classifier';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
@@ -434,7 +434,8 @@ export class ToolSet implements IToolSet {
         turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
       }
     }
-    if (classification !== undefined && isPrivateReadDecision(classification) && this.sentinel !== undefined) {
+    // The reason is read from the stamped info, since a source that classifies its own tools leaves no classification here.
+    if (isPrivateReadReason(tool_info.tier_reason) && this.sentinel !== undefined) {
       // Marked once per call that dispatches; classification alone runs twice for one call, so it does not count.
       markPrivateDataRead(this.sentinel.web_search);
       admission.privateRead = true;
