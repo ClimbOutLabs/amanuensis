@@ -101,6 +101,21 @@ describe('Email connector classifier', () => {
       expect(decision.card).not.toBeNull();
     });
 
+    it('a new-recipient card names the addresses it would add, and a plain send card names none', async () => {
+      const stranger = await classifyTier(
+        firstPartyMailCall('send_email', { recipients: ['Stranger@Example.net'], subject: SUBJECT, body: 'Hello' }),
+        makeCtx(),
+      );
+      expect(stranger.card?.mail_new_recipients).toEqual(['stranger@example.net']);
+      const listedCtx = makeCtx();
+      listedCtx.services.mail_listed_addresses = () => Promise.resolve(['dana@example.com']);
+      const listed = await classifyTier(
+        mailCall('send_email', { recipients: ['dana@example.com'], subject: SUBJECT, body: 'Hi' }, CLOSED_WORLD_READ),
+        listedCtx,
+      );
+      expect(listed.card?.mail_new_recipients ?? null).toBeNull();
+    });
+
     it('a request that reaches a stranger asks with the new-recipient card, even from the first-party sidecar', async () => {
       const decision = await classifyTier(
         firstPartyMailCall('send_email', { recipients: ['stranger@example.net'], subject: SUBJECT, body: 'Hello' }),

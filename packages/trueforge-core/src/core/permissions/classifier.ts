@@ -2234,6 +2234,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         outbound_text: fields.outbound_text,
         destination_host: fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
       },
       reason: 'mail_new_recipient',
       reason_detail: 'A mail send to an address that is not on the Email list.',
