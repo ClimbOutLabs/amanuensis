@@ -147,6 +147,11 @@ export interface DriverRunResult {
 export interface IsolationDriver {
   readonly kind: 'docker' | 'firecracker' | 'slots';
   /**
+   * True only when the driver passes the run's package mirror token to the agent, so a package
+   * download can reach the package gateway. Offline drivers say false.
+   */
+  readonly packageGatewayCapable: boolean;
+  /**
    * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
    * image, but it is neither quick nor read-only: the Docker driver also creates and removes
    * probe containers and stages, runs and deletes a canary run.

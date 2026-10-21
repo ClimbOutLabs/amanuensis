@@ -52,21 +52,6 @@ export function runChatImageStoreContractSuite(
     expect(await store.findBySource({ tenant_id: 'default', session_id: 's1', source_key: 'upload:0' })).toEqual(first);
   });
 
-  it('takes silent attempts up to the limit, per turn, even when asked concurrently', async () => {
-    const { store } = getEnv();
-    const turn = { tenant_id: 'default', session_id: 's1', turn_id: 't1' };
-    const taken = await Promise.all(
-      Array.from({ length: 30 }, () => store.reserveSilentAttempt({ ...turn, limit: 20 })),
-    );
-    expect(taken.filter(Boolean)).toHaveLength(20);
-    expect(await store.countSilentAttempts(turn)).toBe(20);
-    expect(await store.reserveSilentAttempt({ ...turn, limit: 20 })).toBe(false);
-    expect(await store.countSilentAttempts({ ...turn, turn_id: 't2' })).toBe(0);
-    expect(await store.reserveSilentAttempt({ ...turn, turn_id: 't2', limit: 20 })).toBe(true);
-    expect(await store.reserveSilentAttempt({ ...turn, session_id: 's2', limit: 0 })).toBe(false);
-    expect(await store.countSilentAttempts({ ...turn, session_id: 's2' })).toBe(0);
-  });
-
   it('removes the user oldest images past the size cap, never the new one', async () => {
     const { store } = getEnv();
     const ten = Buffer.alloc(10, 1);
@@ -87,13 +72,11 @@ export function runChatImageStoreContractSuite(
     expect(await has('s2', '9')).toBe(true);
   });
 
-  it('deletes images and silent attempts with their chat', async () => {
+  it('deletes images with their chat', async () => {
     const { store, deleteSession } = getEnv();
     await store.putImage(image());
-    await store.reserveSilentAttempt({ tenant_id: 'default', session_id: 's1', turn_id: 't1', limit: 20 });
     await deleteSession('s1');
     expect(await store.getImage({ tenant_id: 'default', session_id: 's1', image_id: 'a'.repeat(32) })).toBeUndefined();
-    expect(await store.countSilentAttempts({ tenant_id: 'default', session_id: 's1', turn_id: 't1' })).toBe(0);
   });
 
   it('expires images older than the retention cut-off', async () => {

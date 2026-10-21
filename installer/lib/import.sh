@@ -23,7 +23,7 @@ check_import_options() {
 
 display_name_problem() {
   if [ -z "$1" ]; then
-    echo "The name is empty. Type the name imported chats should show."
+    echo "The name is empty. Type the name Aman should call you."
   elif [ "${#1}" -gt 80 ]; then
     echo "The name is longer than 80 characters. Type a shorter one."
   elif ! safe_value "$1"; then
@@ -170,7 +170,9 @@ cmd_instance_import() {
   reg_exists "$name" || die "instance $name does not exist"
   owner=$(reg_get "$name" owner_email)
   [ -n "$owner" ] || die "Instance $name has no recorded owner, so nothing was imported."
-  ask_valid OPT_DISPLAY_NAME "Your name, as imported chats show it" "${owner%%@*}" "" display_name_problem
+  # The name recorded at install is already the person's choice, so it is not asked again.
+  if [ -z "$OPT_DISPLAY_NAME" ]; then OPT_DISPLAY_NAME=$(reg_get "$name" owner_name); fi
+  ask_valid OPT_DISPLAY_NAME "Your name, as imported chats show it" "$(owner_name_default "$owner")" "" display_name_problem
   docker_prepare
   lock_acquire
   load_installed_release

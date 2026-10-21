@@ -489,12 +489,7 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export {
-  SILENT_SEARCH_LIMIT,
-  createWebSearchTurnState,
-  recordResultUrls,
-  remoteImageAskReason,
-} from './permissions/webSearch';
+export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, recordResultUrls } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';

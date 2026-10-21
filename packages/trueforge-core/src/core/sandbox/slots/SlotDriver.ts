@@ -100,6 +100,7 @@ interface SlotHealth {
  */
 export class SlotDriver implements IsolationDriver {
   readonly kind = 'slots' as const;
+  readonly packageGatewayCapable = true;
 
   private readonly clients: SlotClient[];
   private readonly logger: Logger;
