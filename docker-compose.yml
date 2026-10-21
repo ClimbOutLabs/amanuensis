@@ -190,6 +190,19 @@ services:
     # pins device=cpu. No GPU reservations here.
     restart: unless-stopped
 
+  # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
+  # The server reaches it as http://mail-email:9557/mcp. The server has no login of its own,
+  # so nothing outside this network may reach it.
+  mail-email:
+    image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
+    command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
+    environment:
+      # Only requests addressed to this service name pass the DNS-rebinding check.
+      MCP_ALLOWED_HOSTS: mail-email
+    expose:
+      - '9557'
+    restart: unless-stopped
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build
