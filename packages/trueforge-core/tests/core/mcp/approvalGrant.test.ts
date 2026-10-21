@@ -339,6 +339,7 @@ describe('always-allow grant eligibility', () => {
     // The server's annotations alone would make this inspection; the secret path must still block the grant.
     expect(info.effect).toBe('inspect');
     expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
   });
 
   it('end-to-end: an annotated connector read of an ordinary path stays eligible for a standing grant', async () => {
@@ -355,6 +356,39 @@ describe('always-allow grant eligibility', () => {
     });
     const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { path: '/home/u/notes/todo.md' } });
     expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+  });
+});
+
+describe('chat-scope eligibility for a secret-path read', () => {
+  it('refuses chat scope for an inspection read flagged as a secret-path read, and keeps it for a plain one', () => {
+    const read = { ...toolInfo('apple-mail', 'list-messages'), effect: 'inspect' as const };
+    expect(allowsChatApproval({ ...read, secret_path_read: true })).toBe(false);
+    expect(allowsChatApproval(read)).toBe(true);
+  });
+
+  it('keeps a one-time admission of a secret-path read, but never admits it from a chat grant', () => {
+    const info: InternalToolCallInfo = {
+      ...toolInfo('apple-mail', 'list-messages'),
+      effect: 'inspect',
+      secret_path_read: true,
+    };
+    const call = toolCall('call-secret', info);
+    const key = approvalGrantKey(info);
+    const granted = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([key]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(granted.get('call-secret')?.decision).toBeUndefined();
+    const once = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map([['call-secret', { status: 'allow' as const, scope: 'once' as const }]]),
+      chatApprovalGrants: new Set([key]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(once.get('call-secret')?.decision).toEqual({ status: 'allow', scope: 'once' });
   });
 });
 

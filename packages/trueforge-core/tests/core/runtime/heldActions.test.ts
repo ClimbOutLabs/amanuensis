@@ -358,6 +358,33 @@ describe('an unattended run', () => {
   });
 });
 
+describe('an attended annotated read of a secret path', () => {
+  const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+
+  it('is asked for once, never offered chat scope, and refused a chat-wide approval', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { orchestrator, thread } = h.build({ unattended: false });
+    const asked = await runTurn({
+      orchestrator,
+      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Read my key' }],
+    });
+    expect(asked.result.required_actions).toMatchObject([{ type: EventType.TOOL_APPROVAL_REQUIRED }]);
+    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', can_chat_allow: false, can_always_allow: false }],
+    });
+
+    const refused = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: refused.orchestrator, sendBatch: [approve('call-secret', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    const once = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: once.orchestrator, sendBatch: [approve('call-secret')] });
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('approving a held action later', () => {
   async function heldBrief(h: Harness) {
     const { thread } = await runBrief(h);
