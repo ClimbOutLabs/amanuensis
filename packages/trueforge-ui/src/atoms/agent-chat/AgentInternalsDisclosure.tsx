@@ -81,7 +81,7 @@ export function AgentInternalsDisclosure({
             aria-expanded={open}
             aria-controls={contentId}
             onClick={() => setToggle({ open: !open, from: expanded })}
-            className="rounded-sm text-left text-xs text-text-tertiary hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/50"
+            className="m-0 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-[inherit] text-xs text-text-tertiary hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/50"
           >
             {summaryText}
           </button>
