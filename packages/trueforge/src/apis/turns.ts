@@ -794,6 +794,7 @@ function createTurnResolver(deps: {
       logger,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
+    { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
   );
 }
 
