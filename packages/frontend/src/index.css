@@ -34,6 +34,9 @@ body {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  /* Paper colour by hour, lighter at the top, with the grain over it. */
+  background-color: var(--paper);
+  background-image: var(--grain), linear-gradient(var(--paper-top), var(--paper) 55%);
 }
 
 @media (max-width: 900px) {
@@ -103,16 +106,6 @@ body {
     margin: 0;
     font-size: 0.9rem;
   }
-}
-
-/* Primary CTA fill: gradient isn't a valid Tailwind color token, so paint it as background-image. */
-.harness-primary-gradient button.bg-primary-button-bg,
-.harness-primary-gradient .auth-screen-button {
-  background-image: radial-gradient(289.46% 144.73% at 8.33% 7.41%, #b27aff 0%, #155dfc 58.99%, #4f39f6 100%);
-}
-
-.harness-primary-gradient[data-theme='light'] aside.bg-sidebar-bg button.bg-primary-button-bg {
-  box-shadow: 0 0.25rem 0.75rem color-mix(in oklab, #4f39f6 35%, transparent);
 }
 
 .boot-screen {
