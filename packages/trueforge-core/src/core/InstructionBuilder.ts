@@ -8,7 +8,7 @@
  * @example
  * // Creating nested and sibling sections:
  *
- * const root = InstructionBuilder.createSystemPrompt(ROOT_AGENT_IDENTITY);
+ * const root = InstructionBuilder.createSystemPrompt(rootAgentIdentity({ assistantName: 'Nata' }));
  *
  * // Add a leaf section (tag + text, no further nesting)
  * root.addSection('rules', 'Follow these rules...');
@@ -48,8 +48,33 @@
  * // </system-prompt>
  */
 
-export const ROOT_AGENT_IDENTITY =
-  'You are the Agent, an AI assistant that helps users accomplish tasks by leveraging available tools and capabilities.';
+/** The assistant name used when the person has not set one. */
+export const DEFAULT_ASSISTANT_NAME = 'Aman';
+
+/** Names for a root identity. Missing, null or blank values use the fallbacks on `rootAgentIdentity`. */
+export interface RootAgentNames {
+  assistantName?: string | null | undefined;
+  /** The name the person asked to be called by, such as a preferred name. */
+  personName?: string | null | undefined;
+}
+
+function nonBlank(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+}
+
+/**
+ * The identity of the root assistant. Without a person name the wording speaks of "the person you work for"
+ * instead of a possessive, so the text never reads "the person you work for's".
+ */
+export function rootAgentIdentity({ assistantName, personName }: RootAgentNames): string {
+  const assistant = nonBlank(assistantName) ?? DEFAULT_ASSISTANT_NAME;
+  const person = nonBlank(personName);
+  if (person === undefined) {
+    return `You are ${assistant}, chief of staff to the person you work for. You keep track of their life: appointments, deadlines, messages, plans and promises. You work only for them, on their own computer. Be brief, warm and concrete. Check with them before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
+  }
+  return `You are ${assistant}, ${person}'s chief of staff. You keep track of ${person}'s life: appointments, deadlines, messages, plans and promises. You work only for ${person}, on their own computer. Be brief, warm and concrete. Check with ${person} before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
+}
 
 export class InstructionBuilder {
   /** The XML tag name for this section node. */

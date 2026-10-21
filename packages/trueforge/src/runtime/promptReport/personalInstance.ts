@@ -20,6 +20,8 @@ import type { ChatAssistant } from '../chatAssistant';
 import type { MemoryConfig } from '../memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../MemoryTurnResourceResolver';
 import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapability';
+import type { TokenFactoryBudget } from '../tokenFactoryBudget';
+import type { UsageSessionReader } from '../usageSummaryCapability';
 
 export type PersonalInstanceName = 'personal' | 'personal-with-google';
 
@@ -87,6 +89,22 @@ function unusedSpaceStore(): SpaceTurnContext['store'] {
     listSpacesWithAggregate: () => unused('listSpacesWithAggregate'),
     getSpace: () => unused('getSpace'),
     getSpaceRevision: () => unused('getSpaceRevision'),
+  };
+}
+
+function unusedUsageSessionReader(): UsageSessionReader {
+  return {
+    listSessions: () => unused('listSessions'),
+    listSessionEvents: () => unused('listSessionEvents'),
+  };
+}
+
+function unusedTokenFactoryBudget(): TokenFactoryBudget {
+  return {
+    isExhausted: () => unused('isExhausted'),
+    assertWithinCap: () => unused('assertWithinCap'),
+    record: () => unused('record'),
+    today: () => unused('today'),
   };
 }
 
@@ -250,6 +268,11 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
       sessionId: SESSION_ID,
       turnId: 'prompt-report-turn',
       logger,
+    },
+    {
+      sessionStore: unusedUsageSessionReader(),
+      budget: unusedTokenFactoryBudget(),
+      authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
   const spec = personalSpec();

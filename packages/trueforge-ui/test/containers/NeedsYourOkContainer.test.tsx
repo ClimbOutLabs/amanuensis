@@ -7,6 +7,7 @@ import { AssistantMessageContainer } from '@/containers/AssistantMessageContaine
 import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { answerHeldAction, reload, server } = vi.hoisted(() => {
@@ -54,6 +55,17 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
   };
 }
 
+const MAIL: NonNullable<SentinelApprovalCard['email']> = {
+  action: 'send',
+  to: [{ name: 'Ana', address: 'ana@example.com' }],
+  cc: [],
+  bcc: [],
+  subject: 'Lunch',
+  body: 'Lunch at noon?',
+  replaces: null,
+  reply_in_thread: null,
+};
+
 function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
   return {
     type: 'tool-call',
@@ -71,6 +83,7 @@ function renderBrief(
     expiresAt?: string;
     notSaved?: number;
     heldCards?: boolean;
+    editable?: boolean;
   } = {},
 ) {
   const message: ThreadMessageLike = {
@@ -94,7 +107,7 @@ function renderBrief(
     publishSentinelEvent({
       toolCallId: 'call-held',
       tier: 3,
-      card: card(),
+      card: input.editable ? card({ email: MAIL }) : card(),
       eventId: 'evt-1',
       threadId: 'main',
       ...(input.heldCards === false
@@ -179,6 +192,26 @@ describe('NeedsYourOkContainer', () => {
     await waitFor(() => {
       expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'always_allow' }));
     });
+  });
+
+  it('shows Change it words as the owner message, and sends them as the reason without running anything', async () => {
+    answerHeldAction.mockResolvedValue(undefined);
+    renderBrief({ editable: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'What should change?' }), {
+      target: { value: 'make it shorter' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(screen.getByText('make it shorter')).toHaveAttribute('data-slot', 'aui_user-message-content');
+    });
+    expect(answerHeldAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answer: 'deny',
+        toolCallId: 'call-held',
+        reason: changeRequestReason('make it shorter'),
+      }),
+    );
   });
 
   it('records a denial without running anything', async () => {

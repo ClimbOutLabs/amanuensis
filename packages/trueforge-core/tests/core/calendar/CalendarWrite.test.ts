@@ -9,6 +9,7 @@ import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { checkHeldReplay, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
 import { DEMO_SEND_REFUSAL } from '../../../src/core/permissions/sendAllowlist';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import type { Route } from '../email/gmail/harness';
 import { scriptedGoogle } from '../email/gmail/harness';
 import { capturingLogger } from '../google/fakes';
@@ -82,6 +83,7 @@ async function approveThenDispatch(input: {
     memoState: createToolCallMemoState(),
     sentinel: {
       services: sentinel.services,
+      web_search: createWebSearchTurnState(),
       identity: {
         tenant_id: sentinel.tenant_id,
         created_by: sentinel.created_by,

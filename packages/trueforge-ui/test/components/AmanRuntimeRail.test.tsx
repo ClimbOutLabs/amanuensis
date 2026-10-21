@@ -344,6 +344,7 @@ describe('AmanRuntimeRail', () => {
               address_as: null,
               user_profile: null,
               pinned_preferences: [],
+              help_areas: [],
               learned_profile: null,
             }),
             updateProfile: async profile => profile,

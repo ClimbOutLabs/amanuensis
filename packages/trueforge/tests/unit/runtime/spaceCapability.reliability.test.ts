@@ -1,3 +1,4 @@
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
 /**
  * Reliability tests for update_space (Phase 1 circuit breaker + Phase 2 block anchors).
  *
@@ -255,6 +256,7 @@ function makeHarness(logger?: Logger, overrides?: { tenantId?: string; userRef?:
     store,
     authority: { tenantId: overrides?.tenantId ?? 'default', userRef: overrides?.userRef ?? 'user-a' },
     tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
     sessionId,
     ...(logger === undefined ? {} : { logger }),
   });
