@@ -69,7 +69,7 @@ describe('mail and calendar sidecars', () => {
 
   it('mail-email starts through the wrapper that restarts it on a new send list', () => {
     const service = serviceNamed('mail-email');
-    expect(service.entrypoint).toEqual(['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']);
+    expect(service['entrypoint']).toEqual(['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']);
     expect(service.volumes).toContain('./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro');
     expect(service.environment?.['AMAN_MAIL_STATUS_FILE']).toBe('/mail-status/loaded.sha256');
   });
