@@ -1698,8 +1698,9 @@ const HIDDEN_QUERY = '(hidden)';
 /** Most characters of query text an approval card shows. */
 const SEARCH_CARD_TEXT_MAX = 1000;
 
-function searchQueryText(strings: OutboundStrings): string {
-  return [...strings.values, ...strings.plumbing]
+/** The query texts joined for one line. The provider's plumbing is left out of what a person reads. */
+function searchQueryText(texts: readonly string[]): string {
+  return texts
     .map(value => value.trim())
     .filter(value => value !== '')
     .join(' | ');
@@ -1819,7 +1820,8 @@ async function classifySearchProviderTool(input: {
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
-  const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const queryText = strings === undefined ? '' : searchQueryText([...strings.values, ...strings.plumbing]);
+  const shownQueryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
   const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
     holdSearchCall({ action, ctx, reason, say, summary, params: action.canonical_params, fields: extraction.fields });
@@ -1896,7 +1898,7 @@ async function classifySearchProviderTool(input: {
   }
   return tier1Decision({
     reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
-    reason_detail: `Searched: ${queryText}`,
+    reason_detail: `Searched: ${shownQueryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });

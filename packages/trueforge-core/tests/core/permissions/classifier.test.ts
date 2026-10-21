@@ -1344,3 +1344,26 @@ describe('connector reads can be always allowed', () => {
     expect([otherRead.tier, otherConnector.tier]).toEqual([3, 3]);
   });
 });
+
+describe('a silent search row names only what was searched', () => {
+  const SESSION_ID = '5f0c9a3e-2b7d-4c1a-9e8f-7a6b5c4d3e2f';
+  const MODEL = 'provider-model-x9';
+  const PLUMBED_SEARCH: SentinelAction = {
+    tool_name: 'web_search',
+    canonical_params: { query: 'Lisbon weather today', session_id: SESSION_ID, model: MODEL },
+    tool_type: 'mcp',
+    mcp_server_name: 'search',
+    mcp_search_provider: true,
+    mcp_search_tool: true,
+    mcp_search_plumbing_fields: ['session_id', 'model'],
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  };
+
+  it('keeps the session id and model name out of the reason a person reads', async () => {
+    const decision = await classifyTier(PLUMBED_SEARCH, makeCtx());
+    expect(decision).toMatchObject({ tier: 1, silent_search_query: expect.stringContaining(SESSION_ID) });
+    expect(decision.reason_detail).toBe('Searched: Lisbon weather today');
+    expect(decision.reason_detail).not.toContain(SESSION_ID);
+    expect(decision.reason_detail).not.toContain(MODEL);
+  });
+});
