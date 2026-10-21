@@ -763,7 +763,7 @@ load_installed_release() {
 # The instance commands never build, so they say when this checkout holds newer code than what they run.
 warn_if_installed_older() {
   [ "$CUR_APP_TAG" = "$(checkout_app_tag)" ] ||
-    warn "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
+    warn "The installed Aman is not the same version as this copy of its code. To use this code, run: installer/install.sh upgrade"
 }
 
 # 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.

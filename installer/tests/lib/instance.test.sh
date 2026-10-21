@@ -377,20 +377,20 @@ test_a_new_instance_points_to_settings_for_a_model() {
   sandbox_drop
 }
 
-test_add_warns_when_the_installed_version_is_older() {
+test_add_warns_when_the_installed_version_differs() {
   local builds
-  t_begin "instance add says once when the installed Aman is older than this checkout, and nothing when they match"
+  t_begin "instance add says once when the installed Aman is not the same version as this checkout, and nothing when they match"
   sandbox_new
   install_machine
   add_instance same
   assert_rc 0
-  assert_not_contains "$OUT$ERR" "older than this copy"
+  assert_not_contains "$OUT$ERR" "not the same version as this copy"
   repo_commit_change "newer code"
   builds=$(log_count "docker build")
   add_instance later
   assert_rc 0
-  assert_flat_contains "$ERR" "The installed Aman is older than this copy of its code. To use the newer code, run: installer/install.sh upgrade"
-  assert_eq "$(printf '%s' "$ERR" | grep -c 'older than this copy')" 1 "the warning shows once"
+  assert_flat_contains "$ERR" "The installed Aman is not the same version as this copy of its code. To use this code, run: installer/install.sh upgrade"
+  assert_eq "$(printf '%s' "$ERR" | grep -c 'not the same version as this copy')" 1 "the warning shows once"
   assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
   sandbox_drop
 }
@@ -686,7 +686,7 @@ test_removing_the_last_instance_takes_the_machine_project_with_it
 test_removing_one_of_two_instances_leaves_the_machine_project
 test_a_failed_first_install_names_its_cleanup
 test_name_validation
-test_add_warns_when_the_installed_version_is_older
+test_add_warns_when_the_installed_version_differs
 test_add_without_a_name_asks_for_one
 test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
