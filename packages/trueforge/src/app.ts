@@ -21,6 +21,7 @@ import { createChatImagesRouter } from './apis/chatImages';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createGoogleRouter } from './apis/google';
+import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -87,6 +88,7 @@ import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
+import type { SchedulerProbe } from './help/healthCheck';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -277,6 +279,8 @@ export interface ServerDeps<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Whether the in-process schedule loop is running; the help check reads it. */
+  schedulerStatus: () => SchedulerProbe;
   /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
@@ -426,6 +430,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/help',
+    withAuth(
+      createHelpRouter({
+        resolveRequestContext,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+        tokenStore: deps.tokenStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        hostReportPath: configuration.HOST_REPORT_PATH,
+        schedulerStatus: deps.schedulerStatus,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
