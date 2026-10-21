@@ -2,7 +2,7 @@
 
 import { normalizeSandboxArtifactBlocks } from '@truefoundry/trueforge-core/core/sandbox/sandboxArtifacts';
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -19,6 +19,7 @@ import { type CitationSource } from '../utils/citationMarkers.js';
 import { remarkCitationMarkers } from '../utils/remarkCitationMarkers.js';
 import { remarkNormalizeProseTypography } from '../utils/remarkNormalizeProseTypography.js';
 import { transformMarkdownSource } from '../utils/transformMarkdownSource.js';
+import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import type { OpenUiFenceBlockProps } from './OpenUiFenceBlock.js';
 import type { SandboxArtifactDownloadProps } from './SandboxArtifactDownload.js';
@@ -132,14 +133,66 @@ export function markdownUrlTransform(value: string): string {
 }
 
 /**
+ * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only when
+ * the person asks, so an image URL in a prompt-injected page never reaches its host on render. Loads
+ * with no referrer; a failed load shows the alt text instead of an empty box.
+ */
+function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
+  const [requested, setRequested] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const host = remoteImageHost(src);
+  const label = alt !== '' ? alt : 'External image';
+  return (
+    <span
+      className="aui-remote-image my-2 inline-flex max-w-full flex-col gap-1 text-xs text-text-secondary"
+      data-testid="aui-remote-image-placeholder"
+    >
+      <span className="flex h-24 w-40 max-w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg p-2 text-center">
+        {requested && !failed ? (
+          <img
+            src={src}
+            alt={alt}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="h-full w-full rounded-lg object-cover"
+            onError={() => setFailed(true)}
+          />
+        ) : failed ? (
+          <span className="line-clamp-3 break-words">Image unavailable: {label}</span>
+        ) : (
+          <button
+            type="button"
+            className={auiButtonClass({
+              variant: 'secondary',
+              size: 'small',
+              className: 'h-auto max-w-full whitespace-normal py-1 text-center',
+            })}
+            aria-label={`Show image: ${label}`}
+            onClick={() => setRequested(true)}
+          >
+            Show image: {label}
+          </button>
+        )}
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate opacity-70">{host}</span>
+        <a href={src} target="_blank" rel="noopener noreferrer" className="shrink-0 underline-offset-2 hover:underline">
+          Open image
+        </a>
+      </span>
+    </span>
+  );
+}
+
+/**
  * Inside a chat turn, only re-encoded images from this chat's image route render; a web link goes to
  * the server, which loads it silently where a search would and otherwise asks with a card; any other
  * source (data:, blob:, another same-origin path), and every image of a turn without image access, is
  * not rendered. Alt text is always plain text.
  *
  * Outside a chat turn (Spaces, settings) remote images never auto-load: a prompt injection can hide
- * private data in an image URL. A placeholder shows the destination host instead, and clicking opens
- * the image in a new tab; same-origin, data: and blob: images still render inline.
+ * private data in an image URL. They show as a thumbnail that loads on request; same-origin, data:
+ * and blob: images still render inline.
  */
 function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgProps: ComponentProps<'img'> }) {
   const scope = useChatImageScope();
@@ -155,21 +208,47 @@ function MarkdownImage({ src, alt, imgProps }: { src: string; alt: string; imgPr
   if (isSafeInlineImageSrc(src)) {
     return <img {...imgProps} src={src} alt={alt} />;
   }
-  const host = remoteImageHost(src);
+  return <RemoteImageThumbnail src={src} alt={alt} />;
+}
+
+/**
+ * A table on a read-only page (a space) sits in its own scroll box. The edge cue on either side
+ * shows only while there is more to see, so a wide table is never clipped without a sign of it.
+ * The scroll position is read back from the box rather than styled alone, because overlay
+ * scrollbars hide the usual hint on most desktops.
+ */
+function ScrollableTable(props: ComponentProps<'table'>) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (box == null) return;
+    const measure = () => {
+      const start = box.scrollLeft > 0;
+      const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+      setEdges(current => (current.start === start && current.end === end ? current : { start, end }));
+    };
+    measure();
+    box.addEventListener('scroll', measure, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(box);
+    return () => {
+      box.removeEventListener('scroll', measure);
+      observer?.disconnect();
+    };
+  }, []);
+
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        'aui-remote-image my-2 inline-flex max-w-full items-center gap-2 rounded border border-border bg-card-bg px-2 py-1 text-xs text-text-secondary',
-      )}
-      data-testid="aui-remote-image-placeholder"
-      title={src}
+    <div
+      className="space-table-frame"
+      data-more-start={edges.start ? '' : undefined}
+      data-more-end={edges.end ? '' : undefined}
     >
-      <span className="truncate">{alt !== '' ? alt : 'External image'}</span>
-      <span className="truncate opacity-70">{host}</span>
-    </a>
+      <div ref={scrollRef} className="space-table-scroll">
+        <table {...props} />
+      </div>
+    </div>
   );
 }
 
@@ -214,6 +293,9 @@ function makeComponents(opts: {
           {children}
         </a>
       );
+    },
+    table({ node: _node, ...props }) {
+      return readOnly ? <ScrollableTable {...props} /> : <table {...props} />;
     },
     // An empty src renders nothing at all, not a placeholder.
     img({ src, alt, node: _node, ...props }) {
