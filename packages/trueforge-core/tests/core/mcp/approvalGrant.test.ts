@@ -634,3 +634,59 @@ describe('connector read inspection is stamped from the classifier decision', ()
     expect(allowsToolGrant(info)).toBe(false);
   });
 });
+
+describe('secret-path detection covers every argument of an unannotated connector read', () => {
+  const selectors = { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] };
+
+  function attachmentToolSet(): ToolSet {
+    return makeRealToolSet({
+      tools: [{ name: 'get_attachment', inputSchema: { type: 'object' } }],
+      selectors,
+      classify: true,
+    });
+  }
+
+  it('refuses chat and always scope for a secret path in attachment_path', async () => {
+    const info = await attachmentToolSet().toolCallInfo({
+      name: 'get_attachment',
+      arguments: { attachment_path: '/home/u/.ssh/id_rsa' },
+    });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('refuses chat and always scope for a secret path in other unusual argument names', async () => {
+    const toolSet = attachmentToolSet();
+    const byLocator = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { locator: '~/.gnupg/secring.gpg' },
+    });
+    const nested = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { payload: { nested: { keyfile: 'config/server.pem' } } },
+    });
+    for (const info of [byLocator, nested]) {
+      expect(info.secret_path_read).toBe(true);
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+    }
+  });
+
+  it('still offers chat and always scope for an ordinary read, including free text that mentions a secret word', async () => {
+    const toolSet = attachmentToolSet();
+    const file = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { attachment_path: '/home/u/notes/todo.md' },
+    });
+    const text = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { note: 'my token budget and secret santa plans' },
+    });
+    for (const info of [file, text]) {
+      expect(info.secret_path_read).not.toBe(true);
+      expect(allowsChatApproval(info)).toBe(true);
+      expect(allowsToolGrant(info)).toBe(true);
+    }
+  });
+});

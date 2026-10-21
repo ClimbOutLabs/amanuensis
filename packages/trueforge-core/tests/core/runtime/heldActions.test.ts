@@ -85,6 +85,12 @@ function makeSource(callTool: CallToolMock): ToolSource {
               annotations: { readOnlyHint: true, openWorldHint: false },
               preload: true,
             },
+            {
+              name: 'get_attachment',
+              description: 'Read an attachment',
+              inputSchema: schema,
+              preload: true,
+            },
           ],
         },
         wasInitialized: undefined,
@@ -382,6 +388,33 @@ describe('an attended annotated read of a secret path', () => {
     const once = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
     await runTurn({ orchestrator: once.orchestrator, sendBatch: [approve('call-secret')] });
     expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an unannotated connector read of a secret path in any argument', () => {
+  const secretRead = {
+    id: 'call-attachment',
+    name: 'get_attachment',
+    args: JSON.stringify({ attachment_path: '/home/u/.ssh/id_rsa' }),
+  };
+
+  it('is never offered chat scope or Always allow, and refused both', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-attachment', held: true, can_always_allow: false }],
+    });
+
+    const chat = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: chat.orchestrator, sendBatch: [approve('call-attachment', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+
+    const always = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: always.orchestrator, sendBatch: [approve('call-attachment', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
   });
 });
 

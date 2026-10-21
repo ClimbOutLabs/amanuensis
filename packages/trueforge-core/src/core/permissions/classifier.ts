@@ -337,29 +337,34 @@ function isSensitivePath(p: string): boolean {
   return SENSITIVE_PATH_PATTERNS.some(pattern => pattern.test(p));
 }
 
-/** Collect string param values that look like paths for sensitive-read detection. */
-function sensitiveReadHit(params: Record<string, unknown>): boolean {
-  const keys = ['path', 'paths', 'file', 'files', 'target', 'operand', 'command'];
-  for (const key of keys) {
-    const value = params[key];
-    if (typeof value === 'string') {
-      if (key === 'command') {
-        for (const token of splitWordsLenient(value)) {
-          if (isSensitivePath(token)) {
-            return true;
-          }
-        }
-      } else if (isSensitivePath(value)) {
-        return true;
-      }
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'string' && isSensitivePath(item)) {
-          return true;
-        }
-      }
-    }
+/** Longest word scanned as a path; a longer one is content, not a file name. */
+const MAX_PATH_WORD_LENGTH = 4096;
+
+/**
+ * A word that names a file: it has a separator, a home or dot prefix, or a bare `name.ext` form.
+ * Free text without those shapes is never a path, so a search that mentions a secret word is not a read.
+ */
+function looksLikeFilePath(word: string): boolean {
+  if (word.length === 0 || word.length > MAX_PATH_WORD_LENGTH) {
+    return false;
+  }
+  return /[/\\]/.test(word) || /^[~.]/.test(word) || /^[\w-]+\.\w{1,10}$/.test(word);
+}
+
+/**
+ * Whether any string argument, at any depth, names a sensitive path. Argument names are not
+ * checked: a connector can carry a path under any key, and a command line carries it as a word.
+ */
+function sensitiveReadHit(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const words = /\s/.test(value) ? splitWordsLenient(value) : [value];
+    return words.some(word => looksLikeFilePath(word) && isSensitivePath(word));
+  }
+  if (Array.isArray(value)) {
+    return value.some(sensitiveReadHit);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some(sensitiveReadHit);
   }
   return false;
 }
