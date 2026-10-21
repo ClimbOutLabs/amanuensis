@@ -67,7 +67,6 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -3149,13 +3148,6 @@ export class AgentThread {
     // accumulation of the deltas — not the true complete response. Skip the
     // final model.message event to avoid emitting an inconsistent assembled message.
     if (signal?.aborted) {
-      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-    }
-
-    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
-    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
-    if (result.value.tool_markup === 'broken') {
-      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
