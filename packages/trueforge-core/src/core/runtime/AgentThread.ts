@@ -1529,7 +1529,8 @@ export class AgentThread {
     this.currentContextUsage = input.currentContextUsage ?? getEmptyCurrentContextUsage();
     this.agentInfo = input.agentInfo;
     this.preComputedCompletion = input.preComputedCompletion;
-    this.sandbox = input.sandbox;
+    // A read-only definition gets no sandbox at all, so no sandbox tool, staged upload, or repository refresh can run.
+    this.sandbox = this.definition.readOnly ? undefined : input.sandbox;
     this.chatApprovalGrants = input.chatApprovalGrants ?? new Set<string>();
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
