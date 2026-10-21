@@ -10,7 +10,21 @@ import {
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
+  plainAuditReason,
 } from '@/sentinel/types.js';
+
+describe('plainAuditReason', () => {
+  it('turns the machine reasons into plain words', () => {
+    expect(plainAuditReason('outbound_guard')).toBe('it carries something that must not leave this computer');
+    expect(plainAuditReason('offline_mode')).toBe('Offline mode is on');
+    expect(plainAuditReason('destination_unverifiable')).toBe('Aman could not check where it would go');
+    expect(plainAuditReason('unattended_run')).toBe('no one was there to ask');
+  });
+
+  it('leaves a reason that is already plain words as it is', () => {
+    expect(plainAuditReason('User declined.')).toBe('User declined.');
+  });
+});
 
 describe('parseToolTier', () => {
   it('accepts the three explicit numeric tiers and nothing else', () => {

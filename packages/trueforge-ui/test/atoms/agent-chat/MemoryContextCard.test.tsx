@@ -31,9 +31,10 @@ describe('MemoryContextCard', () => {
 
   it('pluralizes counts correctly at one and at other counts, including an irregular plural', () => {
     render(<MemoryContextCard recall={recallEvent} />);
-    // The collapsed status line already exercises both the singular form (1 item) and the
-    // irregular plural (2 entities, not "entitys").
-    expect(screen.getByText('1 item, 2 entities')).toBeInTheDocument();
+    // The collapsed status line names only the memories; the entity count is a detail
+    // that stays in the expanded body.
+    expect(screen.getByText('1 memory')).toBeInTheDocument();
+    expect(screen.queryByText('1 item, 2 entities')).not.toBeInTheDocument();
 
     // Expand to also check the same counts rendered as their own rows in the body.
     fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
@@ -61,7 +62,7 @@ describe('MemoryContextCard', () => {
   it('hides a successful recall when agent details are not visible', () => {
     render(<MemoryContextCard recall={recallEvent} agentDetailsVisible={false} />);
     expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
-    expect(screen.queryByText('1 item, 2 entities')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 memory')).not.toBeInTheDocument();
   });
 
   it('still shows a failed/timed-out recall when agent details are not visible', () => {
@@ -76,6 +77,6 @@ describe('MemoryContextCard', () => {
 
   it('defaults agentDetailsVisible to true, keeping prior behavior for existing callers', () => {
     render(<MemoryContextCard recall={recallEvent} />);
-    expect(screen.getByText('1 item, 2 entities')).toBeInTheDocument();
+    expect(screen.getByText('1 memory')).toBeInTheDocument();
   });
 });

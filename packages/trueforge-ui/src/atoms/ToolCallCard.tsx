@@ -41,7 +41,7 @@ export type ToolCallCardProps = {
 
 const DEFAULT_AWAITING_TEXT = 'Awaiting Response...';
 
-// Matches the `mcpDisplayName` shapes (`call_tool: <inner> (<server>)`,
+// Matches the meta-tool name shapes (`call_tool: <inner> (<server>)`,
 // `get_tool_info: <inner> (<server>)`) so the card can show the friendly
 // `innerTool · server` form without depending on the container's formatting.
 const MCP_META_TOOL_LABEL_PATTERN = /^(?:call_tool|get_tool_info):\s(.+?)\s*\(\s*([^)]+?)\s*\)$/;

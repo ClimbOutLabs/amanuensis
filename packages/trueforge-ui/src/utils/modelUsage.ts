@@ -33,8 +33,6 @@ export type ModelUsageSummary = {
   rows: ModelUsageRow[];
   /** Calls other than the answer's own chat role. */
   helperCalls: number;
-  /** Models the helper calls ran on, in order of first use. */
-  helperModelNames: string[];
 };
 
 const ROLE_LABELS: Record<ModelUsageEvent['role'], string> = {
@@ -149,18 +147,7 @@ export function summarizeModelUsage(events: readonly ModelUsageEvent[] | undefin
     noneReported: reportedCalls === 0,
     rows: ordered,
     helperCalls: helpers.reduce((sum, row) => sum + row.calls, 0),
-    helperModelNames: [...new Set(helpers.map(row => row.displayName))],
   };
-}
-
-function pluralize(count: number, singular: string): string {
-  return `${formatTokens(count)} ${singular}${count === 1 ? '' : 's'}`;
-}
-
-/** "+ 2 helper calls on Nemotron 3 Nano", or undefined when there were none. */
-export function describeHelperCalls(summary: ModelUsageSummary): string | undefined {
-  if (summary.helperCalls === 0) return undefined;
-  return `+ ${pluralize(summary.helperCalls, 'helper call')} on ${summary.helperModelNames.join(', ')}`;
 }
 
 /** "1,800 in, 340 out". */

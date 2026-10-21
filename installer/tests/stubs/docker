@@ -512,6 +512,10 @@ case "$cmd" in
           exit 130
         fi
         if [ -n "${STUB_IMPORT_FAIL:-}" ]; then
+          if [ "$STUB_IMPORT_FAIL" = killed ]; then
+            # How a container ends when the machine kills it for memory: it just stops, exit 137.
+            exit 137
+          fi
           # The CLI's JSON log lines come first; its error is the last plain line.
           echo '{"level":"warn","message":"Data import rejected an export section"}' >&2
           if [ "$STUB_IMPORT_FAIL" = heap ]; then

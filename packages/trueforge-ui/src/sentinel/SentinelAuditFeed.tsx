@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 
 import { MessageTimestamp } from '../atoms/MessageTimestamp.js';
 import { Icon } from '../icons/Icon.js';
+import { plainActionTypeLabel } from '../utils/toolCallParsing.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
 import {
+  plainAuditReason,
   SENTINEL_AUDIT_OUTCOME_LABELS,
   TIER2_ACTION_KINDS,
   TIER2_ACTION_LABELS,
@@ -34,14 +36,16 @@ export function outcomeTone(outcome: SentinelAuditOutcome): string {
 const AuditEntryRow: FC<{ entry: SentinelAuditEntry }> = ({ entry }) => (
   <li className="border-b border-border/60 px-3 py-2 last:border-b-0">
     <div className="flex items-baseline justify-between gap-2">
-      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">{entry.action_type}</span>
+      <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">
+        {plainActionTypeLabel(entry.action_type)}
+      </span>
       <MessageTimestamp createdAt={entry.created_at} className="text-[0.6875rem] font-normal" />
     </div>
     <p className="mt-0.5 text-xs text-text-primary">{entry.description}</p>
     <p className={`mt-0.5 text-[0.6875rem] font-medium ${outcomeTone(entry.outcome)}`}>
       {SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome]}
       {entry.reason !== undefined && entry.reason !== '' && (
-        <span className="font-normal text-text-secondary"> · {entry.reason}</span>
+        <span className="font-normal text-text-secondary"> · {plainAuditReason(entry.reason)}</span>
       )}
     </p>
   </li>
@@ -110,9 +114,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   return (
     <div className="flex min-h-0 flex-col">
       <div className="border-b border-border/60 px-3 py-2">
-        <p className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-text-secondary">
-          Tier 2 actions
-        </p>
+        <p className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-text-secondary">Always allow</p>
         <ul className="space-y-1.5">
           {tier2ActionKinds.map(kind => (
             <li key={kind} className="flex items-center justify-between gap-2">
@@ -137,6 +139,10 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
           </button>
         </p>
       )}
+
+      <p className="px-3 pt-2 text-[0.6875rem] font-medium uppercase tracking-wide text-text-secondary">
+        Recent actions
+      </p>
 
       {entries.length === 0 && error === null ? (
         <p className="px-3 py-4 text-center text-xs text-text-secondary">No permission activity in this session yet.</p>

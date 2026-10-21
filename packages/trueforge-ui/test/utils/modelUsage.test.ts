@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  describeHelperCalls,
   describeTokenSplit,
   formatCostUsd,
   formatTokens,
@@ -46,8 +45,6 @@ describe('summarizeModelUsage', () => {
       ['Compaction', 'Nemotron 3 Nano'],
     ]);
     expect(summary?.helperCalls).toBe(2);
-    expect(summary?.helperModelNames).toEqual(['Nemotron 3 Nano']);
-    expect(summary && describeHelperCalls(summary)).toBe('+ 2 helper calls on Nemotron 3 Nano');
     expect(summary?.noneReported).toBe(false);
     expect(summary?.unreportedCalls).toBe(0);
   });
@@ -66,7 +63,6 @@ describe('summarizeModelUsage', () => {
     const summary = summarizeModelUsage([SUPER_EVENT]);
 
     expect(summary?.helperCalls).toBe(0);
-    expect(summary && describeHelperCalls(summary)).toBeUndefined();
   });
 
   it('says usage was not reported, with no tokens or cost, when the provider reported none', () => {

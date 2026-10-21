@@ -99,23 +99,11 @@ function pluralize(count: number, singular: string): string {
   return `${String(count)} ${singular}${count === 1 ? '' : 's'}`;
 }
 
-function buildInternalsSummary({
-  toolCount,
-  thinkingCount,
-  recalledItems,
-  helperCalls,
-}: {
-  toolCount: number;
-  thinkingCount: number;
-  recalledItems: number;
-  helperCalls: number;
-}): string {
+function buildInternalsSummary({ toolCount, thinkingCount }: { toolCount: number; thinkingCount: number }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
-  if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
-  if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   return segments.join(' · ');
 }
 
@@ -176,11 +164,10 @@ export function AssistantMessageContainer() {
   const recall = memoryContext?.recall;
   const agentDetailsVisible = agentDetailsVisibility === 'expanded';
   const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
-  // The recalled-item count is part of "agent details": suppressed while the chat-level
-  // preference is collapsed, unless the recall itself needs attention (timeout/error) — then
-  // it stays in the summary row next to the amber dot while the disclosure content collapses.
+  // The recalled memory itself is part of "agent details": its card stays inside the
+  // disclosure, and a recall that needs attention (timeout/error) still shows the card
+  // there next to the amber dot. The counts live on the card, not in the summary row.
   const memoryVisible = recall != null && (agentDetailsVisible || recallOutcomeBad);
-  const recalledItems = memoryVisible ? (recall?.stats.items ?? 0) : 0;
   const hasMemory = memoryVisible || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
   // Helper calls are agent details like the recalled memory: listed when the chat switch is on.
@@ -229,8 +216,6 @@ export function AssistantMessageContainer() {
         summary={buildInternalsSummary({
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
-          recalledItems: isHost ? recalledItems : 0,
-          helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
         liveLabel={liveLabel}
         isRunning={isLive}

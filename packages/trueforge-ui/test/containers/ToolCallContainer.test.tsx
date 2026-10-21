@@ -97,7 +97,8 @@ function renderPendingApprovalMessage(
 describe('ToolCallContainer', () => {
   it('renders a running tool call without a result', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'search_docs', args: {} }]);
-    expect(screen.getByText('search_docs')).toBeInTheDocument();
+    expect(screen.getByText('Searched docs')).toBeInTheDocument();
+    expect(screen.queryByText('search_docs')).not.toBeInTheDocument();
     expect(screen.queryByText('Result:')).not.toBeInTheDocument();
   });
 
@@ -112,7 +113,7 @@ describe('ToolCallContainer', () => {
         result: '2026-07-01T00:00:00Z',
       },
     ]);
-    fireEvent.click(screen.getByText('get_current_datetime'));
+    fireEvent.click(screen.getByText('Checked the time and date'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('"tz"'));
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
@@ -158,7 +159,7 @@ describe('ToolCallContainer', () => {
         isError: true,
       },
     ]);
-    fireEvent.click(screen.getByText('flaky_tool'));
+    fireEvent.click(screen.getByText('Flaky Tool'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveTextContent('boom');
   });
@@ -181,7 +182,7 @@ describe('ToolCallContainer', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: 'screened-1', toolName: 'fetch_url', args: {}, result }]);
 
     expect(screen.getByText('Content withheld')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('fetch_url'));
+    fireEvent.click(screen.getByText('Read a web page'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveAttribute('data-content', '<html>RED-TEAM-CANARY-7Q2X9</html>');
   });
@@ -204,10 +205,7 @@ describe('ToolCallContainer', () => {
       ToolCallCard,
     });
 
-    const truncatedReason = `${rejectionText.slice(0, 139)}…`;
-    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ outcomeText: `Execution failed: ${truncatedReason}` }),
-    );
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ outcomeText: rejectionText }));
     expect(screen.queryByText('Execution failed', { exact: true })).not.toBeInTheDocument();
     // The rest of the reason is still available, expanded, in the response block.
     const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
@@ -780,10 +778,10 @@ describe('ToolCallContainer', () => {
   });
 
   it.each([
-    ['list_tools', '{"mcp_server":"github-team"}', 'github-team'],
-    ['call_tool', '{"mcp_server":"slack-workspace","tool_name":"send_message","input":{}}', 'slack-workspace'],
-    ['get_tool_info', '{"mcp_server":"linear-integration","tool_name":"create_issue"}', 'linear-integration'],
-  ])('passes mcpServerName for %s', (toolName, argsText, mcpServerName) => {
+    ['list_tools', '{"mcp_server":"github-team"}', 'Checked which tools are available'],
+    ['call_tool', '{"mcp_server":"slack-workspace","tool_name":"send_message","input":{}}', 'Sent message'],
+    ['get_tool_info', '{"mcp_server":"linear-integration","tool_name":"create_issue"}', 'Created issue'],
+  ])('shows a plain title and no server name for %s', (toolName, argsText, title) => {
     const ToolCallCard = createToolCallCardProbe();
     renderToolCallMessage(
       [
@@ -798,7 +796,12 @@ describe('ToolCallContainer', () => {
       { ToolCallCard },
     );
 
-    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ mcpServerName }));
+    const props = ToolCallCard.mock.calls[0]?.[0];
+    expect(props).toEqual(expect.objectContaining({ toolName: title }));
+    expect(props?.mcpServerName).toBeUndefined();
+    expect(title).not.toContain('github-team');
+    expect(title).not.toContain('slack-workspace');
+    expect(title).not.toContain('linear-integration');
   });
 
   it('does not pass mcpServerName for non-MCP tools', () => {
@@ -1009,8 +1012,8 @@ describe('ToolCallContainer: held search request', () => {
 
   it('shows the masked arguments in the Request block of an answered hold, never the raw key', async () => {
     const { container } = renderHeldSearch({ result: 'ok' });
-    await screen.findByText('web_search');
-    fireEvent.click(screen.getByText('web_search'));
+    await screen.findByText('Searched the web');
+    fireEvent.click(screen.getByText('Searched the web'));
     const blocks = await screen.findAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', 'query: how do I rotate ws••••••3x safely');
     expect(container.innerHTML).not.toContain(rawKey);

@@ -36,7 +36,6 @@ import {
   getToolResultContent,
   hasPendingAskUserResponse,
   hasPendingToolApproval,
-  mcpDisplayName,
   parseAskUserQuestionArgs,
   parseMapsResult,
   parseMcpToolArgs,
@@ -44,6 +43,7 @@ import {
   parseSandboxResult,
   parseToolOutputScreen,
   parseToolResultDisposition,
+  plainStepTitle,
   resolveSubAgentMeta,
   toStatus,
 } from '../utils/toolCallParsing.js';
@@ -479,7 +479,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       });
       return (
         <ToolCallCard
-          toolName={`Listing tools · ${mcpServer}`}
+          toolName={plainStepTitle('list_tools')}
           icon="mcp-server"
           expanded={expanded}
           onToggle={onToggle}
@@ -488,7 +488,6 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
           outcomeText={outcomeText}
           status={status}
           showResponseLine={status !== 'running' && !!resultDisplay.data}
-          mcpServerName={mcpServer}
           {...slots}
           approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
@@ -505,7 +504,10 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
 
     return (
       <ToolCallCard
-        toolName={mcpDisplayName(part.toolName, mcpServer, innerToolName)}
+        toolName={plainStepTitle(
+          innerToolName ?? part.toolName,
+          input === undefined ? undefined : JSON.stringify(input),
+        )}
         icon="mcp-server"
         expanded={expanded}
         onToggle={onToggle}
@@ -514,7 +516,6 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         outcomeText={outcomeText}
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
-        mcpServerName={mcpServer}
         searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
@@ -532,7 +533,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
 
   return (
     <ToolCallCard
-      toolName={part.toolName}
+      toolName={plainStepTitle(part.toolName, part.argsText)}
       expanded={expanded}
       onToggle={onToggle}
       awaiting={status === 'running'}

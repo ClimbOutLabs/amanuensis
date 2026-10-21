@@ -137,7 +137,7 @@ export type SentinelApprovalCard = {
   amount: string | null;
   /** Server-parsed command structure for shell actions, or null. */
   parsed_command: string | null;
-  /** Exact arguments sent to a connector, one "name: value" line each, or null. */
+  /** Exact arguments sent to a connector, one "name: value" line each, or the exact code a run_code card shows, or null. */
   outbound_text: string | null;
   /** Host of the connector server that receives the call, or null. */
   destination_host: string | null;
@@ -194,6 +194,20 @@ export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string>
   denied: 'Denied',
   auto_denied: 'Refused',
 };
+
+/** Plain words for the machine reasons a call can be refused without asking. */
+export const SENTINEL_AUDIT_REASON_LABELS: Record<string, string> = {
+  destination_unverifiable: 'Aman could not check where it would go',
+  incomplete_send_card: 'the card was missing details Aman needs to check it',
+  offline_mode: 'Offline mode is on',
+  outbound_guard: 'it carries something that must not leave this computer',
+  unattended_run: 'no one was there to ask',
+};
+
+/** The reason an audit row shows: plain words for a known machine reason, the text itself otherwise. */
+export function plainAuditReason(reason: string): string {
+  return SENTINEL_AUDIT_REASON_LABELS[reason] ?? reason;
+}
 
 function parseAuditOutcome(value: unknown): SentinelAuditOutcome | undefined {
   for (const outcome of SENTINEL_AUDIT_OUTCOMES) {

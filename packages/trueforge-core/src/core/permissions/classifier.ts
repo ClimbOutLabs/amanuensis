@@ -2358,12 +2358,22 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       return classifyRunnerTool(action, ctx);
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
+      // A run_code card shows the code itself, so the person approves the exact program that
+      // will run, never a summary of it. Without readable code the card keeps the older line.
+      const code = name === 'run_code' ? stringParam(action.canonical_params, 'code') : null;
+      const shownCode = code !== null && code.trim() !== '' ? code : null;
+      const language = name === 'run_code' ? stringParam(action.canonical_params, 'language') : null;
+      const languageName = language === 'python' ? 'Python' : language === 'node' ? 'Node.js' : null;
       return tier3Decision({
         card: {
           plain_what:
-            name === 'run_code'
-              ? 'Run code the agent wrote in the sandbox.'
-              : 'Submit an implementation plan for review.',
+            name !== 'run_code'
+              ? 'Submit an implementation plan for review.'
+              : shownCode === null
+                ? 'Run code the agent wrote in the sandbox.'
+                : languageName === null
+                  ? 'Run code Aman wrote:'
+                  : `Run ${languageName} code Aman wrote:`,
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
@@ -2371,7 +2381,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           recipient: null,
           amount: null,
           parsed_command: null,
-          outbound_text: null,
+          outbound_text: shownCode,
           destination_host: null,
           outbound_truncated: false,
         },

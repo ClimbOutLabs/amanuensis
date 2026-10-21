@@ -74,7 +74,8 @@ describe('AuditLogSettings', () => {
     if (live === null || gone === null) throw new Error('audit rows did not render as list items');
 
     expect(within(live).getByText('Approved')).toBeInTheDocument();
-    expect(within(live).getByText('send_email')).toBeInTheDocument();
+    expect(within(live).getByText('Sent email')).toBeInTheDocument();
+    expect(within(live).queryByText('send_email')).not.toBeInTheDocument();
     expect(within(live).getByRole('link', { name: 'Open chat' }).getAttribute('href')).toContain('chat-live');
     expect(within(live).getByText(/2026/)).toBeInTheDocument();
 

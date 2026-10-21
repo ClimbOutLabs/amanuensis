@@ -135,7 +135,12 @@ import_run() {
   fi
   if [ "$rc" != 0 ]; then
     rm -f "$layout"
-    warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix")"
+    # A kill for memory (exit 137) leaves no reason of the app's own in the log, so it is told apart here.
+    if [ "$rc" = 137 ] || grep -Eq 'exit code: 137|signal: killed' "$log" 2>/dev/null; then
+      warn "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
+    else
+      warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix")"
+    fi
     UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi

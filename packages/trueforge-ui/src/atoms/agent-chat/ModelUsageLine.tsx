@@ -3,7 +3,6 @@
 import type { ReactNode } from 'react';
 
 import {
-  describeHelperCalls,
   describeListPriceCost,
   describeTokenSplit,
   formatTokens,
@@ -15,9 +14,9 @@ import {
  * The quiet line under an answer: which model answered, on which provider, and what the whole turn
  * cost, helper calls included. Tokens are the provider's reported usage; a turn whose provider
  * reported none says so rather than showing zero. Cost is a list-price estimate and is labelled so.
+ * Which helper calls ran is not listed here; it sits in the usage details behind Details.
  */
 export function ModelUsageLine({ summary }: { summary: ModelUsageSummary }): ReactNode {
-  const helpers = describeHelperCalls(summary);
   const totalTokens = summary.inputTokens + summary.outputTokens;
   return (
     <p data-testid="model-usage-line" className="mt-2 text-xs text-text-tertiary">
@@ -48,12 +47,6 @@ export function ModelUsageLine({ summary }: { summary: ModelUsageSummary }): Rea
               </span>
             </>
           ) : null}
-        </>
-      )}
-      {helpers === undefined ? null : (
-        <>
-          <span aria-hidden> · </span>
-          <span data-testid="model-usage-helpers">{helpers}</span>
         </>
       )}
     </p>

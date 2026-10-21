@@ -99,7 +99,7 @@ describe('SentinelAuditFeed', () => {
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeEnabled();
     });
@@ -112,7 +112,7 @@ describe('SentinelAuditFeed', () => {
     });
     // The saved settings come back through the provider, so the switch follows them.
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'Always allow: file_write' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Always allow: Write files' })).toBeChecked();
     });
   });
 
@@ -129,7 +129,7 @@ describe('SentinelAuditFeed', () => {
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
@@ -152,10 +152,42 @@ describe('SentinelAuditFeed', () => {
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
+  });
+
+  it('separates the Always allow rules from Recent actions, with plain labels and reasons', async () => {
+    const { api } = stubApi([
+      makeEntry({
+        id: 'entry-1',
+        outcome: 'auto_denied',
+        description: 'Sent a search',
+        reason: 'outbound_guard',
+        tier: 3,
+        action_type: 'web_search',
+      }),
+      makeEntry({ id: 'entry-2', outcome: 'ran', description: 'Wrote a file', tier: 2, action_type: 'file_write' }),
+    ]);
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelAuditFeed sessionId="session-1" />
+      </SentinelApiProvider>,
+    );
+    expect((await screen.findAllByText('Always allow')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Recent actions')).toBeInTheDocument();
+    expect(screen.queryByText('Tier 2 actions')).not.toBeInTheDocument();
+    // The kind shows its plain label, never the tool id, and the refusal reason is in plain words.
+    expect(screen.getAllByText('Write files').length).toBeGreaterThan(0);
+    expect(screen.getByText('Searched the web')).toBeInTheDocument();
+    expect(screen.queryByText('file_write')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) => element?.textContent === ' · it carries something that must not leave this computer',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/outbound_guard/)).not.toBeInTheDocument();
   });
 
   it('shows the empty state when the session has no permission activity', async () => {

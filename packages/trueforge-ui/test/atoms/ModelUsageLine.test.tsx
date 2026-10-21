@@ -31,14 +31,15 @@ describe('ModelUsageLine', () => {
     expect(cost).toHaveAttribute('title', 'Estimated from per-million-token list prices, not your bill.');
   });
 
-  it('folds helper calls into the total and names the model they ran on', () => {
+  it('folds helper calls into the total without listing them on the line', () => {
     render(<ModelUsageLine summary={summaryOf(SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT)} />);
 
     const line = screen.getByTestId('model-usage-line');
     expect(line).toHaveTextContent(
       'Nemotron 3 Super · Token Factory · 6,990 tokens (6,300 in, 690 out) · $0.0012 at list price',
     );
-    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
+    expect(screen.queryByTestId('model-usage-helpers')).not.toBeInTheDocument();
+    expect(line).not.toHaveTextContent('helper calls');
   });
 
   it('shows tokens only when the model has no known price', () => {

@@ -669,11 +669,11 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     return result;
   }
 
-  it('shows the "N recalled" segment and recall counts when agent details are expanded', async () => {
+  it('keeps the recall counts on the memory card inside the details, not in the summary row', async () => {
     await renderWithStoredPreference({ agentDetails: 'expanded' });
     const internals = getAgentInternals();
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
-    expect(within(internals).getByText('3 items, 1 entity')).toBeInTheDocument();
+    expect(within(internals).queryByText(/3 recalled/)).not.toBeInTheDocument();
+    expect(within(internals).getByText('3 memories')).toBeInTheDocument();
   });
 
   it('hides the "N recalled" segment and recall counts when agent details are collapsed', async () => {
@@ -682,14 +682,16 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
   });
 
-  it('keeps the attention dot and the recall count in the summary when a completed recall errored', async () => {
+  it('keeps the attention dot when a completed recall errored, with the failure on the card inside', async () => {
     await renderWithStoredPreference({ agentDetails: 'collapsed', recallOutcome: 'error' });
 
     const internals = getAgentInternals();
-    // The failed recall still surfaces in the summary row next to the amber dot…
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
+    // No recall count in the summary row; the amber dot still marks the turn…
+    expect(within(internals).queryByText(/3 recalled/)).not.toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
-    // …while the disclosure content itself collapses on the completed turn.
+    // …and the failed recall itself is on the memory card, while the disclosure
+    // content itself collapses on the completed turn.
+    expect(within(internals).getByText('Recall failed')).toBeInTheDocument();
     expect(internals.querySelector('[hidden]')).not.toBeNull();
   });
 
@@ -1150,13 +1152,13 @@ describe('AssistantMessageContainer model and cost line', () => {
     );
   });
 
-  it('folds helper calls into the total and names the model they ran on', async () => {
+  it('folds helper calls into the total without naming them on the line', async () => {
     await renderWithUsage({
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
     });
 
     expect(screen.getByTestId('model-usage-line')).toHaveTextContent('6,990 tokens');
-    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
+    expect(screen.queryByTestId('model-usage-helpers')).not.toBeInTheDocument();
   });
 
   it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
@@ -1166,7 +1168,7 @@ describe('AssistantMessageContainer model and cost line', () => {
     });
 
     const internals = getAgentInternals();
-    expect(within(internals).getByText(/2 helper calls/)).toBeInTheDocument();
+    expect(within(internals).queryByText(/2 helper calls/)).not.toBeInTheDocument();
     const rows = within(internals).getAllByTestId('model-usage-row');
     expect(rows.map(row => row.textContent)).toEqual([
       expect.stringContaining('Answer·Nemotron 3 Super'),
@@ -1184,7 +1186,7 @@ describe('AssistantMessageContainer model and cost line', () => {
 
     expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
-    expect(screen.getByTestId('model-usage-helpers')).toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-helpers')).not.toBeInTheDocument();
   });
 
   it('adds no details row for a turn that had only its answer', async () => {

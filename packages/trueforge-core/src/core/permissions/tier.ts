@@ -136,7 +136,9 @@ export const Tier3CardSchema = z
     outbound_text: z
       .string()
       .nullable()
-      .describe('Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker.'),
+      .describe(
+        'Exact arguments sent to a connector, one "name: value" line each, or the exact code a run_code card shows. Long values are cut with a marker.',
+      ),
     destination_host: z
       .string()
       .nullable()
