@@ -196,9 +196,21 @@ services:
   mail-email:
     image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
     command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
+    # Account credentials come only from this optional file, which the installer writes.
+    # Its `.env.*` name is git-ignored.
+    env_file:
+      - path: ./.env.mail-email
+        required: false
     environment:
       # Only requests addressed to this service name pass the DNS-rebinding check.
       MCP_ALLOWED_HOSTS: mail-email
+      # Env-supplied accounts are read from the environment only. `plaintext` makes the
+      # server never touch the OS keyring, and no account is written to the config file.
+      MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
+      # The mail metadata index (SQLite) lives beside this path, on the volume below.
+      MCP_EMAIL_SERVER_CONFIG_PATH: /data/config.toml
+    volumes:
+      - mail-email-data:/data
     expose:
       - '9557'
     restart: unless-stopped
@@ -280,6 +292,8 @@ services:
 
 volumes:
   dex-tls:
+  # Email connector config and mail metadata index. Holds mail metadata at rest, never credentials.
+  mail-email-data:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).

@@ -12,6 +12,10 @@ const ServiceSchema = z
     expose: z.array(z.string()).optional(),
     command: z.array(z.string()).optional(),
     environment: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    volumes: z.array(z.string()).optional(),
+    env_file: z
+      .array(z.union([z.string(), z.object({ path: z.string(), required: z.boolean().optional() })]))
+      .optional(),
   })
   .passthrough();
 
@@ -48,5 +52,16 @@ describe('mail and calendar sidecars', () => {
 
   it('mail-email accepts requests only under its service name', () => {
     expect(serviceNamed('mail-email').environment?.['MCP_ALLOWED_HOSTS']).toBe('mail-email');
+  });
+
+  it('mail-email never reads the OS keyring and keeps its config and index on its own volume', () => {
+    const service = serviceNamed('mail-email');
+    expect(service.environment?.['MCP_EMAIL_SERVER_CREDENTIAL_STORAGE']).toBe('plaintext');
+    expect(service.environment?.['MCP_EMAIL_SERVER_CONFIG_PATH']).toBe('/data/config.toml');
+    expect(service.volumes).toEqual(['mail-email-data:/data']);
+  });
+
+  it('mail-email reads account secrets from an optional git-ignored file only', () => {
+    expect(serviceNamed('mail-email').env_file).toEqual([{ path: './.env.mail-email', required: false }]);
   });
 });
