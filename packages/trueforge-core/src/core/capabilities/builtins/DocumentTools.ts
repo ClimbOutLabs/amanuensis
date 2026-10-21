@@ -27,6 +27,7 @@ import {
   summarizeNetWorth,
   type NetWorthObservationInput,
 } from '../../../documents/netWorthReport';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { ApprovalDecision } from '../../events/schema';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import { toolResultResponse } from '../../mcp/IMCPServer';
@@ -37,7 +38,6 @@ import { throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability } from '../AgentCapability';
 
 export const DOCUMENTS_SERVER_ID = 'documents';
-export const EXTRACT_DOCUMENT_TEXT_TOOL_NAME = 'extract_document_text';
 export const CREATE_DOCUMENT_REPORT_TOOL_NAME = 'create_document_report';
 export const SUMMARIZE_NET_WORTH_TOOL_NAME = 'summarize_net_worth';
 export const DOCUMENTS_INSTRUCTION_SECTION = 'documents';

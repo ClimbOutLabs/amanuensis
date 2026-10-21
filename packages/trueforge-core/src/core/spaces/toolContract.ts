@@ -12,7 +12,7 @@ export const REVERT_SPACE_TOOL_NAME = 'revert_space';
 export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
 
 const SPACE_WRITE_TOOL_NAMES = [CREATE_SPACE_TOOL_NAME, UPDATE_SPACE_TOOL_NAME, REVERT_SPACE_TOOL_NAME] as const;
-const SPACE_READ_TOOL_NAMES = [LIST_SPACES_TOOL_NAME, GET_SPACE_TOOL_NAME, LIST_BLOCKS_TOOL_NAME] as const;
+export const SPACE_READ_TOOL_NAMES = [LIST_SPACES_TOOL_NAME, GET_SPACE_TOOL_NAME, LIST_BLOCKS_TOOL_NAME] as const;
 
 /** Calls that create, change or restore a space. */
 export function isSpaceWriteToolName(tool_name: string): boolean {

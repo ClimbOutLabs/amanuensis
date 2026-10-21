@@ -125,6 +125,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import { keepSubAgentAnswerText } from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -3381,6 +3382,9 @@ export class AgentThread {
         };
       } else if (!hasToolCalls(assistantMessage)) {
         const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
+        if (this.sentinel !== undefined) {
+          keepSubAgentAnswerText({ state: this.sentinel.web_search, text: content });
+        }
         completion = {
           type: 'done',
           output: agentAssistantMessage,

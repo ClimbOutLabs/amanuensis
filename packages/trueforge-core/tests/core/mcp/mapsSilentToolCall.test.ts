@@ -16,6 +16,7 @@ import {
 } from '../../../src/core/permissions/context';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const handler = jest.fn(() => Promise.resolve(toolResultResponse({ text: '{"ok":true}' })));
 
@@ -87,6 +88,7 @@ async function runMap({ maps_without_asking }: { maps_without_asking: boolean })
     memoState: createToolCallMemoState(),
     sentinel: {
       services,
+      web_search: createWebSearchTurnState(),
       identity: {
         tenant_id: 't1',
         created_by: 'u1',

@@ -1,4 +1,4 @@
-import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -12,13 +12,15 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
+import { isMapsToolName } from '../permissions/mapsToolNames';
 import {
   countSilentFetches,
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
+  resultTexts,
+  isSilentSearchReason,
   runOneAtATime,
-  SEARCH_SILENT_REASON,
   type SearchProviderGrant,
 } from '../permissions/webSearch';
 import {
@@ -133,25 +135,6 @@ function searchNotRunText(input: { detail: string; unattended: boolean }): strin
   return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
 }
 
-/** Text a search result carries: its text blocks and its structured content. */
-function resultTexts(result: CallToolResult): string[] {
-  if (result.isError === true) {
-    return [];
-  }
-  const texts: string[] = [];
-  if (Array.isArray(result.content)) {
-    for (const block of result.content) {
-      if (block.type === 'text') {
-        texts.push(block.text);
-      }
-    }
-  }
-  if (result.structuredContent !== undefined) {
-    texts.push(JSON.stringify(result.structuredContent));
-  }
-  return texts;
-}
-
 function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
@@ -162,6 +145,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
+    case 'private_text_check':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something from your mail or calendar.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
@@ -419,13 +404,21 @@ export class ToolSet implements IToolSet {
       return deniedToolCallResponse(decision.reason);
     }
 
-    if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
+    if (this.sentinel !== undefined && (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))) {
+      // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
+      // against it. A silent map was recorded when it was classified, so only approved maps are added here.
+      const turn = this.sentinel.web_search;
+      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
+      if (sent !== undefined) {
+        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+      }
+    }
+    if (decision === undefined && classification !== undefined && isSilentSearchReason(classification.reason) && this.sentinel !== undefined) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
       const turn = this.sentinel.web_search;
       turn.silentSearches += 1;
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
-        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
         countSilentFetches({ values: sent.values, state: turn });
       }
     }
@@ -538,7 +531,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: decision.reason === SEARCH_SILENT_REASON,
+              waiveUnclassified: isSilentSearchReason(decision.reason),
             })),
       },
       classification: decision,
