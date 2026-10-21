@@ -1249,13 +1249,21 @@ export async function classifyUnstampedToolCall(input: {
   ) {
     return info;
   }
+  // A deferred call_tool call is judged on the tool it names, not the wrapper:
+  // when the tool set resolved the underlying tool, the arguments classified
+  // (and the approval token minted over) are the wrapper's inner input, the
+  // same value dispatch verifies against.
+  const effectiveParams =
+    info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(canonical_params) ?? canonical_params)
+      : canonical_params;
   const decision = await classifyHostToolCall({
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
     action: {
       tool_name: info.original_tool_name,
-      canonical_params,
+      canonical_params: effectiveParams,
       tool_type: info.type,
       ...(connector === undefined
         ? {}
