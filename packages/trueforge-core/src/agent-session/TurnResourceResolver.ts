@@ -107,7 +107,8 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
-  readonly webSearchTurn = createWebSearchTurnState();
+  /** The turn's search state, shared by every thread's host context so one thread's reads bind the others. */
+  protected readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -503,8 +504,8 @@ export class TurnResourceResolver<
         toolSets,
       },
       compactionModel,
-      // Every thread records the mail and calendar text it reads; only the root thread saves the flag across turns.
-      extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn, persisted: !agentInfo })],
+      // The root thread carries the session's "read private data" flag across turns.
+      ...(agentInfo ? {} : { extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn })] }),
     };
   }
 

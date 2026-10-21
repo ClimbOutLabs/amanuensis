@@ -1,6 +1,7 @@
 /**
  * Bound session handle: starts turns via {@link SessionHandle.createTurn}.
  */
+import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
 import type { ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
@@ -849,6 +850,8 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
+    // Every thread records the mail and calendar text it reads; only the root thread saves the flag across turns.
+    const privateReads = privateDataReadCapability({ turn: input.resolver.webSearchTurn, persisted: !isChild });
     const capabilities = threadCapabilities({
       spec: input.spec,
       definition,
@@ -861,7 +864,7 @@ export class SessionHandle<
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
-      extraCapabilities,
+      extraCapabilities: [privateReads, ...(extraCapabilities ?? [])],
     });
     return new AgentThread({
       definition,
@@ -959,7 +962,10 @@ export class SessionHandle<
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
         boundRepository: input.resolver.boundRepository,
-        extraCapabilities,
+        extraCapabilities: [
+          privateDataReadCapability({ turn: input.resolver.webSearchTurn, persisted: false }),
+          ...(extraCapabilities ?? []),
+        ],
       });
       throwIfSignalAborted(params.signal);
       return new AgentThread({
