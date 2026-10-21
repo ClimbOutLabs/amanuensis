@@ -850,8 +850,6 @@ export class SessionHandle<
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
-    // Every thread records the mail and calendar text it reads; only the root thread saves the flag across turns.
-    const privateReads = privateDataReadCapability({ turn: input.resolver.webSearchTurn, persisted: !isChild });
     const capabilities = threadCapabilities({
       spec: input.spec,
       definition,
@@ -864,7 +862,7 @@ export class SessionHandle<
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
-      extraCapabilities: [privateReads, ...(extraCapabilities ?? [])],
+      extraCapabilities,
     });
     return new AgentThread({
       definition,
