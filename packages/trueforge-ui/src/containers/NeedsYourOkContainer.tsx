@@ -3,7 +3,7 @@
 import type { PartState } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { ROOT_THREAD_ID, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
-import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { useState } from 'react';
 
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
@@ -15,6 +15,7 @@ import { NeedsYourOk, NotSavedNote } from '../sentinel/NeedsYourOk.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalInfo } from '../sentinel/types.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { useSlot } from '../theme/SlotsProvider.js';
 
 type Local = Exclude<HeldActionStatus, { kind: 'waiting' }>;
 
@@ -24,6 +25,7 @@ type Local = Exclude<HeldActionStatus, { kind: 'waiting' }>;
  * to run exactly the held call, or drop it, shows what became of it, and reloads the chat.
  */
 export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] }): React.JSX.Element | null {
+  const UserMessageBubble = useSlot('UserMessageBubble');
   const sentinel = useOptionalSentinelState();
   const server = useOptionalServer();
   const reload = useTrueFoundryReload();
@@ -63,6 +65,8 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
         reason,
       });
       sentinel.recordAnswer(info.toolCallId, decision === 'deny' ? 'denied' : 'approved');
+      const words = changeRequestText(reason);
+      if (words !== undefined) sentinel.recordChangeRequest(info.toolCallId, words);
       setStatus(info.toolCallId, decision === 'deny' ? undefined : { kind: 'approved', outcome });
       reload();
     } catch (error) {
@@ -77,6 +81,11 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           : { kind: 'failed', message: failure.message },
       );
     }
+  };
+
+  const changeRequestNote = (toolCallId: string) => {
+    const words = sentinel.changeRequestFor(toolCallId);
+    return words === undefined ? undefined : <UserMessageBubble text={words} />;
   };
 
   const statusOf = (info: SentinelApprovalInfo): HeldActionStatus => {
@@ -104,6 +113,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           onChangeRequest={
             offersChangeIt(info.card) ? text => void answer(info, 'deny', changeRequestReason(text)) : undefined
           }
+          changeRequestNote={changeRequestNote(info.toolCallId)}
         />
       ))}
     </NeedsYourOk>

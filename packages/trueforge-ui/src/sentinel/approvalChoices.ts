@@ -9,9 +9,12 @@ export const APPROVAL_CHOICES = {
   deny: { label: 'Deny', hint: 'Do not run this call.' },
 } as const;
 
-/** Cards with content a person may want to edit: a mail, a calendar event, or a new schedule. */
+/** Cards with content a person may want to edit: a mail, a calendar event, a new schedule, or a new specialist. */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {
   return (
-    card.email !== null || card.calendar_event !== null || (card.schedule !== null && card.schedule.action === 'create')
+    card.email !== null ||
+    card.calendar_event !== null ||
+    (card.schedule !== null && card.schedule.action === 'create') ||
+    card.persona !== null
   );
 }

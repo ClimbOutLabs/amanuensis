@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FC } from 'react';
+import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
@@ -37,6 +37,8 @@ export type HeldActionCardProps = {
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
+  /** The owner's own words after a "Change it" answer, shown under the card. */
+  changeRequestNote?: ReactNode;
 };
 
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -99,6 +101,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   onAlwaysAllow,
   onDeny,
   onChangeRequest,
+  changeRequestNote,
 }) => {
   const hasDetails =
     card.recipient !== null ||
@@ -228,6 +231,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             }}
           />
         )}
+        {changeRequestNote}
       </div>
     </li>
   );

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { heldBecause, SERVER_SECRET_REASON } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
@@ -535,6 +536,30 @@ describe('held actions', () => {
       },
     ]);
     expect(context.answers).toEqual({ 'call-a': 'approved', 'call-b': 'denied' });
+  });
+
+  it('reads the words of a Change it answer back from the turn, and no words from an ordinary denial', () => {
+    const context = extractSentinelSessionContext([
+      {
+        type: 'turn.created',
+        input: [
+          {
+            type: 'user.tool_approval',
+            thread_id: 'main',
+            tool_call_id: 'call-a',
+            approval: { status: 'deny', reason: changeRequestReason('make it shorter') },
+          },
+          {
+            type: 'user.tool_approval',
+            thread_id: 'main',
+            tool_call_id: 'call-b',
+            approval: { status: 'deny', reason: 'not now' },
+          },
+        ],
+      },
+    ]);
+    expect(context.answers).toEqual({ 'call-a': 'denied', 'call-b': 'denied' });
+    expect(context.changeRequests).toEqual({ 'call-a': 'make it shorter' });
   });
 });
 

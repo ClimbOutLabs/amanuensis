@@ -135,6 +135,15 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, schedule })).toBe(true);
   });
 
+  it('offers Change it for a new specialist', () => {
+    expect(
+      offersChangeIt({
+        ...card,
+        persona: { name: 'Tutor', description: 'Helps', instructions: 'Be patient.', model_name: 'model-a' },
+      }),
+    ).toBe(true);
+  });
+
   it('offers no Change it for a delete or for an action with nothing to edit', () => {
     expect(offersChangeIt({ ...card, schedule: { ...schedule, action: 'delete' } })).toBe(false);
     expect(offersChangeIt({ ...card, parsed_command: 'rm -rf /tmp/work' })).toBe(false);
