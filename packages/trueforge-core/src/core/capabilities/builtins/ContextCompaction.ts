@@ -1603,7 +1603,14 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         sourceText,
         userText,
       });
-      if ('summary' in evaluation) {
+      if ('reason' in evaluation) {
+        validationReason = evaluation.reason;
+        modelOutput = evaluation.modelOutput;
+      } else if (mode === 'conversation' && evaluation.summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
+        // Judged like any other unusable reply, so the retry (shorter by design) runs before the fallback.
+        validationReason = 'over_length';
+        modelOutput = answerText(response.output.content);
+      } else {
         summary = evaluation.summary;
         missingSections = evaluation.missingSections;
         validationReason = undefined;
@@ -1615,29 +1622,22 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         }
         break;
       }
-      validationReason = evaluation.reason;
-      modelOutput = evaluation.modelOutput;
       if (!isRetry) {
         // Billed even though the reply is discarded, and reported before the retry can be cancelled.
         yield { type: InternalEventType.MODEL_USAGE, usage: callUsage };
         callUsage = getEmptyUsage();
         this.logger?.warn(
-          `Compaction summary unusable, retrying once (reason: ${evaluation.reason}, mode: ${mode}, fingerprint: ${compactionValidationFingerprint(modelOutput, requiredSections)})`,
+          `Compaction summary unusable, retrying once (reason: ${validationReason}, mode: ${mode}, fingerprint: ${compactionValidationFingerprint(modelOutput, requiredSections)})`,
         );
       }
     }
 
-    if (validationReason === undefined) {
-      if (mode === 'coding') {
-        summary = replaceDoneSoFarSection(
-          replaceBoundRepositorySection(summary, repository, commands),
-          this.touchedPaths,
-          this.touchedPathsOverflowed,
-        );
-      } else if (summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
-        validationReason = 'over_length';
-        summary = '';
-      }
+    if (validationReason === undefined && mode === 'coding') {
+      summary = replaceDoneSoFarSection(
+        replaceBoundRepositorySection(summary, repository, commands),
+        this.touchedPaths,
+        this.touchedPathsOverflowed,
+      );
     }
 
     if (validationReason !== undefined) {
