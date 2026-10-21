@@ -128,7 +128,7 @@ describe('space capability', () => {
     expect(rendered).not.toContain('If the web-artifacts-builder skill is available');
   });
 
-  it('instructs the model that emoji are fine and web images are cheaper than data URIs', () => {
+  it('tells the model that remote images do not show in spaces, once, and points to emoji and tiny data URIs', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -141,10 +141,11 @@ describe('space capability', () => {
     const rendered = builder.build();
 
     const expectedSubstrings: string[] = [
-      'Emoji are fine in spaces',
+      'remote images do not show in spaces',
+      'Tell the person once, in one line',
+      'Use emoji instead',
       'plain Unicode text',
-      'Prefer web images by https URL over data URIs',
-      'the browser fetches the bytes at render time',
+      'a small raster data: URI',
     ];
     expectedSubstrings.forEach(substring => expect(rendered).toContain(substring));
   });
@@ -474,6 +475,7 @@ describe('space capability', () => {
     expect(text).not.toContain('default');
     expect(text).not.toContain('user-a');
     expect(JSON.parse(text)).toEqual({
+      summary: 'Created space "Spain houses" (id: space-1, revision 1).',
       space: {
         id: 'space-1',
         name: 'Spain houses',
@@ -919,9 +921,10 @@ describe('space tool model-facing schemas', () => {
 
   it.each([
     [LIST_SPACES_TOOL_NAME, []],
-    [GET_SPACE_TOOL_NAME, ['space_id']],
+    // space_id or space_name: one of the two is required, which the schema refine enforces.
+    [GET_SPACE_TOOL_NAME, []],
     [CREATE_SPACE_TOOL_NAME, ['body', 'name', 'purpose', 'status']],
-    [UPDATE_SPACE_TOOL_NAME, ['space_id']],
+    [UPDATE_SPACE_TOOL_NAME, []],
     [REVERT_SPACE_TOOL_NAME, ['revision', 'space_id']],
     [LIST_BLOCKS_TOOL_NAME, ['space_id']],
   ])('%s keeps the required fields the model must send', async (name, required) => {

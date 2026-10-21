@@ -197,19 +197,35 @@ export class SpaceBodyTooLongError extends Error {
   }
 }
 
+/**
+ * A `space_name` lookup that cannot pick one space: no match, several matches, or too many spaces
+ * to be sure. Terminal tool error; the message lists what to pass instead.
+ */
+class SpaceNameLookupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpaceNameLookupError';
+  }
+}
+
+/** Consecutive failed delta updates on one space before delta mode locks; the model is told this number. */
+const DELTA_BREAKER_TRIP_AFTER_FAILURES = 3;
+
 const SPACE_INSTRUCTION_SECTION = 'spaces';
 const SPACE_INSTRUCTION = `
-When the user asks you to build, create, or set up a space (a tracker, board, or page they want kept up to date), call list_spaces first: if an existing space already covers the subject, update it with update_space instead of creating a duplicate. Read a space's current body and revision with get_space before calling update_space. Create a space with create_space only when no existing one fits, and keep it current with update_space as the facts change. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host renders it in the Spaces view, not as a markdown file or sandbox artifact. Pass body as an array of lines, one element per line: each table row is its own element, and a blank line is an empty-string element. A single string with escaped newlines collapses onto one line and breaks tables.
+When the user asks you to build, create, or keep up a space (a tracker, board, or page they want updated), call list_spaces first. If one already covers the subject, update it; create a new one only when none fits. A space has a name, a purpose, a status (active or archived), a format (markdown or html), and a body. The host shows it in the Spaces view, not as a file.
 
-Use format 'markdown' for a plain list or note, and format 'html' when the space is meant to be looked at rather than skimmed: a tracker, board, dashboard, or anything where layout, color, or images carry meaning. An html space is one complete document fragment. The host injects a base stylesheet ahead of it (a type scale, a warm neutral palette with one accent, a 4px spacing rhythm). Write semantic HTML on its classes rather than reinventing them: .page-header (title plus a .subtitle or <p>), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody> (the host styles it and adds class="num" to bare-number cells), .badge with .badge-success or .badge-warning, and <details>. Add only a small <style> block after the markup, for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates, 2 viewed</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
+Build a large space in steps, not in one call. First create a short skeleton: a title and one section per part, each opened by a marker such as <!-- @block:pricing -->. The create result starts with the space's id, name, and revision. Keep that id and use it for every later call. Then fill one block per update_space call with block_edits: the anchor is the marker's name, and new_content is the block's complete new content. To read a space's current body, call get_space. If you have lost the id, call get_space with space_name instead: the name must match exactly and be unique. After a context compaction, call list_blocks to recover the anchors.
 
-Author every html space on those classes rather than writing page chrome from scratch: one self-contained document, inline CSS, no external scripts, no external stylesheets, and images as https or data URIs. If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment rendered by the host, not a bundled app. Emoji are fine in spaces: they are plain Unicode text. Prefer web images by https URL over data URIs: the browser fetches the bytes at render time, while a data URI embeds base64 in the HTML and eats context. Never author a space by editing files in the sandbox, with apply_patch, replace_text, write_file, or exec: use create_space and update_space only. The host's sanitiser decides what actually renders.
+Pass body as an array of lines, one element per line: each table row is its own element, and a blank line is an empty string. For a list or a note, use format 'markdown'. Use format 'html' when layout, colour, or structure carries meaning, such as a tracker, board, or dashboard. An html space is one complete document fragment: no <script>, no external stylesheets, and no external fonts. The host injects a base stylesheet ahead of it: a type scale, a warm neutral palette with one accent, and a 4px spacing rhythm. Use its classes rather than writing page chrome: .page-header (a title plus a .subtitle), section or .card, .grid-2 or .grid-3, table with <thead> and <tbody>, .badge with .badge-success or .badge-warning, and <details>. Add a small <style> block only for page-specific touches. Example: \`<div class="page-header"><h1>Spain house search</h1><p class="subtitle">6 candidates</p></div><div class="grid-2"><div class="card"><h3>Budget</h3><p>€450,000</p></div></div><table><thead><tr><th>Address</th><th>Status</th></tr></thead><tbody><tr><td>Calle Mayor 1</td><td><span class="badge badge-success">Viewed</span></td></tr></tbody></table>\`.
 
-For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table (a markdown table, or a <table> for html), with columns for what the user cares about.
+If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidance, but do not run its bundling scripts: a space is an HTML fragment the host renders, not a bundled app. Author every html space on those classes, as one self-contained document with inline CSS. Never author a space by editing files in the sandbox (apply_patch, replace_text, write_file, or exec): use create_space and update_space only. The host's sanitiser decides what actually renders.
 
-update_space takes exactly one of the full body, a list of search/replace edits, or a list of block_edits, never two at once. For small changes to a large space, pass edits. Each search is an exact, case-sensitive, whitespace-sensitive substring of the current body (lines joined by one newline). Copy it verbatim from the latest get_space body, never from memory or a metadata-only read. A search that does not match fails the whole update, and nothing is saved. Every occurrence of a search is replaced, so prefer long, unique searches with surrounding context; a search must never be a single common word. Each edit sees the result of the previous ones, so keep edits independent. If a search is not found, do not recompute it or retry the edits: send the full updated body instead. After DELTA_BREAKER_TRIP_AFTER_FAILURES consecutive failed delta updates on one space, edits and block_edits are refused for the session until a successful full-body update or revert_space unlocks them.
+Pictures: remote images do not show in spaces. The host drops any https image and blocks loads from outside, so do not use web image links. Tell the person once, in one line, that spaces cannot show web photos. Use emoji instead (they are plain Unicode text and fine in spaces), or a small raster data: URI (PNG, JPEG, WebP, or GIF) when a picture really matters. A data URI embeds the bytes in the body and eats context, so keep it tiny.
 
-Block edits are the reliable delta path. Delimit independently updated sections with \`<!-- @block:name -->\` markers (valid in html and markdown; names are case-sensitive, so prefer short kebab-case such as \`pricing-table\`). A block runs from its marker to the next marker or the end of the body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block, and block_edits cannot address it. A block_edits entry names the anchor and gives the block's complete new content. An empty new_content deletes the block, and new markers inside new_content split it. An unknown or duplicate anchor fails the whole update, and the error lists the valid anchors. A space with no markers has one implicit block, "auto-body", covering the whole body. After a context compaction, call list_blocks (not get_space) to recover the anchors, with an 80-character preview of each block. list_blocks also reports the preamble (text before the first marker), which has no anchor and changes only through a full-body update. For a full-body update, read the current body with get_space and resend it with your changes folded in. Every update keeps the previous content: get_space accepts a revision to read an older version (only recent ones are kept), and revert_space restores one as a new current revision. To undo a bad update, use revert_space rather than rebuilding the content from memory. expected_aggregate_revision and expected_revision are optional on create_space and update_space. Leave them out and the host reads the current values. Supply one only when a preceding tool result gave it to you. If a supplied value is stale, the error names the current one: retry once with it. On the edits path, a stale revision means the body moved, so do not retry the edits; send the full updated body instead.
+For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
+
+update_space takes exactly one of: a full body, a list of search/replace edits, or a list of block_edits. Never send two at once. Use block_edits for changes to one section. Use edits for a small change to a space with no markers: each search is an exact, case-sensitive substring of the current body, copied verbatim from the latest get_space. A search that does not match fails the whole update, so do not retry it: send the full updated body. An unknown or duplicate anchor also fails the update, and the error lists the valid anchors. A space with no markers has one block, "auto-body", covering the whole body. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed delta updates on one space, edits and block_edits are refused until a successful full-body update or revert_space. Every update keeps the previous revision: to undo a bad update, call revert_space rather than rebuilding the content from memory. expected_revision and expected_aggregate_revision are optional: leave them out. If one is stale, the error names the current value, so retry once with it.
 `;
 
 function buildSpaceInstruction(builder: InstructionBuilder): void {
@@ -229,13 +245,25 @@ const SPACE_BODY_INPUT_SCHEMA = z
   .pipe(SpaceContentSchema.shape.body);
 
 const LIST_SPACES_INPUT_SCHEMA = z.object({}).strict();
+/**
+ * Lookup key for get_space and update_space: the id, or the exact name when the id is not at hand.
+ * `space_name` is its own field because update_space's `name` already sets the new name.
+ */
+const SPACE_LOOKUP_FIELDS = {
+  space_id: z.string().min(1).optional(),
+  space_name: z.string().trim().min(1).max(160).optional(),
+};
+const hasExactlyOneLookupKey = (data: { space_id?: string | undefined; space_name?: string | undefined }): boolean =>
+  (data.space_id === undefined) !== (data.space_name === undefined);
+const LOOKUP_KEY_MESSAGE = 'Provide exactly one of space_id or space_name';
 const GET_SPACE_INPUT_SCHEMA = z
   .object({
-    space_id: z.string().min(1),
+    ...SPACE_LOOKUP_FIELDS,
     revision: z.number().int().positive().optional(),
     include_body: z.boolean().default(true),
   })
-  .strict();
+  .strict()
+  .refine(hasExactlyOneLookupKey, { message: LOOKUP_KEY_MESSAGE });
 const CREATE_SPACE_INPUT_SCHEMA = SpaceContentSchema.extend({
   body: SPACE_BODY_INPUT_SCHEMA,
   expected_aggregate_revision: z.number().int().nonnegative().optional(),
@@ -273,12 +301,13 @@ const UPDATE_SPACE_INPUT_SCHEMA = SpaceContentSchema.partial()
     format: SpaceFormatSchema.optional(),
     edits: z.array(SPACE_EDIT_SCHEMA).min(1).max(50).optional(),
     block_edits: z.array(SPACE_BLOCK_EDIT_SCHEMA).min(1).max(50).optional(),
-    space_id: z.string().min(1),
+    ...SPACE_LOOKUP_FIELDS,
     expected_revision: z.number().int().positive().optional(),
     expected_aggregate_revision: z.number().int().nonnegative().optional(),
     confirm_shrink: z.boolean().optional(),
   })
   .strict()
+  .refine(hasExactlyOneLookupKey, { message: LOOKUP_KEY_MESSAGE })
   .refine(data => [data.body, data.edits, data.block_edits].filter(value => value !== undefined).length === 1, {
     message:
       'Provide exactly one of body (full replacement), edits (search/replace delta updates), or block_edits (anchor-addressed delta updates)',
@@ -373,6 +402,8 @@ const SPACE_SUMMARY_SCHEMA = SpaceSchema.omit({ body: true }).strip();
  */
 interface WriteOutcome {
   mutation: SpaceMutationResult;
+  /** Leads the result text so the model reads the id, name and revision before anything else. */
+  action: 'Created' | 'Updated' | 'Restored';
   /** Per-edit replacement counts, 1-based in message order; set only by the edits path. */
   edit_replacements?: number[];
   /**
@@ -383,8 +414,15 @@ interface WriteOutcome {
   block_results?: { anchor: string; new_length: number; deleted: boolean }[];
 }
 
+/**
+ * The write result. `summary` is the first key, so the model reads the id, name and revision
+ * before anything else. The line is what keeps the id in view: a model that loses it re-reads the
+ * space instead of guessing.
+ */
 function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutcome, 'mutation'>): string {
+  const { id, name, revision } = result.record;
   return JSON.stringify({
+    summary: `${outcome.action} space "${name}" (id: ${id}, revision ${String(revision)}).`,
     space: SPACE_RESULT_SCHEMA.parse(result.record),
     aggregate_revision: result.aggregate_revision,
     ...(outcome.edit_replacements === undefined ? {} : { edit_replacements: outcome.edit_replacements }),
@@ -444,7 +482,6 @@ interface DeltaBreakerEntry {
   failures: number;
   locked: boolean;
 }
-const DELTA_BREAKER_TRIP_AFTER_FAILURES = 3;
 /** Bound on breaker entries: an abandoned lock must not grow memory without limit. */
 const DELTA_BREAKER_MAX_ENTRIES = 5000;
 const deltaBreaker = new Map<string, DeltaBreakerEntry>();
@@ -655,7 +692,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: GET_SPACE_TOOL_NAME,
       description:
-        'Read one space by id: metadata, the aggregate_revision, and the body unless include_body is false. Call before update_space to get the current body and revision. Pass revision to read a retained older revision. Use include_body false only when a recent get_space already returned the body, and never combine it with revision when you want an old body. Use list_spaces first if you lack the id.',
+        'Read one space by space_id, or by space_name when the id is not at hand (the name must be exact and unique). Returns metadata, the aggregate_revision, and the body unless include_body is false. Call before update_space to get the current body and revision. Pass revision to read a retained older revision. Use include_body false only when a recent get_space already returned the body.',
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       handler: async input => this.read(() => this.get(input)),
@@ -663,14 +700,14 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
       description:
-        "Create a persistent space: a named page the host renders in the Spaces view. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. expected_aggregate_revision is optional.",
+        "Create a persistent space: a named page the host renders in the Spaces view. Call list_spaces first to avoid a duplicate. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Pass body as an array of lines, one element per line. Mark updatable sections with <!-- @block:name --> markers. The result starts with the new space's id. expected_aggregate_revision is optional.",
       schema: CREATE_SPACE_INPUT_SCHEMA,
       handler: async input => this.write(() => this.create(input)),
     }),
     defineTool({
       name: UPDATE_SPACE_TOOL_NAME,
       description:
-        'Update one space. Provide exactly one of body, edits, or block_edits. ' +
+        'Update one space by space_id or exact unique space_name. Provide exactly one of body, edits, or block_edits. ' +
         'body replaces the whole space: name, purpose, and status are required with it; format defaults to markdown. ' +
         "edits: up to 50 search/replace pairs applied in order to the current body. Copy each search verbatim from a recent get_space; a search that matches nothing fails the whole update. Check each edit's replacement count against what you intended, and call revert_space if it is wrong. Combine interacting changes into one edit. " +
         'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; an empty new_content deletes the block. ' +
@@ -714,10 +751,11 @@ class SpaceTool extends LocalToolMCP {
   private async get(
     input: z.infer<typeof GET_SPACE_INPUT_SCHEMA>,
   ): Promise<{ space: SpaceRecord; aggregate_revision: number; include_body: boolean }> {
+    const space_id = await this.resolveSpaceId(input);
     const identity = {
       tenant_id: this.options.authority.tenantId,
       created_by: this.options.authority.userRef,
-      space_id: input.space_id,
+      space_id,
     };
     const space =
       input.revision === undefined
@@ -725,9 +763,9 @@ class SpaceTool extends LocalToolMCP {
         : await this.options.store.getSpaceRevision({ ...identity, revision: input.revision });
     if (space === undefined) {
       if (input.revision === undefined) {
-        throw new SpaceNotFoundError({ id: input.space_id });
+        throw new SpaceNotFoundError({ id: space_id });
       }
-      throw new SpaceRevisionNotFoundError({ id: input.space_id, revision: input.revision });
+      throw new SpaceRevisionNotFoundError({ id: space_id, revision: input.revision });
     }
     const aggregate_revision = await resolveAggregateRevision(this.options.store, this.options.authority, undefined);
     return { space, aggregate_revision, include_body: input.include_body };
@@ -750,10 +788,11 @@ class SpaceTool extends LocalToolMCP {
       format: input.format,
       expected_aggregate_revision,
     });
-    return { mutation };
+    return { mutation, action: 'Created' };
   }
 
-  private async update(input: z.infer<typeof UPDATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
+  private async update(request: z.infer<typeof UPDATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
+    const input = { ...request, space_id: await this.resolveSpaceId(request) };
     const blockEdits = input.block_edits;
     const isDelta = input.edits !== undefined || blockEdits !== undefined;
     // Refuse a locked delta BEFORE any store I/O: the burn loop this guards against would
@@ -810,7 +849,7 @@ class SpaceTool extends LocalToolMCP {
       expected_revision: input.expected_revision ?? current.revision,
       expected_aggregate_revision,
     });
-    const outcome: WriteOutcome = { mutation };
+    const outcome: WriteOutcome = { mutation, action: 'Updated' };
     if (edit_replacements !== undefined) {
       outcome.edit_replacements = edit_replacements;
     }
@@ -824,6 +863,47 @@ class SpaceTool extends LocalToolMCP {
     // the real body. (revert() resets on its own path after its own successful write.)
     this.resetDeltaBreaker(input.space_id);
     return outcome;
+  }
+
+  /**
+   * The one owner of space lookup by name: get_space and update_space both call it. A name is
+   * matched exactly and must be unique among the person's spaces; otherwise the error lists the
+   * ids to pass instead.
+   */
+  private async resolveSpaceId(input: {
+    space_id?: string | undefined;
+    space_name?: string | undefined;
+  }): Promise<string> {
+    if (input.space_id !== undefined) {
+      return input.space_id;
+    }
+    const name = input.space_name ?? '';
+    const listed = await this.options.store.listSpacesWithAggregate({
+      tenant_id: this.options.authority.tenantId,
+      created_by: this.options.authority.userRef,
+      status: undefined,
+      limit: SPACE_LIST_LIMIT,
+    });
+    // Past one page the match cannot be proven unique, so fail closed rather than pick one.
+    if (listed.has_more) {
+      throw new SpaceNameLookupError(
+        `Too many spaces to find "${name}" by name. Call list_spaces, then pass its space_id.`,
+      );
+    }
+    const matches = listed.records.filter(record => record.name === name);
+    const [only, ...rest] = matches;
+    if (only === undefined) {
+      throw new SpaceNameLookupError(`No space is named "${name}". Call list_spaces to see the spaces you have.`);
+    }
+    if (rest.length > 0) {
+      const choices = matches.map(
+        record => `${record.id} (revision ${String(record.revision)}, updated ${record.updated_at})`,
+      );
+      throw new SpaceNameLookupError(
+        `More than one space is named "${name}". Call again with space_id set to one of these: ${choices.join('; ')}.`,
+      );
+    }
+    return only.id;
   }
 
   /**
@@ -1063,7 +1143,7 @@ class SpaceTool extends LocalToolMCP {
     });
     // A successful revert unlocks delta mode: the space is back at a known-good revision.
     this.resetDeltaBreaker(input.space_id);
-    return { mutation };
+    return { mutation, action: 'Restored' };
   }
 
   private async requireCurrentSpace(space_id: string): Promise<SpaceRecord> {
@@ -1119,6 +1199,9 @@ class SpaceTool extends LocalToolMCP {
           isError: true,
         });
       }
+      if (error instanceof SpaceNameLookupError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
       throw error;
     }
   }
@@ -1168,6 +1251,9 @@ class SpaceTool extends LocalToolMCP {
           text: JSON.stringify({ error: `${error.message}. Only recent revisions are retained.` }),
           isError: true,
         });
+      }
+      if (error instanceof SpaceNameLookupError) {
+        return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
       }
       if (error instanceof SpaceShrinkRefusedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });

@@ -199,6 +199,7 @@ import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThread
 import {
   collectKnownEventIds,
   guardModelReply,
+  LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
@@ -626,6 +627,12 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
+}
+
+function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
+  const rest = { ...message };
+  delete rest.tool_calls;
+  return rest;
 }
 
 /**
@@ -3249,6 +3256,11 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
+    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
+    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    if (finishReason === 'length') {
+      assistantMessage = withoutToolCalls(assistantMessage);
+    }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
     // model is still silent.
@@ -3381,7 +3393,7 @@ export class AgentThread {
     });
 
     if (finishReason === 'length') {
-      const errorContent = completion?.error_message ?? 'max_tokens breached';
+      const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
