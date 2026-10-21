@@ -188,6 +188,21 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
 }
 
 /**
+ * What the model is told when a package cannot be downloaded here. The run_code offline text and the
+ * slot prompt both say this, so the words stay the same.
+ */
+export const PACKAGE_UNAVAILABLE_RULE =
+  'say that plainly instead of retrying, and do not try another tool to get around it.';
+
+/** Whether a command installs packages from PyPI or npm, the two sites a chat without downloads cannot reach. */
+export function commandInstallsPypiOrNpmPackages(command: string): boolean {
+  return splitShellCommands(command).some(words => {
+    const ecosystem = segmentDownloadEcosystem(programWords(words));
+    return ecosystem === 'pypi' || ecosystem === 'npm';
+  });
+}
+
+/**
  * Whether a command would make a package tool download packages: installs, and the build and test
  * commands that fetch dependencies first. Only these commands get the git-address check, because only
  * they would try to fetch the dependency.
