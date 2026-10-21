@@ -39,9 +39,10 @@ describePg('ensureTrueforgeSchema', () => {
       throw new Error('Postgres test environment not initialized');
     }
 
+    // A table a later migration drops is absent from both schemas; one still in public was not moved.
     for (const tableName of TABLES_TO_MOVE) {
       const locations = await schemaOf(env, tableName);
-      expect(locations).toEqual([TRUEFORGE_SCHEMA]);
+      expect(locations).not.toContain('public');
     }
   });
 
