@@ -40,6 +40,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'AmanAvatarMotion',
   'AmanFirstRunGuide',
   'AmanRuntimeRail',
+  'AmanTour',
   'AmanSetupProvider',
   'AmanWelcome',
   'amanFirstRunItems',
