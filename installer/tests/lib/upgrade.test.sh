@@ -185,7 +185,8 @@ test_install_rerun_updates_instead_of_reusing_old_images() {
   assert_rc 0
   new=$(app_tag "$AMAN_HOME/release/release.json")
   if [ "$new" != "$old" ]; then t_pass; else t_fail "the old release was reused"; fi
-  assert_not_contains "$OUT$ERR" "already built"
+  assert_not_contains "$OUT$ERR" "The Aman app is already built"
+  assert_not_contains "$OUT$ERR" "The speech-to-text service is already built"
   assert_eq "$(compose_image main)" "$new" "the instance runs the new image"
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "the instance had data, so it was backed up"
   assert_eq "$(app_tag "$AMAN_HOME/release/previous.release.json")" "$old" "the old release is kept for the rollback"
