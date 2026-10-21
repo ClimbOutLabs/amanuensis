@@ -654,6 +654,13 @@ describe('classifyTier connector tools and standing grants', () => {
     ['a file in a folder named keyboard', { path: '/work/keyboard/layout.md' }],
     ['a file with an extension and no folder', { file: 'layout.md' }],
     ['a Windows path', { path: 'C:\\Users\\u\\notes\\plan.txt' }],
+    ['a parent folder reference', { path: '..' }],
+    ['a dotfile name', { path: '.bashrc' }],
+    ['a percent-encoded parent path', { path: '..%2F..%2F.ssh%2Fid_rsa' }],
+    ['a double-encoded parent path', { path: '%252e%252e%252fsecrets' }],
+    ['a division slash path', { path: 'notes\u2215todo' }],
+    ['a fullwidth slash path', { path: 'notes\uFF0Ftodo' }],
+    ['a path-like key', { '../secrets': 'yes' }],
   ])('a granted tool asks for a path-like argument, %s', async (_, canonical_params) => {
     const { services } = grantedServices();
     const decision = await classifyTier(connectorAction({ canonical_params }), makeCtx({ services }));
@@ -1272,6 +1279,8 @@ describe('connector reads can be always allowed', () => {
     ['a file name with spaces', { attachment: 'Q3 report final.pdf' }],
     ['a path nested in a list', { filters: [{ files: ['/srv/exports/2026'] }] }],
     ['a very long path', { attachment_path: `${'/a'.repeat(4000)}/draft` }],
+    ['a folder that is not a zone', { attachment_path: 'America/Nowhere' }],
+    ['a percent-encoded folder', { attachment_path: 'notes%2Ftodo' }],
   ])('a mail read of %s gets a card every time, even with a grant on it', async (_, args) => {
     const services = servicesGranting([grantFor('list-messages')]);
     const decision = await classifyTier(
@@ -1291,6 +1300,8 @@ describe('connector reads can be always allowed', () => {
     ['a label and a date', { label: 'INBOX', after: '2026-10-01' }],
     ['a folder name with a space and no slash', { folder: 'Family photos' }],
     ['a search with a secret word in free text', { query: 'my token budget and secret santa plans' }],
+    ['a calendar time zone', { timeZone: 'America/New_York' }],
+    ['another calendar time zone', { time_zone: 'Europe/London' }],
   ])('a mail read of %s keeps both offers', async (_, args) => {
     const decision = await classifyTier(
       readAction({ tool_name: 'list-messages', canonical_params: { account: 'work', ...args } }),

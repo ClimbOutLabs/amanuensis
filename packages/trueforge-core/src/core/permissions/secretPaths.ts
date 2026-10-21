@@ -1,3 +1,5 @@
+import { isValidTimezone } from '../util/clientTimezone';
+
 /**
  * The one list of secret file and folder names the sentinel treats as private, and the matcher
  * that applies it. A path segment is split into words at camelCase humps and at any non-letter-or-digit
@@ -104,6 +106,52 @@ function stripQuotes(text: string): string {
   return text.slice(start, end);
 }
 
+/** Division, fraction, big solidus and fullwidth slashes, which read as a path separator. */
+const LOOK_ALIKE_SLASH = /[\u2215\u2044\u29F8\uFF0F\uFF3C]/gu;
+/** A run of valid percent escapes, which may be a multi-byte character such as `%E2%88%95`. */
+const PERCENT_ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/g;
+const ASCII_PERCENT_ESCAPE = /%([0-9A-Fa-f]{2})/g;
+/** Decoding stops after this many rounds, so `%252e` counts as `.`, and a deeper nest is left as text. */
+const MAX_DECODE_ROUNDS = 3;
+
+function foldSlashes(text: string): string {
+  return text.normalize('NFKC').replace(LOOK_ALIKE_SLASH, ch => (ch === '\uFF3C' ? '\\' : '/'));
+}
+
+/**
+ * Decodes percent escapes. A run that is not valid UTF-8 still decodes its ASCII escapes, so a slash
+ * cannot hide behind a broken multi-byte sequence.
+ */
+function decodeEscapes(text: string): string {
+  return text.replace(PERCENT_ESCAPE_RUN, run => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(ASCII_PERCENT_ESCAPE, (escape, hex: string) => {
+        const code = Number.parseInt(hex, 16);
+        return code < 0x80 ? String.fromCharCode(code) : escape;
+      });
+    }
+  });
+}
+
+/**
+ * The one normalizer every path check reads through: NFKC, look-alike slashes folded to `/` and `\\`,
+ * and percent escapes decoded again after each round, so a path cannot hide in an encoded or
+ * full-width form.
+ */
+function normalizePathText(text: string): string {
+  let current = foldSlashes(text);
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    const decoded = foldSlashes(decodeEscapes(current));
+    if (decoded === current) {
+      break;
+    }
+    current = decoded;
+  }
+  return current;
+}
+
 /** A word that has a path shape: a separator, a leading `~` or dot, or a dot inside a name. */
 function looksLikePathWord(word: string): boolean {
   return /[/\\]/.test(word) || /^[~.]/.test(word) || /\.\w/.test(word);
@@ -120,7 +168,7 @@ function segmentsName(text: string): boolean {
  * word is not a read of one.
  */
 export function namesSecretPath(text: string): boolean {
-  const whole = stripQuotes(text.trim());
+  const whole = stripQuotes(normalizePathText(text).trim());
   if ((!/\s/.test(whole) || /[/\\]/.test(whole)) && segmentsName(whole)) {
     return true;
   }
@@ -134,16 +182,16 @@ export function namesSecretPath(text: string): boolean {
 const DRIVE_LETTER = /^[A-Za-z]:/;
 /** A file name with an extension: a word character, a dot, then a letter that starts the extension. */
 const FILE_EXTENSION = /[\p{L}\p{N}_-]\.\p{L}[\p{L}\p{N}]{0,9}/u;
-
 /**
- * Whether a string has a path shape: a slash or backslash, a leading `~` or drive letter, or a word
- * with a file extension. An email address is not a path. Such a value never gets a standing or chat
- * grant, even when the secret list does not recognise its name.
+ * Whether a string has a path shape after normalization: a slash or backslash, a leading `~`, `.` or
+ * drive letter, or a word with a file extension. An email address is not a path. A whole value the
+ * calendar accepts as a time zone, such as `America/New_York`, is not one either, so a `timeZone`
+ * argument keeps its grant. Intl rejects path strings, so that check cannot exempt a real path.
  */
 function isPathLikeText(text: string): boolean {
-  const whole = stripQuotes(text.trim());
-  if (/[/\\]/.test(whole) || whole.startsWith('~') || DRIVE_LETTER.test(whole)) {
-    return true;
+  const whole = stripQuotes(normalizePathText(text).trim());
+  if (/[/\\]/.test(whole) || whole.startsWith('~') || whole.startsWith('.') || DRIVE_LETTER.test(whole)) {
+    return !isValidTimezone(whole);
   }
   return whole
     .split(/\s+/)
@@ -151,26 +199,28 @@ function isPathLikeText(text: string): boolean {
     .some(word => !word.includes('@') && FILE_EXTENSION.test(word));
 }
 
-/** Whether any string at any depth of a value passes the test. Key names are not checked. */
-function anyStringIn(value: unknown, test: (text: string) => boolean): boolean {
+/** Whether any string at any depth of a value passes the test, and key names too when `checkKeys` is set. */
+function anyStringIn(value: unknown, test: (text: string) => boolean, { checkKeys }: { checkKeys: boolean }): boolean {
   if (typeof value === 'string') {
     return test(value);
   }
   if (Array.isArray(value)) {
-    return value.some(item => anyStringIn(item, test));
+    return value.some(item => anyStringIn(item, test, { checkKeys }));
   }
   if (typeof value === 'object' && value !== null) {
-    return Object.values(value).some(item => anyStringIn(item, test));
+    return Object.entries(value).some(
+      ([key, item]) => (checkKeys && test(key)) || anyStringIn(item, test, { checkKeys }),
+    );
   }
   return false;
 }
 
 /** Whether any string at any depth of a value names a secret path. Key names are not checked. */
 export function containsSecretPath(value: unknown): boolean {
-  return anyStringIn(value, namesSecretPath);
+  return anyStringIn(value, namesSecretPath, { checkKeys: false });
 }
 
-/** Whether any string at any depth of a value has a path shape. Key names are not checked. */
+/** Whether any string or key at any depth of a value has a path shape. */
 export function containsPathLikeValue(value: unknown): boolean {
-  return anyStringIn(value, isPathLikeText);
+  return anyStringIn(value, isPathLikeText, { checkKeys: true });
 }

@@ -215,7 +215,58 @@ describe('containsPathLikeValue', () => {
     expect(containsPathLikeValue(value)).toBe(false);
   });
 
-  test('ignores key names', () => {
-    expect(containsPathLikeValue({ '/work/notes.md': 'hello' })).toBe(false);
+  test('checks key names too', () => {
+    expect(containsPathLikeValue({ '/work/notes.md': 'hello' })).toBe(true);
+  });
+});
+
+describe('containsPathLikeValue', () => {
+  test.each([
+    ['a parent folder reference', '..'],
+    ['a parent folder path', '../../work/plan'],
+    ['a dotfile name', '.bashrc'],
+    ['a dotted name with a leading dot', '..hidden'],
+    ['a percent-encoded slash', 'notes%2Ftodo'],
+    ['a percent-encoded parent path', '..%2F..%2F.ssh%2Fid_rsa'],
+    ['a lowercase percent-encoded parent path', '%2e%2e%2fsecrets'],
+    ['a double-encoded parent path', '%252e%252e%252fsecrets'],
+    ['a division slash', 'notes∕todo'],
+    ['a fraction slash', 'notes⁄todo'],
+    ['a big solidus', 'notes⧸todo'],
+    ['a fullwidth slash', 'notes／todo'],
+    ['a fullwidth backslash', 'notes＼todo'],
+    ['a parent path with fullwidth dots', '．．／secrets'],
+  ])('treats %s as a path-like value', (_, value) => {
+    expect(containsPathLikeValue({ path: value })).toBe(true);
+  });
+
+  test('treats a path-like key as path-like even when its value is plain', () => {
+    expect(containsPathLikeValue({ '../secrets': 'yes' })).toBe(true);
+    expect(containsPathLikeValue({ 'notes%2Ftodo': 'yes' })).toBe(true);
+  });
+
+  test.each([
+    ['an IANA zone name', { timeZone: 'America/New_York' }],
+    ['another IANA zone name', { time_zone: 'Europe/London' }],
+    ['a nested IANA zone name', { filters: [{ zone: 'Asia/Kolkata' }] }],
+    ['an IANA alias zone name', { timeZone: 'US/Eastern' }],
+  ])('does not treat %s as a path', (_, value) => {
+    expect(containsPathLikeValue(value)).toBe(false);
+  });
+
+  test.each([
+    ['a zone name with a parent step', 'America/New_York/../../etc'],
+    ['a zone name with extra words', 'America/New_York later'],
+    ['a made-up zone name with a slash', 'America/Nowhere'],
+  ])('still treats %s as a path', (_, value) => {
+    expect(containsPathLikeValue({ path: value })).toBe(true);
+  });
+
+  test.each([
+    ['a sentence with a dot in it', { query: 'weather in Lisbon this weekend.' }],
+    ['a message id', { id: '18f2a9c0' }],
+    ['an email address', { to: 'someone@example.com' }],
+  ])('does not treat %s as a path', (_, value) => {
+    expect(containsPathLikeValue(value)).toBe(false);
   });
 });
