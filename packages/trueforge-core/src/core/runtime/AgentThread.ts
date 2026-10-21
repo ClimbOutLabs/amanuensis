@@ -17,7 +17,6 @@ import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
 import {
-  NEW_RECIPIENT_NEEDS_CHOICE,
   NEW_RECIPIENT_REFUSED,
   newRecipientsOfMailCall,
   SEND_LIST_STILL_UPDATING,
@@ -1917,9 +1916,9 @@ export class AgentThread {
    * it runs through the ordinary dispatch checks. A refusal throws and leaves the chat untouched.
    */
   /**
-   * An approved mail send to addresses not on the Email list runs only when the owner chose "Add and send" on
-   * its card. The addresses join the list and the sidecar must load them first. Any failure throws before the
-   * approval is recorded, so the draft stays pending for the owner.
+   * Approving a mail send to addresses not on the Email list is the owner's consent to add exactly those
+   * addresses, then send. They come from the call's own arguments, the same ones the card named. The sidecar
+   * must load the list first. Any failure throws before the approval is recorded, so the draft stays pending.
    */
   private async prepareMailRecipientAdds(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -1950,9 +1949,6 @@ export class AgentThread {
       );
       if (added.length === 0) {
         continue;
-      }
-      if (approval.approval.mail_recipients !== 'add') {
-        throw new InvalidAgentSendInputError(NEW_RECIPIENT_NEEDS_CHOICE);
       }
       const result = await sentinel.services.mail_add_recipients(ctx, added);
       if (result === 'refused') {

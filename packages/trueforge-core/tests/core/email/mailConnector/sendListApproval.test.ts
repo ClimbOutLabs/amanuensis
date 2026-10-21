@@ -1,5 +1,5 @@
 import {
-  NEW_RECIPIENT_NEEDS_CHOICE,
+  NEW_RECIPIENT_REFUSED,
   newRecipientsOfMailCall,
 } from '../../../../src/core/email/mailConnector/sendListApproval';
 
@@ -51,7 +51,8 @@ describe('newRecipientsOfMailCall', () => {
     ).toEqual([]);
   });
 
-  it('has a plain message for an unchosen new-recipient send', () => {
-    expect(NEW_RECIPIENT_NEEDS_CHOICE).toMatch(/Add and send/);
+  it('says in plain words that nothing was sent and the draft is kept', () => {
+    expect(NEW_RECIPIENT_REFUSED).toMatch(/nothing was sent/);
+    expect(NEW_RECIPIENT_REFUSED).toMatch(/draft is still here/);
   });
 });

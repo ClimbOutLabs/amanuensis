@@ -9,6 +9,19 @@ export const APPROVAL_CHOICES = {
   deny: { label: 'Deny', hint: 'Do not run this call.' },
 } as const;
 
+/**
+ * The choices on a mail send to an address not on the Email list. Approving adds the shown addresses, so no
+ * chat-wide or always grant is offered on it.
+ */
+export const NEW_RECIPIENT_CHOICES = {
+  approve: { label: 'Add and send', hint: 'Add the addresses shown to your send list, then send.' },
+  cancel: { label: 'Cancel', hint: 'Do not send. Nothing is added to your send list.' },
+} as const;
+
+export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
+  return (card.mail_new_recipients ?? []).length > 0;
+}
+
 /** Cards with content a person may want to edit: a mail, a calendar event, a new schedule, or a new specialist. */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {
   return (

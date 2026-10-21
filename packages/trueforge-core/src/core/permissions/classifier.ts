@@ -2223,7 +2223,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
     return tier3Decision({
       card: {
-        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} ${sentence}`,
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         why_asked_again: null,

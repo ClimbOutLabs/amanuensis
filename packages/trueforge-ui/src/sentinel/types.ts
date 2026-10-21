@@ -148,6 +148,8 @@ export type SentinelApprovalCard = {
   schedule: SentinelApprovalSchedule | null;
   /** The whole specialist when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
+  /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
+  mail_new_recipients?: string[] | null;
 };
 
 /** The whole specialist a chat call adds, in plain words. */
@@ -518,7 +520,15 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
+    mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
   });
+}
+
+/** The addresses a send would add to the Email list, or null when there are none to read. */
+function parseNewRecipients(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const addresses = value.filter((item): item is string => typeof item === 'string');
+  return addresses.length === 0 ? null : addresses;
 }
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {

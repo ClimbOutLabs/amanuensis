@@ -211,6 +211,8 @@ describe('Email connector classifier', () => {
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
       expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+      expect(decision.card?.plain_what).toContain('Approving adds them to your send list and sends.');
+      expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
       expect(decision.card?.outbound_text).toContain(SUBJECT);
       expect(decision.approval_token_id).not.toBeNull();
     });
