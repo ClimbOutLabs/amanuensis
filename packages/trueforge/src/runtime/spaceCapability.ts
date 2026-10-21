@@ -781,7 +781,12 @@ class SpaceTool extends LocalToolMCP {
   }
 
   private async create(input: z.infer<typeof CREATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
-    refuseNewSpaceLinks({ body: input.body, previousBody: '', web_search: this.options.webSearch });
+    refuseNewSpaceLinks({
+      body: input.body,
+      previousBody: '',
+      format: input.format,
+      web_search: this.options.webSearch,
+    });
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
       this.options.authority,
@@ -844,7 +849,12 @@ class SpaceTool extends LocalToolMCP {
         throw error;
       }
     }
-    refuseNewSpaceLinks({ body: body ?? '', previousBody: current.body, web_search: this.options.webSearch });
+    refuseNewSpaceLinks({
+      body: body ?? '',
+      previousBody: current.body,
+      format: input.format ?? current.format,
+      web_search: this.options.webSearch,
+    });
     this.checkShrink(input.space_id, current, body ?? '', input.confirm_shrink);
     const mutation = await this.options.store.updateSpace({
       tenant_id: this.options.authority.tenantId,

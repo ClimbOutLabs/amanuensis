@@ -27,6 +27,7 @@
  * bare number gets a `num` class, so the base stylesheet's `td.num` rule right-aligns it without
  * the model having to remember to mark numeric columns itself.
  */
+import { decodeCssEscapes } from '@truefoundry/trueforge-core/core/spaces/cssEscapes';
 
 /**
  * Browsers strip ASCII whitespace and C0 control characters before scheme-sniffing a URL (so
@@ -101,28 +102,6 @@ function isAllowedUseReference(value: string): boolean {
  */
 function isFragmentUrl(value: string): boolean {
   return /^url\(\s*(['"]?)#[^'"()\s]*\1\s*\)(?:\s+[a-zA-Z0-9#%.,-][a-zA-Z0-9#%.,\s-]*)?$/i.test(value.trim());
-}
-
-/**
- * Decodes CSS escapes so `u\72l(` and `@\69mport` are seen as the browser reads them. Escapes
- * that would yield a backslash, NUL, a surrogate, or an out-of-range code point are dropped or
- * replaced so decoding can never produce a fresh escape.
- */
-function decodeCssEscapes(css: string): string {
-  const decoded = css.replace(
-    /\\(?:([0-9a-fA-F]{1,6})[ \t\n\r\f]?|(\r\n|[\n\r\f])|([\s\S]))/g,
-    (_match, hex: string | undefined, newline: string | undefined, char: string | undefined) => {
-      if (hex !== undefined) {
-        const code = Number.parseInt(hex, 16);
-        if (code === 0x5c) return '';
-        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '�';
-        return String.fromCodePoint(code);
-      }
-      if (newline !== undefined) return '';
-      return char === '\\' ? '' : (char ?? '');
-    },
-  );
-  return decoded.replaceAll('\\', '');
 }
 
 /** Index just past the `)` closing the call whose `(` is at `open`, or the end when unclosed. */

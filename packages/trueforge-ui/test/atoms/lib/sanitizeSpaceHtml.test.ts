@@ -781,3 +781,27 @@ describe('sanitizeSpaceHtml reparse stability', () => {
     expect(performance.now() - started).toBeLessThan(1000);
   });
 });
+
+describe('sanitizeSpaceHtml unusual URL spellings', () => {
+  it('drops a remote img whose tag and attribute names are upper case or entity-encoded', () => {
+    const upper = sanitizeSpaceHtml('<IMG SRC="http://images.example.net/fox.jpg" ALT="Fox">');
+    expect(upper).not.toContain('fox.jpg');
+    const entity = sanitizeSpaceHtml('<img src="&#x68;ttp://images.example.net/fox.jpg" alt="Fox">');
+    expect(entity).not.toContain('fox.jpg');
+  });
+
+  it('drops a remote URL in any attribute the allow-list does not name, such as poster or action', () => {
+    const out = sanitizeSpaceHtml(
+      '<div poster="https://images.example.net/fox.jpg" data-x="1"><form action="https://x.example.net/">hi</form></div>',
+    );
+    expect(out).not.toContain('fox.jpg');
+    expect(out).not.toContain('x.example.net');
+  });
+
+  it('drops a remote image-set() or url() in a style attribute even when unquoted or escaped', () => {
+    const out = sanitizeSpaceHtml(
+      '<div style="background: \\69mage-set(https://images.example.net/a.jpg 1x)"></div><div style="background:url(https://images.example.net/b.jpg)"></div>',
+    );
+    expect(out).not.toContain('images.example.net');
+  });
+});

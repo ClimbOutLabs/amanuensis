@@ -6,6 +6,9 @@
  * unrelated edit never trips over an older picture.
  */
 import { unreturnedUrls, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import type { z } from 'zod';
+import type { SpaceFormatSchema } from '../schemas/space';
+import { bodyLinks, type BodyLink } from './spaceBodyLinks';
 
 /** Largest `data:` picture a space may embed, counted in characters of its URI. */
 export const SPACE_PICTURE_DATA_MAX_CHARS = 32 * 1024;
@@ -20,82 +23,56 @@ export class SpaceLinkRefusedError extends Error {
   }
 }
 
-interface BodyLink {
-  kind: 'picture' | 'link';
-  value: string;
-}
+const UNSTABLE_MARKUP_MESSAGE =
+  'This page has markup that cannot be checked for links safely. Simplify the markup, then try again.';
 
-const HTML_IMG_SRC = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
-const HTML_ANCHOR_HREF = /<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
-const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*<?([^)\s>]+)/g;
-const MARKDOWN_LINK = /(?<!!)\[[^\]]*\]\(\s*<?([^)\s>]+)/g;
-const DATA_URI = /^data:/i;
-const ABSOLUTE_URL = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
-
-/** Attribute values arrive entity-encoded; only the entities a URL carries are decoded here. */
-function decodeEntities(value: string): string {
-  return value.replaceAll('&amp;', '&').replaceAll('&#38;', '&').replaceAll('&#x26;', '&');
-}
-
-function matchesAll(pattern: RegExp, body: string, kind: BodyLink['kind']): BodyLink[] {
-  return [...body.matchAll(pattern)].map(match => ({
-    kind,
-    value: decodeEntities(match[1] ?? match[2] ?? match[3] ?? ''),
-  }));
-}
-
-/** Every picture and link a body names: `<img src>`, markdown images, `<a href>`, and markdown links. */
-function bodyLinks(body: string): BodyLink[] {
-  return [
-    ...matchesAll(HTML_IMG_SRC, body, 'picture'),
-    ...matchesAll(MARKDOWN_IMAGE, body, 'picture'),
-    ...matchesAll(HTML_ANCHOR_HREF, body, 'link'),
-    ...matchesAll(MARKDOWN_LINK, body, 'link'),
-  ];
-}
+/** Stands in for the page's own origin: a value that resolves to this host is local and never fetched from elsewhere. */
+const PAGE_BASE = 'https://space-page.invalid/';
 
 function nounOf(kind: BodyLink['kind']): string {
   return kind === 'picture' ? 'picture' : 'link';
-}
-
-function hostOf(url: string): string | undefined {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
 }
 
 function isPlaceholder(host: string): boolean {
   return PLACEHOLDER_DOMAINS.some(domain => host === domain || host.endsWith(`.${domain}`));
 }
 
-/** The refusal for one new picture or link, or undefined when it may stay. */
+/**
+ * The refusal for one new picture or link, or undefined when it may stay. The value is resolved
+ * with the URL parser the browser uses, so a spelling a browser reads as a remote address is
+ * checked as one, whatever its scheme separators look like.
+ */
 function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): string | undefined {
-  if (DATA_URI.test(value)) {
+  const noun = nounOf(kind);
+  let url: URL;
+  try {
+    url = new URL(value, PAGE_BASE);
+  } catch {
+    return /^https?:/i.test(value)
+      ? `This ${noun} has a link that cannot be read. Search for the ${noun} first, then use a link from the results.`
+      : undefined;
+  }
+  if (url.protocol === 'data:') {
     if (kind === 'picture' && value.length > SPACE_PICTURE_DATA_MAX_CHARS) {
       return `This embedded picture is too large. Keep embedded pictures under ${String(SPACE_PICTURE_DATA_MAX_CHARS / 1024)} KB, or use a picture link from a search result.`;
     }
     return undefined;
   }
-  if (!ABSOLUTE_URL.test(value)) {
+  if (url.hostname === new URL(PAGE_BASE).hostname) {
     return undefined;
   }
-  if (kind === 'picture' && !/^https:\/\//i.test(value)) {
+  if (kind === 'picture' && url.protocol !== 'https:') {
     return 'Pictures must use a secure https link. Search for the picture and use the https link from the results.';
   }
-  if (!/^https?:\/\//i.test(value)) {
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     return undefined;
   }
-  const noun = nounOf(kind);
-  const host = hostOf(value);
-  if (host === undefined) {
-    return `This ${noun} has a link that cannot be read. Search for the ${noun} first, then use a link from the results.`;
-  }
-  if (isPlaceholder(host)) {
+  if (isPlaceholder(url.hostname)) {
     return `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`;
   }
-  if (unreturnedUrls({ values: [value], state: web_search }).length > 0) {
+  // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
+  const candidate = /^https?:\/\//i.test(value) ? value : url.href;
+  if (unreturnedUrls({ values: [candidate], state: web_search }).length > 0) {
     return `This ${noun}'s link did not come from a search or page in this chat. Search for the ${noun} first, then use a link from the results.`;
   }
   return undefined;
@@ -108,10 +85,19 @@ function refusalFor({ kind, value }: BodyLink, web_search: WebSearchTurnState): 
 export function refuseNewSpaceLinks(input: {
   body: string;
   previousBody: string;
+  format: z.infer<typeof SpaceFormatSchema>;
   web_search: WebSearchTurnState;
 }): void {
-  const previous = new Set(bodyLinks(input.previousBody).map(link => `${link.kind}\u0000${link.value}`));
-  for (const link of bodyLinks(input.body)) {
+  const links = bodyLinks({ body: input.body, format: input.format });
+  if (links === undefined) {
+    throw new SpaceLinkRefusedError(UNSTABLE_MARKUP_MESSAGE);
+  }
+  const previous = new Set(
+    (bodyLinks({ body: input.previousBody, format: input.format }) ?? []).map(
+      link => `${link.kind}\u0000${link.value}`,
+    ),
+  );
+  for (const link of links) {
     if (previous.has(`${link.kind}\u0000${link.value}`)) {
       continue;
     }
