@@ -173,9 +173,11 @@ function collect(input: { part: MessagePart; into: Collected; limits: WalkLimits
   if (attachmentId !== undefined || inlineData !== undefined) {
     // Any part Gmail serves by attachment id is a file, named or not.
     into.attachmentTotal += 1;
+    // Gmail sends an empty part id when the whole message is the file; an empty handle can never be opened.
+    const partId = part.partId === undefined || part.partId === '' ? undefined : part.partId;
     if (into.attachments.length < limits.maxAttachments) {
       into.attachments.push({
-        handle: (part.partId ?? `att${String(into.attachmentTotal)}`).slice(0, MAX_HANDLE_CHARS),
+        handle: (partId ?? `att${String(into.attachmentTotal)}`).slice(0, MAX_HANDLE_CHARS),
         attachmentId,
         data: inlineData,
         filename: named ? (part.filename ?? '').slice(0, MAX_FILENAME_CHARS) : 'attachment',

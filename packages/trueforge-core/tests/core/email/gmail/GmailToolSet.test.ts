@@ -291,6 +291,49 @@ describe('GmailToolSet attachments', () => {
     expect(JSON.stringify(result)).not.toContain('%PDF-');
   });
 
+  it('lists and downloads a message whose whole body is the attachment, under a non-empty handle', async () => {
+    const saved: Buffer[] = [];
+    const stager: AttachmentStager = {
+      stageAttachment: input => {
+        saved.push(input.bytes);
+        return Promise.resolve({ filename: input.filename, path: '/workspace/lease.pdf', sandboxCreated: undefined });
+      },
+    };
+    const base = message({ id: 'm1' });
+    const root: GmailMessage = {
+      ...base,
+      payload: {
+        ...base.payload,
+        partId: '',
+        mimeType: 'application/pdf',
+        filename: 'lease.pdf',
+        body: { attachmentId: 'att-root', size: 5 },
+        parts: [],
+      },
+    };
+    const { tools } = await build({
+      stager,
+      routes: [
+        route('/messages/m1', root),
+        route('/messages/m1/attachments/att-root', { size: 5, data: b64url('%PDF-') }),
+      ],
+    });
+    const listed = JSON.parse(text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } })));
+    expect(listed.attachments).toEqual([
+      { handle: 'att1', filename: 'lease.pdf', mime_type: 'application/pdf', size: 5 },
+    ]);
+    const result = JSON.parse(
+      text(
+        await tools.callTool({
+          name: 'download_attachment',
+          arguments: { message_id: 'm1', attachment_handle: 'att1' },
+        }),
+      ),
+    );
+    expect(result.path).toBe('/workspace/lease.pdf');
+    expect(Buffer.from(saved[0] ?? []).toString()).toBe('%PDF-');
+  });
+
   it('does not fetch an id the message does not carry', async () => {
     const { tools, google } = await build({
       stager: {
