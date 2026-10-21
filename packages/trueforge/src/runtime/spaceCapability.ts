@@ -672,7 +672,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'Update one space. Provide exactly one of body, edits, or block_edits. ' +
         'body replaces the whole space: name, purpose, and status are required with it; format defaults to markdown. ' +
-        'edits: up to 50 search/replace pairs applied in order to the current body. Copy each search verbatim from a recent get_space; a search that matches nothing fails the whole update. Check each edit\'s replacement count against what you intended, and call revert_space if it is wrong. Combine interacting changes into one edit. ' +
+        "edits: up to 50 search/replace pairs applied in order to the current body. Copy each search verbatim from a recent get_space; a search that matches nothing fails the whole update. Check each edit's replacement count against what you intended, and call revert_space if it is wrong. Combine interacting changes into one edit. " +
         'block_edits: up to 50 {anchor, new_content} pairs for <!-- @block:name --> sections; an empty new_content deletes the block. ' +
         'With edits or block_edits, name, purpose, status, and format are optional. ' +
         'An update that would shrink the body below a tenth of its size needs confirm_shrink: true. ' +
