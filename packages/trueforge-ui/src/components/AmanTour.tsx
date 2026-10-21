@@ -68,10 +68,10 @@ export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
 
 export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
-    // Naming the guide invokes it, so the reply comes from the Aman guide persona.
+    // Naming the guide invokes it, so the reply comes from Iris, the guide persona.
     key: 'get-to-know',
     label: 'Get to know Aman',
-    prompt: 'Aman guide, introduce yourself and show me how to get started.',
+    prompt: 'Iris, introduce yourself and show me how to get started.',
   },
   {
     key: 'email',

@@ -91,4 +91,9 @@ export interface AgentDefinition {
   budgetedTools?: readonly string[] | undefined;
 
   toolSets?: readonly IToolSet[] | undefined;
+  /**
+   * Offers the model no tools at all, neither connector tools nor built-in ones such as
+   * schedules, files or checklists. For an agent that may only answer from what it already knows.
+   */
+  readOnly?: boolean | undefined;
 }

@@ -5,6 +5,7 @@ import { createLogger } from 'winston';
 import { findUsedKnowledgeHits } from '../../../src/personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
 import { personalizationDigest, type PersonalizationProfile } from '../../../src/personalization/profile';
+import { amanGuidePersonaId, IRIS_NAME } from '../../../src/personas/amanGuide/identity';
 import { buildPersonaContext, type Persona } from '../../../src/personas/persona';
 import {
   PersonaTurnResourceResolver,
@@ -453,5 +454,15 @@ describe('PersonaTurnResourceResolver', () => {
     const resolved = await resolve(resolver, makeSpec(), true);
 
     expect(resolved.extraCapabilities ?? []).toHaveLength(0);
+  });
+  it('makes an Iris turn read-only, and leaves a persona the person named free to use tools', async () => {
+    const iris: Persona = { ...PERSONA, id: amanGuidePersonaId('u1'), created_by: 'u1', display_name: IRIS_NAME };
+    const irisResolver = makeResolver(iris).resolver;
+    const irisResolved = await resolve(irisResolver, makeSpec());
+    expect(irisResolved.definition.readOnly).toBe(true);
+
+    const named = makeResolver(PERSONA).resolver;
+    const namedResolved = await resolve(named, makeSpec());
+    expect(namedResolved.definition.readOnly).toBe(false);
   });
 });

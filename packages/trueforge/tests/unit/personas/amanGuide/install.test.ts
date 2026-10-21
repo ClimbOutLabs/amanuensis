@@ -7,12 +7,8 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqlitePersonaStore } from '../../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { personaKnowledgeLocation } from '../../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../../src/personaKnowledge/sqliteKnowledgeRepository';
-import {
-  AMAN_GUIDE_DISPLAY_NAME,
-  AMAN_GUIDE_INSTRUCTIONS,
-  amanGuidePersonaId,
-  ensureAmanGuide,
-} from '../../../../src/personas/amanGuide/install';
+import { IRIS_NAME, amanGuidePersonaId } from '../../../../src/personas/amanGuide/identity';
+import { AMAN_GUIDE_INSTRUCTIONS, ensureAmanGuide } from '../../../../src/personas/amanGuide/install';
 import { AMAN_GUIDE_TOPICS } from '../../../../src/personas/amanGuide/knowledgePack.generated';
 import { EMBEDDING_DIMENSIONS } from '../../../../src/runtime/memory/embeddingModel';
 
@@ -48,7 +44,7 @@ function guideDocumentTitles(knowledgeDir: string): string[] {
   try {
     return repo
       .listDocuments()
-      .filter(document => document.source_label.startsWith('Aman guide, build '))
+      .filter(document => document.source_label.startsWith('Iris, build '))
       .map(document => document.title)
       .sort();
   } finally {
@@ -69,7 +65,7 @@ describe('ensureAmanGuide', () => {
     });
     expect(persona).toMatchObject({
       id: amanGuidePersonaId(USER),
-      display_name: AMAN_GUIDE_DISPLAY_NAME,
+      display_name: IRIS_NAME,
       instructions: AMAN_GUIDE_INSTRUCTIONS,
       model_name: MODEL,
       aliases: [],
@@ -102,7 +98,7 @@ describe('ensureAmanGuide', () => {
         title: 'Old guide page',
         titleExplicit: true,
         source_kind: 'text',
-        source_label: 'Aman guide, build 0000000000000000',
+        source_label: 'Iris, build 0000000000000000',
         source_url: null,
       });
       repo.createDocument({
@@ -150,14 +146,14 @@ describe('ensureAmanGuide', () => {
     expect(await personaStore.listPersonas({ tenant_id: TENANT, created_by: 'person-b' })).toHaveLength(1);
   });
 
-  it('leaves a persona the person already named "Aman guide" alone and says so', async () => {
+  it('leaves a persona the person already named "Iris" alone and says so', async () => {
     const { personaStore, logger, install } = await setup();
     await personaStore.createPersona({
       tenant_id: TENANT,
       created_by: USER,
       updated_by: USER,
       id: 'my-own-guide',
-      display_name: AMAN_GUIDE_DISPLAY_NAME,
+      display_name: IRIS_NAME,
       aliases: [],
       instructions: 'Mine.',
       model_name: MODEL,

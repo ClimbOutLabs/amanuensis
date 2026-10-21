@@ -134,11 +134,11 @@ describe('visibleTourPrompts', () => {
 });
 
 describe('Get to know Aman', () => {
-  it('shows with no capability granted and sends a message that opens a chat with the Aman guide', () => {
+  it('shows with no capability granted and sends a message that opens a chat with Iris', () => {
     const props = renderTour({ capabilities: NONE });
 
     fireEvent.click(screen.getByRole('button', { name: 'Get to know Aman' }));
 
-    expect(props.onSend).toHaveBeenCalledWith(expect.stringMatching(/^Aman guide, /));
+    expect(props.onSend).toHaveBeenCalledWith(expect.stringMatching(/^Iris, /));
   });
 });

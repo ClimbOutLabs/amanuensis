@@ -1560,7 +1560,8 @@ export class AgentThread {
       : new Map<string, number>();
 
     const capabilities = input.capabilities ?? [];
-    this.systemToolSets = capabilities.flatMap(c => c.systemToolSets ?? []);
+    // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
+    this.systemToolSets = this.definition.readOnly ? [] : capabilities.flatMap(c => c.systemToolSets ?? []);
     this.preLLMContextProcessors = capabilities.flatMap(c => c.preLLMProcessors ?? []);
     this.preEphemeralLLMContextProcessors = capabilities.flatMap(c => c.preLLMEphemeralProcessors ?? []);
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
@@ -1587,8 +1588,9 @@ export class AgentThread {
       }
     }
 
-    if (this.definition.toolSets?.length) {
-      this.deferredTool = new DeferredTool(this.definition.toolSets, {
+    const connectorToolSets = this.definition.readOnly ? [] : (this.definition.toolSets ?? []);
+    if (connectorToolSets.length) {
+      this.deferredTool = new DeferredTool(connectorToolSets, {
         tracing: this.tracing,
         logger: input.logger,
         // Lets call_tool route a mis-addressed host (built-in) tool name to the real
@@ -2587,7 +2589,7 @@ export class AgentThread {
     if (this.deferredTool) {
       tfyManagedServers.push(this.deferredTool);
     }
-    const userServers = [...(this.definition.toolSets ?? [])];
+    const userServers = this.definition.readOnly ? [] : [...(this.definition.toolSets ?? [])];
 
     const { convertedTools, initializationInfo, authRequirementInfo } = await convertMCPServersToTools({
       tfyManagedServers,
