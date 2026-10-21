@@ -199,6 +199,17 @@ describe('outbound guard: re-encoded and disguised secrets', () => {
     expect(ruleFor({ query: 'x'.repeat(OUTBOUND_MAX_CHARS + 1) })).toBe('too_long');
   });
 
+  test('a server secret escaped twice, and a card number written in Arabic-Indic digits', () => {
+    const twice = encodeURIComponent(encodeURIComponent(serverSecret));
+    expect(ruleFor({ query: `see ${twice}` }, [serverSecret])).toBe('server_secret');
+    expect(
+      ruleFor({
+        query:
+          'charge \u0664\u0662\u0664\u0662.\u0664\u0662\u0664\u0662.\u0664\u0662\u0664\u0662.\u0664\u0662\u0664\u0662',
+      }),
+    ).toBe('card_number');
+  });
+
   test('a server secret in base64, base64url or hex, and in any case or spacing', () => {
     const awkward = 'p@ss/word+with=chars&more';
     for (const bytes of [Buffer.from(awkward), Buffer.from(serverSecret)]) {

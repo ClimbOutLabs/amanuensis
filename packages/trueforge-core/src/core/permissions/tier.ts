@@ -52,6 +52,7 @@ export const AUTO_DENY_REASONS = [
   'incomplete_send_card',
   'offline_mode',
   'outbound_guard',
+  'private_text_check',
   'unattended_run',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];

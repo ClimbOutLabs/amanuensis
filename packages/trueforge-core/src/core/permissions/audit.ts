@@ -7,7 +7,7 @@
  */
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
-import { MAPS_SILENT_REASON } from './mapsToolNames';
+import { MAPS_AFTER_READ_SILENT_REASON, MAPS_SILENT_REASON } from './mapsToolNames';
 import {
   HOLD_SAY,
   isSearchHoldCardText,
@@ -16,6 +16,7 @@ import {
   searchHoldAuditText,
 } from './searchHoldText';
 import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
+import { SEARCH_AFTER_READ_SILENT_REASON } from './webSearch';
 
 /** Recorded outcome, per tier. */
 export type AuditOutcome = 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
@@ -54,8 +55,12 @@ export async function recordClassificationAudit(input: {
   }
   const decision = input.decision;
   let outcome: AuditOutcome | null = null;
+  const silentRun =
+    decision.reason === MAPS_SILENT_REASON ||
+    decision.reason === MAPS_AFTER_READ_SILENT_REASON ||
+    decision.reason === SEARCH_AFTER_READ_SILENT_REASON;
   const silentSandboxRun = SANDBOX_SILENT_REASONS.has(decision.reason);
-  if (decision.tier === 1 && (decision.sensitive_read || decision.reason === MAPS_SILENT_REASON || silentSandboxRun)) {
+  if (decision.tier === 1 && (decision.sensitive_read || silentRun || silentSandboxRun)) {
     outcome = 'logged';
   } else if (decision.tier === 3 && decision.auto_deny !== null) {
     outcome = 'auto_denied';

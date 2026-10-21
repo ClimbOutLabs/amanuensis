@@ -194,7 +194,7 @@ describe('SentinelSettings', () => {
     });
     expect(
       screen.getByText(
-        'Maps run without asking, except that after this chat has read private things like email, they ask again.',
+        'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.',
       ),
     ).toBeInTheDocument();
   });
