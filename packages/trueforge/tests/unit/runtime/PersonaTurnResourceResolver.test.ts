@@ -67,6 +67,7 @@ const PERSONALIZATION: PersonalizationProfile = {
   address_as: null,
   user_profile: 'Prefers plain English.',
   pinned_preferences: ['Keep advice practical.'],
+  help_areas: [],
   learned_profile: 'The user values calm explanations.',
   learning_enabled: false,
   revision: 3,

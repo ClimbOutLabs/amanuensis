@@ -15,6 +15,7 @@ const initialProfile: PersonalizationProfile = {
   address_as: null,
   user_profile: 'Values privacy.',
   pinned_preferences: ['Use short summaries.'],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -200,6 +201,29 @@ describe('PersonalizationPanel', () => {
     expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
   });
 
+  it('saves the help areas picked in Settings, in the order picked, and shows the saved choice', async () => {
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{ getProfile: async () => initialProfile, updateProfile, deleteProfile: async () => {} }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    await screen.findByDisplayValue('Mira');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Work and money' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Focus and getting started' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({ help_areas: ['work_money', 'focus'] })),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
+    expect(screen.getByRole('checkbox', { name: 'Work and money' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Focus and getting started' })).toBeChecked();
+  });
+
   it('persists the learning switch through the ordinary save flow', async () => {
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
     render(
@@ -243,6 +267,7 @@ describe('PersonalizationPanel', () => {
       address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: true,
     };
@@ -319,6 +344,7 @@ describe('PersonalizationPanel', () => {
       address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
     };
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));

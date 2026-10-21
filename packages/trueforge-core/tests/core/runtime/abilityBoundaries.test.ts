@@ -2,7 +2,7 @@ import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM'
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
-import { ABILITY_BOUNDARIES_PROMPT } from '../../../src/core/runtime/contextUtils';
+import { ABILITY_BOUNDARIES_PROMPT, WEB_IMAGES_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import '../harnessMocks';
 import { makeSilentLogger } from '../harnessMocks';
@@ -47,5 +47,29 @@ describe('AgentThread ability boundaries instruction', () => {
     const systemMessage = request?.messages.find(m => m.role === 'system');
     expect(systemMessage?.content).toContain('<ability-boundaries>');
     expect(systemMessage?.content).toContain(ABILITY_BOUNDARIES_PROMPT.trim());
+  });
+
+  it('tells the model not to embed decorative images from web pages in its reply', async () => {
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test', toolSets: [] },
+      context: [{ role: 'user', content: 'Check my bills.' }],
+    });
+
+    for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+      // Draining is enough; the assertion is on the request sent to the model.
+    }
+
+    const systemMessage = create.mock.calls[0]?.[0].messages.find(m => m.role === 'system');
+    expect(systemMessage?.content).toContain('<web-images>');
+    expect(systemMessage?.content).toContain(WEB_IMAGES_PROMPT.trim());
   });
 });

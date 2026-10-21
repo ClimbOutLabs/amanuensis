@@ -31,6 +31,7 @@ function toWireProfile(profile: PersonalizationProfile): PersonalizationProfileW
     address_as: profile.address_as,
     user_profile: profile.user_profile,
     pinned_preferences: profile.pinned_preferences,
+    help_areas: profile.help_areas,
     learned_profile: profile.learned_profile,
     learning_enabled: profile.learning_enabled,
     revision: profile.revision,

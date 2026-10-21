@@ -1290,13 +1290,13 @@ describe('why an instance does not run', () => {
   it('names the cause from the container log in one sentence and never asks anyone to read logs', () => {
     make();
     containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
-    world.set('logs_c1', { out: "Error: EACCES: permission denied, mkdir '/home/trueforge'\n" });
+    world.set('logs_c1', { out: "Error: EACCES: permission denied, mkdir '/home/user'\n" });
     world.set('logs_c2', { out: '' });
     const check = find(world.json().doc.instances.main, 'containers');
     assert.equal(check.state, 'fail');
     assert.match(
       check.detail,
-      /The app could not start: it was not allowed to create a folder \(\/home\/trueforge\)\. This is a bug in Aman, not a problem on your computer\./,
+      /The app could not start: it was not allowed to create a folder \(\/home\/user\)\. This is a bug in Aman, not a problem on your computer\./,
     );
     assert.match(check.fix, /aman doctor instance --fix/);
     assert.doesNotMatch(`${check.detail} ${check.fix}`, /docker (compose|logs)|compose\.yaml|\.env/);
@@ -1387,8 +1387,8 @@ describe('network address check', () => {
   it('counts a name given at install as listed', () => {
     make();
     world.network('main', {
-      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://nas.local:8791',
-      extraHosts: 'nas.local',
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://files.example.local:8791',
+      extraHosts: 'files.example.local',
     });
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });

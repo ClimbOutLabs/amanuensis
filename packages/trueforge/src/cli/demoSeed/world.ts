@@ -1,4 +1,5 @@
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
 import { ScheduleManifestSchema } from '../../schemas/schedule';
@@ -71,6 +72,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       'Keep answers short and warm.',
       'Always mention the penicillin allergy when a doctor comes up.',
     ],
+    help_areas: ['new_country', 'work_money'],
     learned_profile: null,
     learning_enabled: false,
   };
@@ -98,9 +100,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     }),
     scheduleManifest: ScheduleManifestSchema.parse({
       task: [
-        'Good morning. Read my calendar for today and my inbox.',
-        'Summarise what needs my attention: what is on today, what I need to prepare, and which emails are waiting on me.',
-        `Flag upcoming appointments and what to bring. Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
+        MORNING_BRIEF_PROMPT,
+        `Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
         'For any email that needs a reply, write a short suggested reply in the brief. Do not send or save anything.',
       ].join(' '),
       cron: '30 7 * * *',

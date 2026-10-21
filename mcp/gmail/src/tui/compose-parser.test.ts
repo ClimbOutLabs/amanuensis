@@ -17,9 +17,9 @@ describe("parseCompose", () => {
   });
 
   it("preserves display-name recipients (Name <addr>)", () => {
-    const raw = "To: Vahid Habibi <vahid.habibi@thebluerock.test>, a@b.test\n\n";
+    const raw = "To: Alex Rivera <alex.rivera@example.com>, a@b.test\n\n";
     const parsed = parseCompose(raw);
-    expect(parsed.to).toEqual(["Vahid Habibi <vahid.habibi@thebluerock.test>", "a@b.test"]);
+    expect(parsed.to).toEqual(["Alex Rivera <alex.rivera@example.com>", "a@b.test"]);
   });
 
   it("does not split on a comma inside a quoted display name", () => {

@@ -3,7 +3,7 @@ import { requiresNetwork } from '../../../src/core/permissions/networkRequiremen
 
 const base = {
   status: 'ok',
-  from: { resolved_name: 'Rua da Emenda', lat: 38.7106, lng: -9.1426 },
+  from: { resolved_name: 'Travessa das Gaivotas', lat: 38.7106, lng: -9.1426 },
   to: { resolved_name: 'Rua de Sao Bernardo', lat: 38.7142, lng: -9.1597 },
   distance_km: 1.9,
   duration_min: 24,
