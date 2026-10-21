@@ -28,11 +28,17 @@ export type TourPrompt = {
 };
 
 export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
-  { key: 'brief', label: 'Your morning brief', prompt: 'Good morning! Give me my brief for today.' },
   {
-    key: 'scam-check',
-    label: 'Check for scams',
-    prompt: 'Is anything in my inbox a scam?',
+    key: 'brief',
+    label: 'Your morning brief',
+    prompt:
+      "Good morning! What do I need to know today? Go through my calendar, email and tasks, and tell me what's coming up, what's due, and anything that looks off.",
+  },
+  {
+    key: 'subscriptions',
+    label: 'Find forgotten subscriptions',
+    prompt:
+      "Look through my email for subscriptions and renewals. List what I'm paying for, how much and how often, and flag anything I may have forgotten about.",
     needs: 'email',
   },
   {
@@ -43,13 +49,14 @@ export const TRY_A_DAY_PROMPTS: readonly TourPrompt[] = [
   },
   {
     key: 'plan-day',
-    label: 'Plan my day',
-    prompt: "Plan my day around what's on my list, with lunch somewhere nearby.",
+    label: 'Help me plan my day',
+    prompt:
+      "Help me plan my day. Look at my calendar and my to-do list, put things in a sensible order with times, and find a good place for lunch near where I'll be.",
   },
   {
     key: 'appointment',
     label: 'Get ready for an appointment',
-    prompt: 'Help me get ready for my next appointment.',
+    prompt: "What's my next appointment, and what should I bring or do before it?",
     needs: 'calendar',
   },
 ];
@@ -61,7 +68,7 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
     prompt: 'Go through my unread email and tell me what needs a reply first.',
     needs: 'email',
   },
-  { key: 'schedule', label: 'Run things on a schedule', prompt: 'Set up a routine that checks my bills every Friday.' },
+  { key: 'schedule', label: 'Run things on a schedule', prompt: 'Every weekday at 7:30, send me my morning brief.' },
   {
     key: 'calendar',
     label: 'Keep your calendar',
@@ -76,35 +83,35 @@ export const CAPABILITY_PROMPTS: readonly TourPrompt[] = [
   {
     key: 'web',
     label: 'Research the live web',
-    prompt: 'Look up the latest news on a topic I care about and sum it up for me.',
+    prompt: "What's in the news today? Give me the five stories that matter, two lines each.",
   },
   {
     key: 'documents',
     label: 'Keep living documents',
-    prompt: 'Start a living document for my packing list that I can update later.',
+    prompt: 'Start a packing list for a weekend trip that we can keep updating.',
   },
   {
     key: 'specialists',
     label: 'Bring in specialists',
-    prompt: 'Bring in a specialist to help me plan my next trip.',
+    prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
   },
   {
     key: 'code',
     label: 'Read files and run code',
-    prompt: 'Add up these expenses and show me the total: 12.50, 8, 31.20.',
+    prompt: 'Add up my expenses by category and make a chart: rent 900, groceries 210, transport 45, eating out 80.',
     needs: 'sandbox',
   },
   { key: 'memory', label: 'Remember what matters', prompt: 'What do you remember about me so far?' },
   {
     key: 'skills',
     label: 'Learn new skills',
-    prompt: 'Learn a new skill that turns my receipts into a monthly expense list.',
+    prompt: 'Learn how to turn a photo of a receipt into a line in my expense list.',
     needs: 'sandbox',
   },
   {
     key: 'move',
     label: 'Move with you',
-    prompt: 'What can you do for me when I am away from my desk?',
+    prompt: 'How do I use you from my phone?',
   },
   { key: 'cost', label: 'Show what it costs', prompt: 'Show me what my chats have cost so far this month.' },
 ];

@@ -84,7 +84,7 @@ describe('AmanTour', () => {
     renderTour({ capabilities: NONE });
     const days = within(screen.getByRole('region', { name: 'Try a day with Aman' }));
 
-    expect(days.queryByRole('button', { name: /Check for scams/ })).not.toBeInTheDocument();
+    expect(days.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
     expect(days.queryByRole('button', { name: /Reply to an email/ })).not.toBeInTheDocument();
     expect(days.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Your morning brief/ })).toBeInTheDocument();
@@ -99,7 +99,7 @@ describe('AmanTour', () => {
     renderTour({ capabilities: { ...NONE, email: true } });
 
     expect(screen.getByRole('button', { name: 'Handle your email' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Check for scams/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Get ready for an appointment/ })).not.toBeInTheDocument();
   });
