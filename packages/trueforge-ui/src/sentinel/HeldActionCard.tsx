@@ -4,6 +4,7 @@ import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
+import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -28,7 +29,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow": the server only accepts it for some tools. */
+  /** Show "Always allow this tool": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
@@ -181,15 +182,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               {APPROVAL_CHOICES.approve.label}
             </Button>
             {alwaysAllowOffered && (
-              <Button
-                variant="secondary"
+              <AlwaysAllowToolControl
                 size="large"
-                title={APPROVAL_CHOICES.alwaysAllow.hint}
-                onClick={onAlwaysAllow}
                 disabled={disabled}
-              >
-                {APPROVAL_CHOICES.alwaysAllow.label}
-              </Button>
+                description="The agent will run this tool on this connector without asking, in every chat."
+                onConfirm={onAlwaysAllow}
+              />
             )}
             {onChangeRequest !== undefined && (
               <Button

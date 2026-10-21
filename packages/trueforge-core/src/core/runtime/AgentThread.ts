@@ -1249,13 +1249,21 @@ export async function classifyUnstampedToolCall(input: {
   ) {
     return info;
   }
+  // A deferred call_tool call is judged on the tool it names, not the wrapper:
+  // when the tool set resolved the underlying tool, the arguments classified
+  // (and the approval token minted over) are the wrapper's inner input, the
+  // same value dispatch verifies against.
+  const effectiveParams =
+    info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(canonical_params) ?? canonical_params)
+      : canonical_params;
   const decision = await classifyHostToolCall({
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
     action: {
       tool_name: info.original_tool_name,
-      canonical_params,
+      canonical_params: effectiveParams,
       tool_type: info.type,
       ...(connector === undefined
         ? {}
@@ -1802,6 +1810,7 @@ export class AgentThread {
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
               tool_name: pending.tool_info.original_tool_name,
+              mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }
         }
@@ -4373,6 +4382,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };
       yield event;
