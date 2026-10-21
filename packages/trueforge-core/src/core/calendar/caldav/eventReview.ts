@@ -7,6 +7,8 @@ export interface CaldavEventReview {
   id: string;
   title: string | null;
   when: string | null;
+  /** Who organizes the event, by name or address; null when neither can be read. */
+  organizer: string | null;
 }
 
 const TimeValueSchema = z.object({
@@ -22,6 +24,12 @@ const GetEventResultSchema = z.object({
   event: z.looseObject({
     summary: z.string().optional(),
     start: TimeValueSchema.optional(),
+    organizer: z
+      .looseObject({
+        name: z.string().optional(),
+        email: z.string().optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -45,11 +53,11 @@ export function formatCaldavWhen(start: CaldavTimeValue): string | null {
   if (monthName === undefined) {
     return null;
   }
-  const date = `${Number(day)} ${monthName} ${year}`;
+  const date = `${String(Number(day))} ${monthName} ${String(year)}`;
   if (start.all_day || dateTime === null) {
     return `${date}, all day`;
   }
-  const time = `${dateTime[4]}:${dateTime[5]}`;
+  const time = `${String(dateTime[4])}:${String(dateTime[5])}`;
   return start.tzid === undefined ? `${date}, ${time}` : `${date}, ${time} (${start.tzid})`;
 }
 
@@ -60,9 +68,21 @@ export function formatCaldavWhen(start: CaldavTimeValue): string | null {
 export function caldavEventReviewFrom({ id, result }: { id: string; result: unknown }): CaldavEventReview {
   const parsed = GetEventResultSchema.safeParse(result);
   if (!parsed.success) {
-    return { id, title: null, when: null };
+    return { id, title: null, when: null, organizer: null };
   }
-  const { summary, start } = parsed.data.event;
+  const { summary, start, organizer } = parsed.data.event;
   const title = summary === undefined || summary.trim() === '' ? null : summary;
-  return { id, title, when: start === undefined ? null : formatCaldavWhen(start) };
+  return {
+    id,
+    title,
+    when: start === undefined ? null : formatCaldavWhen(start),
+    organizer: organizerName(organizer),
+  };
+}
+
+function organizerName(
+  organizer: { name?: string | undefined; email?: string | undefined } | undefined,
+): string | null {
+  const name = [organizer?.name, organizer?.email].find(text => text !== undefined && text.trim() !== '');
+  return name ?? null;
 }

@@ -33,7 +33,12 @@ function caldavAction(
   };
 }
 
-const DENTIST: CaldavEventReview = { id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00 (Europe/Berlin)' };
+const DENTIST: CaldavEventReview = {
+  id: 'ev1',
+  title: 'Dentist',
+  when: '22 Oct 2026, 14:00 (Europe/Berlin)',
+  organizer: 'Office Admin',
+};
 const EVENT_ID = { id: 'ev1' };
 
 describe('CalDAV read classification', () => {
@@ -73,7 +78,7 @@ describe('CalDAV respond_to_event', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). The organizer will be told.',
+      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). The organizer, Office Admin, will be told.',
     );
     expect(decision.card?.cannot_be_undone).toBe("The reply to the organizer can't be unsent.");
     expect(decision.approval_token_id).toEqual(expect.any(String));
@@ -110,7 +115,7 @@ describe('CalDAV respond_to_event', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Accept the event with id ev1. Its title could not be read. The organizer will be told.',
+      'Accept the event with id ev1. Its title could not be read. The organizer will be told. Their name could not be read.',
     );
   });
 
@@ -142,20 +147,108 @@ describe('CalDAV changes', () => {
 
   it('shows an update card that names the existing event', async () => {
     const decision = await classifyTier(
+      caldavAction('update_event', { ...EVENT_ID, summary: 'Moved' }, { caldav_event: DENTIST }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.plain_what).toBe('Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin).');
+  });
+
+  it('lists every field a create call writes in the outbound text, with the long description in full', async () => {
+    const description = 'Bring the forms. '.repeat(400);
+    const decision = await classifyTier(
+      caldavAction('create_event', {
+        calendar_id: 'work',
+        summary: 'Team sync',
+        start: '2026-10-23T09:30:00+02:00',
+        end: '2026-10-23T10:00:00+02:00',
+        timezone: 'Europe/Berlin',
+        description,
+        location: 'Room 4',
+        categories: ['work'],
+        status: 'TENTATIVE',
+        transparent: true,
+        recurrence: 'FREQ=WEEKLY;BYDAY=MO',
+        alarms: [{ trigger: '-PT10M' }],
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    const text = decision.card?.outbound_text ?? '';
+    for (const field of [
+      'calendar_id: ',
+      'summary: ',
+      'start: ',
+      'end: ',
+      'timezone: ',
+      'description: ',
+      'location: ',
+      'categories (array)',
+      'status: ',
+      'transparent (boolean)',
+      'recurrence: ',
+      'alarms (array)',
+    ]) {
+      expect(text).toContain(field);
+    }
+    expect(text).toContain(description.trim());
+    expect(decision.card?.outbound_truncated).toBe(false);
+  });
+
+  it('lists the change fields of an update and leaves the confirm token out', async () => {
+    const decision = await classifyTier(
+      caldavAction(
+        'update_event',
+        { ...EVENT_ID, summary: 'Moved', location: 'Clinic B', confirm_token: 'abc' },
+        { caldav_event: DENTIST },
+      ),
+      makeCtx(),
+    );
+    expect(decision.card?.outbound_text).toBe('id: ev1\nsummary: Moved\nlocation: Clinic B');
+  });
+
+  it('gives the generic card when a call writes a field the card does not list', async () => {
+    const decision = await classifyTier(
+      caldavAction('create_event', {
+        calendar_id: 'work',
+        summary: 'Team sync',
+        start: '2026-10-23T09:30:00+02:00',
+        attendees: [{ email: 'guest@example.com' }],
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.plain_what).not.toMatch(/^Add /);
+    expect(decision.card?.outbound_text).toContain('attendees');
+    expect(decision.card?.outbound_text).toContain('guest@example.com');
+  });
+
+  it('gives the generic card for a stray field on an update, since the connector does not write it', async () => {
+    const decision = await classifyTier(
       caldavAction('update_event', { ...EVENT_ID, calendar_id: 'home', summary: 'Moved' }, { caldav_event: DENTIST }),
       makeCtx(),
     );
-    expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe('Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin) in "home".');
+    expect(decision.card?.plain_what).not.toMatch(/^Change /);
+    expect(decision.card?.outbound_text).toContain('calendar_id');
+  });
+
+  it('gives the generic card when the arguments are too long to show in full', async () => {
+    const decision = await classifyTier(
+      caldavAction('create_event', {
+        calendar_id: 'work',
+        summary: 'Team sync',
+        start: '2026-10-23T09:30:00+02:00',
+        description: 'x'.repeat(25_000),
+      }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).not.toMatch(/^Add /);
   });
 
   it('shows a delete card with a warning that it cannot be restored from here', async () => {
-    const decision = await classifyTier(
-      caldavAction('delete_event', { ...EVENT_ID, calendar_id: 'home' }, { caldav_event: DENTIST }),
-      makeCtx(),
-    );
+    const decision = await classifyTier(caldavAction('delete_event', EVENT_ID, { caldav_event: DENTIST }), makeCtx());
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe('Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin) from "home".');
+    expect(decision.card?.plain_what).toBe('Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin).');
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here.",
     );
@@ -163,7 +256,9 @@ describe('CalDAV changes', () => {
 
   it('escapes a title that carries hidden characters or quotes', async () => {
     const decision = await classifyTier(
-      caldavAction('delete_event', EVENT_ID, { caldav_event: { id: 'ev1', title: 'Say "hi"', when: null } }),
+      caldavAction('delete_event', EVENT_ID, {
+        caldav_event: { id: 'ev1', title: 'Say "hi"', when: null, organizer: null },
+      }),
       makeCtx(),
     );
     expect(decision.card?.plain_what).toContain('\\"hi\\"');

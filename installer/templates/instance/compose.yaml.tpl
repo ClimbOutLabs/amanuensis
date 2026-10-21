@@ -133,6 +133,26 @@ services:
 @@IF_TLS@@      retries: 10
 @@IF_TLS@@    restart: unless-stopped
 
+# Calendar connector. It starts only when named, so an instance without a calendar never runs it. The app reaches it at
+# http://calendar-caldav:9558/mcp on this project's private network. Nothing is published, and the credentials come only from .env.calendar.
+@@IF_CALENDAR@@  calendar-caldav:
+@@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
+@@IF_CALENDAR@@    pull_policy: never
+@@IF_CALENDAR@@    profiles: ['calendar']
+@@IF_CALENDAR@@    env_file:
+@@IF_CALENDAR@@      - path: ./.env.calendar
+@@IF_CALENDAR@@        required: false
+@@IF_CALENDAR@@    environment:
+@@IF_CALENDAR@@      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
+@@IF_CALENDAR@@      ELICITATION: 'false'
+@@IF_CALENDAR@@    expose:
+@@IF_CALENDAR@@      - '9558'
+@@IF_CALENDAR@@    cap_drop:
+@@IF_CALENDAR@@      - ALL
+@@IF_CALENDAR@@    security_opt:
+@@IF_CALENDAR@@      - no-new-privileges:true
+@@IF_CALENDAR@@    restart: unless-stopped
+
   dex:
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
@@ -154,26 +174,6 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
-
-# Calendar connector. It starts only when named, so an instance without a calendar never runs it. The app reaches it at
-# http://calendar-caldav:9558/mcp on this project's private network. Nothing is published, and the credentials come only from .env.calendar.
-@@IF_CALENDAR@@  calendar-caldav:
-@@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
-@@IF_CALENDAR@@    pull_policy: never
-@@IF_CALENDAR@@    profiles: ['calendar']
-@@IF_CALENDAR@@    env_file:
-@@IF_CALENDAR@@      - path: ./.env.calendar
-@@IF_CALENDAR@@        required: false
-@@IF_CALENDAR@@    environment:
-@@IF_CALENDAR@@      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
-@@IF_CALENDAR@@      ELICITATION: 'false'
-@@IF_CALENDAR@@    expose:
-@@IF_CALENDAR@@      - '9558'
-@@IF_CALENDAR@@    cap_drop:
-@@IF_CALENDAR@@      - ALL
-@@IF_CALENDAR@@    security_opt:
-@@IF_CALENDAR@@      - no-new-privileges:true
-@@IF_CALENDAR@@    restart: unless-stopped
 
 configs:
   dex_config:

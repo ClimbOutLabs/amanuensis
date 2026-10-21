@@ -12,10 +12,11 @@ function addressOf(item: unknown): string {
     return item;
   }
   if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-    const { email, address } = item as { email?: unknown; address?: unknown };
+    const email: unknown = 'email' in item ? item.email : undefined;
     if (typeof email === 'string') {
       return email;
     }
+    const address: unknown = 'address' in item ? item.address : undefined;
     if (typeof address === 'string') {
       return address;
     }

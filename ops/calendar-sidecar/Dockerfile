@@ -14,4 +14,4 @@ USER node
 EXPOSE 9558
 
 # Tool names and calendar credentials come from the Compose service, never from this image.
-CMD ["node", "/app/node_modules/supergateway/dist/index.js", "--stdio", "node /app/node_modules/@ni-c/caldav-mcp/dist/index.js", "--outputTransport", "streamableHttp", "--host", "0.0.0.0", "--port", "9558", "--streamableHttpPath", "/mcp", "--logLevel", "info"]
+CMD ["node", "/app/node_modules/supergateway/dist/index.js", "--stdio", "node /app/node_modules/@ni-c/caldav-mcp/dist/index.js", "--outputTransport", "streamableHttp", "--host", "0.0.0.0", "--port", "9558", "--streamableHttpPath", "/mcp", "--logLevel", "warn"]

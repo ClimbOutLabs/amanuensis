@@ -82,6 +82,29 @@ $CAL_SECRET
   sandbox_drop
 }
 
+test_connect_prompt_yes_asks_the_calendar_questions() {
+  t_begin "Yes at Connect a calendar? asks for the provider, address, login and app password, then connects it"
+  sandbox_new
+  run_install_tty "Name for this instance=>
+Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>y
+Your provider (type a number)=>1
+Email address of the calendar account=>owner@example.invalid
+Login name=>
+App password for the calendar=>$CAL_SECRET
+Back up automatically=>y
+Go ahead?=>y
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD" --local-only
+  assert_rc 0
+  assert_flat_contains "$OUT" "Calendar: Fastmail at https://caldav.fastmail.com/dav/, signed in as owner@example.invalid."
+  assert_eq "$(env_lines)" 1 "one connector line in the main settings"
+  assert_not_contains "$OUT$ERR" "$CAL_SECRET"
+  assert_log_lacks "$CAL_SECRET"
+  sandbox_drop
+}
+
 test_second_run_does_not_duplicate() {
   t_begin "running the calendar command twice keeps one connector line"
   sandbox_new
@@ -175,6 +198,7 @@ test_gmail_is_skipped
 test_url_refusals
 test_secret_rules
 test_install_with_calendar_flags
+test_connect_prompt_yes_asks_the_calendar_questions
 test_second_run_does_not_duplicate
 test_piped_input_and_remove
 test_yes_names_missing_value

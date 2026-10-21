@@ -23,7 +23,25 @@ describe('caldavEventReviewFrom', () => {
         id: 'ev1',
         result: { event: { summary: 'Dentist', start: { value: '2026-10-22T14:00:00+02:00', all_day: false } } },
       }),
-    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00' });
+    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null });
+  });
+
+  it('names the organizer by name, or by address when there is no name', () => {
+    const start = { value: '2026-10-22T14:00:00+02:00', all_day: false };
+    expect(
+      caldavEventReviewFrom({
+        id: 'ev1',
+        result: {
+          event: { summary: 'Dentist', start, organizer: { name: 'Office Admin', email: 'admin@example.com' } },
+        },
+      }).organizer,
+    ).toBe('Office Admin');
+    expect(
+      caldavEventReviewFrom({
+        id: 'ev1',
+        result: { event: { summary: 'Dentist', start, organizer: { email: 'admin@example.com' } } },
+      }).organizer,
+    ).toBe('admin@example.com');
   });
 
   it('leaves the title null when it is missing or blank', () => {
@@ -35,6 +53,7 @@ describe('caldavEventReviewFrom', () => {
       id: 'ev1',
       title: null,
       when: null,
+      organizer: null,
     });
   });
 });

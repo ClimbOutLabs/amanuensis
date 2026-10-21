@@ -1,7 +1,12 @@
 import { formatCaldavWhen, type CaldavEventReview } from '../calendar/caldav/eventReview';
-import { CALDAV_SERVER_NAME, isCaldavToolName, type CaldavToolName } from '../calendar/caldav/toolContract';
+import {
+  CALDAV_SERVER_NAME,
+  CALDAV_WRITE_FIELDS,
+  isCaldavToolName,
+  type CaldavToolName,
+} from '../calendar/caldav/toolContract';
 import type { SentinelAction } from './classifier';
-import { escapeDisplayText } from './extractorRegistry';
+import { escapeDisplayText, renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 
 /**
@@ -45,8 +50,13 @@ export async function classifyCaldavTool({
     });
   }
 
+  const card = cardFor({ tool, params, review });
+  // A call that writes a field the card cannot show gets the generic card, which shows the raw call.
+  if (card === null) {
+    return undefined;
+  }
   return tier3Decision({
-    card: cardFor({ tool, params, review }),
+    card,
     reason: tool === 'respond_to_event' ? 'caldav_invitation_reply' : 'caldav_calendar_change',
     reason_detail: 'Calendar change from your connected calendar; always asks.',
     sensitive_read: true,
@@ -59,6 +69,10 @@ function hasToken(params: Record<string, unknown>): boolean {
   return typeof token === 'string' && token !== '';
 }
 
+/**
+ * The card for a change, or null when the call sends an argument the card does not list, or when
+ * the exact arguments would be cut short. A shorter card never stands in for a longer call.
+ */
 function cardFor({
   tool,
   params,
@@ -67,42 +81,70 @@ function cardFor({
   tool: CaldavToolName;
   params: Record<string, unknown>;
   review: CaldavEventReview | null;
-}): Tier3Card {
-  const calendar = stringParam(params, 'calendar_id');
-  const calendarText = calendar === null ? 'your calendar' : `"${shown(calendar)}"`;
+}): Tier3Card | null {
+  const written = CALDAV_WRITE_FIELDS[tool];
+  if (written === undefined) {
+    return null;
+  }
+  // The confirm token is the approval itself, not something the call writes, so it is not listed.
+  const args = Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'confirm_token'));
+  if (Object.keys(args).some(key => !written.includes(key))) {
+    return null;
+  }
+  const outbound = renderOutboundArguments(args, { valueMaxChars: SEND_VALUE_MAX_CHARS });
+  if (outbound.truncated) {
+    return null;
+  }
   const existing = eventSubject({ params, review });
+  const plainWhat = plainWhatFor({ tool, params, existing, review });
+  return cardWith({
+    plain_what: plainWhat.text,
+    cannot_be_undone: plainWhat.cannot_be_undone,
+    outbound_text: outbound.text,
+  });
+}
 
+function plainWhatFor({
+  tool,
+  params,
+  existing,
+  review,
+}: {
+  tool: CaldavToolName;
+  params: Record<string, unknown>;
+  existing: { text: string };
+  review: CaldavEventReview | null;
+}): { text: string; cannot_be_undone: string | null } {
   if (tool === 'create_event') {
+    const calendar = stringParam(params, 'calendar_id');
+    const calendarText = calendar === null ? 'your calendar' : `"${shown(calendar)}"`;
     const title = stringParam(params, 'summary');
     const when = formatCaldavWhen({ value: stringParam(params, 'start') ?? '', all_day: false });
-    return cardWith({
-      plain_what: `Add ${title === null ? 'an event with no title' : `"${shown(title)}"`}${whenText(when)} to ${calendarText}.`,
+    return {
+      text: `Add ${title === null ? 'an event with no title' : `"${shown(title)}"`}${whenText(when)} to ${calendarText}.`,
       cannot_be_undone: null,
-    });
+    };
   }
   if (tool === 'update_event') {
-    return cardWith({
-      plain_what: `Change ${existing.text} in ${calendarText}.`,
-      cannot_be_undone: null,
-    });
+    return { text: `Change ${existing.text}.`, cannot_be_undone: null };
   }
   if (tool === 'delete_event') {
-    return cardWith({
-      plain_what: `Delete ${existing.text} from ${calendarText}.`,
+    return {
+      text: `Delete ${existing.text}.`,
       cannot_be_undone: "This removes the event from the calendar. It can't be restored from here.",
-    });
+    };
   }
-  if (tool === 'respond_to_event') {
-    const verb = answerVerb(stringParam(params, 'response'));
-    return cardWith({
-      plain_what: `${verb} ${existing.text}. The organizer will be told.`,
-      cannot_be_undone: "The reply to the organizer can't be unsent.",
-    });
-  }
-  return cardWith({
-    plain_what: `Aman doesn't know this calendar action yet: ${tool}.`,
-    cannot_be_undone: 'Check the details before you go ahead.',
-  });
+  // respond_to_event: only the organizer is sent the reply, so only the organizer is named.
+  const verb = answerVerb(stringParam(params, 'response'));
+  const organizer = review?.organizer ?? null;
+  const organizerText =
+    organizer === null
+      ? 'The organizer will be told. Their name could not be read.'
+      : `The organizer, ${shown(organizer)}, will be told.`;
+  return {
+    text: `${verb} ${existing.text}. ${organizerText}`,
+    cannot_be_undone: "The reply to the organizer can't be unsent.",
+  };
 }
 
 /** The title and time the card names. A failed lookup is said plainly, with the event id. */
@@ -110,7 +152,7 @@ function eventSubject({ params, review }: { params: Record<string, unknown>; rev
   text: string;
 } {
   const id = stringParam(params, 'id') ?? review?.id ?? 'unknown';
-  if (review === null || review.title === null) {
+  if (review?.title == null) {
     return { text: `the event with id ${shown(id)}. Its title could not be read` };
   }
   const when = whenText(review.when);
@@ -143,9 +185,11 @@ function shown(text: string): string {
 function cardWith({
   plain_what,
   cannot_be_undone,
+  outbound_text,
 }: {
   plain_what: string;
   cannot_be_undone: string | null;
+  outbound_text: string | null;
 }): Tier3Card {
   return {
     plain_what,
@@ -156,7 +200,7 @@ function cardWith({
     recipient: null,
     amount: null,
     parsed_command: null,
-    outbound_text: null,
+    outbound_text,
     destination_host: null,
     outbound_truncated: false,
   };
