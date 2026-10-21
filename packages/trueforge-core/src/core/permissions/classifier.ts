@@ -1558,7 +1558,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     return tier1Decision({
       reason: SANDBOX_FILE_WRITE_REASON,
       reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
-      sensitive_read: targets.paths.some(isSensitivePath),
+      sensitive_read: targets.paths.some(namesSecretPath),
     });
   }
   return decideTier2({
