@@ -48,6 +48,7 @@ import {
   LIST_INBOX_THREADS_TOOL_NAME,
   ListDraftsSchema,
   ListInboxThreadsSchema,
+  NO_RECIPIENT_MESSAGE,
   READ_ANNOTATIONS,
   READ_EMAIL_TOOL_NAME,
   ReadEmailSchema,
@@ -94,6 +95,16 @@ const NEW_APPROVAL =
 /** A refusal of a send in words the model can relay: what was refused, that nothing went out, and what to do. */
 function sendRefusal(reason: string): string {
   return `${reason} Nothing was sent. ${NEW_APPROVAL}`;
+}
+
+/**
+ * Why a draft call's details cannot be used. A draft with no recipient gets the draft contract's own
+ * reason, so the person hears what to add rather than a general refusal.
+ */
+function invalidDraftReason(error: z.ZodError): string {
+  return error.issues.some(issue => issue.message === NO_RECIPIENT_MESSAGE)
+    ? NO_RECIPIENT_MESSAGE
+    : 'The draft details were not valid, so nothing was saved.';
 }
 
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
@@ -331,11 +342,10 @@ export class GmailToolSet extends LocalToolMCP {
         }
         return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
-      const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
       if (params.name === UPDATE_DRAFT_TOOL_NAME) {
         const parsed = UpdateDraftSchema.safeParse(params.arguments);
         if (!parsed.success) {
-          return invalid;
+          return { failure: invalidDraftReason(parsed.error) };
         }
         const existing = await this.#editableDraft(parsed.data.draft_id);
         if ('failure' in existing) {
@@ -346,7 +356,7 @@ export class GmailToolSet extends LocalToolMCP {
       }
       const parsed = DraftEmailSchema.safeParse(params.arguments);
       if (!parsed.success) {
-        return invalid;
+        return { failure: invalidDraftReason(parsed.error) };
       }
       const resolved = await this.#resolveContent({ input: parsed.data, existing: undefined });
       return { draft: resolved.reviewable, replaces: undefined, answered: resolved.answered };

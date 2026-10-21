@@ -30,7 +30,12 @@ export function answeredMessageOf(message: GmailMessage): AnsweredMessage {
 /** The one readable address of a From header, or null when it is not exactly one address Aman can use. */
 function readableAddress(from: string): string | null {
   const address = fromAddress(from);
-  return address === null || address.length > MAX_ADDRESS_CHARS ? null : address;
+  if (address === null || address.length > MAX_ADDRESS_CHARS) {
+    return null;
+  }
+  // A bare word is not an address: an address has a local part, one "@" and a domain.
+  const at = address.indexOf('@');
+  return at > 0 && at === address.lastIndexOf('@') && at < address.length - 1 ? address : null;
 }
 
 /** The sender's address only, so a display name cannot add words or a second address to the card. */

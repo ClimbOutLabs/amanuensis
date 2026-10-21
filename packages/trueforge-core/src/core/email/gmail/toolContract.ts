@@ -106,10 +106,9 @@ export const TOO_MANY_SELECTORS = {
 const draftSelectors = (draft: { subject: string; body: string }) => fewSelectors([draft.subject, draft.body]);
 
 /** A draft is addressed: it names a recipient, or it answers a message and goes to that message's sender. */
-export const NO_RECIPIENT = {
-  message:
-    'The draft has no recipient. Add an address in "to", or pass "in_reply_to" so the reply is addressed to the sender of that message.',
-};
+export const NO_RECIPIENT_MESSAGE =
+  'The draft has no recipient. Add an address in "to", or pass "in_reply_to" so the reply is addressed to the sender of that message.';
+export const NO_RECIPIENT = { message: NO_RECIPIENT_MESSAGE };
 const draftAddressed = (draft: { to?: readonly string[] | undefined; in_reply_to?: string | undefined }) =>
   (draft.to?.length ?? 0) > 0 || draft.in_reply_to !== undefined;
 
