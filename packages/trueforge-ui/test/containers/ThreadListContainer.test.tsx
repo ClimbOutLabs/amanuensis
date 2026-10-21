@@ -634,7 +634,7 @@ describe('ThreadListContainer', () => {
         ],
       },
       chatFolders: {
-        load: async () => ({ folders: [], assignments: [], folderSessions: [] }),
+        load: async () => ({ folders: [], assignments: [], folderSessions: [], unfiledSessions: [] }),
         createFolder,
         renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
         deleteFolder: async () => {},
@@ -732,6 +732,7 @@ describe('ThreadListContainer', () => {
             ],
           },
         ],
+        unfiledSessions: [],
       }),
       createFolder: async ({ name }) => ({ id: 'folder-new', name }),
       renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
@@ -782,6 +783,7 @@ describe('ThreadListContainer', () => {
         folders: [{ id: 'folder-archive', name: 'Archive' }],
         assignments: folderSessions.map(session => ({ sessionId: session.sessionId, folderId: 'folder-archive' })),
         folderSessions: [{ folderId: 'folder-archive', sessions: folderSessions }],
+        unfiledSessions: [],
       }),
       createFolder: async ({ name }) => ({ id: 'folder-new', name }),
       renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
@@ -831,6 +833,7 @@ describe('ThreadListContainer', () => {
           { folderId: 'folder-a', sessions: [session] },
           { folderId: 'folder-b', sessions: [] },
         ],
+        unfiledSessions: [],
       }),
       createFolder: async ({ name }) => ({ id: 'folder-new', name }),
       renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
@@ -863,6 +866,168 @@ describe('ThreadListContainer', () => {
     });
     expect(
       within(screen.getByRole('region', { name: 'Folder A' })).queryByTestId('thread-row-Filed only chat'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('moves a chat loaded by folder to No folder and keeps it under Unfiled', async () => {
+    const setSessionFolder = vi.fn(async () => {});
+    const onThreadOpen = vi.fn();
+    const filedSession = {
+      sessionId: 'session-filed',
+      title: 'Filed only chat',
+      updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    };
+    const otherSession = {
+      sessionId: 'session-other',
+      title: 'Other folder chat',
+      updatedAt: new Date('2026-10-19T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    };
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [
+          { id: 'folder-a', name: 'Folder A' },
+          { id: 'folder-b', name: 'Folder B' },
+        ],
+        assignments: [
+          { sessionId: filedSession.sessionId, folderId: 'folder-a' },
+          { sessionId: otherSession.sessionId, folderId: 'folder-b' },
+        ],
+        folderSessions: [
+          { folderId: 'folder-a', sessions: [filedSession] },
+          { folderId: 'folder-b', sessions: [otherSession] },
+        ],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder,
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-current', title: 'Current chat' }],
+      },
+      chatFolders,
+      onThreadOpen,
+    });
+
+    const filedRow = await screen.findByTestId('thread-row-Filed only chat');
+    const actionButton = filedRow.querySelector<HTMLButtonElement>('[aria-label="Session actions"]');
+    if (actionButton === null) throw new Error('Expected session actions button');
+    fireEvent.click(actionButton);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'No folder' }));
+
+    await waitFor(() => {
+      expect(setSessionFolder).toHaveBeenCalledWith({ sessionId: 'session-filed', folderId: null });
+    });
+    const unfiled = await screen.findByRole('region', { name: 'Unfiled chats' });
+    await waitFor(() => {
+      expect(within(unfiled).getByTestId('thread-row-Filed only chat')).toBeVisible();
+    });
+    expect(
+      within(screen.getByRole('region', { name: 'Folder A' })).queryByTestId('thread-row-Filed only chat'),
+    ).not.toBeInTheDocument();
+
+    const movedRow = within(unfiled).getByTestId('thread-row-Filed only chat');
+    const openButton = movedRow.querySelector<HTMLButtonElement>('button');
+    if (openButton === null) throw new Error('Expected row button');
+    fireEvent.click(openButton);
+    expect(onThreadOpen).toHaveBeenCalled();
+  });
+
+  it('deleting a folder whose chats are not in the recent list lands them under Unfiled', async () => {
+    const deleteFolder = vi.fn(async () => {});
+    const first = {
+      sessionId: 'session-one',
+      title: 'Folder chat one',
+      updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    };
+    const second = {
+      sessionId: 'session-two',
+      title: 'Folder chat two',
+      updatedAt: new Date('2026-10-19T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    };
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-a', name: 'Folder A' }],
+        assignments: [
+          { sessionId: first.sessionId, folderId: 'folder-a' },
+          { sessionId: second.sessionId, folderId: 'folder-a' },
+        ],
+        folderSessions: [{ folderId: 'folder-a', sessions: [first, second] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder,
+      setSessionFolder: async () => {},
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-current', title: 'Current chat' }],
+      },
+      chatFolders,
+    });
+
+    expect(await screen.findByRole('region', { name: 'Folder A' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Folder A' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete folder' }));
+
+    await waitFor(() => {
+      expect(deleteFolder).toHaveBeenCalledWith({ folderId: 'folder-a' });
+    });
+    expect(screen.queryByRole('region', { name: 'Folder A' })).not.toBeInTheDocument();
+    const unfiled = await screen.findByRole('region', { name: 'Unfiled chats' });
+    expect(within(unfiled).getByTestId('thread-row-Folder chat one')).toBeInTheDocument();
+    expect(within(unfiled).getByTestId('thread-row-Folder chat two')).toBeInTheDocument();
+  });
+
+  it('shows chats with no folder loaded from the server under Unfiled', async () => {
+    const looseSession = {
+      sessionId: 'session-loose',
+      title: 'Loose chat',
+      updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    };
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-a', name: 'Folder A' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-a', sessions: [] }],
+        unfiledSessions: [looseSession],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-current', title: 'Current chat' }],
+      },
+      chatFolders,
+    });
+
+    const unfiled = await screen.findByRole('region', { name: 'Unfiled chats' });
+    expect(within(unfiled).getByTestId('thread-row-Loose chat')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Folder A' })).queryByTestId('thread-row-Loose chat'),
     ).not.toBeInTheDocument();
   });
 

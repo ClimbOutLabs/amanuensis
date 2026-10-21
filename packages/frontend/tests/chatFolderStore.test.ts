@@ -20,7 +20,7 @@ function sessionWire({
   agent,
 }: {
   id: string;
-  folderId: string;
+  folderId: string | null;
   title: string | null;
   updatedAt: string;
   agent: SessionAgentWire;
@@ -29,7 +29,7 @@ function sessionWire({
 }
 
 test('chat folder store loads each folder by folder and pages within that folder', async () => {
-  const sessionRequests: Array<{ folderId: string | null; pageToken: string | null }> = [];
+  const sessionRequests: Array<{ folderId: string | null; pageToken: string | null; noFolder: boolean }> = [];
   const store = createChatFolderStore(async input => {
     const url = new URL(String(input), 'http://localhost');
 
@@ -42,7 +42,23 @@ test('chat folder store loads each folder by folder and pages within that folder
       assert.equal(url.searchParams.get('order'), 'desc', 'should request newest chats first');
       const folderId = url.searchParams.get('folder_id');
       const pageToken = url.searchParams.get('page_token');
-      sessionRequests.push({ folderId, pageToken });
+      const noFolder = url.searchParams.get('no_folder') === 'true';
+      sessionRequests.push({ folderId, pageToken, noFolder });
+
+      if (noFolder && pageToken === null) {
+        return Response.json({
+          data: [
+            sessionWire({
+              id: 'session-loose-1',
+              folderId: null,
+              title: 'Loose one',
+              updatedAt: '2026-10-16T12:00:00.000Z',
+              agent: { type: 'reference', id: 'agent-support', name: 'Support' },
+            }),
+          ],
+          pagination: {},
+        });
+      }
 
       if (folderId === 'folder-a' && pageToken === null) {
         return Response.json({
@@ -102,9 +118,19 @@ test('chat folder store loads each folder by folder and pages within that folder
 
   assert.deepEqual(result.folders, [FOLDER_A, FOLDER_B]);
   assert.deepEqual(sessionRequests, [
-    { folderId: 'folder-a', pageToken: null },
-    { folderId: 'folder-a', pageToken: 'folder-a-page-2' },
-    { folderId: 'folder-b', pageToken: null },
+    { folderId: 'folder-a', pageToken: null, noFolder: false },
+    { folderId: 'folder-a', pageToken: 'folder-a-page-2', noFolder: false },
+    { folderId: 'folder-b', pageToken: null, noFolder: false },
+    { folderId: null, pageToken: null, noFolder: true },
+  ]);
+  assert.deepEqual(result.unfiledSessions, [
+    {
+      sessionId: 'session-loose-1',
+      title: 'Loose one',
+      updatedAt: new Date('2026-10-16T12:00:00.000Z'),
+      agentName: 'Support',
+      isMutable: false,
+    },
   ]);
   assert.deepEqual(result.assignments, [
     { sessionId: 'session-a1', folderId: 'folder-a' },
@@ -155,7 +181,8 @@ test('chat folder store loads each folder by folder and pages within that folder
 });
 
 test('chat folder store returns an empty chat list for an empty folder', async () => {
-  let sessionRequests = 0;
+  let folderRequests = 0;
+  let unfiledRequests = 0;
   const store = createChatFolderStore(async input => {
     const url = new URL(String(input), 'http://localhost');
 
@@ -164,8 +191,12 @@ test('chat folder store returns an empty chat list for an empty folder', async (
     }
 
     if (url.pathname === '/api/v1/sessions') {
-      sessionRequests++;
-      assert.equal(url.searchParams.get('folder_id'), 'folder-a');
+      if (url.searchParams.get('no_folder') === 'true') {
+        unfiledRequests++;
+      } else {
+        folderRequests++;
+        assert.equal(url.searchParams.get('folder_id'), 'folder-a');
+      }
       return Response.json({ data: [], pagination: {} });
     }
 
@@ -176,7 +207,80 @@ test('chat folder store returns an empty chat list for an empty folder', async (
 
   assert.deepEqual(result.assignments, []);
   assert.deepEqual(result.folderSessions, [{ folderId: 'folder-a', sessions: [] }]);
-  assert.equal(sessionRequests, 1);
+  assert.deepEqual(result.unfiledSessions, []);
+  assert.equal(folderRequests, 1);
+  assert.equal(unfiledRequests, 1);
+});
+
+test('chat folder store loads chats with no folder and pages through them', async () => {
+  const unfiledPageTokens: Array<string | null> = [];
+  const store = createChatFolderStore(async input => {
+    const url = new URL(String(input), 'http://localhost');
+
+    if (url.pathname === '/api/v1/session-folders') {
+      return Response.json({ data: [FOLDER_A] });
+    }
+
+    if (url.pathname === '/api/v1/sessions') {
+      if (url.searchParams.get('folder_id') === 'folder-a') {
+        return Response.json({ data: [], pagination: {} });
+      }
+      assert.equal(url.searchParams.get('no_folder'), 'true');
+      const pageToken = url.searchParams.get('page_token');
+      unfiledPageTokens.push(pageToken);
+      if (pageToken === null) {
+        return Response.json({
+          data: [
+            sessionWire({
+              id: 'session-loose-1',
+              folderId: null,
+              title: 'Loose one',
+              updatedAt: '2026-10-20T12:00:00.000Z',
+              agent: { type: 'inline', spec: { model: { name: 'test-model' } } },
+            }),
+          ],
+          pagination: { next_page_token: 'loose-page-2' },
+        });
+      }
+      if (pageToken === 'loose-page-2') {
+        return Response.json({
+          data: [
+            sessionWire({
+              id: 'session-loose-2',
+              folderId: null,
+              title: null,
+              updatedAt: '2026-10-19T12:00:00.000Z',
+              agent: { type: 'reference', id: 'agent-research', name: null },
+            }),
+          ],
+          pagination: {},
+        });
+      }
+    }
+
+    throw new Error(`Unexpected request to ${url.pathname}${url.search}`);
+  });
+
+  const result = await store.load();
+
+  assert.deepEqual(unfiledPageTokens, [null, 'loose-page-2']);
+  assert.deepEqual(result.assignments, []);
+  assert.deepEqual(result.unfiledSessions, [
+    {
+      sessionId: 'session-loose-1',
+      title: 'Loose one',
+      updatedAt: new Date('2026-10-20T12:00:00.000Z'),
+      agentName: null,
+      isMutable: true,
+    },
+    {
+      sessionId: 'session-loose-2',
+      title: null,
+      updatedAt: new Date('2026-10-19T12:00:00.000Z'),
+      agentName: null,
+      isMutable: false,
+    },
+  ]);
 });
 
 test('chat folder store surfaces server errors', async () => {

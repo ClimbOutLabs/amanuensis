@@ -110,6 +110,36 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
   const jsonHeaders = { 'content-type': 'application/json' };
   // Server enforces max limit of 25 on session list queries (PAGE_LIMIT in trueforge/src/schemas/common.ts)
   const SESSION_LIST_PAGE_LIMIT = 25;
+
+  async function listAllSessions(filter: { folder_id: string } | { no_folder: string }): Promise<SessionWire[]> {
+    const sessions: SessionWire[] = [];
+    let pageToken: string | undefined;
+    do {
+      const query = new URLSearchParams({
+        ...filter,
+        limit: String(SESSION_LIST_PAGE_LIMIT),
+        order: 'desc',
+      });
+      if (pageToken !== undefined) {
+        query.set('page_token', pageToken);
+      }
+      const page = readSessionPage(await readJson(await fetcher(`/api/v1/sessions?${query.toString()}`)));
+      sessions.push(...page.sessions);
+      pageToken = page.nextPageToken;
+    } while (pageToken !== undefined);
+    return sessions;
+  }
+
+  function toFolderSession(session: SessionWire): ChatFolderSession {
+    return {
+      sessionId: session.id,
+      title: session.title,
+      updatedAt: new Date(session.updated_at),
+      agentName: session.agentName,
+      isMutable: session.isMutable,
+    };
+  }
+
   return {
     async load() {
       const folders = readFolders(await readJson(await fetcher('/api/v1/session-folders')));
@@ -119,32 +149,16 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
       // no matter how far the recent chats list has been scrolled.
       for (const folder of folders) {
         const sessions: ChatFolderSession[] = [];
-        let pageToken: string | undefined;
-        do {
-          const query = new URLSearchParams({
-            folder_id: folder.id,
-            limit: String(SESSION_LIST_PAGE_LIMIT),
-            order: 'desc',
-          });
-          if (pageToken !== undefined) {
-            query.set('page_token', pageToken);
-          }
-          const page = readSessionPage(await readJson(await fetcher(`/api/v1/sessions?${query.toString()}`)));
-          for (const session of page.sessions) {
-            assignments.push({ sessionId: session.id, folderId: folder.id });
-            sessions.push({
-              sessionId: session.id,
-              title: session.title,
-              updatedAt: new Date(session.updated_at),
-              agentName: session.agentName,
-              isMutable: session.isMutable,
-            });
-          }
-          pageToken = page.nextPageToken;
-        } while (pageToken !== undefined);
+        for (const session of await listAllSessions({ folder_id: folder.id })) {
+          assignments.push({ sessionId: session.id, folderId: folder.id });
+          sessions.push(toFolderSession(session));
+        }
         folderSessions.push({ folderId: folder.id, sessions });
       }
-      return { folders, assignments, folderSessions };
+      // Chats with no folder come from their own query for the same reason: the
+      // recent chats list only covers its loaded pages.
+      const unfiledSessions = (await listAllSessions({ no_folder: 'true' })).map(toFolderSession);
+      return { folders, assignments, folderSessions, unfiledSessions };
     },
 
     async createFolder({ name }) {

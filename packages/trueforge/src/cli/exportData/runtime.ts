@@ -63,6 +63,7 @@ async function buildSession<TTransaction>({
         source_type: undefined,
         source_id: undefined,
         folder_id: undefined,
+        no_folder: false,
       });
       for (const session of page.data) {
         const { subject_id: userId, subject_display_name: displayName } = session.created_by_subject;

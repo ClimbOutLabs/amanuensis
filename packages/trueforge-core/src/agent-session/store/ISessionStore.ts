@@ -175,6 +175,8 @@ export interface ListSessionsInput {
   agent_id: string | undefined;
   /** When set, only sessions filed in this folder. */
   folder_id: string | undefined;
+  /** When true, only sessions with no folder. Never combined with `folder_id`. */
+  no_folder: boolean;
   /** When set, match creator or named-agent binding. Empty `agent_ids` means creator-only. */
   created_by_or_agent_ids:
     | {

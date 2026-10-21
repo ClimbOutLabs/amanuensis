@@ -114,6 +114,11 @@ export const ListSessionsRequestQuerySchema = z
     ),
     agent_id: z.string().min(1).optional().describe('When set, only sessions bound to this agent id are returned.'),
     folder_id: z.string().min(1).optional().describe('When set, only sessions filed in this folder are returned.'),
+    no_folder: z
+      .stringbool()
+      .optional()
+      .describe('When true, only sessions with no folder are returned.')
+      .openapi({ type: 'boolean' }),
     created_by_me: z
       .stringbool()
       .optional()
@@ -140,6 +145,10 @@ export const ListSessionsRequestQuerySchema = z
   .refine(q => q.source_id === undefined || q.source_type !== undefined, {
     message: 'source_id requires source_type',
     path: ['source_id'],
+  })
+  .refine(q => q.no_folder !== true || q.folder_id === undefined, {
+    message: 'no_folder cannot be combined with folder_id',
+    path: ['no_folder'],
   })
   .openapi('ListSessionsRequestQuery');
 

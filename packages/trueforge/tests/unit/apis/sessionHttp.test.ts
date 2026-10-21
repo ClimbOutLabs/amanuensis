@@ -727,6 +727,50 @@ describe('sessions HTTP agent binding', () => {
     expect(unfiltered.data.map(s => s.id)).toEqual(expect.arrayContaining([...filedIds, otherId, unfiledId]));
   });
 
+  it('lists only the sessions with no folder when no_folder is given', async () => {
+    const createSession = async () => {
+      const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const createFolder = async (name: string) => {
+      const created = await app.request('/api/session-folders', jsonInit('POST', { name }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const listSessions = async (query: string) => {
+      const res = await app.request(`/?${query}`);
+      expect(res.status).toBe(200);
+      return ListSessionsResponseSchema.parse(await res.json());
+    };
+
+    const workId = await createFolder('Work');
+    const filedId = await createSession();
+    const assigned = await app.request(`/${filedId}/folder`, jsonInit('PUT', { folder_id: workId }));
+    expect(assigned.status).toBe(200);
+    const looseIds = [await createSession(), await createSession()];
+
+    const all = await listSessions('no_folder=true');
+    expect(all.data.map(s => s.id).sort()).toEqual([...looseIds].sort());
+    expect(all.data.every(s => s.folder_id === null)).toBe(true);
+
+    const page1 = await listSessions('no_folder=true&limit=1');
+    expect(page1.data).toHaveLength(1);
+    const next = page1.pagination.next_page_token;
+    expect(next).toBeDefined();
+    const page2 = await listSessions(`no_folder=true&limit=1&page_token=${encodeURIComponent(next ?? '')}`);
+    expect(page2.data).toHaveLength(1);
+    expect([...page1.data, ...page2.data].map(s => s.id).sort()).toEqual([...looseIds].sort());
+
+    const off = await listSessions('no_folder=false');
+    expect(off.data.map(s => s.id)).toEqual(expect.arrayContaining([filedId, ...looseIds]));
+
+    const combined = await app.request(`/?no_folder=true&folder_id=${workId}`);
+    expect(combined.status).toBe(400);
+  });
+
   it("does not assign another user's folder", async () => {
     const createdSession = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
     const session = (await createdSession.json()) as { data: { id: string } };
