@@ -1,8 +1,8 @@
 /**
  * The one list of secret file and folder names the sentinel treats as private, and the matcher
- * that applies it. A path segment is split into words on any non-letter-or-digit character, and a
- * segment is secret when one of its whole words is a secret word: `.git-credentials` and
- * `client_secret.json` are secret, while `secretary` and `tokenizer.ts` are ordinary names.
+ * that applies it. A path segment is split into words at camelCase humps and at any non-letter-or-digit
+ * character, then matched word by word: `.git-credentials`, `client_secret.json` and `apiKey.txt`
+ * are secret, while `secretary`, `tokenizer.ts` and `monkey.md` are ordinary names.
  */
 
 /** Folders and dotfiles that hold keys or logins; a dotted suffix such as `.env.local` also matches. */
@@ -17,10 +17,29 @@ const SECRET_WORDS = new Set([
   'token',
   'tokens',
   'password',
+  'passwords',
   'passwd',
   'apikey',
+  'apikeys',
   'privkey',
+  'privkeys',
 ]);
+
+/**
+ * Two adjacent words that name a secret together. The second word also matches with a trailing `s`,
+ * so `api_keys` counts. A lone `key` or `token` is not listed here, so `keyboard` stays ordinary.
+ */
+const SECRET_WORD_PAIRS: readonly (readonly [string, string])[] = [
+  ['api', 'key'],
+  ['private', 'key'],
+  ['priv', 'key'],
+  ['access', 'key'],
+  ['secret', 'key'],
+  ['client', 'secret'],
+  ['auth', 'token'],
+  ['refresh', 'token'],
+  ['session', 'token'],
+];
 
 /** Key files: SSH key prefixes, and key or certificate suffixes. */
 const SECRET_KEY_PREFIXES = ['id_rsa', 'id_ed25519', 'id_ecdsa'];
@@ -30,11 +49,38 @@ const QUOTE_CHARACTERS = `'"\``;
 
 const WORD_SEPARATOR = /[^\p{L}\p{N}]+/u;
 
+/** A lowercase letter or digit followed by an uppercase letter, or an acronym followed by a capitalised word. */
+const LOWER_TO_UPPER_HUMP = /([\p{Ll}\p{N}])(\p{Lu})/gu;
+const ACRONYM_TO_WORD_HUMP = /(\p{Lu})(\p{Lu}\p{Ll})/gu;
+
+/** Splits a name into lowercase words. Humps are split before lowercasing, so `apiKey` and `API_KEY` both split. */
+function splitWords(name: string): string[] {
+  return name
+    .replace(LOWER_TO_UPPER_HUMP, '$1 $2')
+    .replace(ACRONYM_TO_WORD_HUMP, '$1 $2')
+    .split(WORD_SEPARATOR)
+    .map(word => word.toLowerCase())
+    .filter(word => word.length > 0);
+}
+
+function hasSecretWord(words: string[]): boolean {
+  return words.some((word, index) => {
+    if (SECRET_WORDS.has(word)) {
+      return true;
+    }
+    const next = words[index + 1];
+    return (
+      next !== undefined &&
+      SECRET_WORD_PAIRS.some(([first, second]) => word === first && (next === second || next === `${second}s`))
+    );
+  });
+}
+
 function isSecretSegment(segment: string): boolean {
   const name = segment.toLowerCase();
   return (
     SECRET_DOT_NAMES.some(dot => name === dot || name.startsWith(`${dot}.`)) ||
-    name.split(WORD_SEPARATOR).some(word => SECRET_WORDS.has(word)) ||
+    hasSecretWord(splitWords(segment)) ||
     SECRET_KEY_PREFIXES.some(prefix => name.startsWith(prefix)) ||
     SECRET_KEY_SUFFIXES.some(suffix => name.endsWith(suffix))
   );

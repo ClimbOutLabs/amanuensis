@@ -68,13 +68,83 @@ describe('namesSecretPath', () => {
     '/work/secretary/notes.md',
     '/repo/src/tokenizer.ts',
     '/home/u/keyboard/layout.md',
-    '/home/u/notes/todo.md',
+    '/home/u/notes/monkey.md',
+    '/home/u/notes/apiaries.md',
+    '/home/u/keys/notes.md',
+    '/home/u/notes/key-ideas.md',
+    '/home/u/notes/access-log.md',
+    '/home/u/notes/sessionNotes.md',
+    '/home/u/notes/Tokenizer.ts',
+    '/home/u/notes/secretary_plan.md',
+    '/home/u/notes/Passwordless.md',
     'my token budget and secret santa plans',
     'weather in Lisbon this weekend',
     'the token.',
     'e.g. a plain query',
   ])('does not block the ordinary value %s', value => {
     expect(namesSecretPath(value)).toBe(false);
+  });
+});
+
+describe('namesSecretPath with split words', () => {
+  const PAIRS: Array<[string, string]> = [
+    ['api', 'key'],
+    ['private', 'key'],
+    ['access', 'key'],
+    ['secret', 'key'],
+    ['client', 'secret'],
+    ['auth', 'token'],
+    ['refresh', 'token'],
+    ['session', 'token'],
+  ];
+
+  const capitalise = (word: string): string => `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+
+  test.each(
+    PAIRS.flatMap(([first, second]) => [
+      `${first}_${second}.txt`,
+      `${first}-${second}.txt`,
+      `${first}.${second}.txt`,
+      `${first}${capitalise(second)}.txt`,
+      `${capitalise(first)}${capitalise(second)}.txt`,
+      `${first.toUpperCase()}_${second.toUpperCase()}.txt`,
+      `${first}_${second}s.txt`,
+      `${first}${capitalise(second)}s.txt`,
+      `${first}-${second}s.txt`,
+    ]),
+  )('blocks a secret pair written as %s', name => {
+    expect(namesSecretPath(`/home/u/notes/${name}`)).toBe(true);
+    expect(namesSecretPath(name)).toBe(true);
+  });
+
+  test.each([
+    'apiKey',
+    'APIKey',
+    'API_KEY',
+    'accessKeyId',
+    'privateKey',
+    'clientSecret',
+    'authToken',
+    'refresh_token',
+    'sessionToken',
+  ])('blocks a two-word secret name %s when it is the whole value', name => {
+    expect(namesSecretPath(name)).toBe(true);
+  });
+
+  test.each([
+    '/home/u/notes/passwords.txt',
+    '/home/u/notes/credential.txt',
+    '/home/u/notes/Credentials',
+    '/home/u/notes/tokens.json',
+    '/home/u/notes/apiKeys.csv',
+    '/home/u/notes/privkeys.txt',
+    '/home/u/notes/PASSWORD.txt',
+    '/home/u/notes/passwd',
+    '/home/u/notes/apikey.txt',
+    '/home/u/notes/privKey.txt',
+    '/home/u/notes/SecretKey.json',
+  ])('blocks the single secret word or plural in %s', value => {
+    expect(namesSecretPath(value)).toBe(true);
   });
 });
 
