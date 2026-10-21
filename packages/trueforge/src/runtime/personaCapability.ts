@@ -17,7 +17,9 @@ import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/Tool
 import {
   CREATE_PERSONA_TOOL_NAME,
   isPersonaWriteToolName,
+  LIST_PERSONAS_TOOL_NAME,
   PERSONA_SERVER_ID,
+  USE_PERSONA_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/personas/toolContract';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -25,7 +27,8 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonaStore } from '../db/personaStore';
 import { PersonaNameConflictError } from '../db/personaStore';
 import { createPersonaForOwner } from '../personas/createPersona';
-import { personaMatchKey, type PersonaContent } from '../personas/persona';
+import { personaMatchKey, personaNameKeys, type Persona, type PersonaContent } from '../personas/persona';
+import { activateSessionPersona } from '../personas/sessionPersona';
 import { PersonaContentSchema, PersonaNameSchema } from '../schemas/persona';
 
 /** A description is one line in the card and in the persona list. */
@@ -51,6 +54,14 @@ export const CreatePersonaToolSchema = z
 
 export type CreatePersonaToolInput = z.infer<typeof CreatePersonaToolSchema>;
 
+export const UsePersonaToolSchema = z
+  .object({
+    name: PersonaNameSchema.describe("The name of one of the user's existing specialists."),
+  })
+  .strict();
+
+export type UsePersonaToolInput = z.infer<typeof UsePersonaToolSchema>;
+
 /** The stored instructions lead with the description, so the persona keeps its one-line purpose. */
 export function personaContentFor(input: {
   name: string;
@@ -75,6 +86,8 @@ export interface PersonaTurnContext {
   owner_id: string;
   /** The model the chat runs on; a new specialist answers with it. */
   model_name: string;
+  /** The chat the specialist takes over; the switch is recorded on it. */
+  session_id: string;
   logger: Logger;
 }
 
@@ -93,9 +106,19 @@ interface PreparedCreate {
 
 const NOT_APPROVED = 'Nothing was added because the user has not approved it. Ask again if they still want it.';
 
-/** Plain words for the model: the specialist exists, and the chat cannot hand the request over to it. */
-function readyMessage(name: string): string {
-  return `The specialist ${name} is ready. Tell the user it is ready and how to start a chat with it: begin a message with ${name}'s name, for example "${name}, ...". Do not say the current request was handed to them.`;
+/** Plain words for the model: the specialist was added and now answers this chat from the next message on. */
+function createdMessage(name: string): string {
+  return `The specialist ${name} is ready and now answers this chat from the next message on. Tell the user in one plain line: "Now talking with ${name}." Do not say the current request was handed to them.`;
+}
+
+/** Reusing a specialist says so plainly, then switches the chat to it the same way. */
+function reusedMessage(name: string): string {
+  return `Tell the user in one plain line: "Using your existing ${name}." Then tell them in one more plain line: "Now talking with ${name}." Do not say the current request was handed to them.`;
+}
+
+/** A specialist's first line is its one-line description: the description leads the stored instructions. */
+function firstLine(text: string): string {
+  return text.split('\n', 1)[0] ?? '';
 }
 
 function jsonResult(value: unknown) {
@@ -131,10 +154,26 @@ export class PersonaToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_PERSONA_TOOL_NAME,
         description:
-          'Add a lasting specialist for the user: a short name, a one-line description, and instructions for what it focuses on and how it talks. The user approves a card before anything is saved. It cannot change or delete an existing specialist. After it succeeds, tell the user the specialist is ready.',
+          'Add a lasting specialist for the user: a short name, a one-line description, and instructions for what it focuses on and how it talks. Call list_personas first, and use use_persona instead when a specialist already fits. The user approves a card before anything is saved. On success this chat switches to the specialist. It cannot change or delete an existing specialist.',
         schema: CreatePersonaToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
+      }),
+      defineTool({
+        name: LIST_PERSONAS_TOOL_NAME,
+        description:
+          "List the user's specialists: each name, its aliases, and its one-line description. Call this before create_persona to see whether one already fits.",
+        schema: z.object({}).strict(),
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        handler: () => this.#list(),
+      }),
+      defineTool({
+        name: USE_PERSONA_TOOL_NAME,
+        description:
+          "Switch this chat to one of the user's existing specialists by name. Use it instead of create_persona when a specialist already fits. Nothing is saved or changed.",
+        schema: UsePersonaToolSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        handler: input => this.#use(input),
       }),
     ];
   }
@@ -233,10 +272,7 @@ export class PersonaToolSet extends LocalToolMCP {
 
   /** Every name and alias the owner's personas already answer to, in match form. */
   async #takenNameKeys(): Promise<Set<string>> {
-    const personas = await this.#options.store.listPersonas({
-      tenant_id: this.#options.tenant_id,
-      created_by: this.#options.owner_id,
-    });
+    const personas = await this.#ownerPersonas();
     const keys = new Set<string>();
     for (const persona of personas) {
       keys.add(personaMatchKey(persona.display_name));
@@ -245,6 +281,46 @@ export class PersonaToolSet extends LocalToolMCP {
       }
     }
     return keys;
+  }
+
+  #ownerPersonas(): Promise<Persona[]> {
+    return this.#options.store.listPersonas({
+      tenant_id: this.#options.tenant_id,
+      created_by: this.#options.owner_id,
+    });
+  }
+
+  async #list() {
+    const personas = await this.#ownerPersonas();
+    return jsonResult({
+      specialists: personas.map(persona => ({
+        name: persona.display_name,
+        aliases: persona.aliases,
+        description: firstLine(persona.instructions),
+      })),
+    });
+  }
+
+  /** Switches this chat to an existing specialist. Nothing is saved, so no card is shown. */
+  async #use(input: UsePersonaToolInput) {
+    const key = personaMatchKey(input.name);
+    const persona = (await this.#ownerPersonas()).find(candidate => personaNameKeys(candidate).includes(key));
+    if (persona === undefined) {
+      return errorResult(
+        `Nothing was changed because the user has no specialist named "${input.name}". Call list_personas to see the names, or create_persona to add one.`,
+      );
+    }
+    await this.#switchChat(persona);
+    return jsonResult({ using: { name: persona.display_name }, next: reusedMessage(persona.display_name) });
+  }
+
+  #switchChat(persona: Persona) {
+    return activateSessionPersona({
+      store: this.#options.store,
+      tenant_id: this.#options.tenant_id,
+      session_id: this.#options.session_id,
+      persona,
+    });
   }
 
   #duplicateMessage(name: string): string {
@@ -260,8 +336,9 @@ export class PersonaToolSet extends LocalToolMCP {
       return errorResult(prepared.message);
     }
     const { content, description } = prepared.value;
+    let created: Persona;
     try {
-      await createPersonaForOwner({
+      created = await createPersonaForOwner({
         tenant_id: this.#options.tenant_id,
         owner_id: this.#options.owner_id,
         content,
@@ -274,16 +351,17 @@ export class PersonaToolSet extends LocalToolMCP {
       }
       throw error;
     }
+    await this.#switchChat(created);
     return jsonResult({
       created: { name: content.display_name, description },
-      next: readyMessage(content.display_name),
+      next: createdMessage(content.display_name),
     });
   }
 }
 
 const PERSONA_INSTRUCTION_SECTION = 'specialists';
 const PERSONA_INSTRUCTION =
-  'Specialists can only be added with create_persona, which asks the user first. Say one was added only when create_persona succeeded. Never change or delete a specialist from chat.';
+  'Before adding a specialist, call list_personas. If one already fits, switch to it with use_persona instead. Specialists are added only with create_persona, which asks the user first. Say one was added only when create_persona succeeded. Never change or delete a specialist from chat.';
 
 function buildPersonaInstruction(builder: InstructionBuilder): void {
   builder.addSection(PERSONA_INSTRUCTION_SECTION, PERSONA_INSTRUCTION);

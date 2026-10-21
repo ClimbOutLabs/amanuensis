@@ -25,7 +25,12 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
-import { PERSONA_SERVER_ID } from '../personas/toolContract';
+import {
+  isPersonaWriteToolName,
+  LIST_PERSONAS_TOOL_NAME,
+  PERSONA_SERVER_ID,
+  USE_PERSONA_TOOL_NAME,
+} from '../personas/toolContract';
 import {
   isScheduleStatusToolName,
   isScheduleWriteToolName,
@@ -1994,8 +1999,24 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
   };
 }
 
-/** Adding a specialist always asks with the full instructions. Any other persona tool name fails closed. */
+/**
+ * Adding a specialist always asks with the full instructions. Reading the list and switching this chat to an
+ * existing specialist run without asking. Any other persona tool name fails closed.
+ */
 async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.tool_name === LIST_PERSONAS_TOOL_NAME) {
+    return tier1Decision({ reason: 'persona_read', reason_detail: 'Read your specialists.', sensitive_read: false });
+  }
+  if (action.tool_name === USE_PERSONA_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'persona_switch',
+      reason_detail: 'Switch this chat to a specialist you already have.',
+      sensitive_read: false,
+    });
+  }
+  if (!isPersonaWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown specialist tool.' });
+  }
   if (action.persona_write === undefined) {
     return autoDenyDecision({
       reason: 'destination_unverifiable',

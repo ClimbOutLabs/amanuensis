@@ -1,4 +1,4 @@
-import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -9,13 +9,17 @@ import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-co
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
+import { TENANT_ID } from '../../../src/apis/sessions';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { activateSessionPersona } from '../../../src/personas/sessionPersona';
 import type { ChatRunner } from '../../../src/runtime/chatAssistant';
 import { chatModelName } from '../../../src/runtime/chatAssistant';
 import { PersonaToolSet, personaContentFor } from '../../../src/runtime/personaCapability';
+import { resolveTurnPersona } from '../../../src/runtime/turnPersona';
 
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Test Owner' };
 const CHAT_MODEL = 'test-provider/chat-model';
@@ -26,6 +30,8 @@ const TRAVEL_PLANNER = {
   description: 'Plans trips in detail, with a day-by-day route.',
   instructions: 'Focus on routes, timing and local food. Talk in short, friendly sentences.',
 };
+
+const CHAT_SESSION_ID = 'chat-1';
 
 /** The card prompt's own call: a persona the chat answers with, on the chat's model. */
 async function setup(input: { existing?: string[] } = {}) {
@@ -46,6 +52,14 @@ async function setup(input: { existing?: string[] } = {}) {
     },
   });
   const store = new SqlitePersonaStore(db);
+  const sessionStore = new SqliteSessionStore(db);
+  await new Sessions({ sessionStore }).create({
+    tenant_id: TENANT_ID,
+    session_id: CHAT_SESSION_ID,
+    created_by_subject: OWNER,
+    external_id: null,
+    agent: { type: 'inline', spec: CHAT_SPEC },
+  });
   for (const name of input.existing ?? []) {
     await store.createPersona({
       tenant_id: 'default',
@@ -73,11 +87,14 @@ async function setup(input: { existing?: string[] } = {}) {
     tenant_id: 'default',
     owner_id: OWNER.subject_id,
     model_name: chatModelName(runner),
+    session_id: CHAT_SESSION_ID,
     logger: winston.createLogger({ silent: true }),
     sentinel,
   });
   const listAll = () => store.listPersonas({ tenant_id: 'default', created_by: OWNER.subject_id });
-  return { tools, sentinel, store, listAll };
+  const activeChatPersona = () =>
+    store.getLatestManualSessionPersona({ tenant_id: TENANT_ID, session_id: CHAT_SESSION_ID });
+  return { tools, sentinel, store, modelProviderStore, listAll, activeChatPersona };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -86,10 +103,12 @@ type Setup = Awaited<ReturnType<typeof setup>>;
 async function dispatch(input: {
   built: Setup;
   args: Record<string, unknown>;
+  name?: string | undefined;
   decision?: ApprovalDecision | undefined;
 }) {
   const { tools, sentinel } = input.built;
-  const info = await tools.toolCallInfo({ name: 'create_persona', arguments: input.args });
+  const name = input.name ?? 'create_persona';
+  const info = await tools.toolCallInfo({ name, arguments: input.args });
   const message: InternalEnrichedAssistantMessage = {
     role: 'assistant',
     content: null,
@@ -97,14 +116,14 @@ async function dispatch(input: {
       {
         id: 'call-1',
         type: 'function',
-        function: { name: 'create_persona', arguments: JSON.stringify(input.args) },
+        function: { name, arguments: JSON.stringify(input.args) },
         tool_info: info,
       },
     ],
   };
   const result = await executeToolCalls({
     assistantMessage: message,
-    toolMapping: new Map([['create_persona', { toolSet: tools, originalToolName: 'create_persona' }]]),
+    toolMapping: new Map([[name, { toolSet: tools, originalToolName: name }]]),
     threadId: 'main',
     approvalDecisions: new Map(input.decision === undefined ? [] : [['call-1', input.decision]]),
     memoState: createToolCallMemoState(),
@@ -213,12 +232,115 @@ describe('create_persona', () => {
     expect(info.pre_dispatch_failure?.message).toContain('The description must be one line.');
   });
 
-  it('gives the model the ready message and no claim that the request was handed over', async () => {
+  it('gives the model the switch line and no claim that the request was handed over', async () => {
     const built = await setup();
     const { result } = await dispatch({ built, args: TRAVEL_PLANNER, decision: { status: 'allow' } });
     const text = resultText(result);
-    expect(text).toContain('The specialist Travel planner is ready.');
-    expect(text).toContain("begin a message with Travel planner's name");
+    expect(text).toContain('Now talking with Travel planner.');
+    expect(text).toContain('answers this chat from the next message on');
     expect(text).toContain('Do not say the current request was handed to them.');
+  });
+
+  it('switches this chat to the specialist it just added', async () => {
+    const built = await setup();
+    expect(await built.activeChatPersona()).toBeUndefined();
+
+    await dispatch({ built, args: TRAVEL_PLANNER, decision: { status: 'allow' } });
+    const [saved] = await built.listAll();
+    expect(await built.activeChatPersona()).toMatchObject({
+      persona_id: saved?.id,
+      persona_name: 'Travel planner',
+      source: 'explicit',
+    });
+  });
+});
+
+describe('reusing a specialist', () => {
+  it('creates the specialist once, then reuses it with no card the second time', async () => {
+    const built = await setup();
+
+    // First run: the card is shown, approved, and the chat switches to the new specialist.
+    await dispatch({ built, args: TRAVEL_PLANNER, decision: { status: 'allow' } });
+    const [created] = await built.listAll();
+
+    // Second run: the model reads the list first, which needs no card.
+    const listed = await dispatch({ built, args: {}, name: 'list_personas' });
+    expect(listed.info.is_approval_required).toBe(false);
+    expect(listed.info.tier3_card).toBeUndefined();
+    expect(resultText(listed.result)).toContain('"name":"Travel planner"');
+
+    // The model then switches to the one it found, with no card and no new specialist.
+    const info = await built.tools.toolCallInfo({ name: 'use_persona', arguments: { name: 'travel PLANNER' } });
+    expect(info.is_approval_required).toBe(false);
+    expect(info.tier3_card).toBeUndefined();
+    const { result } = await dispatch({ built, args: { name: 'travel PLANNER' }, name: 'use_persona' });
+    const text = resultText(result);
+    expect(text).toContain('Using your existing Travel planner.');
+    expect(text).toContain('Now talking with Travel planner.');
+    expect(await built.listAll()).toHaveLength(1);
+    expect(await built.activeChatPersona()).toMatchObject({ persona_id: created?.id, source: 'explicit' });
+  });
+
+  it('still refuses a second create with the same name as a safety net', async () => {
+    const built = await setup();
+    await dispatch({ built, args: TRAVEL_PLANNER, decision: { status: 'allow' } });
+
+    const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain('already has a specialist named "Travel planner"');
+    expect(await built.listAll()).toHaveLength(1);
+  });
+
+  it('refuses to switch to a name the user has no specialist for, and changes nothing', async () => {
+    const built = await setup({ existing: ['Zara'] });
+    const { result } = await dispatch({ built, args: { name: 'Milo' }, name: 'use_persona' });
+    expect(resultText(result)).toContain('has no specialist named \\"Milo\\"');
+    expect(await built.activeChatPersona()).toBeUndefined();
+  });
+
+  it('lists each specialist by name, aliases and its one-line description, with no card', async () => {
+    const built = await setup({ existing: ['Zara'] });
+    const info = await built.tools.toolCallInfo({ name: 'list_personas', arguments: {} });
+    expect(info.is_approval_required).toBe(false);
+    const { result } = await dispatch({ built, args: {}, name: 'list_personas' });
+    expect(JSON.parse(resultText(result))).toEqual({
+      specialists: [{ name: 'Zara', aliases: [], description: 'Be brief.' }],
+    });
+  });
+});
+
+describe('the chat after a switch', () => {
+  it('answers from the specialist next, and switching back returns to the default assistant', async () => {
+    const built = await setup({ existing: ['Zara'] });
+    const [zara] = await built.listAll();
+    if (zara === undefined) {
+      throw new Error('The seeded specialist is missing.');
+    }
+    await dispatch({ built, args: { name: 'Zara' }, name: 'use_persona' });
+
+    const resolveNext = async () =>
+      resolveTurnPersona({
+        personaStore: built.store,
+        modelProviderStore: built.modelProviderStore,
+        defaultAssistantName: undefined,
+        tenant_id: TENANT_ID,
+        created_by: OWNER.subject_id,
+        turnInput: [{ type: 'user.message', content: 'Plan a weekend trip.' }],
+        previousTurnCustom: undefined,
+        latestManualActivation: await built.activeChatPersona(),
+        legacyParentActivation: undefined,
+        latestManualActivationAfterParent: undefined,
+      });
+
+    expect(await resolveNext()).toMatchObject({ kind: 'persona', persona: { id: zara.id }, source: 'sticky' });
+
+    // Switching back the usual way: the chat's default activation wins on the next turn.
+    await activateSessionPersona({
+      store: built.store,
+      tenant_id: TENANT_ID,
+      session_id: CHAT_SESSION_ID,
+      persona: undefined,
+    });
+    expect(await resolveNext()).toBeUndefined();
   });
 });

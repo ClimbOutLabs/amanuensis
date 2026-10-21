@@ -3,7 +3,6 @@ import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { ulid } from 'ulid';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../db/personaStore';
@@ -12,6 +11,7 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { closePersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import { createPersonaForOwner } from '../personas/createPersona';
 import { buildPersonaContext, type Persona, type PersonaActivation } from '../personas/persona';
+import { activateSessionPersona } from '../personas/sessionPersona';
 import {
   createPersonaRoute,
   deletePersonaRoute,
@@ -250,15 +250,11 @@ export function createSessionPersonasRouter(deps: SessionPersonasRouterDeps) {
     if (personaId !== null && persona === undefined) {
       return c.json({ error: { message: `Persona not found: ${personaId}` } }, 404);
     }
-    const recorded = await deps.personaStore.recordPersonaActivation({
+    const recorded = await activateSessionPersona({
+      store: deps.personaStore,
       tenant_id: TENANT_ID,
-      id: ulid().toLowerCase(),
       session_id: sessionId,
-      turn_id: null,
-      persona_id: persona?.id ?? null,
-      persona_name: persona?.display_name ?? null,
-      model_name: persona?.model_name ?? null,
-      source: persona === undefined ? 'default' : 'explicit',
+      persona,
     });
     return c.json({ data: toWireActivation(recorded) }, 200);
   };

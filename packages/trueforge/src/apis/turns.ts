@@ -2090,6 +2090,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               tenant_id: requestContext.tenant_id,
               owner_id: userRef,
               model_name: chatModelName(chatRunner),
+              session_id: session.session_id,
               logger: deps.logger,
             },
       schedules:
