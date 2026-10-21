@@ -13,11 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
-import {
-  heldBecause,
-  savedSearchHoldReason,
-  SERVER_SECRET_REASON,
-} from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -149,6 +145,20 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
+  /** The whole specialist when the action adds one, or null. */
+  persona: SentinelApprovalPersona | null;
+};
+
+/** The whole specialist a chat call adds, in plain words. */
+export type SentinelApprovalPersona = {
+  /** Specialist name in plain words. */
+  name: string;
+  /** One line on what the specialist is for. */
+  description: string;
+  /** The whole instruction text the specialist follows. */
+  instructions: string;
+  /** The model the specialist answers with. */
+  model_name: string;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -322,19 +332,19 @@ const SEARCH_QUERY_MARKER = ' for: ';
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
-  const because = savedSearchHoldReason(card.why_asked_again);
-  if (because === undefined) return card;
-  if (because === SERVER_SECRET_REASON) {
+  const saved = savedSearchHold(card.why_asked_again);
+  if (saved === undefined) return card;
+  if (saved.secret) {
     const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: `${heading}${heldBecause(SERVER_SECRET_REASON)}`,
+      plain_what: withHoldSay(heading, saved.say),
       why_asked_again: null,
       outbound_text: null,
     };
   }
-  return { ...card, plain_what: `${card.plain_what}${heldBecause(because)}`, why_asked_again: null };
+  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -448,6 +458,19 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
+/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+function parsePersona(value: unknown): SentinelApprovalPersona | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  if (name === undefined || description === undefined || instructions === undefined || model_name === undefined) {
+    return null;
+  }
+  return { name, description, instructions, model_name };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -491,6 +514,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
+    persona: parsePersona(value.persona),
   });
 }
 

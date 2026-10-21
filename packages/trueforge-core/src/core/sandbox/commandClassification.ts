@@ -97,9 +97,9 @@ interface TokenizedCommand {
   unsafe: boolean;
 }
 
-/** Discard-only redirects do not mutate the repository. */
+/** Discard-only redirects do not mutate the repository. The path may follow the operator after spaces or tabs. */
 function stripNullDeviceRedirects(command: string): string {
-  return command.replace(/(?:^|\s)\d*>>?\/dev\/null(?=\s|$)/g, ' ');
+  return command.replace(/(?:^|\s)\d*>>?[ \t]*\/dev\/null(?=\s|$)/g, ' ');
 }
 
 /**

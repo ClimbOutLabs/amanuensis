@@ -447,7 +447,7 @@ describe('buildBugReportBundle', () => {
   it('carries nothing of a held search card, masked or not', () => {
     const card = {
       plain_what:
-        "Search the web through finder for: debug sy••••••11. Held because it contains one of this computer's keys.",
+        'Search the web through finder for: debug sy••••••11. This search contains something that looks like a password or key.',
       outbound_text: 'query: debug sy••••••11',
     };
     const rows = [

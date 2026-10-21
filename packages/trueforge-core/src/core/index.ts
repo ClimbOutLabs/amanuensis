@@ -395,7 +395,7 @@ export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/stru
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
 // Skills: the ISkillMounter seam lets hosts plug in their own skill sources
-export { InstructionBuilder } from './InstructionBuilder';
+export { InstructionBuilder, rootAgentIdentity, type RootAgentNames } from './InstructionBuilder';
 export {
   SKILLS_PREAMBLE,
   SkillMounter,
@@ -483,17 +483,13 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
   Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export {
-  SILENT_SEARCH_LIMIT,
-  createWebSearchTurnState,
-  recordResultUrls,
-  remoteImageAskReason,
-} from './permissions/webSearch';
+export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, recordResultUrls } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';

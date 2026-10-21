@@ -58,12 +58,31 @@ const RunCodeFileInSchema = z.object({
   content_base64: z.string().min(1),
 });
 
+const RunCodeCodeSchema = z
+  .string()
+  .min(1)
+  .refine(code => code.length <= CODE_MAX_LENGTH, `must be at most ${String(CODE_MAX_LENGTH)} characters`);
+
+/** A workspace path. Its length is checked by refine, for the same xgrammar reason as the file name. */
+const SCRIPT_PATH_MAX_LENGTH = 4096;
+
+const RunCodeScriptPathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    path => path.length <= SCRIPT_PATH_MAX_LENGTH,
+    `must be at most ${String(SCRIPT_PATH_MAX_LENGTH)} characters`,
+  );
+
+/**
+ * Exactly one of `code` or `script_path` is required. The schema marks both optional because the
+ * JSON Schema the model sees cannot express "exactly one"; the run service refuses the other cases.
+ */
 export const RunCodeInputSchema = z.object({
   language: RunCodeLanguageSchema,
-  code: z
-    .string()
-    .min(1)
-    .refine(code => code.length <= CODE_MAX_LENGTH, `must be at most ${String(CODE_MAX_LENGTH)} characters`),
+  code: RunCodeCodeSchema.optional(),
+  // A file the model wrote under the chat workspace. The run reads a copy; the file is never changed.
+  script_path: RunCodeScriptPathSchema.optional(),
   // Model-authored content only (e.g. CSV text the model composes). Conversation
   // attachments are staged into ingress automatically by the harness and
   // advertised in the tool description — the model never base64-encodes them.

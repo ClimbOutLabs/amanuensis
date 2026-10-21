@@ -14,6 +14,7 @@ test_prompts_state_their_rule() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -34,6 +35,7 @@ test_an_invalid_name_asks_again_with_the_reason() {
   run_install_tty "Name for this instance=>My_Name
 Name for this instance=>main
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -54,6 +56,7 @@ Name for this instance=>main-
 Name for this instance=>machine
 Name for this instance=>main
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"Main\" has capital letters"
@@ -64,6 +67,7 @@ Go ahead?=>n"
   run_install_tty "Name for this instance=>abcdefghijklmnopqrstuvwxyz
 Name for this instance=>main
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters. Use 1 to 24"
@@ -77,6 +81,7 @@ test_an_invalid_email_asks_again() {
   run_install_tty "Name for this instance=>
 Your email=>not-an-email
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
@@ -138,6 +143,7 @@ test_a_short_password_asks_again_and_states_the_rule_each_time() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>short
@@ -157,6 +163,7 @@ test_five_bad_passwords_stop() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>a1
