@@ -149,6 +149,20 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
+  /** The whole specialist when the action adds one, or null. */
+  persona: SentinelApprovalPersona | null;
+};
+
+/** The whole specialist a chat call adds, in plain words. */
+export type SentinelApprovalPersona = {
+  /** Specialist name in plain words. */
+  name: string;
+  /** One line on what the specialist is for. */
+  description: string;
+  /** The whole instruction text the specialist follows. */
+  instructions: string;
+  /** The model the specialist answers with. */
+  model_name: string;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -462,6 +476,19 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
+/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+function parsePersona(value: unknown): SentinelApprovalPersona | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  if (name === undefined || description === undefined || instructions === undefined || model_name === undefined) {
+    return null;
+  }
+  return { name, description, instructions, model_name };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -505,6 +532,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     email: parseEmail(value.email),
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
+    persona: parsePersona(value.persona),
   });
 }
 

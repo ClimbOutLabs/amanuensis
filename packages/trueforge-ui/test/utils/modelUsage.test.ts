@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeModelUsage,
   describeTokenSplit,
   formatCostUsd,
   formatTokens,
@@ -35,7 +36,11 @@ describe('summarizeModelUsage', () => {
   it('totals the answer and its helper calls, with the answer model first', () => {
     const summary = summarizeModelUsage([NANO_SUMMARY_EVENT, SUPER_EVENT, NANO_COMPACTION_EVENT]);
 
-    expect(summary?.answer).toEqual({ displayName: 'Nemotron 3 Super', providerLabel: 'Token Factory' });
+    expect(summary?.answer).toEqual({
+      displayName: 'Nemotron 3 Super',
+      provider: 'tokenfactory',
+      providerLabel: 'Token Factory',
+    });
     expect(summary?.inputTokens).toBe(1800 + 500 + 4000);
     expect(summary?.outputTokens).toBe(340 + 50 + 300);
     expect(summary?.costUsd).toBeCloseTo(0.000846 + 0.000042 + 0.000312, 12);
@@ -45,6 +50,10 @@ describe('summarizeModelUsage', () => {
       ['Compaction', 'Nemotron 3 Nano'],
     ]);
     expect(summary?.helperCalls).toBe(2);
+    expect(summary?.helperModelNames).toEqual(['Nemotron 3 Nano']);
+    expect(summary && describeModelUsage(summary).find(fact => fact.key === 'helpers')?.value).toBe(
+      '2, on Nemotron 3 Nano',
+    );
     expect(summary?.noneReported).toBe(false);
     expect(summary?.unreportedCalls).toBe(0);
   });
@@ -63,6 +72,7 @@ describe('summarizeModelUsage', () => {
     const summary = summarizeModelUsage([SUPER_EVENT]);
 
     expect(summary?.helperCalls).toBe(0);
+    expect(summary && describeModelUsage(summary).map(fact => fact.key)).toEqual(['model', 'tokens', 'cost']);
   });
 
   it('says usage was not reported, with no tokens or cost, when the provider reported none', () => {
