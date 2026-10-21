@@ -382,6 +382,7 @@ instance_collect() {
   instance_collect_addresses
   instance_collect_tls
   instance_collect_token_factory
+  email_collect
   ui_ok "Instance $I_NAME for $I_EMAIL"
 }
 
@@ -555,6 +556,8 @@ instance_create() {
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
+  if [ "$E_ON" = 1 ]; then email_save "$I_NAME"; fi
+  AMAN_EMAIL_PASSWORD=
   INSTANCE_PENDING=
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -585,6 +588,7 @@ read_password_first() {
   if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     read_token_factory_key_stdin
   fi
+  email_read_password_stdin
 }
 
 # How an address of the Open row is told apart, so the ones other devices use come first.
@@ -625,6 +629,9 @@ print_instance_summary() {
     esac
   done < <(origins_display_order "${origins:-$url}")
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
+  if [ -n "$(reg_get "$name" mail_address)" ]; then
+    ui_check_row ok "Email" "$(reg_get "$name" mail_address), $(reg_get "$name" mail_provider)"
+  fi
   print_model_row "$name"
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
@@ -922,6 +929,7 @@ cmd_instance_add() {
   warn_if_installed_older
   I_NAME=$OPT_NAME
   if reg_exists "$I_NAME"; then
+    email_refuse_on_existing
     tf_rotation_collect
     instance_create
     tf_rotation_apply

@@ -6,6 +6,7 @@
 #        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
+#        install.sh instance email <name> [--remove]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -17,7 +18,7 @@ set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
 # A password or key in the caller's environment is never used and must not reach a child process.
-unset AMAN_PASSWORD AMAN_TF_KEY NEBIUS_API_KEY
+unset AMAN_PASSWORD AMAN_TF_KEY AMAN_EMAIL_PASSWORD NEBIUS_API_KEY
 
 INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
@@ -61,6 +62,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/email.sh
+. "$INSTALLER_DIR/lib/email.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
 # shellcheck source=lib/import.sh
@@ -111,11 +114,21 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
+OPT_EMAIL_PROVIDER=
+OPT_EMAIL_ADDRESS=
+OPT_EMAIL_IMAP_HOST=
+OPT_EMAIL_IMAP_PORT=
+OPT_EMAIL_SMTP_HOST=
+OPT_EMAIL_SMTP_PORT=
+OPT_EMAIL_PASSWORD_STDIN=0
+OPT_EMAIL_REMOVE=0
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
 AMAN_PASSWORD=
 AMAN_TF_KEY=
+AMAN_EMAIL_PASSWORD=
+E_ON=0
 ui_init
 
 usage() {
@@ -137,6 +150,9 @@ Amanuensis installer
                                   export your data from an older Aman in that folder; the old Aman is only read
   install.sh instance refresh <name>
                                   start the instance again with its current settings
+  install.sh instance email <name> [--remove]
+                                  connect, change or remove an email account of an instance, then restart it;
+                                  asks for the details unless the --email-* options are given
   install.sh instance password [<name>]
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
@@ -164,6 +180,7 @@ Options
   --instance NAME       which instance demo-seed and password apply to (default: the only one)
   --password-stdin      read the password from the first line of the input instead of asking for it
   --token-factory-key-stdin  read the Token Factory key from the input (the line after the password with --password-stdin); never put the key on the command line
+                        With several stdin options the lines come in this order: password, Token Factory key, email app password.
   --token-factory-model ID   the Token Factory model to use (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
   --demo                make the instance a demo and fill it with example data once it runs
@@ -183,6 +200,12 @@ Options
   --display-name NAME   with instance import, your name as imported chats show it (default: asked, or the start of your email)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
+  --email-provider NAME  with the email options: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, proton or other
+  --email-address ADDRESS  the email address to connect
+  --email-password-stdin  read the email app password from the input (see the line order below)
+  --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
+                        the incoming and outgoing servers, for --email-provider other only
+  --remove              with instance email, remove the email account of the instance
   --print-root-steps    show the admin steps that install Docker, and stop
   --print-network       show every site the installer may contact, and stop
   --print-proxy-requirements  show what a reverse proxy in front of Aman must do, and stop
@@ -216,6 +239,8 @@ parse_args() {
       --verbose) UI_VERBOSE=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
+      --email-password-stdin) OPT_EMAIL_PASSWORD_STDIN=1 ;;
+      --remove) OPT_EMAIL_REMOVE=1 ;;
       --install-docker) OPT_INSTALL_DOCKER=1 ;;
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
@@ -234,12 +259,12 @@ parse_args() {
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
-      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user)
+      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=*)
+      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --email-provider=* | --email-address=* | --email-imap-host=* | --email-imap-port=* | --email-smtp-host=* | --email-smtp-port=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -292,6 +317,12 @@ set_option() {
     --display-name) OPT_DISPLAY_NAME=$2 ;;
     --from-compose) OPT_FROM_COMPOSE=$2 ;;
     --user) OPT_MIGRATE_USER=$2 ;;
+    --email-provider) OPT_EMAIL_PROVIDER=$2 ;;
+    --email-address) OPT_EMAIL_ADDRESS=$2 ;;
+    --email-imap-host) OPT_EMAIL_IMAP_HOST=$2 ;;
+    --email-imap-port) OPT_EMAIL_IMAP_PORT=$2 ;;
+    --email-smtp-host) OPT_EMAIL_SMTP_HOST=$2 ;;
+    --email-smtp-port) OPT_EMAIL_SMTP_PORT=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -342,6 +373,7 @@ on_exit() {
   trap - EXIT
   AMAN_PASSWORD=
   AMAN_TF_KEY=
+  AMAN_EMAIL_PASSWORD=
   ui_step_abort
   upgrade_on_exit
   import_on_exit
@@ -360,6 +392,7 @@ main() {
   check_demo_options
   check_import_options
   check_migrate_options
+  check_email_options
   cloud_guard
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -403,8 +436,9 @@ main() {
         demo-seed) cmd_instance_demo_seed ;;
         import) cmd_instance_import ;;
         refresh) cmd_instance_refresh ;;
+        email) cmd_instance_email ;;
         password) cmd_instance_password ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|password" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password" ;;
       esac
       ;;
   esac

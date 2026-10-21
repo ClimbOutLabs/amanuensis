@@ -125,6 +125,7 @@ test_end_of_input_at_the_password_prompt_aborts() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=><EOF>"
@@ -141,6 +142,7 @@ test_prompts_and_summary_use_plain_words() {
   sandbox_new
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD

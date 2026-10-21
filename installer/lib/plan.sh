@@ -536,6 +536,7 @@ cmd_install() {
   else
     ui_phase "Your instance" 2 6
     ui_skip "Instance $(reg_names | tr '\n' ' ')is already set up; nothing to ask"
+    email_refuse_on_existing
     tf_rotation_collect
   fi
   backups_collect

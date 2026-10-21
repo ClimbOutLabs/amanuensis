@@ -403,6 +403,7 @@ Name for this instance:=>main
 Name for this instance:=>Bad_Name
 Name for this instance:=>work
 Your email=>work@example.invalid
+Connect an email account=>n
 Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
 Enter password again=>$SENTINEL_PASSWORD" instance add
   assert_eq "$RC" 0
