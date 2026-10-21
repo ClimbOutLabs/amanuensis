@@ -373,7 +373,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Signed in' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'You' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Answering' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Memory' })).toBeInTheDocument();
@@ -385,6 +385,60 @@ describe('AmanRuntimeRail', () => {
     // Old labels must not reappear.
     expect(screen.queryByRole('heading', { name: 'Status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
+  });
+
+  describe('the You row', () => {
+    const profileWith = (names: { address_as: string | null; user_name: string | null }) => ({
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      ...names,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: [],
+      learned_profile: null,
+    });
+
+    const renderRail = ({ profile, userName }: { profile: ReturnType<typeof profileWith> | null; userName?: string }) =>
+      render(
+        <RuntimeHarness messages={[]}>
+          <PersonalizationProvider
+            api={{
+              getProfile: async () => profile,
+              updateProfile: async value => value,
+              deleteProfile: async () => {},
+            }}
+          >
+            <AmanRuntimeRail userName={userName} />
+          </PersonalizationProvider>
+        </RuntimeHarness>,
+      );
+
+    it('shows the name the person asked to be called first', async () => {
+      renderRail({
+        profile: profileWith({ address_as: 'Mum', user_name: 'Maria' }),
+        userName: 'maria@example.com',
+      });
+
+      expect(await screen.findByText('Mum')).toBeInTheDocument();
+      expect(screen.queryByText('Maria')).not.toBeInTheDocument();
+    });
+
+    it('shows the name the person gave ahead of the sign-in name', async () => {
+      renderRail({ profile: profileWith({ address_as: null, user_name: 'Maria' }), userName: 'owner' });
+
+      expect(await screen.findByText('Maria')).toBeInTheDocument();
+    });
+
+    it('never shows the sign-in name owner, and hides the row when nothing else is set', async () => {
+      const { container } = renderRail({
+        profile: profileWith({ address_as: null, user_name: null }),
+        userName: 'owner',
+      });
+
+      expect(screen.queryByText('owner')).not.toBeInTheDocument();
+      expect(container.querySelector('[data-section="account"]')).toBeNull();
+    });
   });
 
   it('shows the probe latency next to a ready status', async () => {
