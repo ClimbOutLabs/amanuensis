@@ -443,7 +443,7 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   run_install instance refresh main --address files
   assert_rc 0
   assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"files"'
-  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint" | grep -c "$before")" 0 "a new authority"
+  assert_eq "$(grep -c "$before" "$AMAN_HOME/tls/ca/root.fingerprint")" 0 "a new authority"
   assert_flat_contains "$OUT" "root certificate was made again"
   assert_flat_contains "$OUT" "each device must trust it again"
   assert_contains "$(pki_info)" '"root_covers_leaf":true'

@@ -99,10 +99,12 @@ A session can be bound to one registered repository and an absolute checkout pat
 
 Confirmed commands are host-owned. The agent invokes a command by ID, while the harness supplies the exact command, working directory, purpose, and timeout. A missing command or invalid checkout fails clearly instead of falling back to a guessed command or directory.
 
-To reduce first-run setup friction, the harness can propose commands from two bounded repository files after a checkout is bound:
+To reduce first-run setup friction, the harness can propose commands from four bounded repository files after a checkout is bound:
 
 - `package.json` scripts named `build`, `test`, or `verify`
 - explicit `Build:`, `Test:`, or `Verify:` command declarations in `AGENTS.md`
+- `pyproject.toml`: the pytest, Ruff and mypy tool tables, and explicit scripts in the Hatch default environment
+- `Makefile` targets named `build`, `test`, `lint`, `check`, or `verify`
 
 Proposals are never executable. Review and confirm a proposal before it enters the command registry. The registry remains the source of truth even if the source file later changes.
 
@@ -111,6 +113,10 @@ A successful `verify` command can authorize a separately approved commit in the 
 Verification authorization is process-local in this release. It survives normal turn reconstruction in one running server, but a server restart or replica hop loses it and the commit fails closed by asking for verification again. The runtime exposes an asynchronous receipt-store boundary so deployments can replace that owner with durable, cross-replica storage without changing sandbox admission.
 
 The repository endpoints live under `/api/v1/repositories`; session binding lives under `/api/v1/sessions/{session_id}/repository`.
+
+### Working on a repo from a chat
+
+The chat has a "Work on a repo" button. The person picks one of their GitHub repos (read through the GitHub connector attached to the chat) or pastes a GitHub address, and picks a branch. Aman then asks, in the chat, to clone the repo into the sandbox workspace; the clone goes through the usual host git path, so it asks for approval like any other clone. When the clone finishes, the chat is bound to the checkout, the chat shows the repo and branch it is working on, and the command proposals found in the repo files appear in one card for the person to confirm or dismiss. A repo larger than 100 MB cannot be opened yet, and without a GitHub connector the picker says to connect GitHub first, under Connectors. Public repos can be opened by address without a connector.
 
 ## Structured file edits
 
