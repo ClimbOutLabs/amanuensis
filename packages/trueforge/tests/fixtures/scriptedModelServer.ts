@@ -122,7 +122,6 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
   return undefined;
 }
 
-/** The `run:<tool>` directive still awaiting a tool result, or undefined when none is open. */
 /** The text of the last tool result in the conversation, if a tool has answered. */
 function lastToolResultText(messages: ChatMessage[]): string | undefined {
   const results = messages.filter(message => message.role === 'tool');
@@ -130,6 +129,7 @@ function lastToolResultText(messages: ChatMessage[]): string | undefined {
   return last === undefined ? undefined : messageText(last.content);
 }
 
+/** The `run:<tool>` directive still awaiting a tool result, or undefined when none is open. */
 function pendingDirective(messages: ChatMessage[]): string | undefined {
   let directive: string | undefined;
   for (const message of messages) {

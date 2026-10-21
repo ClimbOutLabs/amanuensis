@@ -99,7 +99,7 @@ describe('usage summary over the session store', () => {
       input_tokens: 1300,
       output_tokens: 600,
       total_tokens: 1900,
-      cost_usd: 0.00075,
+      cost_usd: null,
       unpriced_tokens: 400,
     });
     expect(summary.top_chats.map(chat => chat.title)).toEqual(['Trip plan', 'Untitled chat']);

@@ -4,6 +4,7 @@
  * looked up or computed here.
  */
 import { resolveLocalTime } from '@truefoundry/trueforge-core/core';
+import { sumKnownCostUsd } from '@truefoundry/trueforge-core/core/util/usageCost';
 import { z } from 'zod';
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,35 +151,30 @@ function periodDates({ input, today }: { input: UsageSummaryInput; today: string
   }
 }
 
-/** Running sums for one slice; cost is the sum of the priced events, unpriced tokens are counted apart. */
+/** Running sums for one slice; unpriced tokens are counted apart from the cost. */
 class Tally {
   input_tokens = 0;
   output_tokens = 0;
-  priced_cost = 0;
-  priced_events = 0;
   unpriced_tokens = 0;
+  private readonly costs: (number | null)[] = [];
 
   add(entry: UsageEntry): void {
     this.input_tokens += entry.input_tokens;
     this.output_tokens += entry.output_tokens;
+    this.costs.push(entry.cost_usd);
     if (entry.cost_usd === null) {
       this.unpriced_tokens += entry.input_tokens + entry.output_tokens;
-      return;
     }
-    this.priced_cost += entry.cost_usd;
-    this.priced_events += 1;
   }
 
   get total_tokens(): number {
     return this.input_tokens + this.output_tokens;
   }
 
-  /** Null only when some tokens were used and none of them has a known price. */
+  /** Null when any event in the slice has no known price, so a partial sum is never the total. */
   get cost_usd(): number | null {
-    if (this.priced_events === 0 && this.unpriced_tokens > 0) {
-      return null;
-    }
-    return roundUsd(this.priced_cost);
+    const total = sumKnownCostUsd(this.costs);
+    return total === null ? null : roundUsd(total);
   }
 
   row(): UsageGroupRow {

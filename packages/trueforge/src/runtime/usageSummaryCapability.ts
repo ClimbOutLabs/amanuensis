@@ -135,7 +135,7 @@ async function usageEntriesForSession({
 }
 
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where the price is known, split by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. Use it for questions about what their chats cost or how much they used. Periods: today, this_week, this_month (default), or date_range. Tokens with no known price are counted apart: say so, never guess a price. Answer in a few plain sentences with the figures; a small bar chart fits when there are several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where the price is known, split by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance, every person's use, not just theirs. Use it for questions about what their chats cost or how much they used. Periods: today, this_week, this_month (default), or date_range. Tokens with no known price are counted apart, and a cost is left out (null) when any of its tokens lack a price: say so, never guess a price. Answer in a few plain sentences with the figures; a small bar chart fits when there are several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;

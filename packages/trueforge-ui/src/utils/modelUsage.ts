@@ -1,3 +1,4 @@
+import { sumKnownCostUsd } from '@truefoundry/trueforge-core/core/util/usageCost';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 /** One `aman.model.usage` event: the calls one role made on one model during a turn. */
@@ -84,15 +85,6 @@ export function describeListPriceCost(cost: number): string {
   return `${formatCostUsd(cost)} at list price`;
 }
 
-function sumCost(costs: readonly (number | null)[]): number | null {
-  let total = 0;
-  for (const cost of costs) {
-    if (cost === null) return null;
-    total += cost;
-  }
-  return total;
-}
-
 function toRows(events: readonly ModelUsageEvent[]): ModelUsageRow[] {
   const rows = new Map<string, ModelUsageRow & { costParts: (number | null)[] }>();
   for (const event of events) {
@@ -118,7 +110,7 @@ function toRows(events: readonly ModelUsageEvent[]): ModelUsageRow[] {
   }
   return [...rows.values()].map(({ costParts, ...row }) => ({
     ...row,
-    costUsd: costParts.length === 0 ? null : sumCost(costParts),
+    costUsd: costParts.length === 0 ? null : sumKnownCostUsd(costParts),
   }));
 }
 
@@ -144,7 +136,7 @@ export function summarizeModelUsage(events: readonly ModelUsageEvent[] | undefin
     answer: { displayName: answerRow.displayName, providerLabel: answerRow.providerLabel },
     inputTokens: ordered.reduce((sum, row) => sum + row.inputTokens, 0),
     outputTokens: ordered.reduce((sum, row) => sum + row.outputTokens, 0),
-    costUsd: reportedCalls === 0 ? null : sumCost(reportedCosts),
+    costUsd: reportedCalls === 0 ? null : sumKnownCostUsd(reportedCosts),
     unreportedCalls: calls - reportedCalls,
     noneReported: reportedCalls === 0,
     rows: ordered,

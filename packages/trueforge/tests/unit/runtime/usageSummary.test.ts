@@ -99,15 +99,20 @@ describe('summarizeUsage', () => {
     created_at: '2026-10-10T12:00:00Z',
   });
 
-  it('totals tokens and sums the known cost, counting unpriced tokens apart', () => {
+  it('totals tokens, counting unpriced tokens apart, and shows no total cost while any call is unpriced', () => {
     const summary = summarizeUsage({ entries: [priced, pricedAgain, unpriced], period, cap: undefined });
     expect(summary.total).toEqual({
       input_tokens: 3300,
       output_tokens: 600,
       total_tokens: 3900,
-      cost_usd: 0.006,
+      cost_usd: null,
       unpriced_tokens: 400,
     });
+  });
+
+  it('shows the total cost when every call is priced', () => {
+    const summary = summarizeUsage({ entries: [priced, pricedAgain], period, cap: undefined });
+    expect(summary.total).toMatchObject({ total_tokens: 3500, cost_usd: 0.006, unpriced_tokens: 0 });
   });
 
   it('splits by model, most tokens first, with cost null where no price is known', () => {
@@ -123,7 +128,7 @@ describe('summarizeUsage', () => {
   it('splits by day in ascending order', () => {
     const summary = summarizeUsage({ entries: [pricedAgain, unpriced, priced], period, cap: undefined });
     expect(summary.by_day).toEqual([
-      { date: '2026-10-10', total_tokens: 1900, cost_usd: 0.002, unpriced_tokens: 400 },
+      { date: '2026-10-10', total_tokens: 1900, cost_usd: null, unpriced_tokens: 400 },
       { date: '2026-10-11', total_tokens: 2000, cost_usd: 0.004, unpriced_tokens: 0 },
     ]);
   });
