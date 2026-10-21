@@ -1925,7 +1925,9 @@ export class AgentThread {
       }
     }
     const changeRequests = input.approvals.flatMap(approval =>
-      approval.approval.status === 'deny' && isChangeRequestReason(approval.approval.reason)
+      approval.approval.status === 'deny' &&
+      approval.approval.reason !== undefined &&
+      isChangeRequestReason(approval.approval.reason)
         ? [approval.approval.reason]
         : [],
     );

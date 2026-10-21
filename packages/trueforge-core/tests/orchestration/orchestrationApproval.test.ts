@@ -275,6 +275,8 @@ describe('orchestration: pause then resume on tool approval', () => {
   describe('change it', () => {
     const ROOT_FINAL = 'note saved';
     const CHANGE_TEXT = 'make it shorter';
+    const CHANGE_REQUEST_SENTENCE =
+      'The person asked for changes before approving: make it shorter. Make the changes and propose it again.';
     const REVISED_CALL_ID = 'call-write-revised';
 
     it('never runs the tool and hands the model the words the person asked for', async () => {
@@ -303,9 +305,8 @@ describe('orchestration: pause then resume on tool approval', () => {
           messages: expect.arrayContaining([
             expect.objectContaining({
               role: 'tool',
-              content: expect.stringContaining(
-                'The person asked for changes before approving: make it shorter. Make the changes and propose it again.',
-              ),
+              tool_call_id: WRITE_NOTE_CALL_ID,
+              content: expect.stringContaining(`"result":"${CHANGE_REQUEST_SENTENCE}"`),
             }),
           ]),
         }),
