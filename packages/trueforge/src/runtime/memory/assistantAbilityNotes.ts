@@ -1,20 +1,3 @@
-/**
- * The one guard on the memory write path: a note about Aman's own abilities is
- * never stored as a memory. When a tool call fails and Aman says "I can't read
- * email", that sentence is about Aman's last attempt, not about the person, yet
- * the turn retain and the profile mirror would otherwise keep it and recall it
- * later as if it were a fact. Both memory backends run every retained item
- * through here before writing, so no producer can save such a note.
- *
- * The filter drops whole statements, never whole memories: the rest of the
- * turn still saves. It only matches statements whose subject is Aman (first
- * person in Aman's own text, "the assistant", "Aman") carrying an inability
- * marker, or a subject-less inability fragment ("Unable to ..."). Facts about
- * the person keep a different subject and pass untouched, including facts about
- * what the person can or cannot do. In a verbatim turn transcript the person's
- * own side is never filtered at all: there, "I" is the person.
- */
-
 const TURN_USER_PREFIX = 'User: ';
 const TURN_ASSISTANT_SEPARATOR = '\n\nAssistant: ';
 const TURN_SUMMARY_PREFIX = 'Turn summary: ';
@@ -25,6 +8,8 @@ const IDIOM_PATTERN = /\bcan't wait\b|\bcan't thank\b|\bcan't help but\b/g;
 /** Contractions expanded so one marker set covers every spelling. */
 const CONTRACTIONS: readonly (readonly [RegExp, string])[] = [
   [/\bi'm\b/g, 'i am'],
+  [/\bi'll\b/g, 'i will'],
+  [/\bi'd\b/g, 'i would'],
   [/\bcan't\b/g, 'cannot'],
   [/\bcouldn't\b/g, 'could not'],
   [/\bwasn't\b/g, 'was not'],
@@ -40,26 +25,49 @@ const CONTRACTIONS: readonly (readonly [RegExp, string])[] = [
 ];
 
 const ABILITY_SUBJECT = '(?:i|aman|the assistant|assistant)';
-const GAP_WORD = '(?:am|is|are|was|were|has|have|do|does|not|will|be|been|currently|still)';
+const GAP_WORD =
+  '(?:am|is|are|was|were|has|have|had|do|does|not|will|would|might|may|be|been|going to|currently|still)';
 const ABILITY_MARKER =
-  '(?:cannot|could not|unable to|not (?:be |been )?able to|have (?:access|permission)|no (?:access|permission) to|(?:lack|lacks) access|failed to|having trouble)';
+  '(?:cannot|could not|unable to|not (?:be |been )?able to|incapable|(?:not|no|lack|lacks) (?:have )?(?:access|permission)|(?:not|no) have the ability|failed to|having trouble)';
 const ABILITY_CLAUSE = new RegExp(`\\b${ABILITY_SUBJECT}\\b(?:\\s+${GAP_WORD})*\\s*${ABILITY_MARKER}\\b`);
-const ABILITY_FRAGMENT = /^(?:unable to|not able to|could not|cannot|no (?:access|permission) to)\b/;
+const ABILITY_FRAGMENT = /^(?:unable to|not able to|could not|will not be able to)\b/;
 
-/** Lowercases and canonicalizes a statement so the two patterns above see one spelling. */
+/** Speech verbs that put a following first-person clause in another speaker's mouth. */
+const REPORTING_VERB =
+  /\b(?:said|says|told|asked|mentioned|noted|reported|explained|wrote|replied|thinks|thought|believes|believed|confirmed|warned)\b/;
+const AMAN_SUBJECT_AT_START = /^(?:i|aman|the assistant|assistant)\b/;
+
+/** Lowercases and canonicalizes a statement so the patterns above see one spelling. */
 function normalizeForMatching(statement: string): string {
   let text = statement.replace(/[’‘]/g, "'").trim().toLowerCase();
   text = text.replace(IDIOM_PATTERN, 'canwait');
   for (const [pattern, replacement] of CONTRACTIONS) {
     text = text.replace(pattern, replacement);
   }
-  return text;
+  return text.replace(/\bcan not\b/g, 'cannot');
 }
 
 function isAssistantAbilityNote(statement: string): boolean {
   const text = normalizeForMatching(statement);
   const start = text.replace(/^[^a-z]+/, '');
-  return ABILITY_FRAGMENT.test(start) || ABILITY_CLAUSE.test(text);
+  if (ABILITY_FRAGMENT.test(start)) {
+    return true;
+  }
+  const match = ABILITY_CLAUSE.exec(text);
+  if (match === null) {
+    return false;
+  }
+  // A clause another speaker reports ("Alex said I cannot ...") states that
+  // speaker's fact, not Aman's note. A reporting clause whose own subject is
+  // Aman ("Aman said I cannot ...") still counts as Aman's note.
+  const before = text
+    .slice(0, match.index)
+    .replace(/^[^a-z]+/, '')
+    .trim();
+  if (before !== '' && !AMAN_SUBJECT_AT_START.test(before) && REPORTING_VERB.test(before)) {
+    return false;
+  }
+  return true;
 }
 
 /** One line with its ability-note sentences removed; undefined when nothing on the line survives. */
@@ -99,26 +107,24 @@ function filterAssistantText(text: string): string {
     .trim();
 }
 
-/**
- * Removes ability notes about Aman from one retained item's content. Returns an
- * empty string when nothing else remains, so the caller drops the item.
- */
+/** Removes Aman's ability notes from assistant turn text and turn summaries; all other content is returned unchanged. */
 export function stripAssistantAbilityNotes(content: string): string {
   if (content.startsWith(TURN_USER_PREFIX)) {
     const separatorAt = content.indexOf(TURN_ASSISTANT_SEPARATOR);
-    if (separatorAt >= 0) {
-      const personText = content.slice(TURN_USER_PREFIX.length, separatorAt);
-      const assistantText = content.slice(separatorAt + TURN_ASSISTANT_SEPARATOR.length);
-      const keptAssistant = filterAssistantText(assistantText);
-      if (keptAssistant === '') {
-        return personText.trim() === '' ? '' : `${TURN_USER_PREFIX}${personText}`;
-      }
-      return `${TURN_USER_PREFIX}${personText}${TURN_ASSISTANT_SEPARATOR}${keptAssistant}`;
+    if (separatorAt < 0) {
+      return content;
     }
+    const personText = content.slice(TURN_USER_PREFIX.length, separatorAt);
+    const assistantText = content.slice(separatorAt + TURN_ASSISTANT_SEPARATOR.length);
+    const keptAssistant = filterAssistantText(assistantText);
+    if (keptAssistant === '') {
+      return personText.trim() === '' ? '' : `${TURN_USER_PREFIX}${personText}`;
+    }
+    return `${TURN_USER_PREFIX}${personText}${TURN_ASSISTANT_SEPARATOR}${keptAssistant}`;
   }
   if (content.startsWith(TURN_SUMMARY_PREFIX)) {
     const kept = filterAssistantText(content.slice(TURN_SUMMARY_PREFIX.length));
     return kept === '' ? '' : `${TURN_SUMMARY_PREFIX}${kept}`;
   }
-  return filterAssistantText(content);
+  return content;
 }

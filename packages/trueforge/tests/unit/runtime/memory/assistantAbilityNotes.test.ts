@@ -21,8 +21,8 @@ describe('stripAssistantAbilityNotes', () => {
     "Assistant couldn't load the calendar.",
     "Unable to read the user's email.",
     'Could not reach the mail server.',
-  ])('drops an ability note about Aman: %s', note => {
-    expect(stripAssistantAbilityNotes(note)).toBe('');
+  ])('drops an ability note about Aman in a turn summary: %s', note => {
+    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
   });
 
   it.each([
@@ -39,8 +39,24 @@ describe('stripAssistantAbilityNotes', () => {
     "The assistant hasn't been able to send email.",
     'I lack access to the calendar.',
     'Aman lacks access to the calendar.',
-  ])('drops a future or perfect tense ability note about Aman: %s', note => {
-    expect(stripAssistantAbilityNotes(note)).toBe('');
+  ])('drops a future or perfect tense ability note about Aman in a turn summary: %s', note => {
+    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
+  });
+
+  it.each([
+    "I'll be unable to read email.",
+    "I'd be unable to read email.",
+    'I would not be able to read email.',
+    'I might not be able to read email.',
+    "I'm going to be unable to read email.",
+    'I had no access to the drive.',
+    'Aman had no access to the drive.',
+    'I can not read email.',
+    "I don't have the ability to read email.",
+    'I am incapable of reading email.',
+    'Will not be able to read email.',
+  ])('drops a future or modal ability note about Aman in a turn summary: %s', note => {
+    expect(stripAssistantAbilityNotes(`Turn summary: ${note}`)).toBe('');
   });
 
   it.each([
@@ -69,6 +85,40 @@ describe('stripAssistantAbilityNotes', () => {
     'I have been reading your email all morning.',
   ])('keeps a positive or plain statement about Aman: %s', statement => {
     expect(stripAssistantAbilityNotes(statement)).toBe(statement);
+  });
+
+  it.each([
+    "I can't swim.",
+    '- I cannot take calls on Fridays.',
+    "I'm unable to drive at night.",
+    'I have access to the shared drive.',
+    'No access to the building after hours.',
+    'Cannot be reached after 5pm.',
+  ])("keeps the person's own plain text, which is not a turn or a summary: %s", content => {
+    expect(stripAssistantAbilityNotes(content)).toBe(content);
+  });
+
+  it('keeps a User: turn that has no assistant part', () => {
+    expect(stripAssistantAbilityNotes("User: I can't swim.")).toBe("User: I can't swim.");
+  });
+
+  it.each([
+    'No access to the building after hours.',
+    'Cannot be reached after 5pm.',
+    'I have access to the shared drive.',
+    'Alex said I cannot work Fridays.',
+    "The user said I can't swim.",
+    'Aman will be able to read email once you reconnect.',
+    "The user can't check email at work.",
+    'Marta has no access to the shared drive.',
+    "The user told Aman he can't swim.",
+  ])('keeps a fact inside a turn summary: %s', statement => {
+    const content = `Turn summary: ${statement}`;
+    expect(stripAssistantAbilityNotes(content)).toBe(content);
+  });
+
+  it('drops an ability note Aman reports about himself in a turn summary', () => {
+    expect(stripAssistantAbilityNotes("Turn summary: Aman said I can't read email.")).toBe('');
   });
 
   it('drops a future tense ability note inside a turn summary and keeps the other sentences', () => {
@@ -166,16 +216,14 @@ describe('stripAssistantAbilityNotes', () => {
     expect(result).not.toContain("can't read email");
   });
 
-  it('filters a learned profile document the same way', () => {
+  it('leaves a learned profile document untouched, because it is not a turn or a summary', () => {
     const content = [
       '## Preferences',
       '',
       '- Prefers tea in the morning.',
       "- Aman can't access the work calendar.",
     ].join('\n');
-    const result = stripAssistantAbilityNotes(content);
-    expect(result).toContain('Prefers tea in the morning.');
-    expect(result).not.toContain("can't access the work calendar");
+    expect(stripAssistantAbilityNotes(content)).toBe(content);
   });
 });
 
@@ -204,12 +252,31 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
     }
   });
 
+  it("stores the person's own plain statement unchanged", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-ability-'));
+    try {
+      const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
+      const outcome = await client.retain({
+        items: [{ content: "I can't swim.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-3' }],
+        operationId: 'op-plain',
+        timeoutMs: 5000,
+      });
+      expect(outcome).toEqual({ ok: true });
+      const log = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8');
+      expect(log).toContain("I can't swim.");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('stores nothing for an item that is only an ability note, and still completes the operation', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-ability-'));
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
       const outcome = await client.retain({
-        items: [{ content: "I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' }],
+        items: [
+          { content: "Turn summary: I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' },
+        ],
         operationId: 'op-note-only',
         timeoutMs: 5000,
       });
@@ -269,7 +336,9 @@ describe('memory write path: HindsightClient.retain', () => {
       fetchImpl,
     });
     const outcome = await client.retain({
-      items: [{ content: "I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' }],
+      items: [
+        { content: "Turn summary: I can't read email.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-2' },
+      ],
       operationId: 'op-2',
       timeoutMs: 10_000,
     });
