@@ -1,3 +1,4 @@
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 /** What this instance can do, so the tour only offers prompts that will work here. */
@@ -32,8 +33,7 @@ const DAY_CARD_SLOTS = 6;
 export const MORNING_BRIEF: TourPrompt = {
   key: 'brief',
   label: 'Your morning brief',
-  prompt:
-    "Good morning! What do I need to know today? Go through my calendar, email and tasks, and tell me what's coming up, what's due, and anything that looks off.",
+  prompt: MORNING_BRIEF_PROMPT,
 };
 
 const CLEAR_HEAD: TourPrompt = {

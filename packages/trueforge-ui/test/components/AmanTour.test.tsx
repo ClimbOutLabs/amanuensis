@@ -2,6 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+
 import { AmanTour } from '@/components/AmanTour.js';
 import {
   CAPABILITY_PROMPTS,
@@ -52,6 +54,18 @@ describe('AmanTour', () => {
     renderTour({ setup: <p>Setup block here</p> });
 
     expect(screen.getByText('Setup block here')).toBeInTheDocument();
+  });
+
+  it('uses the canonical morning brief prompt for the featured card', () => {
+    expect(MORNING_BRIEF.prompt).toBe(MORNING_BRIEF_PROMPT);
+  });
+
+  it('offers the specialist card prompt that uses a travel specialist', () => {
+    const specialists = CAPABILITY_PROMPTS.find(item => item.key === 'specialists');
+    expect(specialists).toMatchObject({
+      label: 'Bring in specialists',
+      prompt: "Get a travel specialist to plan a long weekend somewhere I've never been.",
+    });
   });
 
   it('features the morning brief above the six day cards', () => {

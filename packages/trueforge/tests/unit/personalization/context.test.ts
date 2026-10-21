@@ -1,9 +1,10 @@
-import { InstructionBuilder } from '@truefoundry/trueforge-core/core';
+import { InstructionBuilder, rootAgentIdentity } from '@truefoundry/trueforge-core/core';
 import {
   buildPersonalizationContext,
   isPersonalizationUnchanged,
   PERSONALIZATION_MAX_CONTEXT_CHARACTERS,
   personalizationDigest,
+  rootIdentityNames,
   sanitizeLearnedProfile,
   type PersonalizationProfile,
 } from '../../../src/personalization/profile';
@@ -165,5 +166,31 @@ describe('personalization context', () => {
     expect(context.injected_context).toContain('<user-profile>Values privacy.</user-profile>');
     expect(context.injected_context).toContain('<learned-profile>');
     expect(context.injected_context.endsWith('</learned-profile>')).toBe(true);
+  });
+});
+
+describe('root identity from the profile', () => {
+  it('names the person by the preferred name, else the name', () => {
+    expect(rootIdentityNames({ ...profile, address_as: 'Sam', user_name: 'Sam Rivera' })).toEqual({
+      assistantName: 'Aman',
+      personName: 'Sam',
+    });
+    expect(rootIdentityNames({ ...profile, user_name: 'Sam Rivera' }).personName).toBe('Sam Rivera');
+    expect(rootIdentityNames(profile).personName).toBeNull();
+  });
+
+  it('has no person and no assistant name before a profile exists', () => {
+    expect(rootIdentityNames(undefined)).toEqual({ assistantName: undefined, personName: undefined });
+  });
+
+  it('renders the identity with both names, with only the assistant name, and with neither', () => {
+    const both = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata', address_as: 'Maya' }));
+    expect(both.startsWith("You are Nata, Maya's chief of staff.")).toBe(true);
+
+    const assistantOnly = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata' }));
+    expect(assistantOnly.startsWith('You are Nata, chief of staff to the person you work for.')).toBe(true);
+
+    const neither = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: null }));
+    expect(neither.startsWith('You are Aman, chief of staff to the person you work for.')).toBe(true);
   });
 });
