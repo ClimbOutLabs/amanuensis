@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 
+import { HelpStuckButton } from '../help/HelpStuckButton.js';
 import { cn } from './lib/cn.js';
 
 /** Shared title styles for page / chat chrome headers. */
@@ -14,6 +15,8 @@ export type PageHeaderProps = {
   start?: ReactNode;
   /** Trailing actions; pushed to the end. */
   end?: ReactNode;
+  /** Adds the "Help, I'm stuck" button after the trailing actions. Set on the main screen headers only. */
+  helpAction?: boolean;
   /** Extra content between title and end (prefer `start` / `end` when possible). */
   children?: ReactNode;
   className?: string;
@@ -22,7 +25,7 @@ export type PageHeaderProps = {
 /** Shared shell/page header bar used by chat chrome and list pages.
  * `min-h-14` keeps a single-row bar aligned with Agent Config; wrapping end actions can grow the bar.
  */
-export function PageHeader({ title, start, end, children, className }: PageHeaderProps) {
+export function PageHeader({ title, start, end, helpAction = false, children, className }: PageHeaderProps) {
   return (
     <header
       className={cn('flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-border px-4', className)}
@@ -30,7 +33,12 @@ export function PageHeader({ title, start, end, children, className }: PageHeade
       {start}
       {typeof title === 'string' ? <h1 className={pageHeaderTitleClassName}>{title}</h1> : title}
       {children}
-      {end != null ? <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">{end}</div> : null}
+      {end != null || helpAction ? (
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+          {end}
+          {helpAction ? <HelpStuckButton /> : null}
+        </div>
+      ) : null}
     </header>
   );
 }

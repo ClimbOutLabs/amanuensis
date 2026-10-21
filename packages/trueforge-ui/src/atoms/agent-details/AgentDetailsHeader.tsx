@@ -45,6 +45,7 @@ export function AgentDetailsHeader({ agentId, detail, onBack }: AgentDetailsHead
 
   return (
     <PageHeader
+      helpAction
       className="bg-primary-bg"
       start={
         <button
