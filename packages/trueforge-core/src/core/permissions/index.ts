@@ -62,7 +62,7 @@ export {
   canonicalWriteTarget,
   extractExecutedFileOperand,
   isInsideWorkspace,
-  observeShellCreatedFiles,
+  isNewWriteTarget,
   sha256FileContent,
   skipWrapperPrefix,
   splitWordsLenient,

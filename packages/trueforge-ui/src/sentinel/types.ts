@@ -251,6 +251,8 @@ export type SentinelUserSettings = {
   search_without_asking: boolean;
   /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
   maps_without_asking: boolean;
+  /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
+  sandbox_without_asking: boolean;
 };
 
 /**
@@ -701,12 +703,19 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
   if (!isRecord(settings)) {
-    return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true, maps_without_asking: false };
+    return {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    };
   }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }

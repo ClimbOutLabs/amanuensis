@@ -198,6 +198,8 @@ export interface SentinelUserSettingsTable {
   search_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   maps_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  sandbox_without_asking: number;
   created_at: string;
   updated_at: string;
 }

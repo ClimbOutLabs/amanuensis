@@ -11,7 +11,8 @@
  * either. Returns a TierDecision with stable reason codes, the approval card,
  * the Tier 2 kind, and the tracked-execution approval binding.
  */
-import { realpathSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
+import os from 'os';
 import path from 'path';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
@@ -89,6 +90,7 @@ import {
 } from './outboundGuard';
 import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
+import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
   GUARD_RULE_SAY,
   HOLD_SAY,
@@ -110,6 +112,10 @@ import {
 import {
   autoDenyDecision,
   failClosedDecision,
+  SANDBOX_COMMAND_REASON,
+  SANDBOX_FILE_WRITE_REASON,
+  SANDBOX_PACKAGE_INSTALL_REASON,
+  SANDBOX_RUN_CODE_REASON,
   tier1Decision,
   tier2Decision,
   tier3Decision,
@@ -124,10 +130,12 @@ import { mailboxText, type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
+  canonicalWriteIdentity,
   canonicalWriteTarget,
   contentDigest,
   extractExecutedFileOperand,
   isInsideWorkspace,
+  isNewWriteTarget,
   isUnderRoot,
   lexicalPath,
   sha256FileContent,
@@ -368,6 +376,7 @@ function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
   return {
     tenant_id: ctx.tenant_id,
     created_by: ctx.created_by,
+    conversation_id: ctx.conversation_id,
     repository_id: ctx.repository_id,
     workspace_cwd: ctx.workspace_cwd,
   };
@@ -750,12 +759,325 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
   return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
 }
 
+/** Package managers whose installs go through the sandbox package gateway. */
+const PACKAGE_MANAGER_COMMANDS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'pip', 'pip3']);
+
+/** Install flags that only change how packages are saved or reported. Any other flag asks. */
+const SAFE_INSTALL_FLAGS: ReadonlySet<string> = new Set([
+  '-q',
+  '--quiet',
+  '-U',
+  '--upgrade',
+  '--no-input',
+  '-D',
+  '--save-dev',
+  '-S',
+  '--save',
+]);
+
+/** A package name with an optional scope, extras, and version pin. A web address, a path, or a bare dot name does not match. */
+const PLAIN_PACKAGE_SPEC =
+  /^(?!\.+$)(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(\[[A-Za-z0-9,._-]+\])?([=<>!~^@]{1,2}[A-Za-z0-9.*_+-]+)?$/u;
+
+/** `python -m pip` runs the same pip, so its argv is classified as pip's. */
+function pipEquivalentArgv(argv: readonly string[]): readonly string[] {
+  const [program, flag, module] = argv;
+  if ((program === 'python' || program === 'python3') && flag === '-m' && module === 'pip') {
+    return ['pip', ...argv.slice(3)];
+  }
+  return argv;
+}
+
+function isPackageInstallArgv(input: readonly string[]): boolean {
+  const argv = pipEquivalentArgv(input);
+  const [program, subcommand] = argv;
+  if (program === undefined || subcommand === undefined || !PACKAGE_MANAGER_COMMANDS.has(program)) {
+    return false;
+  }
+  return program === 'pip' || program === 'pip3'
+    ? subcommand === 'install'
+    : ['install', 'add', 'i'].includes(subcommand);
+}
+
+/**
+ * Installers whose install scripts run the package's own code, and so run code from the repository on a
+ * local path. Their silent installs must pass IGNORE_SCRIPTS_FLAG. pip always runs build hooks and .pth
+ * files, so every pip install keeps its card.
+ */
+const SCRIPT_RUNNING_INSTALLERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn']);
+const IGNORE_SCRIPTS_FLAG = '--ignore-scripts';
+
+/**
+ * Files that can turn install scripts or install hooks back on. Any one of them present in a folder the
+ * install reads from means the install asks.
+ */
+const INSTALL_HOOK_FILES: readonly string[] = [
+  '.pnpmfile.cjs',
+  '.pnpmfile.mjs',
+  '.npmrc',
+  '.yarnrc',
+  '.yarnrc.yml',
+  'pnpm-workspace.yaml',
+];
+
+/** Installers whose hook files and install-script defaults change by version, so the version must be declared. */
+const VERSION_GATED_INSTALLERS: ReadonlySet<string> = new Set(['pnpm', 'yarn']);
+
+/** A packageManager field that names pnpm or yarn with a full version, such as `pnpm@11.16.0+sha512...`. */
+const DECLARED_PACKAGE_MANAGER = /^(pnpm|yarn)@\d+\.\d+\.\d+/u;
+
+/**
+ * True when the install names only plain packages, so every download goes through the package gateway,
+ * and it runs no install scripts. Any pip install, and any npm, pnpm or yarn install without the ignore flag, asks.
+ */
+function isPlainPackageInstall(input: readonly string[]): boolean {
+  if (!isPackageInstallArgv(input)) {
+    return false;
+  }
+  const argv = pipEquivalentArgv(input);
+  const [program] = argv;
+  if (program === undefined || !SCRIPT_RUNNING_INSTALLERS.has(program)) {
+    return false;
+  }
+  const operands = argv.slice(2);
+  const packages = operands.filter(word => !word.startsWith('-'));
+  const flags = operands.filter(word => word.startsWith('-'));
+  return (
+    packages.length > 0 &&
+    packages.every(spec => PLAIN_PACKAGE_SPEC.test(spec)) &&
+    flags.includes(IGNORE_SCRIPTS_FLAG) &&
+    flags.every(flag => flag === IGNORE_SCRIPTS_FLAG || SAFE_INSTALL_FLAGS.has(flag))
+  );
+}
+
+/**
+ * The install's own folder, then each folder above it up to the workspace root. An install outside the workspace
+ * walks up to the filesystem root, which is the wider check.
+ */
+function installFolderChain({ base, root }: { base: string; root: string | null }): string[] {
+  const stop = root === null ? null : path.resolve(root);
+  const folders: string[] = [];
+  for (let dir = path.resolve(base); ; dir = path.dirname(dir)) {
+    folders.push(dir);
+    if (dir === stop || path.dirname(dir) === dir) {
+      return folders;
+    }
+  }
+}
+
+/** Whether a file that can re-enable install scripts or hooks sits where the install reads from. */
+async function installHooksPresent({ ctx, cwd }: { ctx: ClassifyContext; cwd: string | null }): Promise<boolean> {
+  // A remote sandbox with no file reader cannot rule the hook files out, so the install asks.
+  if (ctx.path_resolution === 'remote' && ctx.file_digest === undefined) {
+    return true;
+  }
+  const base = resolveIdentityCwd(ctx, cwd);
+  const folders = [...installFolderChain({ base, root: ctx.workspace_cwd }), os.homedir()];
+  for (const folder of folders) {
+    for (const name of INSTALL_HOOK_FILES) {
+      // The file may not exist, so its folder is resolved and the name appended, not the whole path.
+      const identity = canonicalWriteTarget({ p: name, cwd: folder, resolution: ctx.path_resolution });
+      if (identity === null) {
+        return true;
+      }
+      const digest = await contentDigest({ identity, resolution: ctx.path_resolution, digest: ctx.file_digest });
+      if (digest !== null) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** The packageManager field of a package.json, or null when the file cannot be read or names none. */
+function declaredPackageManager(manifest: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+    if (typeof parsed === 'object' && parsed !== null && 'packageManager' in parsed) {
+      return typeof parsed.packageManager === 'string' ? parsed.packageManager : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the package.json nearest the install names this installer's version. Its hook files and script
+ * defaults depend on that version, so an install whose version is unknown asks. A remote sandbox cannot be
+ * read from here, so its version is never known.
+ */
+function installerVersionDeclared({
+  installer,
+  ctx,
+  cwd,
+}: {
+  installer: string;
+  ctx: ClassifyContext;
+  cwd: string | null;
+}): boolean {
+  if (ctx.path_resolution === 'remote') {
+    return false;
+  }
+  const base = resolveIdentityCwd(ctx, cwd);
+  const manifest = installFolderChain({ base, root: ctx.workspace_cwd })
+    .map(folder => path.join(folder, 'package.json'))
+    .find(file => existsSync(file));
+  if (manifest === undefined) {
+    return false;
+  }
+  const declared = declaredPackageManager(manifest) ?? '';
+  return DECLARED_PACKAGE_MANAGER.exec(declared)?.[1] === installer;
+}
+
+/** The plain line the activity list shows for a silent run. */
+function sandboxRunDetail(command: string): string {
+  return `Ran in the sandbox: ${escapeDisplayText(command)}`;
+}
+
+/**
+ * Interpreters a silent run may start. Shells are left out: the shell parser rejects `sh` and `bash` as
+ * wrappers, so a shell script keeps its card.
+ */
+const IMAGE_RUNTIMES: ReadonlySet<string> = new Set(['python', 'python3', 'node']);
+
+/** Options an interpreter may take before its script. None of them starts code other than that script. */
+const SILENT_RUNTIME_OPTIONS: ReadonlySet<string> = new Set(['-u', '-B', '-E', '-I', '-O']);
+
+/**
+ * The script a silent run would execute: an image runtime, safe options, then a script path. Inline code
+ * (`-c`, `-e`), a module (`-m`), stdin (`-`), and any other program have no such script and return undefined.
+ */
+function silentRunScript(argv: readonly string[]): string | undefined {
+  const [program, ...rest] = argv;
+  if (program === undefined || !IMAGE_RUNTIMES.has(program)) {
+    return undefined;
+  }
+  let index = 0;
+  while (index < rest.length && SILENT_RUNTIME_OPTIONS.has(rest[index] ?? '')) {
+    index += 1;
+  }
+  const script = rest[index];
+  if (script === undefined || script.startsWith('-')) {
+    return undefined;
+  }
+  return script;
+}
+
+/**
+ * The silent run a command gets with the switch on: a plain package install, or a script run of a file Aman
+ * wrote in this conversation. A script run of any other file (a repo file, a download, an unknown file) keeps
+ * its card, and so does a test runner, which runs code it finds in the repo.
+ */
+async function sandboxRunPlacement({
+  command,
+  parsed,
+  ctx,
+  cwd,
+}: {
+  command: string;
+  parsed: ParsedSimpleCommand | undefined;
+  ctx: ClassifyContext;
+  cwd: string | null;
+}): Promise<{ reason: string; reason_detail: string } | null> {
+  if (parsed === undefined) {
+    return null;
+  }
+  const program = parsed.argv[0];
+  if (program === undefined) {
+    return null;
+  }
+  // An install that is not plain (index URL, path, web address, requirements file) asks, whatever its program.
+  if (isPackageInstallArgv(parsed.argv)) {
+    const installer = pipEquivalentArgv(parsed.argv)[0] ?? '';
+    const versionUnknown =
+      VERSION_GATED_INSTALLERS.has(installer) && !installerVersionDeclared({ installer, ctx, cwd });
+    if (!isPlainPackageInstall(parsed.argv) || versionUnknown || (await installHooksPresent({ ctx, cwd }))) {
+      return null;
+    }
+    return { reason: SANDBOX_PACKAGE_INSTALL_REASON, reason_detail: sandboxRunDetail(command) };
+  }
+  const script = silentRunScript(parsed.argv);
+  if (script === undefined) {
+    return null;
+  }
+  const identity = canonicalFileIdentity({
+    p: script,
+    cwd: resolveIdentityCwd(ctx, cwd),
+    resolution: ctx.path_resolution,
+  });
+  if (
+    identity === null ||
+    !ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
+  ) {
+    return null;
+  }
+  // A script that loads other code (an import of a non-standard module, a dynamic import, a child process)
+  // can run files from the workspace, so only a script that stays within the standard library runs silently.
+  if (
+    !scriptFileLoadsOnlyStandardCode({
+      runtime: program === 'node' ? 'node' : 'python',
+      file: identity,
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return null;
+  }
+  return { reason: SANDBOX_COMMAND_REASON, reason_detail: sandboxRunDetail(command) };
+}
+
+/**
+ * The silent run of `run_code`: code Aman wrote in this chat, given as the call's own `code` or as a file it
+ * wrote this session. It passes the same install and code-origin checks as a silent command. Code that starts
+ * a program or loads anything beyond the standard library keeps its card.
+ */
+async function runCodePlacement({
+  params,
+  ctx,
+}: {
+  params: Record<string, unknown>;
+  ctx: ClassifyContext;
+}): Promise<{ reason: string; reason_detail: string } | null> {
+  const code = stringParam(params, 'code');
+  const scriptPath = stringParam(params, 'script_path');
+  // The call names exactly one program source, and a runtime this check can read.
+  if ((code === null) === (scriptPath === null)) {
+    return null;
+  }
+  const language = stringParam(params, 'language');
+  const runtime = language === 'python' || language === 'node' ? language : null;
+  if (runtime === null || (await installHooksPresent({ ctx, cwd: null }))) {
+    return null;
+  }
+  const detail = { reason: SANDBOX_RUN_CODE_REASON, reason_detail: 'Ran code in the sandbox.' };
+  if (code !== null) {
+    return scriptLoadsOnlyStandardCode({ runtime, source: code }) ? detail : null;
+  }
+  if (scriptPath === null) {
+    return null;
+  }
+  // script_path resolves against the workspace; a script Aman did not write this session keeps its card.
+  const identity = canonicalFileIdentity({
+    p: scriptPath,
+    cwd: resolveIdentityCwd(ctx, null),
+    resolution: ctx.path_resolution,
+  });
+  if (
+    identity === null ||
+    !ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
+  ) {
+    return null;
+  }
+  return scriptFileLoadsOnlyStandardCode({ runtime, file: identity, resolution: ctx.path_resolution }) ? detail : null;
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
   const cwd = stringParam(action.canonical_params, 'cwd');
   const env = envOverrides(action.canonical_params);
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  const sandboxSilent = await services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
 
   // Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
   // can inject code into allowlisted commands: escalate for approval.
@@ -794,18 +1116,26 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     ) {
       return autoDenyDecision({
         reason: 'offline_mode',
-        reason_detail: 'This shell command is not in the offline subset.',
+        reason_detail:
+          parsed !== undefined && isPackageInstallArgv(parsed.argv)
+            ? 'Installing packages needs downloads, which are off while offline.'
+            : 'This shell command is not in the offline subset.',
         sensitive_read: false,
       });
     }
     // An allowed offline command continues to the same containment checks as online.
   }
 
+  // With the user's switch on, a run of a script Aman wrote in this conversation is placed here and skips
+  // the card. The containment checks below still apply to it.
+  const parsed = parseSimpleCommand(command);
+  const silentRun = sandboxSilent ? await sandboxRunPlacement({ command, parsed, ctx, cwd }) : null;
+
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
   // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden
   // behind a separator (e.g. `echo ok; sh payload.sh`) must not bypass this.
-  const parsed = parseSimpleCommand(command);
-  const segments = splitCompoundSegments(command);
+  // An in-sandbox run is exempt: the workspace and sandbox-folder limits above it still hold.
+  const segments = silentRun === null ? splitCompoundSegments(command) : [];
   for (const segment of segments) {
     const segParsed = parseSimpleCommand(segment);
     const argvForHash = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
@@ -893,7 +1223,11 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   // Allowlist matching.
   if (parsed !== undefined) {
     const matched = matchAllowlist(parsed, services.shell_allowlist);
-    if (matched !== undefined) {
+    const run =
+      matched !== undefined
+        ? { reason: 'shell_allowlist', reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.` }
+        : silentRun;
+    if (run !== null) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
       // The cwd and every file operand must resolve inside the workspace.
       // An agent-controlled cwd or a symlink escape must not run silently.
@@ -975,11 +1309,11 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
-      // Every allowlist entry is read-only by curation (no writes, no network), so a match
-      // that passed the checks above runs silently. Anything that failed them asked instead.
+      // Every allowlist entry is read-only by curation (no writes, no network), and an in-sandbox
+      // run is contained by the same checks. Anything that failed them asked instead.
       return tier1Decision({
-        reason: 'shell_allowlist',
-        reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
+        reason: run.reason,
+        reason_detail: run.reason_detail,
         sensitive_read: containsSecretPath(action.canonical_params),
       });
     }
@@ -1094,6 +1428,19 @@ function namedWriteTargets(paths: readonly string[]): string {
   return hidden > 0 ? `${shown.join(', ')} and ${String(hidden)} more` : shown.join(', ');
 }
 
+/** A write target a silent write may touch: a file Aman created in this conversation, or a path that does not exist yet. */
+function silentWriteTarget(input: { p: string; cwd: string; ctx: ClassifyContext }): boolean {
+  const { p, cwd, ctx } = input;
+  const identity = canonicalWriteIdentity({ p, cwd, resolution: ctx.path_resolution });
+  if (
+    identity !== null &&
+    ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
+  ) {
+    return true;
+  }
+  return isNewWriteTarget({ p, cwd, resolution: ctx.path_resolution });
+}
+
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
   const targets = sandboxWriteTargets({ action, ctx, identityCwd });
@@ -1126,11 +1473,10 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       ? absolutePatchTarget({ workspace_root: workspaceRoot, relative_path: target, resolution: ctx.path_resolution })
       : target,
   );
-  // Resolve each write target via its parent directory: the target itself may
-  // not exist yet, and resolving it directly would misread every new-file
-  // write as outside the workspace.
+  // A new file resolves through its parent directory; an existing one, or a link, through its own
+  // symlinks, so a link whose destination is outside the workspace is seen where it lands.
   const insideWorkspace = (target: string): boolean => {
-    const identity = canonicalWriteTarget({ p: target, cwd: targets.cwd, resolution: ctx.path_resolution });
+    const identity = canonicalWriteIdentity({ p: target, cwd: targets.cwd, resolution: ctx.path_resolution });
     if (identity === null) {
       return false;
     }
@@ -1198,6 +1544,21 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
+    });
+  }
+  // A write that stayed inside the workspace and missed every limit above runs silently when the user lets it.
+  // Only a new file, or one Aman created in this conversation, may do so: an edit to an existing file asks.
+  const everyTargetIsSilentlyWritable = absolute.every(target =>
+    silentWriteTarget({ p: target, cwd: targets.cwd, ctx }),
+  );
+  if (
+    everyTargetIsSilentlyWritable &&
+    (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+  ) {
+    return tier1Decision({
+      reason: SANDBOX_FILE_WRITE_REASON,
+      reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
+      sensitive_read: targets.paths.some(namesSecretPath),
     });
   }
   return decideTier2({
@@ -2473,6 +2834,15 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       (name === 'run_workflow' && isRunnerWorkflow(action.canonical_params['workflow']))
     ) {
       return classifyRunnerTool(action, ctx);
+    }
+    if (
+      name === 'run_code' &&
+      (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+    ) {
+      const silentRun = await runCodePlacement({ params: action.canonical_params, ctx });
+      if (silentRun !== null) {
+        return tier1Decision({ ...silentRun, sensitive_read: false });
+      }
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
       return tier3Decision({

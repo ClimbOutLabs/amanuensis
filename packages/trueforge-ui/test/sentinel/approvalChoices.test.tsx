@@ -75,6 +75,7 @@ describe('approval choices', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),

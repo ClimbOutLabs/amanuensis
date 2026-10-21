@@ -699,6 +699,62 @@ await client.data.exportData();
 </dl>
 </details>
 
+## Help
+<details><summary><code>client.help.<a href="/src/api/resources/help/client/Client.ts">getHealthCheck</a>() -> TrueForge.GetHelpHealthCheckResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the default model, connectors, sandbox and schedules, and the last full check run on the computer. Each check has one plain sentence and, when needed, one next step.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.help.getHealthCheck();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `HelpClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## MCP Servers
 <details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">list</a>() -> TrueForge.ListAvailableMcpServersResponse</code></summary>
 <dl>
@@ -2320,6 +2376,69 @@ await client.repositories.create({
 <dd>
 
 **request:** `TrueForge.CreateRepositoryRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RepositoriesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.repositories.<a href="/src/api/resources/repositories/client/Client.ts">getGithubMetadata</a>({ ...params }) -> TrueForge.GetGithubRepositoryDetailsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads one public GitHub repo and its branches, for the repo picker. Private repos need the chat route.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.repositories.getGithubMetadata();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetGithubMetadataRepositoriesRequest`
 
 </dd>
 </dl>
@@ -5332,6 +5451,214 @@ await client.sessionRepository.delete("session_id");
 <dd>
 
 **request:** `TrueForge.DeleteSessionRepositoryRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionRepositoryClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessionRepository.<a href="/src/api/resources/sessionRepository/client/Client.ts">listGithubRepositories</a>(session_id) -> TrueForge.ListGithubRepositoriesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Uses the GitHub connector attached to this chat. Without one, the answer says to connect GitHub.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessionRepository.listGithubRepositories("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionRepositoryClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessionRepository.<a href="/src/api/resources/sessionRepository/client/Client.ts">getGithubRepository</a>(session_id, { ...params }) -> TrueForge.GetGithubRepositoryDetailsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads one GitHub repo and its branches, using this chat GitHub connector when one is attached.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessionRepository.getGithubRepository("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetGithubRepositorySessionRepositoryRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionRepositoryClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessionRepository.<a href="/src/api/resources/sessionRepository/client/Client.ts">startWork</a>(session_id, { ...params }) -> TrueForge.StartRepositoryWorkResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the repo size and branch on GitHub, registers the repo, and binds the chat to the checkout path the clone will use.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessionRepository.startWork("session_id", {
+    branch: "branch",
+    cloneUrl: "clone_url"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.StartRepositoryWorkRequest`
 
 </dd>
 </dl>

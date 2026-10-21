@@ -13,6 +13,18 @@ export type Tier = 1 | 2 | 3;
 
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
 
+/** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
+export const SANDBOX_COMMAND_REASON = 'sandbox_command';
+export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
+export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
+export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
+export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
+  SANDBOX_COMMAND_REASON,
+  SANDBOX_PACKAGE_INSTALL_REASON,
+  SANDBOX_FILE_WRITE_REASON,
+  SANDBOX_RUN_CODE_REASON,
+]);
+
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
  * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
