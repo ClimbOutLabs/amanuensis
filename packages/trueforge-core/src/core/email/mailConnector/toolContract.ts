@@ -12,6 +12,11 @@ export const MAIL_READ_TOOL_NAMES = [
   'list_mailboxes',
 ] as const;
 
+/** Whether the tool only reads mail. Reads run without a card; every other Email tool asks first. */
+export function isMailReadToolName(tool_name: string): boolean {
+  return MAIL_READ_TOOL_NAMES.some(name => name === tool_name);
+}
+
 /** Tools that deliver a message to recipients, so each recipient must be on the Email list. */
 export const MAIL_SEND_TOOL_NAMES = ['send_email', 'forward_email'] as const;
 

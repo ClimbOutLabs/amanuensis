@@ -58,6 +58,22 @@ describe('extractSentinelFromEvent', () => {
     ],
   };
 
+  it('keeps the new recipients of a mail send, and reads none from any other card', () => {
+    const [mail, other] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-mail',
+          tier: 3,
+          tier3_card: { plain_what: 'Send.', mail_new_recipients: ['stranger@example.net', 7] },
+        },
+        { tool_call_id: 'call-other', tier: 2, tier3_card: { plain_what: 'Read.' } },
+      ],
+    });
+    expect(mail?.card.mail_new_recipients).toEqual(['stranger@example.net']);
+    expect(other?.card.mail_new_recipients).toBeNull();
+  });
+
   it('parses per-tool-call approval cards with the backend field names', () => {
     const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);

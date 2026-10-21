@@ -16,6 +16,7 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
+import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
@@ -67,7 +68,6 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { BROKEN_TOOL_MARKUP_MESSAGE } from '../llm/toolMarkup';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
@@ -126,6 +126,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import { keepSubAgentAnswerText } from '../permissions/webSearch';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -201,6 +202,7 @@ import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThread
 import {
   collectKnownEventIds,
   guardModelReply,
+  LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
   TOO_MANY_TOOL_CALLS_MESSAGE,
 } from './modelReplyGuard';
@@ -628,6 +630,12 @@ function deriveAgentThreadState(input: {
 
 function hasToolCalls(message: InternalEnrichedAssistantMessage): boolean {
   return Boolean(message.tool_calls && message.tool_calls.length > 0);
+}
+
+function withoutToolCalls(message: InternalEnrichedAssistantMessage): InternalEnrichedAssistantMessage {
+  const rest = { ...message };
+  delete rest.tool_calls;
+  return rest;
 }
 
 /**
@@ -1761,6 +1769,8 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
+        // Mail to new addresses is checked before anything is recorded, like a held action below.
+        await this.prepareMailRecipientAdds({ approvals, pendingById, heldById });
         // Checked before anything is recorded, so a refused action leaves the chat untouched.
         const heldReplay = await this.prepareHeldReplay({
           approvals: approvals.filter(approval => heldById.has(approval.tool_call_id)),
@@ -1901,6 +1911,50 @@ export class AgentThread {
       },
       ...input,
     });
+  }
+
+  /**
+   * An approved mail send first makes the sidecar run the server's Email list. New addresses come only from the
+   * approved card, and the sidecar must load the list before the send, on the first try and on a retry. Any failure
+   * throws before the approval is recorded, so the draft stays pending.
+   */
+  private async prepareMailRecipientAdds(input: {
+    approvals: readonly UserToolApprovalMessage[];
+    pendingById: ReadonlyMap<string, InternalEnrichedToolCall>;
+    heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
+  }): Promise<void> {
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      return;
+    }
+    const ctx = { tenant_id: sentinel.tenant_id, created_by: sentinel.created_by };
+    for (const approval of input.approvals) {
+      if (approval.approval.status !== 'allow') {
+        continue;
+      }
+      const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
+      if (
+        call === undefined ||
+        !isMailSend({
+          mcp_server_name: call.tool_info.mcp_server_name,
+          tool_name: call.tool_info.original_tool_name,
+        })
+      ) {
+        continue;
+      }
+      const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (added.length > 0) {
+        const result = await sentinel.services.mail_add_recipients(ctx, added);
+        if (result === 'refused') {
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
+        }
+        if (result === 'not_loaded') {
+          throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+        }
+      } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
+      }
+    }
   }
 
   /**
@@ -3160,13 +3214,6 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    // Leaked tool-call markup that could not be rebuilt into real calls: the reply is not
-    // trustworthy, so nothing in it runs or is saved. The answer stops with the plain reason.
-    if (result.value.tool_markup === 'broken') {
-      yield this.generateErrorEvent(BROKEN_TOOL_MARKUP_MESSAGE, undefined, 'model_stream_fault');
-      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-    }
-
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
     // per-reply call cap stops the turn before anything in it is classified or run. An
@@ -3264,6 +3311,11 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
+    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
+    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    if (finishReason === 'length') {
+      assistantMessage = withoutToolCalls(assistantMessage);
+    }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
     // model is still silent.
@@ -3376,6 +3428,9 @@ export class AgentThread {
         };
       } else if (!hasToolCalls(assistantMessage)) {
         const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
+        if (this.sentinel !== undefined) {
+          keepSubAgentAnswerText({ state: this.sentinel.web_search, text: content });
+        }
         completion = {
           type: 'done',
           output: agentAssistantMessage,
@@ -3396,7 +3451,7 @@ export class AgentThread {
     });
 
     if (finishReason === 'length') {
-      const errorContent = completion?.error_message ?? 'max_tokens breached';
+      const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }

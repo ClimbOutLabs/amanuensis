@@ -3,6 +3,8 @@ import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mail
 import type { Logger } from 'winston';
 
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import { ensureAllowedRecipientsFile } from './mailAllowedRecipients';
+import { runFirstFillInBackground } from './mailFirstFill';
 
 /** Plain words: this is the description a person reads on the Connectors page. */
 const MAIL_CONNECTOR_DESCRIPTION = 'Reads, drafts and sends email from the mail accounts set up for this instance.';
@@ -10,6 +12,7 @@ const MAIL_CONNECTOR_DESCRIPTION = 'Reads, drafts and sends email from the mail 
 /**
  * Registers the Email connector at the mail sidecar's endpoint. Runs at every boot, so the stored endpoint
  * always matches the configuration. Without an endpoint the sidecar is not configured and nothing is written.
+ * The sidecar is the operator's own, so it is first-party; the origin still has to be listed in the configuration.
  */
 export async function registerMailConnector({
   url,
@@ -27,9 +30,35 @@ export async function registerMailConnector({
     tenant_id,
     name: MAIL_CONNECTOR_NAME,
     manifest: { type: 'remote', name: MAIL_CONNECTOR_NAME, url, description: MAIL_CONNECTOR_DESCRIPTION },
-    first_party: false,
+    first_party: true,
   });
   return 'registered';
+}
+
+/**
+ * Boot step for the send list: creates an empty list the first time, so the sidecar can start, and fills it
+ * from Sent in the background. Never keeps the server from starting.
+ */
+export async function prepareMailPolicyAtBoot({
+  url,
+  policyPath,
+  logger,
+}: {
+  url: string | undefined;
+  policyPath: string | undefined;
+  logger: Logger;
+}): Promise<void> {
+  if (url === undefined || policyPath === undefined) {
+    return;
+  }
+  try {
+    const created = await ensureAllowedRecipientsFile({ path: policyPath });
+    if (created) {
+      runFirstFillInBackground({ url, path: policyPath, logger });
+    }
+  } catch (error) {
+    logger.warn('Email send list could not be prepared', extractErrorLogFields(error));
+  }
 }
 
 /** Boot step: a failure is logged and never keeps the server from starting. */

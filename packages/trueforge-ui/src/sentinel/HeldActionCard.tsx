@@ -4,7 +4,7 @@ import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -112,6 +112,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
   const [changing, setChanging] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
+  // Approving a new-recipient send adds its addresses, so it never offers "Always allow" and its labels say so.
+  const newRecipients = isNewRecipientCard(card);
+  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
+  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -173,14 +177,14 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             <Button
               variant="primary"
               size="large"
-              title={APPROVAL_CHOICES.approve.hint}
+              title={approveChoice.hint}
               onClick={onApprove}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.approve.label}
+              {approveChoice.label}
             </Button>
-            {alwaysAllowOffered && (
+            {alwaysAllowOffered && !newRecipients && (
               <Button
                 variant="secondary"
                 size="large"
@@ -209,12 +213,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             <Button
               variant="secondary"
               size="large"
-              title={APPROVAL_CHOICES.deny.hint}
+              title={denyChoice.hint}
               onClick={onDeny}
               disabled={disabled}
               className="sm:min-w-24"
             >
-              {APPROVAL_CHOICES.deny.label}
+              {denyChoice.label}
             </Button>
           </div>
         )}

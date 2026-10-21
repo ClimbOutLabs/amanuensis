@@ -56,6 +56,51 @@ async function* finalAnswerStream(): AsyncGenerator<
   };
 }
 
+async function* cutOffMidToolCallStream(): AsyncGenerator<
+  ExtendedChatCompletionChunk,
+  RawAssistantMessageWithUsage,
+  unknown
+> {
+  yield {
+    id: 'chunk-cut',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'test-model',
+    choices: [{ index: 0, delta: { role: 'assistant', content: 'Let me look that up.' }, finish_reason: null }],
+  };
+  yield {
+    id: 'chunk-cut',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'test-model',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: 'call-cut',
+              type: 'function',
+              function: { name: 'get_space', arguments: '{"space_id":"sp' },
+            },
+          ],
+        },
+        finish_reason: 'length',
+      },
+    ],
+  };
+  return {
+    output: {
+      role: 'assistant',
+      content: 'Let me look that up.',
+      tool_calls: [{ id: 'call-cut', type: 'function', function: { name: 'get_space', arguments: '{"space_id":"sp' } }],
+    },
+    usage: getEmptyUsage(),
+    finish_reason: 'length',
+  };
+}
+
 describe('AgentThread token exhaustion recovery', () => {
   it('preserves the failed output but never replays incomplete reasoning', async () => {
     const requests: ChatCompletionMessageParam[][] = [];
@@ -103,7 +148,11 @@ describe('AgentThread token exhaustion recovery', () => {
           context: [],
           output: expect.arrayContaining([expect.objectContaining({ type: 'model.message', finish_reason: 'length' })]),
         }),
-        expect.objectContaining({ type: 'internal.agent.done', status: 'error', error: 'max_tokens breached' }),
+        expect.objectContaining({
+          type: 'internal.agent.done',
+          status: 'error',
+          error: "Aman's reply was cut off because it ran long. Ask it to continue.",
+        }),
       ]),
     );
     expect(thread.getAgentThreadMetrics()).toEqual(
@@ -128,6 +177,53 @@ describe('AgentThread token exhaustion recovery', () => {
     }
     expect(thread.toSnapshot().context.at(-1)).toEqual(
       expect.objectContaining({ role: 'assistant', content: 'Recovered.' }),
+    );
+  });
+
+  it('keeps the text of a reply cut off mid tool call but saves no half-written call', async () => {
+    const create = jest
+      .fn<ReturnType<ILLM['create']>, Parameters<ILLM['create']>>()
+      .mockImplementationOnce(() => cutOffMidToolCallStream());
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      context: [{ role: 'user', content: 'Find my space' }],
+    });
+
+    const events = [];
+    for await (const event of thread.execute()) {
+      events.push(event);
+    }
+
+    const append = events.find(event => event.type === 'internal.agent.context.append');
+    expect(append).toEqual(
+      expect.objectContaining({
+        context: [],
+        output: [
+          expect.objectContaining({
+            type: 'model.message',
+            finish_reason: 'length',
+            content: 'Let me look that up.',
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(append)).not.toContain('call-cut');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'internal.agent.done',
+          status: 'error',
+          error: "Aman's reply was cut off because it ran long. Ask it to continue.",
+        }),
+      ]),
     );
   });
 });

@@ -1,5 +1,8 @@
-/** The sending fields of a mail call. `from` and `reply_to` never receive the message, so they are not read. */
-const SENDING_FIELDS = ['to', 'cc', 'bcc'] as const;
+/**
+ * The sending fields of a mail call, named as the Email sidecar names them. `from` and `reply_to` never receive
+ * the message, so they are not read.
+ */
+const SENDING_FIELDS = ['recipients', 'cc', 'bcc'] as const;
 
 /** Case and edge space never change who receives a message, so they never change whether it is listed. */
 export function normalizeMailAddress(address: string): string {

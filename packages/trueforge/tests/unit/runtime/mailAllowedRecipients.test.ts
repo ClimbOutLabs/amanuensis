@@ -37,7 +37,7 @@ describe('exactRecipientAddress', () => {
 describe('renderAllowedRecipientsFile', () => {
   it('writes each validated address once, in the one shape the reader accepts', () => {
     expect(renderAllowedRecipientsFile(['dana@example.com', 'sam@example.com'])).toBe(
-      'allowed_recipients = ["dana@example.com", "sam@example.com"]\n',
+      'db_location = "/data/db.sqlite3"\nallowed_recipients = ["dana@example.com", "sam@example.com"]\n',
     );
   });
 
@@ -47,7 +47,7 @@ describe('renderAllowedRecipientsFile', () => {
   });
 
   it('writes an empty list, which denies every send', () => {
-    expect(renderAllowedRecipientsFile([])).toBe('allowed_recipients = []\n');
+    expect(renderAllowedRecipientsFile([])).toBe('db_location = "/data/db.sqlite3"\nallowed_recipients = []\n');
   });
 });
 

@@ -1,7 +1,7 @@
 import { MailAttachmentProcessor } from '../../../../src/core/email/mailConnector/MailAttachmentProcessor';
 import type { ToolCallResult } from '../../../../src/core/mcp/executeToolCalls';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
-import { makeMockIMCPServer } from '../../harnessMocks';
+import { makeMockIMCPServer, makeStubPublicSandbox } from '../../harnessMocks';
 
 const BASE64_BYTES = Buffer.from('%PDF-1.4 scanned lease').toString('base64');
 
@@ -64,6 +64,24 @@ describe('MailAttachmentProcessor', () => {
     expect(result.message.content).toBe('Attachments cannot be opened in this chat because the sandbox is off.');
     expect(result.message.content).not.toContain(BASE64_BYTES);
     expect(result.outputTransform).toBe('replaced');
+  });
+
+  it('with a sandbox, the bytes are staged as a file and the model reads only its path and the untrusted notice', async () => {
+    const sandbox = makeStubPublicSandbox();
+    const upload = jest
+      .spyOn(sandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
+    const result = makeResult({
+      serverName: 'Email',
+      toolName: 'get_attachment_content',
+      rawContent: attachmentRaw(BASE64_BYTES),
+    });
+    await new MailAttachmentProcessor().process([result], { ...SANDBOX_OFF, sandbox });
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0]?.[0].content).toEqual(Buffer.from('%PDF-1.4 scanned lease'));
+    expect(result.message.content).toContain('/tmp/uploads/');
+    expect(result.message.content).toContain('untrusted data');
+    expect(result.message.content).not.toContain(BASE64_BYTES);
   });
 
   it('leaves the raw provider output intact for output screening', async () => {

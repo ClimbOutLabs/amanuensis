@@ -1,4 +1,4 @@
-import { parseMailEmailMcpUrl } from '../../../src/config';
+import { parseMailEmailMcpUrl, withMailSidecarOrigin } from '../../../src/config';
 
 describe('MAIL_EMAIL_MCP_URL', () => {
   it('is unset when blank, so no sidecar is configured', () => {
@@ -13,5 +13,22 @@ describe('MAIL_EMAIL_MCP_URL', () => {
   it('refuses anything that is not an http(s) URL', () => {
     expect(() => parseMailEmailMcpUrl('mail-email:9557')).toThrow('MAIL_EMAIL_MCP_URL must be an http(s) URL');
     expect(() => parseMailEmailMcpUrl('ftp://mail-email/mcp')).toThrow('MAIL_EMAIL_MCP_URL must be an http(s) URL');
+  });
+});
+
+describe('the sidecar origin is first-party when the sidecar is configured', () => {
+  it('adds the sidecar origin to the listed origins once', () => {
+    const origins = ['https://memory.internal:8443'];
+    expect(withMailSidecarOrigin({ origins, mailUrl: 'http://mail-email:9557/mcp' })).toEqual([
+      'https://memory.internal:8443',
+      'http://mail-email:9557',
+    ]);
+    expect(
+      withMailSidecarOrigin({ origins: ['http://mail-email:9557'], mailUrl: 'http://mail-email:9557/mcp' }),
+    ).toEqual(['http://mail-email:9557']);
+  });
+
+  it('leaves the origins alone when no sidecar is configured', () => {
+    expect(withMailSidecarOrigin({ origins: [], mailUrl: undefined })).toEqual([]);
   });
 });

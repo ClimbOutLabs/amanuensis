@@ -25,7 +25,8 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { MAIL_CONNECTOR_NAME, MAIL_SEND_TOOL_NAMES } from '../email/mailConnector/toolContract';
+import { isMailSend } from '../email/mailConnector/sendListApproval';
+import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
@@ -72,7 +73,13 @@ import {
   type ExtractionResult,
 } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
-import { isMapsToolName, MAPS_SILENT_REASON, RENDER_PLACES_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
+import {
+  isMapsToolName,
+  MAPS_AFTER_READ_SILENT_REASON,
+  MAPS_SILENT_REASON,
+  RENDER_PLACES_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+} from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   appendOutboundTrace,
@@ -83,6 +90,7 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
+import { privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
 import { isRunnerWorkflow } from './runner';
 import {
   GUARD_RULE_SAY,
@@ -137,6 +145,8 @@ import {
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
+  privateTextForChecks,
+  SEARCH_AFTER_READ_SILENT_REASON,
   SEARCH_SILENT_REASON,
   SILENT_SEARCH_LIMIT,
   unreturnedUrls,
@@ -1539,8 +1549,23 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
   }
-  if (hasReadPrivateData(ctx.web_search)) {
-    return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+  const readMode = hasReadPrivateData(ctx.web_search);
+  if (readMode) {
+    const texts = privateTextForChecks(ctx.web_search);
+    if (texts === undefined || strings === undefined) {
+      return held('mcp_search_after_private_read', HOLD_SAY.private_read);
+    }
+    const leak = privateTextLeak({
+      mode: 'search',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended
+        ? privateTextSkipped(leak)
+        : held('mcp_search_after_private_read', HOLD_SAY.private_read);
+    }
   }
   // Sandbox and built-in tools classify under their own sentinel context, so their private reads are kept per chat.
   if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
@@ -1559,11 +1584,52 @@ async function classifySearchProviderTool(input: {
     return held('mcp_search_host_limit', HOLD_SAY.site_limit);
   }
   return tier1Decision({
-    reason: SEARCH_SILENT_REASON,
+    reason: readMode ? SEARCH_AFTER_READ_SILENT_REASON : SEARCH_SILENT_REASON,
     reason_detail: `Searched: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
+}
+
+/** Said to the owner when a scheduled run's search or map is skipped because its text was copied from mail or calendar. */
+const PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE =
+  'One lookup was skipped, because it would have shared something from your mail or calendar.';
+
+/** What a skipped call's text would have carried, in plain words. */
+function leakWords(leak: PrivateTextLeak): string {
+  switch (leak) {
+    case 'contact':
+      return 'an email address or phone number';
+    case 'number':
+      return 'a long number';
+    case 'name':
+      return "a person's name";
+    case 'phrase':
+      return 'a phrase copied word for word';
+    case 'token':
+      return 'a long code';
+  }
+}
+
+/** A call that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
+  return autoDenyDecision({
+    reason: 'private_text_check',
+    reason_detail: `It would have shared ${leakWords(leak)} from your mail or calendar.`,
+    owner_message: PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE,
+    sensitive_read: false,
+  });
+}
+
+/**
+ * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
+ * read does not mark the chat as holding a secret.
+ */
+function isCheckedPrivateRead(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'truefoundry-system' &&
+    (action.mcp_server_name === GMAIL_SERVER_ID || action.mcp_server_name === CALENDAR_SERVER_ID)
+  );
 }
 
 /**
@@ -1581,19 +1647,42 @@ async function classifyMapsSilently(input: {
   if (!verdict.ok) {
     return undefined;
   }
-  if (hasReadPrivateData(ctx.web_search) || ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
     return undefined;
+  }
+  const readMode = hasReadPrivateData(ctx.web_search);
+  const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
+  if (readMode && texts === undefined) {
+    return undefined;
+  }
+  if (texts !== undefined && strings !== undefined) {
+    // A map may name a street address from the mail, so only the words of a search are checked for copies.
+    const leak = privateTextLeak({
+      mode: 'maps',
+      strings,
+      earlier: ctx.web_search.sentText,
+      privateTexts: texts,
+    });
+    if (leak !== null) {
+      return ctx.services.unattended ? privateTextSkipped(leak) : undefined;
+    }
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return tier1Decision({
-    reason: MAPS_SILENT_REASON,
-    reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-    sensitive_read: false,
-  });
+  return readMode
+    ? tier1Decision({
+        reason: MAPS_AFTER_READ_SILENT_REASON,
+        reason_detail: `Map: ${values.join(', ')}`,
+        sensitive_read: false,
+      })
+    : tier1Decision({
+        reason: MAPS_SILENT_REASON,
+        reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+        sensitive_read: false,
+      });
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -1716,18 +1805,20 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
+/** The reason a silent Email read is recorded with. */
+const MAIL_READ_REASON = 'mail_read';
+
 /** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
-function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): string[] {
+async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
   if (
     action.tool_type !== 'mcp' ||
-    action.mcp_server_name !== MAIL_CONNECTOR_NAME ||
-    !MAIL_SEND_TOOL_NAMES.some(name => name === action.tool_name)
+    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
   ) {
     return [];
   }
   return mailRecipientsNotListed({
-    listed: ctx.services.mail_listed_addresses ?? [],
+    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
     params: action.canonical_params,
   });
 }
@@ -1750,6 +1841,27 @@ function demoRefusesConnector(input: {
 }
 
 /**
+ * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
+ * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
+ * connector that happens to be named Email.
+ */
+async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Email needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  markPrivateDataRead(ctx.web_search);
+  return tier1Decision({
+    reason: MAIL_READ_REASON,
+    reason_detail: `Read your email with \`${action.tool_name}\`.`,
+    sensitive_read: true,
+  });
+}
+
+/**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
  */
@@ -1762,7 +1874,6 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     });
   }
   if (isGmailReadToolName(action.tool_name)) {
-    markPrivateDataRead(ctx.web_search);
     return tier1Decision({
       reason: 'gmail_read',
       reason_detail: 'Read your email.',
@@ -1934,7 +2045,6 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   if (!isCalendarReadToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
   }
-  markPrivateDataRead(ctx.web_search);
   return tier1Decision({
     reason: 'calendar_read',
     reason_detail: 'Read your calendar.',
@@ -2193,7 +2303,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
-  const newMailRecipients = mailNewRecipients({ action, ctx });
+  const newMailRecipients = await mailNewRecipients({ action, ctx });
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
     const sentence = externalServiceWhat({
@@ -2204,7 +2314,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
     return tier3Decision({
       card: {
-        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} ${sentence}`,
+        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         why_asked_again: null,
@@ -2215,6 +2325,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         outbound_text: fields.outbound_text,
         destination_host: fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
       },
       reason: 'mail_new_recipient',
       reason_detail: 'A mail send to an address that is not on the Email list.',
@@ -2443,6 +2554,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return classifyCalendarTool(action, ctx);
   }
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
+    action.mcp_first_party === true &&
+    isMailReadToolName(action.tool_name)
+  ) {
+    return classifyMailRead(action, ctx);
+  }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
     return classifyScheduleTool(action, ctx);
   }
@@ -2604,7 +2723,8 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
-  if (decision.sensitive_read && decision.auto_deny === null) {
+  // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
+  if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
     ctx.services.private_reads.markPrivateDataRead(ctx);
   }
   await recordClassificationAudit({

@@ -117,6 +117,9 @@ services:
       # the server forwards recorded WAV audio and degrades gracefully when
       # the sidecar is unreachable (typed chat keeps working).
       STT_URL: http://aman-stt:8001
+      # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
+      MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
+      MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -134,6 +137,9 @@ services:
       # Persistent persona knowledge libraries; without this, libraries vanish
       # on container recreate.
       - persona-knowledge-data:/data/persona-knowledge
+      # The Email send list. The server is its only writer; the sidecar mounts it read-only.
+      - mail-policy:/data/mail-policy
+      - mail-policy-status:/data/mail-policy-status:ro
     depends_on:
       loopback:
         condition: service_started
@@ -195,6 +201,8 @@ services:
   # so nothing outside this network may reach it.
   mail-email:
     image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
+    # The wrapper starts the sidecar on the send list the server writes, and restarts it when that list changes.
+    entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
     command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
     # Account credentials come only from this optional file, which the installer writes.
     # Its `.env.*` name is git-ignored.
@@ -207,9 +215,16 @@ services:
       # Env-supplied accounts are read from the environment only. `plaintext` makes the
       # server never touch the OS keyring, and no account is written to the config file.
       MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
-      # The mail metadata index (SQLite) lives beside this path, on the volume below.
-      MCP_EMAIL_SERVER_CONFIG_PATH: /data/config.toml
+      # The send list the server owns. It is read-only here; the server is the only writer.
+      MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
+      # Where the wrapper records the hash of the list it started with. The server waits on it.
+      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
+      # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
+      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
     volumes:
+      - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
+      - mail-policy:/policy:ro
+      - mail-policy-status:/mail-status
       - mail-email-data:/data
     expose:
       - '9557'
@@ -309,7 +324,11 @@ services:
 
 volumes:
   dex-tls:
-  # Email connector config and mail metadata index. Holds mail metadata at rest, never credentials.
+  # The Email send list. Holds only addresses, never credentials.
+  mail-policy:
+  # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.
+  mail-policy-status:
+  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
   mail-email-data:
   # Persistent Markdown memory files .
   memory-data:
