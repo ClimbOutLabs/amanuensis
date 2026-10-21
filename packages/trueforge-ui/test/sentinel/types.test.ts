@@ -10,6 +10,7 @@ import {
   parseTier2ActionKind,
   parseToolTier,
   parseUserSettings,
+  sentinelAuditLabel,
 } from '@/sentinel/types.js';
 
 describe('parseToolTier', () => {
@@ -641,6 +642,19 @@ describe('parseAuditEntries', () => {
     }
     expect(parseAuditEntries([{ ...entry, outcome: 'maybe' }])).toEqual([]);
     expect(parseAuditEntries([{ ...entry, outcome: 'undone' }])).toEqual([]);
+  });
+});
+
+describe('sentinelAuditLabel', () => {
+  it('says a silent Tier 1 run went ahead without asking, and a held Tier 2 or 3 call is held', () => {
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 1 })).toBe('Done without asking');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 2 })).toBe('Held for you');
+    expect(sentinelAuditLabel({ outcome: 'logged', tier: 3 })).toBe('Held for you');
+  });
+
+  it('keeps the plain label for every other outcome', () => {
+    expect(sentinelAuditLabel({ outcome: 'ran', tier: 2 })).toBe('Ran');
+    expect(sentinelAuditLabel({ outcome: 'auto_denied', tier: 3 })).toBe('Refused');
   });
 });
 
