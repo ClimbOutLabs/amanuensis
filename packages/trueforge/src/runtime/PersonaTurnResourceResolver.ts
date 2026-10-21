@@ -3,6 +3,7 @@ import type { AgentCapability, ModelMessageEvent } from '@truefoundry/trueforge-
 import { repairAssistantMessageContent, stripCitationMarkers } from '../personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
+import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import type { PersonaContext } from '../personas/persona';
 import { PersonalizationTurnResourceResolver } from './PersonalizationTurnResourceResolver';
 
@@ -187,6 +188,8 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
         // catalog name without its provider prefix, as the base resolver does.
         modelId: personaModel.modelId ?? persona.model_name.slice(persona.model_name.indexOf('/') + 1),
         modelSupportsVision: personaModel.modelSupportsVision,
+        // Iris only explains Aman from what she knows: she is never given a tool that sends, writes or schedules.
+        readOnly: isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by }),
       },
       compactionModel: await this.#pinCompactionAwayFromPersona(input.spec, resolved),
       extraCapabilities: [

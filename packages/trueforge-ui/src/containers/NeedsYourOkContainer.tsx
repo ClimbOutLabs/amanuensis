@@ -105,7 +105,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           key={info.toolCallId}
           card={info.card}
           status={statusOf(info)}
-          alwaysAllowOffered={info.held?.alwaysAllowOffered === true}
+          alwaysAllowOffered={info.alwaysAllowOffered === true}
           disabled={!canManage || server == null || !hasSessionResync(server)}
           onApprove={() => void answer(info, 'approve')}
           onAlwaysAllow={() => void answer(info, 'always_allow')}

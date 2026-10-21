@@ -130,7 +130,7 @@ describe('HeldActionCard for a new recipient', () => {
         onChangeRequest={vi.fn()}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Change it' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add and send' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -149,7 +149,7 @@ describe('HeldActionCard for a new recipient', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Always allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow this tool' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
   });

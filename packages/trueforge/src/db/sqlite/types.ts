@@ -198,6 +198,8 @@ export interface SentinelUserSettingsTable {
   search_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   maps_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  sandbox_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -257,6 +259,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Connector host the grant was given for; null for a connector with no URL. */
+  mcp_server_host: string | null;
   created_at: string;
 }
 

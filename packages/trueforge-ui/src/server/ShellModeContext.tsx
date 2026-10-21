@@ -89,7 +89,7 @@ export type HistoryAgentFilter = {
   intent: HistoryAgentIntent;
 };
 
-type ShellModeContextValue = {
+export type ShellModeContextValue = {
   mode: ShellMode;
   /** Host agentConfig mode (capabilities source). */
   agentConfigMode: AgentConfig['mode'];

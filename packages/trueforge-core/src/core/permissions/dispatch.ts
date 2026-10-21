@@ -27,6 +27,7 @@ import { hashArgv, matchAllowlist, OFFLINE_SHELL_COMMANDS, parseSimpleCommand } 
 import type { Tier, TrackedExecutionBinding } from './tier';
 import {
   canonicalFileIdentity,
+  canonicalWriteIdentity,
   canonicalWriteTarget,
   contentDigest,
   extractExecutedFileOperand,
@@ -158,8 +159,7 @@ function verifyTier2Containment(input: {
           )
         : patchTargets.paths.map(relative_path => absolutePatchTarget({ workspace_root, relative_path, resolution }));
     for (const target of targets) {
-      // The target may not exist yet: resolve via its parent directory.
-      const identity = canonicalWriteTarget({ p: target, cwd: callDirectory, resolution });
+      const identity = canonicalWriteIdentity({ p: target, cwd: callDirectory, resolution });
       if (identity === null || !insideRoot(identity)) {
         return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
       }
@@ -202,6 +202,9 @@ function verifyTier2Containment(input: {
   return undefined;
 }
 
+/** File-write tools whose sandbox writes can run without a card, so they are re-checked at dispatch. */
+const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
+
 /**
  * Returns an error message when the call must not execute, or undefined when
  * it is cleared to run. Tier 3 calls and Tier 2 calls that asked are verified
@@ -217,8 +220,8 @@ export async function verifyPreDispatch(input: {
   const { services } = ctx;
 
   if (call.tier === 1) {
-    // Only shell commands are silent because of a containment rule that can change underfoot.
-    if (call.tool_name !== 'exec') {
+    // Only shell commands and sandbox file writes are silent because of a containment rule that can change underfoot.
+    if (call.tool_name !== 'exec' && !SANDBOX_FILE_WRITE_TOOLS.has(call.tool_name)) {
       return undefined;
     }
     const workspaceRoot = ctx.workspace_cwd;

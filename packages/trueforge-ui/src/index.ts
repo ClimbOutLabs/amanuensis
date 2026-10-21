@@ -350,6 +350,17 @@ export { UserEditComposerContainer } from './containers/UserEditComposerContaine
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
 export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkOnRepoControls.js';
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
+export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
+export type {
+  HelpHealthCheck,
+  HelpHealthItem,
+  HelpHealthStatus,
+  HelpHostReport,
+  HelpHostReportState,
+} from './help/helpModel.js';
+export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
+export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
+export { HelpStuckButton } from './help/HelpStuckButton.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
 export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';

@@ -208,6 +208,7 @@ export interface SentinelUserSettingsTable {
   tier2_auto_allow: JSONColumnType<Tier2ActionKind[], Tier2ActionKind[] | string, Tier2ActionKind[] | string>;
   search_without_asking: boolean;
   maps_without_asking: boolean;
+  sandbox_without_asking: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -267,6 +268,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Connector host the grant was given for; null for a connector with no URL. */
+  mcp_server_host: string | null;
   created_at: Date;
 }
 

@@ -15,13 +15,11 @@ function addressOf(item: unknown): string {
     return item;
   }
   if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-    const email: unknown = 'email' in item ? item.email : undefined;
-    if (typeof email === 'string') {
-      return email;
+    if ('email' in item && typeof item.email === 'string') {
+      return item.email;
     }
-    const address: unknown = 'address' in item ? item.address : undefined;
-    if (typeof address === 'string') {
-      return address;
+    if ('address' in item && typeof item.address === 'string') {
+      return item.address;
     }
   }
   // An entry with no readable address matches nothing on the list, so it is shown rather than passed over.

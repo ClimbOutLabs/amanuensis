@@ -29,6 +29,7 @@ describe('OfflineIndicator', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -44,6 +45,7 @@ describe('OfflineIndicator', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -60,6 +62,7 @@ describe('OfflineIndicator', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     const { container } = render(
       <SentinelApiProvider api={api}>
@@ -78,6 +81,7 @@ describe('SentinelSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -102,6 +106,7 @@ describe('SentinelSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -131,6 +136,7 @@ describe('SentinelSettings', () => {
         tier2_auto_allow: [],
         search_without_asking: on,
         maps_without_asking: false,
+        sandbox_without_asking: true,
       });
       render(
         <SentinelApiProvider api={api}>
@@ -151,6 +157,7 @@ describe('SentinelSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
     render(
@@ -168,6 +175,7 @@ describe('SentinelSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -197,6 +205,7 @@ describe('SentinelSettings', () => {
       tier2_auto_allow: [],
       search_without_asking: true,
       maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
     render(
@@ -206,5 +215,51 @@ describe('SentinelSettings', () => {
     );
     fireEvent.click(await screen.findByRole('switch', { name: 'Show maps without asking' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Save failed.');
+  });
+
+  it('shows the sandbox switch on by default, and turning it off saves the choice', async () => {
+    const { api, updateUserSettings } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    const toggle = await screen.findByRole('switch', { name: 'Run code in the sandbox without asking' });
+    expect(toggle).toBeChecked();
+    expect(
+      screen.getByText(
+        'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ sandbox_without_asking: false });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Run code in the sandbox without asking' })).not.toBeChecked();
+    });
+  });
+
+  it('renders the sandbox switch unchecked when the server says it asks', async () => {
+    const { api } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: false,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    expect(await screen.findByRole('switch', { name: 'Run code in the sandbox without asking' })).not.toBeChecked();
+    expect(screen.getByText('Work inside the sandbox asks before it runs.')).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { useRef, useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
+import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -38,6 +39,11 @@ export type PermissionApprovalCardProps = {
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
+  /**
+   * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
+   * server says the owner may always allow this tool; the card asks for confirmation first.
+   */
+  onApproveAlways?: (() => void) | undefined;
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
@@ -168,6 +174,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   tier,
   onApprove,
   onApproveForChat,
+  onApproveAlways,
   onDeny,
   onChangeRequest,
   onApproveAll,
@@ -278,6 +285,15 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             >
               {APPROVAL_CHOICES.approveForChat.label}
             </Button>
+          )}
+          {onApproveAlways !== undefined && !newRecipients && (
+            <AlwaysAllowToolControl
+              size="small"
+              className="flex-1"
+              disabled={disabled}
+              description={`The agent will run "${toolName}" on this connector without asking, in every chat.`}
+              onConfirm={onApproveAlways}
+            />
           )}
           {onChangeRequest !== undefined && (
             <Button

@@ -95,6 +95,12 @@ function makeSource(callTool: CallToolMock, serverName = 'mail', clashingSend = 
             annotations: { readOnlyHint: true, openWorldHint: false },
             preload: true,
           },
+          {
+            name: 'get_attachment',
+            description: 'Read an attachment',
+            inputSchema: schema,
+            preload: true,
+          },
         ];
   return {
     name: serverName,
@@ -305,7 +311,12 @@ describe('an unattended run', () => {
 
   it('still runs a read-only tool the owner always allowed, silently', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -382,6 +393,60 @@ describe('an unattended run', () => {
       sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Send it now' }],
     });
     expect(turn.result.required_actions).toMatchObject([{ type: EventType.TOOL_APPROVAL_REQUIRED }]);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('an attended annotated read of a secret path', () => {
+  const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+
+  it('is asked for once, never offered chat scope, and refused a chat-wide approval', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { orchestrator, thread } = h.build({ unattended: false });
+    const asked = await runTurn({
+      orchestrator,
+      sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Read my key' }],
+    });
+    expect(asked.result.required_actions).toMatchObject([{ type: EventType.TOOL_APPROVAL_REQUIRED }]);
+    expect(asked.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', can_chat_allow: false, can_always_allow: false }],
+    });
+
+    const refused = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: refused.orchestrator, sendBatch: [approve('call-secret', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    const once = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await runTurn({ orchestrator: once.orchestrator, sendBatch: [approve('call-secret')] });
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an unannotated connector read of a secret path in any argument', () => {
+  const secretRead = {
+    id: 'call-attachment',
+    name: 'get_attachment',
+    args: JSON.stringify({ attachment_path: '/home/u/.ssh/id_rsa' }),
+  };
+
+  it('is never offered chat scope or Always allow, and refused both', async () => {
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-attachment', held: true, can_always_allow: false }],
+    });
+
+    const chat = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: chat.orchestrator, sendBatch: [approve('call-attachment', 'chat')] }),
+    ).rejects.toThrow('chat-scoped approval is not available');
+
+    const always = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: always.orchestrator, sendBatch: [approve('call-attachment', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
     expect(h.callTool).not.toHaveBeenCalled();
   });
 });
@@ -541,7 +606,7 @@ describe('approving a held action later', () => {
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', mcp_server_host: null };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -551,6 +616,21 @@ describe('approving a held action later', () => {
     expect(h.callTool).toHaveBeenCalledTimes(1);
     // The grant made the call silent, so no dispatch row follows: the approval is recorded at the answer.
     expect(h.audit.at(-1)).toMatchObject({ outcome: 'approved' });
+  });
+
+  it('does not offer or accept Always allow for an annotated read of a secret path', async () => {
+    const secretRead = { id: 'call-secret', name: 'read_note', args: JSON.stringify({ path: '/home/u/.ssh/id_rsa' }) };
+    const h = makeHarness([() => toolCallsStream([secretRead])]);
+    const { thread, brief } = await runBrief(h);
+    expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
+      tool_calls: [{ id: 'call-secret', held: true, can_always_allow: false }],
+    });
+
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-secret', 'always')] }),
+    ).rejects.toThrow('always-allow approval is not available');
+    expect(h.callTool).not.toHaveBeenCalled();
   });
 
   it('does not offer a chat-wide approval on a held action', async () => {
@@ -660,6 +740,40 @@ describe('approving a held mail send to an address not on the Email list', () =>
     h.mailAdd.mockResolvedValueOnce('not_loaded');
     await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
     expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry waits for the sidecar again once the list shows the address, and sends only when it loads', async () => {
+    // Each add writes the address to the list, as the real server does, before the sidecar has loaded it.
+    const listed = ['dana@example.com'];
+    const { h, context } = await heldSend(listed);
+    const answers: MailAddRecipientsResult[] = ['not_loaded', 'not_loaded', 'loaded'];
+    h.mailAdd.mockImplementation((_ctx, addresses) => {
+      listed.push(...addresses);
+      return Promise.resolve(answers.shift() ?? 'loaded');
+    });
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailAdd).toHaveBeenCalledTimes(2);
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.mailAdd).toHaveBeenCalledTimes(3);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('an approved send with only known addresses waits for the list, keeps the draft, and sends nothing while it is not loaded', async () => {
+    const { h, context } = await heldSend(['dana@example.com'], {
+      call: { ...mailSendCall, args: JSON.stringify({ ...MAIL_SEND_ARGS, recipients: ['dana@example.com'] }) },
+    });
+    h.mailLoaded.mockResolvedValueOnce('not_loaded');
+
+    await expect(answer(h, context, [approve('call-mail')])).rejects.toThrow(SEND_LIST_STILL_UPDATING);
+    expect(h.mailLoaded).toHaveBeenCalledTimes(1);
     expect(h.callTool).not.toHaveBeenCalled();
 
     await answer(h, context, [approve('call-mail')]);
@@ -870,7 +984,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: '{}',
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(1);
@@ -905,7 +1024,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).toHaveBeenCalledTimes(20);
@@ -920,7 +1044,12 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       args: JSON.stringify({ note: `n${String(index)}` }),
     }));
     const h = makeHarness([() => toolCallsStream(calls)]);
-    await h.base.tool_grants.recordToolGrant({ ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note' });
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
     const { brief } = await runBrief(h);
 
     expect(h.callTool).not.toHaveBeenCalled();
