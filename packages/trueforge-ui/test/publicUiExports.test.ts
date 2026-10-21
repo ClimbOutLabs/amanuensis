@@ -51,7 +51,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'HelpProvider',
   'useOptionalHelp',
   'HelpStuckButton',
-  'AMAN_GUIDE_NAME',
   'HELP_BUTTON_LABEL',
   'IRIS_HELP_CHOICES',
   'PersonalizationProvider',

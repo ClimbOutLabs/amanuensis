@@ -1,4 +1,4 @@
-import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 /**
  * Help check as the app shows it. The wire shape comes from GET /api/v1/help/health-check; the server
  * schema is its canonical owner, and the frontend checks each response against these fields.

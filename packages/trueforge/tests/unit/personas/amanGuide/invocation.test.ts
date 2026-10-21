@@ -1,4 +1,4 @@
-import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { matchPersonaInvocation, type PersonaContent } from '../../../../src/personas/persona';
 
 // The text the "Get to know Aman" Tour card sends. The UI test pins the same string's prefix.

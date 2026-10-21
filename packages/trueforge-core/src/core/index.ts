@@ -496,7 +496,6 @@ export {
   remoteImageAskReason,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export { AMAN_GUIDE_DESCRIPTION, AMAN_GUIDE_NAME } from './personas/guide';
 export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';
 export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';

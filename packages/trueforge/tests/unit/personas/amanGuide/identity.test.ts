@@ -1,4 +1,4 @@
-import { AMAN_GUIDE_DESCRIPTION, AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core';
+import { AMAN_GUIDE_DESCRIPTION, AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { amanGuidePersonaId, isAmanGuidePersona } from '../../../../src/personas/amanGuide/identity';
 
 describe('Iris identity', () => {

@@ -1,11 +1,7 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability, ILLM, ModelMessageEvent } from '@truefoundry/trueforge-core/core';
-import {
-  AMAN_GUIDE_NAME,
-  EventType,
-  InstructionBuilder,
-  ModelMessageEventSchema,
-} from '@truefoundry/trueforge-core/core';
+import { EventType, InstructionBuilder, ModelMessageEventSchema } from '@truefoundry/trueforge-core/core';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import { createLogger } from 'winston';
 import { findUsedKnowledgeHits } from '../../../src/personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
