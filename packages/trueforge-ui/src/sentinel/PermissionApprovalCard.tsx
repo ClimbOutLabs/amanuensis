@@ -8,6 +8,7 @@ import { Icon } from '../icons/Icon.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { CALENDAR_BADGES, CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
+import { PERSONA_BADGE, PersonaDetails } from './PersonaDetails.js';
 import { SCHEDULE_BADGES, ScheduleDetails } from './ScheduleDetails.js';
 import type {
   SentinelApprovalCard,
@@ -182,7 +183,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { email, calendar_event: calendarEvent, schedule } = card;
+  const { email, calendar_event: calendarEvent, schedule, persona } = card;
   const badge =
     email !== null
       ? EMAIL_BADGES[email.action]
@@ -190,7 +191,9 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         ? CALENDAR_BADGES[calendarEvent.action]
         : schedule !== null
           ? SCHEDULE_BADGES[schedule.action]
-          : null;
+          : persona !== null
+            ? PERSONA_BADGE
+            : null;
   return (
     <div className="rounded-lg border border-border bg-card-bg">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-border bg-secondary-bg px-4 py-2">
@@ -244,6 +247,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
         {schedule !== null && <ScheduleDetails schedule={schedule} />}
+
+        {persona !== null && <PersonaDetails persona={persona} />}
 
         {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 
