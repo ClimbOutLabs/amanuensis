@@ -1,5 +1,19 @@
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
-import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard, type SentinelApprovalMailbox } from './types.js';
+import {
+  WAITING_FOR_YOU_LABEL,
+  type SentinelApprovalCard,
+  type SentinelApprovalEmail,
+  type SentinelApprovalMailbox,
+} from './types.js';
+
+/**
+ * The title of a mail card. Its verb is the verb on the primary button, so the title and the button
+ * always name the same action.
+ */
+export function emailQuestion(email: SentinelApprovalEmail): string {
+  if (email.action !== 'send') return 'Save this draft?';
+  return email.reply_in_thread !== null ? 'Send this reply?' : 'Send this email?';
+}
 
 /** The people a card sends to, in plain words: the first name, then how many more. */
 function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string {
@@ -13,17 +27,7 @@ function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string 
 /** The question a ticket asks, one sentence the person can answer with a verb. */
 export function approvalQuestion(card: SentinelApprovalCard): string {
   const { email, calendar_event: event, schedule, persona } = card;
-  if (email !== null) {
-    const to = recipientsText(email.to);
-    switch (email.action) {
-      case 'send':
-        return email.reply_in_thread !== null ? `Send this reply to ${to}?` : `Send this email to ${to}?`;
-      case 'save':
-        return 'Save this draft?';
-      case 'change':
-        return 'Change this saved draft?';
-    }
-  }
+  if (email !== null) return emailQuestion(email);
   if (event !== null) {
     return event.action === 'create'
       ? `Add "${event.title}" to your calendar?`
@@ -38,12 +42,12 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
   return card.plain_what;
 }
 
-/** The verb on the safe button: what "yes" does, in the card's own words. */
+/** The verb on the primary button: what "yes" does, in the card's own words. */
 export function approveVerb(card: SentinelApprovalCard): string {
   // Approving a new-recipient send adds its addresses to the send list, so it says so.
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.approve.label;
   const { email, calendar_event: event, schedule, persona } = card;
-  if (email !== null) return email.action === 'send' ? 'Send it' : 'Save it';
+  if (email !== null) return email.action === 'send' ? 'Send' : 'Save draft';
   if (event !== null) return event.action === 'create' ? 'Add it' : 'Save it';
   if (schedule !== null) return schedule.action === 'create' ? 'Create it' : 'Delete it';
   if (persona !== null) return 'Create it';
@@ -53,7 +57,8 @@ export function approveVerb(card: SentinelApprovalCard): string {
 /** The verb on the quiet button that says no. */
 export function declineVerb(card: SentinelApprovalCard): string {
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.cancel.label;
-  return card.email !== null && card.email.action === 'send' ? "Don't send" : 'Not now';
+  if (card.email === null) return 'Not now';
+  return card.email.action === 'send' ? "Don't send" : "Don't save";
 }
 
 /** Word for a finished approval, shown in the stub and the badge. */
@@ -77,28 +82,16 @@ export function approvalSentLine(card: SentinelApprovalCard, time: string): stri
 }
 
 export type ApprovalStub = {
-  /** What the ticket is, in a few words: REPLY TO RUI, NEW SCHEDULE. */
+  /** What the ticket is, in a few words: "New schedule", "Changed event". */
   what: string;
-  /** What it holds: the subject, the event or the schedule name. */
+  /** What it holds: the event or the schedule name. */
   detail: string;
-  /** The state: WAITING FOR YOU, or SENT with the time. */
+  /** The state: Waiting for you, or Done with the time. */
   state: string;
 };
 
 function stubWhat(card: SentinelApprovalCard): string {
-  const { email, calendar_event: event, schedule, persona } = card;
-  if (email !== null) {
-    switch (email.action) {
-      case 'send':
-        return email.reply_in_thread !== null
-          ? `Reply to ${recipientsText(email.to)}`
-          : `Email to ${recipientsText(email.to)}`;
-      case 'save':
-        return 'New draft';
-      case 'change':
-        return 'Changed draft';
-    }
-  }
+  const { calendar_event: event, schedule, persona } = card;
   if (event !== null) return event.action === 'create' ? 'New event' : 'Changed event';
   if (schedule !== null) return schedule.action === 'create' ? 'New schedule' : 'Delete schedule';
   if (persona !== null) return 'New specialist';
@@ -106,19 +99,28 @@ function stubWhat(card: SentinelApprovalCard): string {
 }
 
 function stubDetail(card: SentinelApprovalCard): string {
-  const { email, calendar_event: event, schedule, persona } = card;
-  if (email !== null) return email.subject === '' ? 'No subject' : email.subject;
+  const { calendar_event: event, schedule, persona } = card;
   if (event !== null) return event.title;
   if (schedule !== null) return schedule.name;
   if (persona !== null) return persona.name;
   return card.destination ?? card.recipient ?? 'Open Details to see what it does';
 }
 
-/** The stub of an approval ticket. `sentAt` is the time it was sent, or null while it waits. */
+/** The stub of a ticket that is not a mail. `sentAt` is the time it was approved, or null while it waits. */
 export function approvalStub(card: SentinelApprovalCard, { sentAt }: { sentAt: string | null }): ApprovalStub {
   return {
     what: stubWhat(card),
     detail: stubDetail(card),
     state: sentAt === null ? WAITING_FOR_YOU_LABEL : `${doneWord(card)} ${sentAt}`,
   };
+}
+
+/** What a mail card is called in the banner: "1 email waiting for your approval". */
+export function approvalKindNoun(card: SentinelApprovalCard): string {
+  const { email, calendar_event: event, schedule, persona } = card;
+  if (email !== null) return 'email';
+  if (event !== null) return 'calendar change';
+  if (schedule !== null) return 'schedule change';
+  if (persona !== null) return 'specialist';
+  return 'action';
 }

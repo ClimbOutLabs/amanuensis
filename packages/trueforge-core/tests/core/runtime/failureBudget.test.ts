@@ -26,6 +26,10 @@ import { EXITED_NOTE } from '../../../src/core/sandbox/execResultSemantics';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
+// Guard tests run longer replies than the production step budget, and so would stop at it before the
+// guard under test can fire. The budget itself is covered by replyStepBudget.test.ts at production values.
+const RAISED_REPLY_STEP_BUDGET = { main: 1000, sub: 1000 };
+
 /**
  * A toolset with two tools: `write`, which always succeeds, and `run`, which fails the way the
  * caller decides: by returning an error result (it ran and failed) or by throwing before
@@ -141,6 +145,7 @@ async function runThreadInstance(
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     definition: {
+      stepBudget: RAISED_REPLY_STEP_BUDGET,
       modelClient,
       modelId: undefined,
       configuredModels: undefined,
@@ -325,6 +330,7 @@ describe('failed-batch nudge', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
@@ -413,6 +419,7 @@ describe('failed-batch nudge', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
@@ -703,6 +710,7 @@ describe('repeat budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient: { create: laterCreate, createNonStream: jest.fn() },
         modelId: undefined,
         configuredModels: undefined,
@@ -861,7 +869,12 @@ describe('repeat budget', () => {
     const root = new AgentThread({
       threadId: 'main',
       title: 'Main',
-      definition: { modelId: undefined, configuredModels: undefined, modelClient: rootModel },
+      definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
+        modelId: undefined,
+        configuredModels: undefined,
+        modelClient: rootModel,
+      },
       context: [{ role: 'user', content: 'Delegate this.' }],
       capabilities,
       toolCallMemo: undefined,
@@ -878,6 +891,7 @@ describe('repeat budget', () => {
           threadId: input.threadId,
           title: input.request.name,
           definition: {
+            stepBudget: RAISED_REPLY_STEP_BUDGET,
             modelId: undefined,
             configuredModels: undefined,
             modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
@@ -1017,12 +1031,16 @@ describe('repeat budget', () => {
     );
     expect(assistantBatchIndex).toBeGreaterThanOrEqual(0);
     const messagesAfterBatch = finalMessages.slice(assistantBatchIndex + 1);
-    // Both tool results, then the nudge — never a user message ahead of a tool result from the
-    // same batch, and the request message sequence stays assistant, tool, tool, user.
+    // Both tool results come first, never a user message ahead of them. The per-reply block sits
+    // just before the latest user message, which here is the nudge.
     expect(messagesAfterBatch[0]).toMatchObject({ role: 'tool' });
     expect(messagesAfterBatch[1]).toMatchObject({ role: 'tool' });
-    expect(messagesAfterBatch[2]).toMatchObject({ role: 'user' });
-    expect(JSON.stringify(messagesAfterBatch[2])).toContain(nudgeText);
+    expect(messagesAfterBatch[2]).toMatchObject({
+      role: 'system',
+      content: expect.stringContaining('<reply-context>'),
+    });
+    expect(messagesAfterBatch[3]).toMatchObject({ role: 'user' });
+    expect(JSON.stringify(messagesAfterBatch[3])).toContain(nudgeText);
   });
 
   it('defers the nudge until a sub-agent launched from the same batch finishes', async () => {
@@ -1084,6 +1102,7 @@ describe('repeat budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient: rootModel,
         modelId: undefined,
         configuredModels: undefined,
@@ -1100,6 +1119,7 @@ describe('repeat budget', () => {
           threadId: input.threadId,
           title: input.request.name,
           definition: {
+            stepBudget: RAISED_REPLY_STEP_BUDGET,
             modelId: undefined,
             configuredModels: undefined,
             modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
@@ -1194,6 +1214,7 @@ describe('repeat budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,
@@ -1531,6 +1552,7 @@ describe('pre-edit discovery hard cap', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
+        stepBudget: RAISED_REPLY_STEP_BUDGET,
         modelClient,
         modelId: undefined,
         configuredModels: undefined,

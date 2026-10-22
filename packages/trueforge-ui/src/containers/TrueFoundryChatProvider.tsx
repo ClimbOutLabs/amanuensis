@@ -18,13 +18,14 @@ import {
   notifyComposerBusyFailure,
   useComposerBusyScope,
 } from '../hooks/useComposerBusyState.js';
-import { ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
+import { createStreamDropChannel, ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
 import { ActiveSessionPermissionsProvider } from '../hooks/useResourcePermissions.js';
 import {
   isPendingApprovalsError,
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
+import { isNetworkFailureError, LiveConnectionLostError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
@@ -49,6 +50,20 @@ function ActiveSessionPermissionScope({
   );
 }
 
+/**
+ * Reading the chat's state is safe to retry, so a read that never reached the server (often the
+ * first request after a phone wakes) becomes a resync instead of an error and an empty chat.
+ * Sends keep their own error: retrying one is the person's call.
+ */
+async function readOrConnectionLost<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isNetworkFailureError(error)) throw new LiveConnectionLostError({ cause: error });
+    throw error;
+  }
+}
+
 function runtimeServer({
   server,
   locallyCreatedSessionIds,
@@ -63,6 +78,10 @@ function runtimeServer({
       locallyCreatedSessionIds.add(session.id);
       return session;
     },
+    getSession: request => readOrConnectionLost(() => server.getSession(request)),
+    getTurn: request => readOrConnectionLost(() => server.getTurn(request)),
+    listTurns: request => readOrConnectionLost(() => server.listTurns(request)),
+    listEvents: request => readOrConnectionLost(() => server.listEvents(request)),
     async listSessions(request) {
       const result = await server.listSessions(request);
       return {
@@ -128,6 +147,7 @@ function ChatRuntimeScope({
     () => runtimeServer({ server, locallyCreatedSessionIds }),
     [locallyCreatedSessionIds, server],
   );
+  const streamDrops = useMemo(() => createStreamDropChannel(), []);
   // composer().send() is void and swallows onNew rejections; clear optimistic
   // busy when the runtime reports a pre-stream failure (e.g. createSession).
   // The runtime hands back no attempt id of its own, so this failure is stamped with the id of
@@ -136,6 +156,13 @@ function ChatRuntimeScope({
   // in flight (in this chat, or in an unrelated one sharing the same module).
   const resolvedOnError = useCallback(
     (error: unknown) => {
+      if (error instanceof LiveConnectionLostError) {
+        // The chat still exists on the server; only this page lost sight of it. Reconnect
+        // and resync quietly instead of showing a failure.
+        notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
+        streamDrops.report();
+        return;
+      }
       // A surfaced failure is avatar ground truth too: hold the composed error pose, then
       // ease back. Fires whether the host or the toaster renders the error itself.
       activitySink?.reportError();
@@ -153,7 +180,7 @@ function ChatRuntimeScope({
       }
       reportError(error);
     },
-    [activitySink, composerBusyScope, reportError],
+    [activitySink, composerBusyScope, reportError, streamDrops],
   );
 
   const runtime = useTrueFoundryAgentRuntime({
@@ -172,10 +199,11 @@ function ChatRuntimeScope({
 
   return (
     <AssistantRuntimeProvider runtime={runtime as never}>
-      <ForegroundEventSync />
-      <ActiveSessionPermissionScope locallyCreatedSessionIds={locallyCreatedSessionIds}>
-        {children}
-      </ActiveSessionPermissionScope>
+      <ForegroundEventSync streamDrops={streamDrops}>
+        <ActiveSessionPermissionScope locallyCreatedSessionIds={locallyCreatedSessionIds}>
+          {children}
+        </ActiveSessionPermissionScope>
+      </ForegroundEventSync>
     </AssistantRuntimeProvider>
   );
 }

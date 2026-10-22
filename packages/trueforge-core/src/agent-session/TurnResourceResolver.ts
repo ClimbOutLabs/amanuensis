@@ -197,11 +197,15 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /** How long a web search or page read may take before the model gets a plain tool error instead. */
+      searchCallTimeoutMs?: number | undefined;
       /**
        * Host instance-wide bound in milliseconds on waiting for a model call's
        * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
        */
       modelFirstResponseTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelIdleTimeoutMs. */
+      modelIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
@@ -263,6 +267,10 @@ export class TurnResourceResolver<
 
   get modelFirstResponseTimeoutMs(): number | undefined {
     return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get modelIdleTimeoutMs(): number | undefined {
+    return this.deps.modelIdleTimeoutMs;
   }
 
   get toolCallPolicy(): HostToolCallPolicy | undefined {
@@ -450,6 +458,8 @@ export class TurnResourceResolver<
           }),
           pages: fetchedPages,
           pagesScope: pageScope,
+          searchCallTimeoutMs: this.deps.searchCallTimeoutMs,
+          logger: this.deps.logger,
         });
       }),
     );

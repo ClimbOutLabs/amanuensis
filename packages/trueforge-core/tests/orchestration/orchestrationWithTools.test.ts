@@ -101,12 +101,14 @@ const EXPECTED_ROOT_LLM_INPUT = [
   {
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
   },
   {
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
       {
         role: 'assistant',
