@@ -26,6 +26,7 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/google/connection';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import {
   CREATE_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
@@ -688,6 +689,7 @@ function blockPreview(content: string): string {
 class SpaceTool extends LocalToolMCP {
   readonly name = SPACE_SERVER_ID;
   readonly displayName = 'Space';
+  protected override readonly bundle: ToolBundleName = 'spaces';
 
   constructor(private readonly options: SpaceCapabilityOptions) {
     super({ tracing: options.tracing });
@@ -1340,6 +1342,7 @@ export function spaceCapability(options: SpaceCapabilityOptions): AgentCapabilit
   return {
     systemToolSets: [new SpaceTool(options)],
     instructionBuilders: [buildSpaceInstruction],
+    bundle: 'spaces',
   };
 }
 

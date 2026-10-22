@@ -56,6 +56,16 @@ sequenceDiagram
 
 The extra discovery round-trips only happen the first time a tool is needed — and they are far cheaper than carrying every schema in context on every model call.
 
+The meta tools are only sent while at least one connector has `preload` off. They are for connector tools only: a built-in tool is always called directly by its own name, never through `call_tool`.
+
+## Built-in tool bundles
+
+Built-in tools are grouped in bundles: `google` (email and calendar), `web`, `maps`, `sandbox`, `spaces`, `documents`, `schedules`, `sub_agents` and `extras`. The system prompt lists each bundle in one short line. A few built-in tools, such as `ask_user_question`, go out on every turn. Connector tools follow their `preload` setting, except that the search connector goes with `web` and the first-party email and calendar accounts go with `google`.
+
+Before the first model call of a turn, a router picks the bundles the message needs. It reads the message's words (a link or a question picks `web`, an email or a meeting picks `google`, and so on), whether files are attached, and the bundles used in the last three replies of the chat. It includes a bundle when unsure. A bundle's tools and its guidance in the system prompt go out together.
+
+The model can call `load_bundle` with a bundle name to add a bundle for the rest of the chat. Its tools are added at the end of the tool list. The chat remembers up to four loaded bundles. Each tool keeps its own name in every bundle, so its permission check, approval card and audit record are the same however it was loaded.
+
 ## Selective preloading
 
 You don't have to choose all-or-nothing. `preload_tools` eagerly loads specific tools while the rest of the server stays deferred:
