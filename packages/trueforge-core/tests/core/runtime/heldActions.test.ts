@@ -293,7 +293,10 @@ describe('an unattended run', () => {
 
     expect(h.callTool).not.toHaveBeenCalled();
     expect(events.map(event => event.type)).not.toContain(EventType.TOOL_APPROVAL_REQUIRED);
-    expect(h.audit).toEqual([]);
+    // The refusal is recorded as an automatic denial, never as a hold for the owner.
+    expect(h.audit).toEqual([
+      expect.objectContaining({ outcome: 'auto_denied', auto_deny_reason: 'tool_not_prepared' }),
+    ]);
     expect(JSON.stringify(thread.toSnapshot().context)).toContain(REMOVED_TOOL_RESULT);
   });
 
