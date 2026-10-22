@@ -293,11 +293,18 @@ const INSPECTION_STOP_LIMIT = 30;
 const ASYNC_ITERATOR_ABORTED = Symbol('async-iterator-aborted');
 
 /**
- * Default bound on waiting for a model call's first output before failing the turn visibly.
- * Ten minutes: generous for slow prefill on large-but-legal contexts, tight enough that a
- * provider that accepted the request and went silent never leaves a turn hanging for hours.
+ * Default bound on waiting for a model call's first output, on every step including the one after a
+ * tool result. Ninety seconds: past it a person has long stopped waiting, and the steps already done
+ * are kept, so trying again costs little.
  */
-export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
+export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 90_000;
+
+/** Default bound on silence between a model's chunks once it has started answering. */
+export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
+
+/** Shown when a model call goes silent; the steps done so far are kept. */
+export const MODEL_STOPPED_ANSWERING_MESSAGE =
+  'The model stopped answering. Try again, or pick another model in the composer.';
 
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
@@ -320,9 +327,9 @@ export const DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS = 30_000;
  * above any legitimate request and far below a provider-hanging one.
  */
 const MAX_MODEL_REQUEST_CHARS = 4_000_000;
-const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
+const MODEL_STREAM_SILENT = Symbol('model-stream-silent');
 
-/** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
+/** Human duration for a watchdog timeout in a user-facing error, e.g. "5 minutes", "90 seconds". */
 function describeTimeout(timeoutMs: number): string {
   if (timeoutMs < 60_000) {
     const seconds = Math.max(1, Math.round(timeoutMs / 1000));
@@ -410,24 +417,21 @@ async function* drainWithNoProgressTimeout<T>(
 }
 
 /**
- * Waits for the first model chunk with a bounded watchdog. A provider that accepts the request
- * but never produces a first chunk (and never errors) would otherwise leave the turn active
- * indefinitely — observed as a ~4-hour stall with zero model steps. On timeout the stream is
- * asked to close and the caller fails the turn visibly. The timer is cleared the moment the
- * wait settles for any reason (chunk, abort, or error), so it can never fire late.
+ * Waits for the next model chunk under a silence bound: the first-token bound before any chunk, the
+ * idle bound after. The race does not depend on the provider honouring an abort, so a request that
+ * was accepted and then went quiet (on any provider, on any step) cannot hold the turn open. On
+ * expiry the stream is asked to close, never awaited, and the caller ends the step.
  */
-function nextModelChunkWithFirstResponseTimeout<T, TReturn>(input: {
+function nextModelChunkWithin<T, TReturn>(input: {
   iterator: AsyncIterator<T, TReturn, unknown>;
   signal: AbortSignal | undefined;
   requestClose: () => void;
   timeoutMs: number;
-}): Promise<IteratorResult<T, TReturn> | typeof ASYNC_ITERATOR_ABORTED | typeof MODEL_FIRST_RESPONSE_TIMEOUT> {
+}): Promise<IteratorResult<T, TReturn> | typeof ASYNC_ITERATOR_ABORTED | typeof MODEL_STREAM_SILENT> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      // The model went silent: ask the stream to close, but never await cleanup — a hung
-      // provider must not strand the turn a second time.
       input.requestClose();
-      resolve(MODEL_FIRST_RESPONSE_TIMEOUT);
+      resolve(MODEL_STREAM_SILENT);
     }, input.timeoutMs);
     nextAbortableIteratorResult(input).then(
       result => {
@@ -441,6 +445,22 @@ function nextModelChunkWithFirstResponseTimeout<T, TReturn>(input: {
       },
     );
   });
+}
+
+/**
+ * The model client's own stream deadline (see VercelAILLM) fired: the same silence, seen from the
+ * transport. Matched by name, on the error or the error it wraps, because a DOMException from
+ * another realm is not an `instanceof Error`.
+ */
+function isModelStreamDeadline(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && typeof current === 'object' && current !== null; depth += 1) {
+    if (Reflect.get(current, 'name') === 'TimeoutError') {
+      return true;
+    }
+    current = Reflect.get(current, 'cause');
+  }
+  return false;
 }
 
 function mechanicalHandoffEvidence(): AbnormalHandoffEvidence {
@@ -1568,6 +1588,7 @@ export class AgentThread {
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
+  private readonly modelIdleTimeoutMs: number;
   private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
@@ -1620,6 +1641,7 @@ export class AgentThread {
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    this.modelIdleTimeoutMs = input.modelIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
     this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
@@ -2370,6 +2392,17 @@ export class AgentThread {
       ...(handoffCause === undefined ? {} : { handoff_cause: handoffCause }),
       ...(output && { output }),
     };
+  }
+
+  /** Ends the step after the model went silent; the steps already done stay in the turn. */
+  private *endStepModelSilent(): Generator<AgentThreadEvent, void, unknown> {
+    this.logger.warn('Model went silent; ending the step', {
+      threadId: this.threadId,
+      model: this.definition.modelId ?? 'unknown',
+      firstResponseTimeoutMs: this.modelFirstResponseTimeoutMs,
+      idleTimeoutMs: this.modelIdleTimeoutMs,
+    });
+    yield this.generateErrorEvent(MODEL_STOPPED_ANSWERING_MESSAGE, undefined, 'model_response_timeout');
   }
 
   /**
@@ -3280,29 +3313,19 @@ export class AgentThread {
       const modelRequestStartedAt = Date.now();
       modelMessageUsage = undefined;
       try {
-        // The first chunk waits behind the watchdog: a provider that accepts the request but
-        // never produces output (and never errors) must fail the turn visibly, not hang it.
-        let attemptResult = await nextModelChunkWithFirstResponseTimeout({
+        // Every chunk waits behind a silence bound, so a provider that accepts the request and then
+        // goes quiet ends the step with a plain message instead of holding the turn open.
+        let attemptResult = await nextModelChunkWithin({
           iterator: llmStream,
           signal,
           requestClose: requestLLMStreamClose,
           timeoutMs: this.modelFirstResponseTimeoutMs,
         });
-        if (attemptResult === MODEL_FIRST_RESPONSE_TIMEOUT) {
-          yield this.generateErrorEvent(
-            `The model produced no output within ${describeTimeout(this.modelFirstResponseTimeoutMs)}, so the ` +
-              `turn was stopped instead of hanging. This usually means the request was too large for the ` +
-              `model to start on, for example after pasting a very large document. Try a smaller message or ` +
-              `a different model, then send again.`,
-            undefined,
-            'model_response_timeout',
-          );
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        if (attemptResult === ASYNC_ITERATOR_ABORTED) {
-          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-        }
-        while (!attemptResult.done) {
+        while (
+          attemptResult !== ASYNC_ITERATOR_ABORTED &&
+          attemptResult !== MODEL_STREAM_SILENT &&
+          !attemptResult.done
+        ) {
           const chunk = attemptResult.value;
           if (chunk.usage) {
             modelMessageUsage = this.computeAssistantMessageUsage({
@@ -3329,14 +3352,19 @@ export class AgentThread {
               yield event;
             }
           }
-          attemptResult = await nextAbortableIteratorResult({
+          attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
             requestClose: requestLLMStreamClose,
+            timeoutMs: this.modelIdleTimeoutMs,
           });
-          if (attemptResult === ASYNC_ITERATOR_ABORTED) {
-            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
-          }
+        }
+        if (attemptResult === ASYNC_ITERATOR_ABORTED) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+        if (attemptResult === MODEL_STREAM_SILENT) {
+          yield* this.endStepModelSilent();
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         result = attemptResult;
         break;
@@ -3344,6 +3372,10 @@ export class AgentThread {
         // Cancellation and every non-stream-fault error keep their existing handling
         // (ASYNC_ITERATOR_ABORTED above for cancellation; execute()'s outer catch, fatal_error,
         // for anything else) rather than being retried here.
+        if (!signal?.aborted && isModelStreamDeadline(error)) {
+          yield* this.endStepModelSilent();
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
         if (signal?.aborted || !(error instanceof ModelStreamFault)) {
           throw error;
         }

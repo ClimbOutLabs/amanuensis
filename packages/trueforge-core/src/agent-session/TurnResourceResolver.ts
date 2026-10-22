@@ -202,6 +202,8 @@ export class TurnResourceResolver<
        * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
        */
       modelFirstResponseTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelIdleTimeoutMs. */
+      modelIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
@@ -263,6 +265,10 @@ export class TurnResourceResolver<
 
   get modelFirstResponseTimeoutMs(): number | undefined {
     return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get modelIdleTimeoutMs(): number | undefined {
+    return this.deps.modelIdleTimeoutMs;
   }
 
   get toolCallPolicy(): HostToolCallPolicy | undefined {
