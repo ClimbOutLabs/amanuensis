@@ -113,30 +113,36 @@ describe('EmailApprovalCard fields', () => {
     expect(screen.getAllByText('grace@example.com')).toHaveLength(1);
   });
 
-  it('shows the Cc row only when there are copies', () => {
+  it('shows the Copy and Hidden copy rows only when there are some', () => {
     const { unmount } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.queryByText('Cc')).not.toBeInTheDocument();
-    expect(screen.queryByText('Bcc')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copy')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hidden copy')).not.toBeInTheDocument();
     unmount();
 
     renderEmail({ cc: [bare('sam@example.com')], bcc: [bare('audit@example.com')] });
-    expect(screen.getByText('Cc')).toBeInTheDocument();
+    expect(screen.getByText('Copy')).toBeInTheDocument();
     expect(screen.getByText('sam@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Bcc')).toBeInTheDocument();
+    expect(screen.getByText('Hidden copy')).toBeInTheDocument();
     expect(screen.getByText('audit@example.com')).toBeInTheDocument();
   });
 
-  it('says "Reply in existing thread" under the subject only for a reply', () => {
+  it('shows the reply-in-thread subject and sender rows only for a reply', () => {
     const { unmount } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
     expect(screen.queryByText('Reply in existing thread')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reply in the thread, subject')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reply in the thread, from')).not.toBeInTheDocument();
     unmount();
 
-    renderEmail({ reply_in_thread: { subject: 'Lease', from: 'Grace' } });
+    renderEmail({ reply_in_thread: { subject: 'Lease', from: 'Grace' }, subject: 'Re: Lease' });
     expect(screen.getByText('Reply in existing thread')).toBeInTheDocument();
+    expect(screen.getByText('Reply in the thread, subject')).toBeInTheDocument();
+    expect(screen.getByText('Lease', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Reply in the thread, from')).toBeInTheDocument();
+    expect(screen.getByText('Grace', { selector: 'dd' })).toBeInTheDocument();
   });
 
   it('shows an address replies go to, on its own line, before the person approves', () => {

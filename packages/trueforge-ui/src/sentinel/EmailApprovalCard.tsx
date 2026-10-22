@@ -102,7 +102,7 @@ function EmailBody({ body }: { body: string }) {
 
 /**
  * The card for a mail waiting on the person. It shows the metadata, the message as it will be sent, and
- * one sticky bar of actions. Each field appears once; a Cc or Bcc row shows only when there are some.
+ * one sticky bar of actions. Each field appears once; a Copy or Hidden copy row shows only when there are some.
  */
 export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   approvalId,
@@ -140,17 +140,25 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       <div className="border-t border-border px-4 py-3">
         <p className="mb-2 text-sm text-text-secondary">What will be sent</p>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
+          {email.reply_in_thread !== null && (
+            <>
+              <dt className="text-text-secondary">Reply in the thread, subject</dt>
+              <dd className="break-words text-text-primary">{email.reply_in_thread.subject}</dd>
+              <dt className="text-text-secondary">Reply in the thread, from</dt>
+              <dd className="break-words text-text-primary">{email.reply_in_thread.from}</dd>
+            </>
+          )}
           <dt className="text-text-secondary">To</dt>
           <dd className="break-words text-text-primary">{mailboxListText(email.to)}</dd>
           {email.cc.length > 0 && (
             <>
-              <dt className="text-text-secondary">Cc</dt>
+              <dt className="text-text-secondary">Copy</dt>
               <dd className="break-words text-text-primary">{mailboxListText(email.cc)}</dd>
             </>
           )}
           {email.bcc.length > 0 && (
             <>
-              <dt className="text-text-secondary">Bcc</dt>
+              <dt className="text-text-secondary">Hidden copy</dt>
               <dd className="break-words text-text-primary">{mailboxListText(email.bcc)}</dd>
             </>
           )}
