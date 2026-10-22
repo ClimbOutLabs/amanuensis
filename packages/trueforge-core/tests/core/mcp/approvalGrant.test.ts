@@ -750,8 +750,8 @@ describe('search chat grant', () => {
   });
 });
 
-describe('calendar changes never get a durable grant', () => {
-  it.each(['calendar_write', 'caldav_calendar_change', 'caldav_invitation_reply', 'connector_calendar_write'])(
+describe('calendar changes that reach guests never get a durable grant', () => {
+  it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
     'refuses chat and always scope for %s, even when the server calls the tool a read',
     tier_reason => {
       const info: InternalToolCallInfo = {

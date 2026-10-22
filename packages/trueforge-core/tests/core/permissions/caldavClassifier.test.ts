@@ -79,7 +79,7 @@ describe('CalDAV respond_to_event', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). The organizer, Office Admin, will be told.',
+      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). The organizer, Office Admin, will be told. This reply goes to the event organizer, so Aman always asks.',
     );
     expect(decision.card?.cannot_be_undone).toBe("The reply to the organizer can't be unsent.");
     expect(decision.approval_token_id).toEqual(expect.any(String));
@@ -116,7 +116,7 @@ describe('CalDAV respond_to_event', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Accept the event with id ev1. Its title could not be read. The organizer will be told. Their name could not be read.',
+      'Accept the event with id ev1. Its title could not be read. The organizer will be told. Their name could not be read. This reply goes to the event organizer, so Aman always asks.',
     );
   });
 
@@ -256,7 +256,7 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Changing this will email: Sam Lee, dana@example.com.',
+      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Changing this will email: Sam Lee, dana@example.com. This change reaches the other people invited to this event, so Aman always asks.',
     );
   });
 
@@ -287,7 +287,7 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Deleting this will email: Sam Lee.',
+      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin). Deleting this will email: Sam Lee. This cancellation reaches the other people invited to this event, so Aman always asks.',
     );
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent.",

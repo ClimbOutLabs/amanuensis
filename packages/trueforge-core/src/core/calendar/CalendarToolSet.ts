@@ -46,9 +46,13 @@ import {
   type UpdateEventInput,
 } from './toolContract';
 
-/** Keys the host adds to an approved write: the zone the times were read in, and the hash of what was shown. */
+/**
+ * Keys the host adds to an approved write: the zone the times were read in, the hash of what was shown, and
+ * whether the write reaches any guest. A standing grant admits only a write that reaches no guest.
+ */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
 const REVIEW_HASH_KEY = 'review_hash';
+const REACHES_GUESTS_KEY = 'reaches_guests';
 
 const NO_ZONE =
   "Nothing was saved because Aman doesn't know which time zone the times are in. Ask the user, then pass time_zone.";
@@ -234,6 +238,7 @@ export class CalendarToolSet extends LocalToolMCP {
           ...(params.arguments ?? {}),
           [APPROVED_ZONE_KEY]: zone,
           [REVIEW_HASH_KEY]: hashEventWrite(resolved.request),
+          [REACHES_GUESTS_KEY]: resolved.review.attendees.length > 0,
         },
         review: resolved.review,
       };
@@ -287,28 +292,59 @@ export class CalendarToolSet extends LocalToolMCP {
   }
 
   /**
+   * An answer to this call decides it. With no answer, only a standing grant can admit it, and the classifier
+   * grants one only for a change that reaches no guest, so the card never waives a guest change.
+   */
+  async #writePermitted({
+    approval,
+    toolName,
+    reachesGuests,
+  }: {
+    approval: ApprovalDecision | undefined;
+    toolName: string;
+    reachesGuests: unknown;
+  }): Promise<boolean> {
+    if (approval !== undefined) {
+      return approval.status === 'allow';
+    }
+    if (reachesGuests !== false) {
+      return false;
+    }
+    const { sentinel } = this.#options;
+    return sentinel.services.tool_grants.hasToolGrant({
+      tenant_id: sentinel.tenant_id,
+      created_by: sentinel.created_by,
+      mcp_server_name: CALENDAR_SERVER_ID,
+      tool_name: toolName,
+      mcp_server_host: null,
+    });
+  }
+
+  /**
    * The zone and hash the user approved this exact call under. A call that arrives without them, or with arguments
    * other than the approved ones, writes nothing; so does any call in a scheduled run, where nobody approved it.
    */
-  #approvedWrite<T>(input: {
+  async #approvedWrite<T>(input: {
     call: T;
     schema: z.ZodType<T>;
+    toolName: string;
     approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
-  }): { zone: string; hash: string } | { refusal: string } {
+  }): Promise<{ zone: string; hash: string } | { refusal: string }> {
     if (this.#options.sentinel.services.unattended) {
       return { refusal: "Scheduled runs never change the calendar. This waits for the owner's OK." };
-    }
-    // The approved params are settled when the call is classified, before anyone answers, so only the person's
-    // answer to this very call lets it write.
-    if (input.approval?.status !== 'allow') {
-      return { refusal: NOT_APPROVED };
     }
     const {
       [APPROVED_ZONE_KEY]: zone,
       [REVIEW_HASH_KEY]: hash,
+      [REACHES_GUESTS_KEY]: reachesGuests,
       ...approvedArgs
     } = input.context?.approved_params ?? {};
+    // The approved params are settled when the call is classified, before anyone answers, so only the person's
+    // answer to this very call, or a standing grant the classifier admitted, lets it write.
+    if (!(await this.#writePermitted({ approval: input.approval, toolName: input.toolName, reachesGuests }))) {
+      return { refusal: NOT_APPROVED };
+    }
     if (typeof zone !== 'string' || typeof hash !== 'string') {
       return { refusal: NOT_APPROVED };
     }
@@ -434,7 +470,13 @@ export class CalendarToolSet extends LocalToolMCP {
     approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
   }) {
-    const approved = this.#approvedWrite({ call: input, schema: CreateEventSchema, approval, context });
+    const approved = await this.#approvedWrite({
+      call: input,
+      schema: CreateEventSchema,
+      toolName: CREATE_EVENT_TOOL_NAME,
+      approval,
+      context,
+    });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }
@@ -456,7 +498,13 @@ export class CalendarToolSet extends LocalToolMCP {
     approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
   }) {
-    const approved = this.#approvedWrite({ call: input, schema: UpdateEventSchema, approval, context });
+    const approved = await this.#approvedWrite({
+      call: input,
+      schema: UpdateEventSchema,
+      toolName: UPDATE_EVENT_TOOL_NAME,
+      approval,
+      context,
+    });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }

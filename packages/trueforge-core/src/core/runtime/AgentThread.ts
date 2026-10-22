@@ -122,7 +122,6 @@ import {
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit } from '../permissions/audit';
-import { calendarWriteBudgetBlocks } from '../permissions/calendarWriteBudget';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import {
   checkHeldReplay,
@@ -199,7 +198,6 @@ import {
   policyBlockedNudgeMessage,
   scanApprovalDecisions,
   toEnrichedToolCall,
-  toolCallsThisTurn,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
   WEB_IMAGES_PROMPT,
@@ -3425,30 +3423,6 @@ export class AgentThread {
         yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
         return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
       }
-    }
-    // Calendar changes past this turn's limit, and exact repeats of one already made, never ask or run.
-    const calendarBlocks = calendarWriteBudgetBlocks({
-      earlier: toolCallsThisTurn(this.context),
-      decisions: scanApprovalDecisions(this.context),
-      calls: assistantMessage.tool_calls ?? [],
-    });
-    if (calendarBlocks.size > 0 && assistantMessage.tool_calls !== undefined) {
-      assistantMessage = {
-        ...assistantMessage,
-        tool_calls: assistantMessage.tool_calls.map(call => {
-          const block = calendarBlocks.get(call.id);
-          return block === undefined
-            ? call
-            : {
-                ...call,
-                tool_info: {
-                  ...call.tool_info,
-                  is_approval_required: false,
-                  pre_dispatch_failure: { kind: 'policy_blocked' as const, ...block },
-                },
-              };
-        }),
-      };
     }
     // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
     if (unattended) {
