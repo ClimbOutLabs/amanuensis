@@ -125,7 +125,11 @@ export function holdApprovalCalls(input: {
         tool_info: {
           ...info,
           is_approval_required: false,
-          pre_dispatch_failure: { kind: 'policy_blocked', message: NOT_SAVED_MESSAGES[reason] },
+          pre_dispatch_failure: {
+            kind: 'policy_blocked',
+            message: NOT_SAVED_MESSAGES[reason],
+            owner_message: NOT_SAVED_MESSAGES[reason],
+          },
         },
       });
     } else {
