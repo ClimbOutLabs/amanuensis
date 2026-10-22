@@ -9,6 +9,7 @@ import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { takeComposerPrefill, useComposerDraft } from '../hooks/useComposerDraft.js';
 import { useComposerPauseView } from '../hooks/useComposerPauseView.js';
+import { useComposerPlaceholder } from '../hooks/useComposerPlaceholder.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { SlotsProvider, useSlot, useSlotIsDefault } from '../theme/SlotsProvider.js';
@@ -187,7 +188,9 @@ function ComposerWithOptionalDraft({
   return <ComposerBody placeholder={placeholder} forceDisabled={forceDisabled} connectedToBanner={connectedToBanner} />;
 }
 
-export function ComposerContainer({ placeholder = 'Ask anything...' }: ComposerContainerProps) {
+export function ComposerContainer({ placeholder: placeholderOverride }: ComposerContainerProps) {
+  const pickedPlaceholder = useComposerPlaceholder();
+  const placeholder = placeholderOverride ?? pickedPlaceholder;
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();
 

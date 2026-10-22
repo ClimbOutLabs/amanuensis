@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ApprovalNavBanner } from '@/atoms/ApprovalNavBanner.js';
+import { ApprovalNavBanner, approvalBannerLabel } from '@/atoms/ApprovalNavBanner.js';
 
 describe('ApprovalNavBanner', () => {
   it('renders the count label and disables chevrons at the ends', () => {
@@ -96,5 +96,19 @@ describe('ApprovalNavBanner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next approval' }));
     expect(onNext).toHaveBeenCalledOnce();
     expect(onFocusCurrent).not.toHaveBeenCalled();
+  });
+});
+
+describe('approvalBannerLabel', () => {
+  it('names the kind when exactly one item waits', () => {
+    expect(approvalBannerLabel(1, 'email')).toBe('1 email waiting for your approval');
+  });
+
+  it('falls back to the plain count when the kind is not known', () => {
+    expect(approvalBannerLabel(1, undefined)).toBe('1 item needs your approval');
+  });
+
+  it('counts the items when more than one waits, whatever the kind', () => {
+    expect(approvalBannerLabel(2, 'email')).toBe('2 items need your approval');
   });
 });
