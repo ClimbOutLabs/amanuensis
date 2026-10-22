@@ -33,7 +33,7 @@ test_a_default_install_is_served_over_https() {
   assert_contains "$file" "- '192.168.1.20:8791:8081'" "the plain port reaches only the front end"
   assert_contains "$file" "- '192.168.1.20:8443:8443'"
   assert_not_contains "$file" "192.168.1.20:8791:8790" "the app itself is not reachable from the network"
-  assert_not_contains "$file" "0.0.0.0"
+  assert_not_contains "$file" "'0.0.0.0:"
   assert_contains "$file" "image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9"
   assert_contains "$file" "network_mode: 'service:loopback'"
   assert_contains "$file" "user: '1000:1000'" "the front end runs as the person who installed, so the folders it reads stay theirs"

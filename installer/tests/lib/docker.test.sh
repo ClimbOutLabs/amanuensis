@@ -92,6 +92,7 @@ test_blocker_stops_before_any_prompt() {
   STUB_COMPOSE_VERSION=1.29.2
   run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect an email account=>n
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "Stopped before changing anything"
@@ -180,6 +181,7 @@ test_install_offer_declined() {
 
 
 
+
 y
 n
 "
@@ -263,6 +265,7 @@ test_group_decline_stops_without_sudo() {
   STUB_DOCKER_DENIED=1
   : >"$SB_STATE/group_members"
   with_input "n
+
 
 
 
