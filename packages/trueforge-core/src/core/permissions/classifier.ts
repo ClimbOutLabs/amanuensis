@@ -133,7 +133,6 @@ import {
   autoDenyDecision,
   CONTENT_STEERED_REASON,
   failClosedDecision,
-  SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
   SANDBOX_PACKAGE_INSTALL_REASON,
   SANDBOX_RUN_CODE_REASON,
@@ -1009,38 +1008,11 @@ function sandboxRunDetail(command: string): string {
 }
 
 /**
- * Interpreters a silent run may start. Shells are left out: the shell parser rejects `sh` and `bash` as
- * wrappers, so a shell script keeps its card.
- */
-const IMAGE_RUNTIMES: ReadonlySet<string> = new Set(['python', 'python3', 'node']);
-
-/** Options an interpreter may take before its script. None of them starts code other than that script. */
-const SILENT_RUNTIME_OPTIONS: ReadonlySet<string> = new Set(['-u', '-B', '-E', '-I', '-O']);
-
-/**
- * The script a silent run would execute: an image runtime, safe options, then a script path. Inline code
- * (`-c`, `-e`), a module (`-m`), stdin (`-`), and any other program have no such script and return undefined.
- */
-function silentRunScript(argv: readonly string[]): string | undefined {
-  const [program, ...rest] = argv;
-  if (program === undefined || !IMAGE_RUNTIMES.has(program)) {
-    return undefined;
-  }
-  let index = 0;
-  while (index < rest.length && SILENT_RUNTIME_OPTIONS.has(rest[index] ?? '')) {
-    index += 1;
-  }
-  const script = rest[index];
-  if (script === undefined || script.startsWith('-')) {
-    return undefined;
-  }
-  return script;
-}
-
-/**
- * The silent run a command gets with the switch on: a plain package install, or a script run of a file Aman
- * wrote in this conversation. A script run of any other file (a repo file, a download, an unknown file) keeps
- * its card, and so does a test runner, which runs code it finds in the repo.
+ * The silent run a command gets with the switch on: a plain package install. A script run is not
+ * placed here: the exec tool refuses interpreter runs before approval, pointing at `run_code`, so a
+ * silent script placement could never take effect. Script runs keep their card through the
+ * tracked-execution and allowlist checks below, and so does a test runner, which runs code it
+ * finds in the repo.
  */
 async function sandboxRunPlacement({
   command,
@@ -1070,33 +1042,7 @@ async function sandboxRunPlacement({
     }
     return { reason: SANDBOX_PACKAGE_INSTALL_REASON, reason_detail: sandboxRunDetail(command) };
   }
-  const script = silentRunScript(parsed.argv);
-  if (script === undefined) {
-    return null;
-  }
-  const identity = canonicalFileIdentity({
-    p: script,
-    cwd: resolveIdentityCwd(ctx, cwd),
-    resolution: ctx.path_resolution,
-  });
-  if (
-    identity === null ||
-    !ctx.services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })
-  ) {
-    return null;
-  }
-  // A script that loads other code (an import of a non-standard module, a dynamic import, a child process)
-  // can run files from the workspace, so only a script that stays within the standard library runs silently.
-  if (
-    !scriptFileLoadsOnlyStandardCode({
-      runtime: program === 'node' ? 'node' : 'python',
-      file: identity,
-      resolution: ctx.path_resolution,
-    })
-  ) {
-    return null;
-  }
-  return { reason: SANDBOX_COMMAND_REASON, reason_detail: sandboxRunDetail(command) };
+  return null;
 }
 
 /**
@@ -1225,8 +1171,8 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     // An allowed offline command continues to the same containment checks as online.
   }
 
-  // With the user's switch on, a run of a script Aman wrote in this conversation is placed here and skips
-  // the card. The containment checks below still apply to it.
+  // With the user's switch on, a plain package install is placed here and skips the card. The
+  // containment checks below still apply to it.
   const parsed = parseSimpleCommand(command);
   const silentRun = sandboxSilent ? await sandboxRunPlacement({ command, parsed, ctx, cwd }) : null;
 
