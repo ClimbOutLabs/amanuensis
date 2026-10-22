@@ -177,9 +177,16 @@ instance_render() {
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
   [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
+  # compose file, because the compose file mounts it from this folder.
+  local email_on=0
+  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
   ensure_private_dir "$dir"
+  if [ "$email_on" = 1 ]; then
+    write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
+  fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -613,14 +620,10 @@ print_proxy_requirements() {
   say "    the app contacts the login origin from inside its container."
 }
 
-# With --password-stdin the password is the first line of stdin, read before any prompt can take it; with
-# --token-factory-key-stdin the key is the next line.
+# The stdin answers were read before any prompt could take one; the sign-in password is checked here.
 read_password_first() {
   if [ "$PASSWORD_FROM_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     ask_password AMAN_PASSWORD
-  fi
-  if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
-    read_token_factory_key_stdin
   fi
 }
 
@@ -761,6 +764,7 @@ load_installed_release() {
   REL_STT_TAG=$CUR_STT_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
+  REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
 
