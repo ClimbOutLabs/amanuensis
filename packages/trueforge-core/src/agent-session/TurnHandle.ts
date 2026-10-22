@@ -124,9 +124,10 @@ function toMCPAuthRequiredEvent(event: InternalMCPAuthRequiredEvent): MCPAuthReq
   };
 }
 
-function turnMetricsFromAgentThreadMetrics(
+export function turnMetricsFromAgentThreadMetrics(
   metrics: AgentThreadMetrics,
   lastCallInputTokens: number | null,
+  wallTimeMs: number,
 ): TurnMetrics {
   return {
     total_input_tokens: metrics.total_input_tokens,
@@ -136,7 +137,15 @@ function turnMetricsFromAgentThreadMetrics(
     total_cache_write_tokens: metrics.total_cache_write_tokens,
     total_reasoning_tokens: metrics.total_reasoning_tokens,
     total_cost_in_usd: metrics.total_cost_in_usd,
+    steps: metrics.iterations,
+    sub_agent_steps: metrics.sub_agent_steps,
     last_call_input_tokens: lastCallInputTokens ?? undefined,
+    tool_calls_by_tool: metrics.tool_calls_by_tool,
+    results_by_kind: metrics.results_by_kind,
+    guard_fired: metrics.guard_fired,
+    claim_mismatch: metrics.claim_mismatch,
+    wall_time_ms: wallTimeMs,
+    time_to_first_token_ms: metrics.time_to_first_token_ms,
   };
 }
 
@@ -392,7 +401,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     signal: AbortSignal;
   }): AsyncGenerator<TurnStreamingEvent> {
     const { orchestrator, resolver, signal } = parts;
-
+    const streamStartedAt = Date.now();
     let caughtError: Error | undefined;
     const lifecycle = { frozenByStore: false };
     let executeResult: AgentThreadExecutionResult | undefined;
@@ -443,6 +452,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
               metrics: turnMetricsFromAgentThreadMetrics(
                 orchestrator.getMetrics(),
                 orchestrator.getLastCallInputTokens(),
+                Date.now() - streamStartedAt,
               ),
             };
             this.turn = { ...this.turn, state, updated_at: updatedAt };
@@ -492,6 +502,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         const metrics = turnMetricsFromAgentThreadMetrics(
           orchestrator.getMetrics(),
           orchestrator.getLastCallInputTokens(),
+          Date.now() - streamStartedAt,
         );
         // Abnormal handoffs are mechanical. In particular, cancellation must not
         // revive work through another model inference.

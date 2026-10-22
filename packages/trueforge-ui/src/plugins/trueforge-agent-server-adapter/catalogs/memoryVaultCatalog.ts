@@ -4,17 +4,20 @@ import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** One memory fact as the vault presents it. */
-export interface MemoryVaultEntry {
-  id: string;
-  text: string;
-  timestamp: string;
-  persona: string | null;
-}
+const MemoryVaultEntrySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  timestamp: z.string(),
+  persona: z.string().nullable(),
+});
 
 /** Per-persona sharing config: which vault namespaces each persona may read. */
-export interface MemoryVaultSharing {
-  shares: Record<string, string[]>;
-}
+const MemoryVaultSharingSchema = z.object({
+  shares: z.record(z.string(), z.array(z.string())),
+});
+
+export type MemoryVaultEntry = z.infer<typeof MemoryVaultEntrySchema>;
+export type MemoryVaultSharing = z.infer<typeof MemoryVaultSharingSchema>;
 
 /** Wire namespace of a persona's own vault. */
 export function personaVaultNamespace(displayName: string): string {
@@ -33,17 +36,6 @@ export interface MemoryVaultCatalog {
   getSharing(): Promise<MemoryVaultSharing>;
   updateSharing(sharing: MemoryVaultSharing): Promise<MemoryVaultSharing>;
 }
-
-const MemoryVaultEntrySchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  timestamp: z.string(),
-  persona: z.string().nullable(),
-});
-
-const MemoryVaultSharingSchema = z.object({
-  shares: z.record(z.string(), z.array(z.string())),
-});
 
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
 
