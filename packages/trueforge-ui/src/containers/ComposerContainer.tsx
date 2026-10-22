@@ -13,6 +13,7 @@ import { useComposerPlaceholder } from '../hooks/useComposerPlaceholder.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { SlotsProvider, useSlot, useSlotIsDefault } from '../theme/SlotsProvider.js';
+import { armSpokenReply, clearDraftFromVoice, takeDraftFromVoice } from '../utils/voiceTurn.js';
 import { ApprovalNavContainer } from './ApprovalNavContainer.js';
 import { AskUserContainer } from './AskUserContainer.js';
 import { ComposerAttachmentsContainer } from './AttachmentsContainer.js';
@@ -61,6 +62,10 @@ function ComposerBody({
   const hasModel = Boolean(agentSpec?.model?.name?.trim());
   const { isBusy, send, resetBusy } = useComposerBusyState();
   useComposerDraft();
+  // Emptying the composer drops the voice draft, so a later typed message never counts as spoken.
+  useEffect(() => {
+    if (!hasText) clearDraftFromVoice();
+  }, [hasText]);
   useEffect(() => {
     const prefill = takeComposerPrefill();
     if (prefill !== null) aui.composer().setText(prefill);
@@ -73,7 +78,11 @@ function ComposerBody({
   const canSubmit = canSubmitComposer({ disabled, hasText, hasAttachments, requiresModel, hasModel });
   const submit = () => {
     if (!canSubmit) return;
-    send(() => aui.composer().send());
+    const fromVoice = takeDraftFromVoice();
+    send(() => {
+      armSpokenReply(fromVoice);
+      return aui.composer().send();
+    });
   };
 
   return (

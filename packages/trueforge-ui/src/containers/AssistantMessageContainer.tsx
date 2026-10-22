@@ -25,6 +25,9 @@ import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceConte
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
 import { useModelUsageVisible } from '../utils/modelUsageDisplayPreference.js';
+import { isSpeechOutputSupported, speakText, stopSpeaking, useSpeakingKey } from '../utils/speechOutput.js';
+import { readSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
+import { finalAnswerSpeech } from '../utils/speechText.js';
 import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
@@ -172,6 +175,9 @@ export function AssistantMessageContainer() {
   const messageId = useAuiState(s => s.message.id);
   const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
   const answerText = useAuiState(s => messageText(s.message.content));
+  // Read-aloud is per answer and only once it is done; the full plain answer is read on demand.
+  const finalSpeech = useAuiState(s => finalAnswerSpeech(s.message.content));
+  const speakingKey = useSpeakingKey();
   // A brief shows its stops and chapters once the answer is done; until then the normal progress shows.
   const briefSections = answersBrief && !isMessageRunning ? parseBrief(answerText) : null;
 
@@ -342,7 +348,22 @@ export function AssistantMessageContainer() {
       <AssistantMessageBubble
         error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
         actionBar={
-          !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
+          !isThreadRunning ? (
+            <MessageActionBar
+              isCopied={isCopied}
+              onCopy={copy}
+              createdAt={createdAt}
+              speech={
+                finalSpeech !== '' && isSpeechOutputSupported()
+                  ? {
+                      speaking: speakingKey === messageId,
+                      onSpeak: () => speakText({ key: messageId, text: finalSpeech, voiceURI: readSpeechVoiceURI() }),
+                      onStop: stopSpeaking,
+                    }
+                  : undefined
+              }
+            />
+          ) : undefined
         }
       >
         {briefSections !== null ? (
