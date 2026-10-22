@@ -182,6 +182,20 @@ async function openChat(page: Page, origin: string, sessionId: string): Promise<
   await page.getByText('run:inert_write please').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
+/**
+ * Clicks a card button the chat may be replacing at that moment: the open chat can learn the
+ * request ended and swap the card for the ended note first. Returns false when that happened.
+ */
+async function clickUnlessEnded(page: Page, name: string): Promise<boolean> {
+  try {
+    await page.getByRole('button', { name }).first().click({ timeout: 10_000 });
+    return true;
+  } catch (error) {
+    if (await page.getByText(ENDED_NOTE).isVisible()) return false;
+    throw error;
+  }
+}
+
 /** After a reload the card must not be shown as waiting: no Allow, no Not now. */
 async function assertNotWaitingAfterReload(page: Page, name: string): Promise<void> {
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -238,11 +252,13 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       await allow.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await endRequest(api, ids);
 
-      await allow.click();
-      await page
-        .getByText('Nothing was approved or run', { exact: false })
-        .first()
-        .waitFor({ timeout: RENDER_TIMEOUT_MS });
+      // Either the click reached the server and was refused, or the chat had already ended the card.
+      if (await clickUnlessEnded(page, ALLOW)) {
+        await page
+          .getByText('Nothing was approved or run', { exact: false })
+          .first()
+          .waitFor({ timeout: RENDER_TIMEOUT_MS });
+      }
       await page.screenshot({ path: join(outDir, 'ended-4-allow-refused.png'), fullPage: true });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');
       await assertNotWaitingAfterReload(page, 'allow');
@@ -260,7 +276,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       await deny.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await endRequest(api, ids);
 
-      await deny.click();
+      await clickUnlessEnded(page, DENY);
       await page.waitForTimeout(3_000);
       await page.screenshot({ path: join(outDir, 'ended-6-deny-clicked.png'), fullPage: true });
       assert.equal(api.mcp.writeInvocations(), 0, 'Not now runs nothing');
