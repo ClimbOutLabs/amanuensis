@@ -201,9 +201,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const statusLine = statusLineLabel({ status, activity });
   const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
-  // Collapsed, and at phone width where the full status row is hidden, this one string is the
-  // only place the connection state and the active model stay readable.
-  const compactSummary = `${statusLabel} · ${modelName}`;
+  // Collapsed, the dot is the only status left. Its words carry the connection state only; the
+  // model name stays behind Details.
+  const compactSummary = statusLabel;
   const personName = personDisplayName({ profile, signInName: userName });
   const trimmedPersonaName = personaName?.trim();
   const pendingCount = pendingApprovalIds.length;

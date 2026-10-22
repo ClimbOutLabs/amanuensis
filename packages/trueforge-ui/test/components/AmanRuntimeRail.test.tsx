@@ -125,6 +125,18 @@ describe('AmanRuntimeRail', () => {
     expect(await screen.findByRole('status', { name: 'Offline mode is on' })).toBeInTheDocument();
   });
 
+  it('keeps the model name out of the collapsed status dot', () => {
+    window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" status="ready" />
+      </RuntimeHarness>,
+    );
+    const dot = screen.getByRole('img', { name: 'Ready' });
+    expect(dot).toHaveAttribute('title', 'Ready');
+    expect(dot.getAttribute('aria-label')).not.toContain('local-model');
+  });
+
   it('starts collapsed when the stored preference says so', () => {
     window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
 
