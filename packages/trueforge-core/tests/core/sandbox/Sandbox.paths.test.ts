@@ -3118,7 +3118,12 @@ describe('Sandbox provider-owned paths', () => {
   });
 
   it('puts the provider uploads dir in the system prompt, not /tmp/uploads', () => {
-    const sandbox = makeSandbox(makeProvider());
+    const unbound = new InstructionBuilder('root');
+    makeSandbox(makeProvider()).buildInstruction(unbound);
+    expect(unbound.build()).toContain('/prov/uploads/');
+    // The coding guidance only goes out once a repository is attached to the chat.
+    expect(unbound.build()).not.toContain('work from a checked-out repository');
+    const sandbox = makeRepositorySandbox(makeProvider());
     const builder = new InstructionBuilder('root');
     sandbox.buildInstruction(builder);
     const prompt = builder.build();
@@ -3168,6 +3173,7 @@ describe('Sandbox provider-owned paths', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

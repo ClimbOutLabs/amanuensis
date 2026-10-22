@@ -145,7 +145,7 @@ describe('SentinelSettings', () => {
       );
       expect(
         await screen.findByText(
-          "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.",
+          "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode.",
         ),
       ).toBeInTheDocument();
     },

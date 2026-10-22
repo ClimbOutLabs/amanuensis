@@ -1,6 +1,6 @@
 'use client';
 
-import { useApprovalCardOffScreen } from '../hooks/useApprovalCardOffScreen.js';
+import { useApprovalCardPlacement } from '../hooks/useApprovalCardPlacement.js';
 import { useApprovalNav } from '../hooks/useApprovalNav.js';
 import { approvalKindNoun } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
@@ -14,9 +14,9 @@ export function ApprovalNavContainer() {
   const ApprovalNavBanner = useSlot('ApprovalNavBanner');
   const { count, index, canPrev, canNext, goPrev, goNext, focusCurrent, currentId } = useApprovalNav();
   const sentinel = useOptionalSentinelState();
-  const offScreen = useApprovalCardOffScreen(currentId);
+  const placement = useApprovalCardPlacement(currentId);
 
-  if (count === 0 || !offScreen) return null;
+  if (count === 0 || placement !== 'off-screen') return null;
 
   const card = currentId === null ? undefined : sentinel?.approvalFor(currentId)?.card;
   const kind = count === 1 && card !== undefined ? approvalKindNoun(card) : undefined;

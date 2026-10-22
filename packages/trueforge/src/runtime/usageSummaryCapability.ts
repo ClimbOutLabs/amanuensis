@@ -12,6 +12,7 @@ import {
   type CallToolResponse,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
+import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { MODEL_USAGE_EVENT_TYPE } from '../schemas/modelUsageEvents';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
@@ -153,6 +154,7 @@ export interface UsageSummaryCapabilityOptions extends UsageSummaryTurnContext {
 class UsageSummaryTool extends LocalToolMCP {
   readonly name = USAGE_SUMMARY_SERVER_ID;
   readonly displayName = 'Usage';
+  protected override readonly bundle: ToolBundleName = 'extras';
 
   constructor(private readonly options: UsageSummaryCapabilityOptions) {
     super({ tracing: options.tracing });

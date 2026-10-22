@@ -5,6 +5,10 @@ export interface ListPersonasInput {
   created_by: string;
 }
 
+export interface ListPersonaOwnersInput {
+  tenant_id: string;
+}
+
 export interface GetPersonaInput extends ListPersonasInput {
   id: string;
 }
@@ -73,6 +77,8 @@ export class PersonaNameConflictError extends Error {
  */
 export interface IPersonaStore<TTransaction = never> {
   listPersonas(input: ListPersonasInput, transaction?: TTransaction): Promise<Persona[]>;
+  /** Each person in the tenant who owns at least one persona, in a stable order. */
+  listPersonaOwners(input: ListPersonaOwnersInput, transaction?: TTransaction): Promise<string[]>;
   getPersona(input: GetPersonaInput, transaction?: TTransaction): Promise<Persona | undefined>;
   /** Rejects a name or alias that already invokes another persona. */
   createPersona(input: CreatePersonaInput, transaction?: TTransaction): Promise<Persona>;

@@ -191,7 +191,8 @@ export class PersonaToolSet extends LocalToolMCP {
     resolveUnderlyingTool?: boolean,
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
-    if (!isPersonaWriteToolName(params.name)) {
+    // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
+    if (resolveUnderlyingTool === false || !isPersonaWriteToolName(params.name)) {
       return info;
     }
     const prepared = await this.#prepareCreate(params.arguments ?? {});

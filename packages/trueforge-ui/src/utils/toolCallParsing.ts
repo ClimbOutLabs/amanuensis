@@ -1,5 +1,5 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
-import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/extractorRegistry';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
 import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
