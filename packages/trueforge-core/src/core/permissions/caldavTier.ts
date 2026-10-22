@@ -9,6 +9,7 @@ import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
+import { TOOL_GRANT_REASON } from './toolGrants';
 
 /**
  * Tier rules for the CalDAV connector. Only the mounted connector, marked first-party, gets them.
@@ -22,10 +23,12 @@ export async function classifyCaldavTool({
   action,
   review,
   mintToken,
+  hasStandingGrant,
 }: {
   action: Pick<SentinelAction, 'tool_name' | 'canonical_params' | 'tool_type' | 'mcp_server_name' | 'mcp_first_party'>;
   review: CaldavEventReview | null;
   mintToken: () => Promise<string>;
+  hasStandingGrant: () => Promise<boolean>;
 }): Promise<TierDecision | undefined> {
   if (action.tool_type !== 'mcp' || action.mcp_server_name !== CALDAV_SERVER_NAME || action.mcp_first_party !== true) {
     return undefined;
@@ -56,13 +59,57 @@ export async function classifyCaldavTool({
   if (card === null) {
     return undefined;
   }
+  const reach = reachFor({ tool });
+  if (reach.own && (await hasStandingGrant())) {
+    return tier1Decision({
+      reason: TOOL_GRANT_REASON,
+      reason_detail: `Always allowed: \`${tool}\` on your calendar.`,
+      sensitive_read: true,
+    });
+  }
   return tier3Decision({
-    card,
-    reason: tool === 'respond_to_event' ? 'caldav_invitation_reply' : 'caldav_calendar_change',
-    reason_detail: 'Calendar change from your connected calendar; always asks.',
+    card: reach.sentence === null ? card : { ...card, plain_what: `${card.plain_what}${reach.sentence}` },
+    reason: reach.reason,
+    reason_detail: reach.reason_detail,
     sensitive_read: true,
     approval_token_id: await mintToken(),
   });
+}
+
+/**
+ * Whether a change touches only the person's own calendar. Only a new event can be judged from its own
+ * arguments. Aman cannot see every entry in a CalDAV calendar file, so a change or cancellation of an
+ * existing event never counts as guest-free, whatever its fetched guest list says.
+ */
+function reachFor({ tool }: { tool: CaldavToolName }): {
+  reason: string;
+  reason_detail: string;
+  own: boolean;
+  sentence: string | null;
+} {
+  if (tool === 'respond_to_event') {
+    return {
+      reason: 'caldav_invitation_reply',
+      reason_detail: 'Calendar change that reaches guests always asks.',
+      own: false,
+      sentence: ' This reply goes to the event organizer, so Aman always asks.',
+    };
+  }
+  if (tool === 'create_event') {
+    return {
+      reason: 'caldav_calendar_change',
+      reason_detail: 'Calendar change on your own calendar asks.',
+      own: true,
+      sentence: null,
+    };
+  }
+  const verb = tool === 'delete_event' ? 'deleting' : 'changing';
+  return {
+    reason: 'caldav_calendar_guests',
+    reason_detail: 'Change to an existing calendar event always asks.',
+    own: false,
+    sentence: ` Aman always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
+  };
 }
 
 function hasToken(params: Record<string, unknown>): boolean {

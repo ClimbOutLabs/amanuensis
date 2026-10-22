@@ -10,6 +10,11 @@ import { subscribeToSentinelEvents } from './sentinelEvents.js';
 import type { ApprovalAnswer, SentinelApprovalInfo } from './types.js';
 
 export type SentinelState = {
+  /**
+   * Whether this chat's saved cards are read. Until then a waiting call may still have a card on its way,
+   * so the chat must not draw a stand-in card for it.
+   */
+  savedCardsRead: boolean;
   /** Tiered approval info the server attached to a tool call, if any. */
   approvalFor: (toolCallId: string) => SentinelApprovalInfo | undefined;
   /** The card for an action a scheduled run held for the owner, if this tool call is one. */
@@ -40,6 +45,9 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const [approvals, setApprovals] = useState<Map<string, SentinelApprovalInfo>>(new Map());
   const [answers, setAnswers] = useState<Map<string, ApprovalAnswer>>(new Map());
   const [changeRequests, setChangeRequests] = useState<Map<string, string>>(new Map());
+  // Keyed by session, so switching chats never reads the last chat's finished read as this one's.
+  const [readSessionId, setReadSessionId] = useState<string | null>(null);
+  const savedCardsRead = api == null || sessionId == null || readSessionId === sessionId;
 
   useEffect(() => {
     return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(info.toolCallId, info)));
@@ -49,6 +57,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
     setApprovals(new Map());
     setAnswers(new Map());
     setChangeRequests(new Map());
+    setReadSessionId(null);
     if (api == null || sessionId == null) return;
     let cancelled = false;
     void api
@@ -64,11 +73,14 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
         });
         setAnswers(previous => new Map([...Object.entries(context.answers ?? {}), ...previous]));
         setChangeRequests(previous => new Map([...Object.entries(context.changeRequests ?? {}), ...previous]));
+        setReadSessionId(sessionId);
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
         // Best-effort: live events still populate the map, but a failed read leaves a reloaded tab
         // with the generic approval bar, so it must not fail silently.
         console.error('Sentinel approval history could not be loaded', error);
+        setReadSessionId(sessionId);
       });
     return () => {
       cancelled = true;
@@ -77,6 +89,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
 
   const state = useMemo<SentinelState>(
     () => ({
+      savedCardsRead,
       // Entries are keyed by the server tool call id; chat parts pass the runtime's invocation key.
       approvalFor: toolCallId => approvals.get(toolInvocationRawId(toolCallId)),
       heldFor: toolCallId => {
@@ -91,7 +104,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
       recordChangeRequest: (toolCallId, words) =>
         setChangeRequests(previous => new Map(previous).set(toolInvocationRawId(toolCallId), words)),
     }),
-    [approvals, answers, changeRequests],
+    [savedCardsRead, approvals, answers, changeRequests],
   );
 
   return <SentinelStateContext.Provider value={state}>{children}</SentinelStateContext.Provider>;

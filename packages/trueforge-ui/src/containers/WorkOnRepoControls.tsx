@@ -5,7 +5,7 @@ import { FolderGit2, GitBranch } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuiState } from '@/assistant-ui.js';
-import { readSandboxEnabled } from '@/atoms/draft/agentSandbox.js';
+import { chatSandboxKnownOff } from '@/atoms/draft/agentSandbox.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import {
   useOptionalRepositoryWork,
@@ -24,8 +24,8 @@ export type WorkOnRepoControlsProps = {
   isRunning: boolean;
   /** True when the newest turn shows its work did not go through, so a clone it ran did not land. */
   turnFailed?: boolean;
-  /** Cloning runs in the chat's sandbox, so the control cannot work while the sandbox is off. */
-  sandboxOn: boolean;
+  /** True only when the chat is known to run without the sandbox, where a clone cannot work. */
+  sandboxOff: boolean;
   /** Sends a chat message in this thread; used for the clone request the person approves. */
   sendMessage: (text: string) => void;
 };
@@ -134,7 +134,7 @@ export function WorkOnRepoControls({
   sessionId,
   isRunning,
   turnFailed = false,
-  sandboxOn,
+  sandboxOff,
   sendMessage,
 }: WorkOnRepoControlsProps) {
   const api = useRepositoryWork();
@@ -456,7 +456,7 @@ export function WorkOnRepoControls({
           type="button"
           variant="ghost"
           size="small"
-          disabled={!sandboxOn}
+          disabled={sandboxOff}
           onClick={panelOpen ? () => setPanelOpen(false) : openPanel}
         >
           <FolderGit2 aria-hidden className="mr-1.5 h-3.5 w-3.5" />
@@ -469,7 +469,7 @@ export function WorkOnRepoControls({
           </p>
         ) : null}
       </div>
-      {!sandboxOn ? (
+      {sandboxOff ? (
         <p className="text-[0.8125rem] text-text-secondary">
           Work on a repo needs the sandbox. Open Add-ons in the composer, go to Connectors, and turn on Sandbox.
         </p>
@@ -479,7 +479,7 @@ export function WorkOnRepoControls({
           {startError}
         </p>
       ) : null}
-      {panelOpen && sandboxOn ? (
+      {panelOpen && !sandboxOff ? (
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-card-bg px-3 py-2.5 shadow-sm">
           {sessionId ? (
             <div className="flex flex-col gap-1.5">
@@ -587,7 +587,7 @@ export function ThreadWorkOnRepoControls() {
 function ConnectedThreadWorkOnRepoControls() {
   const aui = useAui();
   const remoteId = useAuiState(state => state.threadListItem.remoteId);
-  const { agentSpec } = useTrueFoundryAgentSpec();
+  const draft = useTrueFoundryAgentSpec();
   const isRunning = useThreadIsRunning();
   // A turn paused on the person (an approval, for one) has not finished, so it
   // still counts as running here; a turn whose work did not go through is no clone.
@@ -605,7 +605,7 @@ function ConnectedThreadWorkOnRepoControls() {
       sessionId={remoteId ?? null}
       isRunning={isRunning || awaitingAction}
       turnFailed={turnFailed}
-      sandboxOn={readSandboxEnabled(agentSpec?.config)}
+      sandboxOff={chatSandboxKnownOff(draft)}
       sendMessage={sendMessage}
     />
   );
