@@ -11,11 +11,12 @@ import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import { DropdownMenu, DropdownMenuItem } from '@/atoms/primitives/DropdownMenu.js';
 import { Icon } from '@/icons/Icon.js';
 import { useShellMode } from '@/server/ShellModeContext.js';
-import { useOptionalSpaces, type Space, type SpaceStatus } from '@/server/SpaceContext.js';
+import { useOptionalSpaces, type Space } from '@/server/SpaceContext.js';
 import { resolvePresetTokens } from '@/theme/presets/index.js';
 import { useThemeMode } from '@/theme/SlotsProvider.js';
 import { TOKEN_CSS_VARS } from '@/theme/types.js';
 
+import { setComposerPrefill } from '../hooks/useComposerDraft.js';
 import { SPACE_PAGE_BASE_STYLE, spaceThemeDeclarations } from './spacePageBase.js';
 
 /** Strips a leading H1 that repeats the space name (the model echoes it in the body). Markdown only. */
@@ -26,27 +27,7 @@ function bodyWithoutRepeatedTitle(space: Pick<Space, 'name' | 'body'>): string {
   return space.body.slice(match[0].length);
 }
 
-/** Strips markup down to text, for a one-line preview of an html body. Drops `<style>`/`<script>` content wholesale, not just their tags, so CSS or JS text never leaks into the preview. */
-function stripTags(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ');
-}
-
-/** First non-heading, non-empty line of the body, for a one-line preview on the list page. */
-function bodyPreview(space: Pick<Space, 'name' | 'body' | 'format'>): string {
-  if (space.format === 'html') {
-    return stripTags(space.body).replace(/\s+/g, ' ').trim();
-  }
-  const rest = bodyWithoutRepeatedTitle(space);
-  for (const rawLine of rest.split('\n')) {
-    const line = rawLine.trim().replace(/^#+\s*/, '');
-    if (line.length > 0) return line;
-  }
-  return '';
-}
-
+/** Exact local date and time: the hover text and the accessible name of the updated time. */
 function formatUpdated(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
@@ -59,75 +40,120 @@ function formatUpdated(iso: string): string {
   });
 }
 
-function StatusPill({ status }: { status: SpaceStatus }) {
-  const active = status === 'active';
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-        active ? 'bg-success-bg text-success-text' : 'bg-secondary-bg text-text-secondary',
-      )}
-    >
-      {active ? 'Active' : 'Archived'}
-    </span>
+const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; seconds: number }> = [
+  { unit: 'day', seconds: 86_400 },
+  { unit: 'hour', seconds: 3_600 },
+  { unit: 'minute', seconds: 60 },
+];
+
+/** "5 minutes ago", or "just now" under a minute, for how long since the space last changed. */
+export function formatRelativeUpdated(iso: string, now: number): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return formatUpdated(iso);
+  const elapsed = Math.max(0, Math.round((now - then) / 1000));
+  const match = RELATIVE_UNITS.find(candidate => elapsed >= candidate.seconds);
+  if (match === undefined) return 'just now';
+  return new Intl.RelativeTimeFormat(undefined, { numeric: 'always' }).format(
+    -Math.floor(elapsed / match.seconds),
+    match.unit,
   );
 }
+
+/** What a space holds, shown as a small cue on its card: an html page is a board, a markdown table is a table. */
+export type SpaceKind = 'list' | 'table' | 'board';
+
+const MARKDOWN_TABLE_DIVIDER_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m;
+
+export function spaceKind(space: Pick<Space, 'format' | 'body'>): SpaceKind {
+  if (space.format === 'html') return 'board';
+  return MARKDOWN_TABLE_DIVIDER_RE.test(space.body) ? 'table' : 'list';
+}
+
+const SPACE_KIND_LABEL: Record<SpaceKind, string> = { list: 'List', table: 'Table', board: 'Board' };
+
+/** Example the empty list offers as a starting point; put in the composer, and sent only when the person does. */
+const EXAMPLE_SPACE_PROMPT = 'Make a space called Dog breeds that compares family dogs';
 
 function SpacesListSkeleton() {
   return (
     <div className="flex flex-col gap-2" role="status" aria-live="polite" aria-busy="true">
       <span className="sr-only">Loading spaces</span>
       {[0, 1, 2].map(i => (
-        <div key={i} className="h-20 animate-pulse rounded-lg border border-border bg-card-bg" aria-hidden />
+        <div key={i} className="h-24 animate-pulse rounded-lg border border-border bg-card-bg" aria-hidden />
       ))}
     </div>
   );
 }
 
-function SpacesEmptyState() {
+/** Null when no composer can open here: the example is then left out, not shown as a button that does nothing. */
+function SpacesEmptyState({ onStartChat }: { onStartChat: ((text: string) => void) | null }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-16 text-center">
       <Icon name="cube" className="size-6 text-text-secondary" aria-hidden />
-      <p className="text-sm font-medium text-text-primary">No spaces yet</p>
+      <p className="text-base font-medium text-text-primary">No spaces yet</p>
       <p className="max-w-sm text-sm text-text-secondary">
-        Ask the assistant to build one, e.g. “build me a space for tracking houses in Spain.”
+        A space is a page Aman keeps up to date for you, as a list, a table or a board.
       </p>
+      {onStartChat != null ? (
+        <>
+          <p className="text-sm text-text-secondary">Try asking:</p>
+          <Button variant="secondary" size="small" type="button" onClick={() => onStartChat(EXAMPLE_SPACE_PROMPT)}>
+            {EXAMPLE_SPACE_PROMPT}
+          </Button>
+        </>
+      ) : null}
     </div>
   );
 }
 
-function SpaceRow({ space, onOpen }: { space: Space; onOpen: (spaceId: string) => void }) {
-  const preview = bodyPreview(space);
+function SpaceCard({ space, now, onOpen }: { space: Space; now: number; onOpen: (spaceId: string) => void }) {
   return (
     <button
       type="button"
-      className="flex w-full flex-col gap-1 rounded-lg border border-border bg-card-bg px-4 py-3 text-left transition-colors hover:bg-secondary-bg/40"
+      className="flex w-full min-w-0 flex-col gap-2 rounded-lg border border-border bg-card-bg px-4 py-3 text-left transition-colors hover:bg-secondary-bg/40"
       onClick={() => onOpen(space.id)}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{space.name}</span>
-        <StatusPill status={space.status} />
-      </div>
-      {space.purpose.length > 0 ? <p className="truncate text-xs text-text-secondary">{space.purpose}</p> : null}
-      {preview.length > 0 ? <p className="truncate text-xs text-text-secondary/80">{preview}</p> : null}
-      <p className="text-[11px] text-text-secondary/70">Updated {formatUpdated(space.updated_at)}</p>
+      <span className="min-w-0 truncate text-base font-semibold text-text-primary">{space.name}</span>
+      {space.purpose.length > 0 ? (
+        <span className="min-w-0 truncate text-sm text-text-secondary">{space.purpose}</span>
+      ) : null}
+      <span className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-secondary">
+        <span className="rounded-full bg-secondary-bg px-2 py-0.5 font-medium">
+          {SPACE_KIND_LABEL[spaceKind(space)]}
+        </span>
+        <time dateTime={space.updated_at} title={formatUpdated(space.updated_at)}>
+          {formatRelativeUpdated(space.updated_at, now)}
+        </time>
+        {space.status === 'archived' ? <span>Archived</span> : null}
+      </span>
     </button>
   );
 }
 
-function SpacesListPage({ onOpen }: { onOpen: (spaceId: string) => void }) {
+function SpacesListPage({
+  onOpen,
+  onStartChat,
+}: {
+  onOpen: (spaceId: string) => void;
+  onStartChat: ((text: string) => void) | null;
+}) {
   const ctx = useOptionalSpaces();
+  const now = Date.now();
+  const newestFirst = useMemo(
+    () => [...(ctx?.spaces ?? [])].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
+    [ctx?.spaces],
+  );
   if (ctx == null) return null;
   const showSkeleton = ctx.loading && ctx.spaces.length === 0;
   const showEmpty = !ctx.loading && ctx.error == null && ctx.spaces.length === 0;
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-6 py-6">
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-6">
       {ctx.error != null ? <p className="text-sm text-failure-bg">{ctx.error}</p> : null}
       {showSkeleton ? <SpacesListSkeleton /> : null}
-      {showEmpty ? <SpacesEmptyState /> : null}
-      {!showSkeleton && ctx.spaces.length > 0
-        ? ctx.spaces.map(space => <SpaceRow key={space.id} space={space} onOpen={onOpen} />)
+      {showEmpty ? <SpacesEmptyState onStartChat={onStartChat} /> : null}
+      {!showSkeleton && newestFirst.length > 0
+        ? newestFirst.map(space => <SpaceCard key={space.id} space={space} now={now} onOpen={onOpen} />)
         : null}
     </div>
   );
@@ -358,7 +384,52 @@ function DeleteSpaceModal({
   );
 }
 
-function SpaceDetailPage({ spaceId, onDeleted }: { spaceId: string; onDeleted: () => void }) {
+/** Longer purposes get a "Show more" control; shorter ones always fit in the two-line clamp. */
+const LONG_PURPOSE_CHARS = 140;
+
+/** The space's purpose as the page subtitle: two lines, with the full text one click away. */
+function PurposeLine({ purpose }: { purpose: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (purpose.length === 0) return null;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <p className={cn('text-base text-text-secondary', !expanded && 'line-clamp-2')}>{purpose}</p>
+      {purpose.length > LONG_PURPOSE_CHARS ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="border-0 bg-transparent p-0 text-sm font-medium text-text-secondary underline-offset-2 hover:underline"
+          onClick={() => setExpanded(current => !current)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function UpdatedLine({ updatedAt }: { updatedAt: string }) {
+  const exact = formatUpdated(updatedAt);
+  return (
+    <p className="text-sm text-text-secondary">
+      Kept up to date by Aman ·{' '}
+      <time dateTime={updatedAt} title={exact} aria-label={`updated ${exact}`}>
+        updated {formatRelativeUpdated(updatedAt, Date.now())}
+      </time>
+    </p>
+  );
+}
+
+function SpaceDetailPage({
+  spaceId,
+  onDeleted,
+  onAskChange,
+}: {
+  spaceId: string;
+  onDeleted: () => void;
+  /** Null when no composer can open here, so the ask action is not offered. */
+  onAskChange: ((text: string) => void) | null;
+}) {
   const ctx = useOptionalSpaces();
   const space = useMemo(() => ctx?.spaces.find(s => s.id === spaceId), [ctx, spaceId]);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -366,11 +437,11 @@ function SpaceDetailPage({ spaceId, onDeleted }: { spaceId: string; onDeleted: (
   if (ctx == null) return null;
   if (space == null) {
     return ctx.loading ? (
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-3 px-6 py-6">
         <SpacesListSkeleton />
       </div>
     ) : (
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-6">
         <p className="text-sm text-text-secondary">This space is no longer available.</p>
       </div>
     );
@@ -379,22 +450,36 @@ function SpaceDetailPage({ spaceId, onDeleted }: { spaceId: string; onDeleted: (
   const body = space.format === 'html' ? space.body : bodyWithoutRepeatedTitle(space);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-6">
-      <header className="flex flex-col gap-2 border-b border-border pb-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{space.name}</h1>
-            <StatusPill status={space.status} />
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-6">
+      <header className="flex flex-col gap-3 border-b border-border pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-text-primary">{space.name}</h1>
+            {space.status === 'archived' ? (
+              <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">Archived</span>
+            ) : null}
           </div>
-          <SpaceOverflowMenu onRequestDelete={() => setDeleteOpen(true)} />
+          <div className="flex shrink-0 items-center gap-2">
+            {onAskChange != null ? (
+              <Button
+                variant="secondary"
+                size="small"
+                type="button"
+                onClick={() => onAskChange(`In the space “${space.name}”, `)}
+              >
+                Ask Aman to change this
+              </Button>
+            ) : null}
+            <SpaceOverflowMenu onRequestDelete={() => setDeleteOpen(true)} />
+          </div>
         </div>
-        {space.purpose.length > 0 ? <p className="text-sm text-text-secondary">{space.purpose}</p> : null}
-        <p className="text-xs text-text-secondary/70">Updated {formatUpdated(space.updated_at)}</p>
+        <PurposeLine purpose={space.purpose} />
+        <UpdatedLine updatedAt={space.updated_at} />
       </header>
       {body.trim().length === 0 ? null : space.format === 'html' ? (
         <SpaceHtmlFrame html={body} />
       ) : (
-        <Markdown content={body} readOnly className="space-markdown max-w-none" />
+        <Markdown content={body} readOnly spacePictures className="space-markdown max-w-none" />
       )}
       <DeleteSpaceModal space={space} open={deleteOpen} onOpenChange={setDeleteOpen} onDeleted={onDeleted} />
     </div>
@@ -418,6 +503,12 @@ export function SpacesView() {
 
   if (!spacesOpen) return null;
 
+  // Opening a new chat takes the spaces page away, so the text is set first and the chat's composer takes it.
+  const startChat = (text: string) => {
+    setComposerPrefill(text);
+    shell.openDraft();
+  };
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-primary-bg">
       <header className="sticky top-0 flex shrink-0 items-center gap-2 border-b border-border bg-primary-bg px-2 py-1.5">
@@ -433,9 +524,13 @@ export function SpacesView() {
         <h1 className="text-lg font-semibold tracking-tight text-text-primary">Spaces</h1>
       </header>
       {selectedSpaceId != null ? (
-        <SpaceDetailPage spaceId={selectedSpaceId} onDeleted={() => openSpaces(null)} />
+        <SpaceDetailPage
+          spaceId={selectedSpaceId}
+          onDeleted={() => openSpaces(null)}
+          onAskChange={shell.isComposerEnabled ? startChat : null}
+        />
       ) : (
-        <SpacesListPage onOpen={id => openSpaces(id)} />
+        <SpacesListPage onOpen={id => openSpaces(id)} onStartChat={shell.isComposerEnabled ? startChat : null} />
       )}
     </div>
   );

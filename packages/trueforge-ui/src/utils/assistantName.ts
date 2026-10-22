@@ -1,5 +1,4 @@
-/** The name the assistant goes by before the person picks one. */
-export const DEFAULT_ASSISTANT_NAME = 'Aman';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
 
 /** The assistant's name as the person chose it, or the default when they have not chosen one. */
 export function assistantDisplayName(assistantName: string | null | undefined): string {

@@ -4,8 +4,7 @@ import { createContext, useContext, type FC, type ReactNode } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
 
-/** The panda's alt text, the same on every surface that shows the picture. */
-const AMAN_PANDA_ALT = 'Aman, drawn as a panda writing with a quill';
+import { AVATAR_ALT } from './AmanAvatarMotion.js';
 
 const AmanPandaSourceContext = createContext<string | null>(null);
 
@@ -37,7 +36,7 @@ export const AmanPandaRoundTicket: FC<{ src: string | null; name: string; classN
     <div className={cn('aui-ticket aui-ticket--punch flex items-center gap-3 p-3', className)}>
       <img
         src={src}
-        alt={AMAN_PANDA_ALT}
+        alt={AVATAR_ALT}
         className="size-[3.4rem] shrink-0 rounded-full border-[0.125rem] border-gold object-cover"
       />
       <div className="min-w-0">

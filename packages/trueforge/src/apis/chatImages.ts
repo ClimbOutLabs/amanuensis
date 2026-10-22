@@ -7,7 +7,7 @@ import { ChatImageNotFoundError, type ChatImageService } from '../runtime/chatIm
 import { ChatImageIdSchema, CreateTurnImagesRequestSchema } from '../schemas/chatImages';
 
 /** A served image is only ever an inert picture: no sniffing, no script or framing if opened as a document. */
-const IMAGE_SAFETY_HEADERS = {
+export const IMAGE_SAFETY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Content-Security-Policy': "default-src 'none'; sandbox",
   'Cross-Origin-Resource-Policy': 'same-origin',

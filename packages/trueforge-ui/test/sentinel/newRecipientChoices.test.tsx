@@ -37,9 +37,8 @@ describe('PermissionApprovalCard for a new recipient', () => {
   it('labels the three choices Add and send, Change it, and Cancel', () => {
     render(
       <PermissionApprovalCard
-        toolName="send_email"
+        othersWaiting={0}
         card={newRecipientCard()}
-        tier={3}
         onApprove={vi.fn()}
         onDeny={vi.fn()}
         onChangeRequest={vi.fn()}
@@ -48,16 +47,15 @@ describe('PermissionApprovalCard for a new recipient', () => {
     expect(screen.getByRole('button', { name: 'Add and send' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Change it' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow it' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
   });
 
   it('never offers Approve for this chat, even when the container passes a chat handler', () => {
     render(
       <PermissionApprovalCard
-        toolName="send_email"
+        othersWaiting={0}
         card={newRecipientCard()}
-        tier={3}
         onApprove={vi.fn()}
         onApproveForChat={vi.fn()}
         onDeny={vi.fn()}
@@ -66,51 +64,40 @@ describe('PermissionApprovalCard for a new recipient', () => {
     expect(screen.queryByRole('button', { name: 'Approve for this chat' })).not.toBeInTheDocument();
   });
 
-  it('calls onApprove from Add and send, and onDeny from Cancel', () => {
+  it('calls onApprove from Add and send', () => {
     const onApprove = vi.fn();
-    const onDeny = vi.fn();
     render(
-      <PermissionApprovalCard
-        toolName="send_email"
-        card={newRecipientCard()}
-        tier={3}
-        onApprove={onApprove}
-        onDeny={onDeny}
-      />,
+      <PermissionApprovalCard othersWaiting={0} card={newRecipientCard()} onApprove={onApprove} onDeny={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Add and send' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onDeny from Cancel', () => {
+    const onDeny = vi.fn();
+    render(<PermissionApprovalCard othersWaiting={0} card={newRecipientCard()} onApprove={vi.fn()} onDeny={onDeny} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
   it('shows the plain sentence that says approving adds the address and sends', () => {
-    render(
-      <PermissionApprovalCard
-        toolName="send_email"
-        card={newRecipientCard()}
-        tier={3}
-        onApprove={vi.fn()}
-        onDeny={vi.fn()}
-      />,
-    );
+    render(<PermissionApprovalCard othersWaiting={0} card={newRecipientCard()} onApprove={vi.fn()} onDeny={vi.fn()} />);
     expect(screen.getByText(NEW_RECIPIENT_TEXT)).toBeInTheDocument();
   });
 
   it('keeps the ordinary labels and the chat button on a card with no new recipient', () => {
     render(
       <PermissionApprovalCard
-        toolName="read_note"
+        othersWaiting={0}
         card={baseCard({ mail_new_recipients: null })}
-        tier={2}
         onApprove={vi.fn()}
         onApproveForChat={vi.fn()}
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add and send' })).not.toBeInTheDocument();
   });
 });

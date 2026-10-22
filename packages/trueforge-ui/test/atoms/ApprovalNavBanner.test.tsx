@@ -22,7 +22,7 @@ describe('ApprovalNavBanner', () => {
       />,
     );
 
-    expect(screen.getByText('4 tools need your input')).toBeTruthy();
+    expect(screen.getByText('4 items need your approval')).toBeTruthy();
     expect(screen.getByText('(1/4)')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous approval' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Next approval' })).not.toBeDisabled();
@@ -57,7 +57,7 @@ describe('ApprovalNavBanner', () => {
         onFocusCurrent={() => {}}
       />,
     );
-    expect(screen.getByText('1 tool needs your input')).toBeTruthy();
+    expect(screen.getByText('1 item needs your approval')).toBeTruthy();
   });
 
   it('focuses the current approval when the banner is clicked', () => {
