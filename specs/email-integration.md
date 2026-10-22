@@ -74,9 +74,9 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 
 ## Safety Model
 
-**What a send delivers is what the user saw.** The card is built from the draft as Gmail holds it, never from the model's words. Aman remembers a fingerprint of that draft: recipients, copy, hidden copy, subject, text, thread, reply headers, and the sender name. The send goes ahead only if the draft still matches. An edit made after review, by anyone, makes the send stop and ask again. A review is used once and lasts 30 minutes. It lives in memory, so after a restart or an expiry the user is asked again.
+**What a send delivers is what the user saw.** The card is built from the draft as Gmail holds it, never from the model's words. Aman remembers a fingerprint of that draft: recipients, copy, hidden copy, where replies go, subject, text, thread, reply headers, and the sender name. The send goes ahead only if the draft still matches. An edit made after review, by anyone, makes the send stop and ask again. A review is used once and lasts 30 minutes. It lives in memory, so after a restart or an expiry the user is asked again.
 
-**Only drafts Aman can show in full are sent.** A draft is refused when it has an attachment, an HTML version, extra headers such as a reply address, a different sender, a body too long to read, odd blank space at its edges, or a recipient list that a mail reader might split differently. Headers that are not shown must be in a closed, simple format.
+**Only drafts Aman can show in full are sent.** A draft is refused when it has an attachment, an HTML version, a header Aman does not know, a different sender, a From, Reply-To or Sender line that is not exactly one plain address, a body too long to read, odd blank space at its edges, or a recipient list that a mail reader might split differently. A reply address other than the account is allowed only because the card shows it as "Replies go to". Headers that are not shown must be in a closed, simple format.
 
 **Nothing may be hidden.** Text with characters that do not show, such as zero-width marks or Unicode tag characters, is refused, except in the few places they are part of normal writing, such as emoji and some scripts.
 

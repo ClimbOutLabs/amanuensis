@@ -4,6 +4,9 @@
 
 UPGRADE_STAGE=idle
 UPGRADE_BACKUP=
+# What upgrade_checkout_behind adds to the pull command it advises when the checkout's branch
+# does not track its source, so the command names the source and branch a plain pull would need.
+UPGRADE_PULL_ARGS=
 
 upgrade_rollback() {
   local name failed=0 rc=1
@@ -104,12 +107,78 @@ upgrade_report() {
   AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor --json >/dev/null 2>&1 || true
 }
 
+# The source a branch that tracks nothing would be pulled from: the checkout's only remote, when
+# it has exactly one. With no remote, or several to choose from, there is no safe guess.
+upgrade_fallback_remote() {
+  local remotes
+  remotes=$(git -C "$REPO_ROOT" remote 2>/dev/null) || remotes=
+  if [ "$(printf '%s\n' "$remotes" | grep -c . || true)" = 1 ]; then
+    printf '%s' "$remotes"
+  fi
+}
+
+# The checkout path wrapped in double quotes, with the few characters that stay special inside
+# double quotes escaped, so a printed command still runs when the path has spaces or the like.
+upgrade_quoted_path() {
+  local path=$1
+  path=${path//\\/\\\\}
+  path=${path//\"/\\\"}
+  path=${path//\$/\\$}
+  path=${path//\`/\\\`}
+  printf '"%s"' "$path"
+}
+
+# Whether the checkout is missing commits that its source has. The tags an upgrade compares come
+# from this checkout alone, so a checkout that fell behind its source looks current until the
+# source is asked. Fetching just the branch the checkout is on is enough to tell; nothing is
+# ever pulled. A checkout that cannot be compared (no git, no source) is not behind. A
+# comparison that fails warns with the reason it found and counts as not behind, so an offline
+# computer still upgrades with the code it has.
+upgrade_checkout_behind() {
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || return 1
+  local branch remote tracked source_ref
+  branch=$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null) || branch=
+  tracked=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null) || tracked=
+  if [ -n "$tracked" ]; then
+    remote=${tracked%%/*}
+    source_ref=${tracked#*/}
+    UPGRADE_PULL_ARGS=
+  elif [ -n "$branch" ]; then
+    remote=$(upgrade_fallback_remote)
+    [ -n "$remote" ] || return 1
+    source_ref=$branch
+    UPGRADE_PULL_ARGS=" $remote $source_ref"
+  else
+    return 1
+  fi
+  git -C "$REPO_ROOT" remote get-url "$remote" >/dev/null 2>&1 || return 1
+  if ! GIT_TERMINAL_PROMPT=0 git -C "$REPO_ROOT" fetch --quiet "$remote" "+refs/heads/$source_ref:refs/remotes/$remote/$source_ref" 2>/dev/null; then
+    # The fetch failed. Asking the source to list the branch tells a branch it does not have
+    # apart from a source that cannot be reached, so the warning names the real reason.
+    local listing_rc=0
+    GIT_TERMINAL_PROMPT=0 git -C "$REPO_ROOT" ls-remote --exit-code --heads "$remote" "refs/heads/$source_ref" >/dev/null 2>&1 || listing_rc=$?
+    if [ "$listing_rc" = 2 ]; then
+      warn "Aman could not check for a newer version, because this copy is on the branch $source_ref, which is not on $remote. The upgrade carries on with the code already on this computer. To check for a newer version, switch this copy to a branch that is on $remote, then run: aman upgrade --check"
+    else
+      warn "Aman could not check for a newer version, because $remote could not be reached. The upgrade carries on with the code already on this computer. To check again, fix the connection and run: aman upgrade --check"
+    fi
+    return 1
+  fi
+  [ -n "$(git -C "$REPO_ROOT" rev-list "HEAD..refs/remotes/$remote/$source_ref" 2>/dev/null)" ]
+}
+
 cmd_upgrade() {
   local name
   require_installed
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   docker_attach
   release_resolve
+  if upgrade_checkout_behind; then
+    say "A newer version of Aman is available."
+    say "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
+    say "To get the newer version, run: git -C $(upgrade_quoted_path "$REPO_ROOT") pull$UPGRADE_PULL_ARGS && aman upgrade"
+    return 0
+  fi
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
   if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
