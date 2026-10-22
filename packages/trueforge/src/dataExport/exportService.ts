@@ -2,11 +2,12 @@
  * Streams one user's data export archive: one JSON file per section (chats
  * spread over numbered `sessions/` files), the memory tree as Markdown, and
  * uploaded files only when requested. Never
- * exported: model providers and their keys, OAuth tokens, registered OAuth
+ * exported: model provider keys, OAuth tokens, registered OAuth
  * clients, approval tokens, always-allow grants, skills and registered
  * repositories, sandbox state, schedule run history, and anything another
- * user owns. The owner's own permission history (audit rows) and each chat's
- * persona choices do travel.
+ * user owns. A model provider's setup (its type, address and models) does
+ * travel, so an import can put it back and ask only for the key. The owner's
+ * own permission history (audit rows) and each chat's persona choices travel.
  *
  * Every JSON value (except identity fields) and every memory file passes both
  * secret layers before it is written; uploaded files ship byte-exact.
@@ -31,6 +32,7 @@ import { errorCode } from '../cli/errorCode';
 import type { AgentRecord } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
@@ -59,6 +61,7 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
+import { exportableModelProvider } from './modelProviders';
 import { createExportScrubber, type ExportScrubber } from './secretScrub';
 import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBoundFields } from './sessionRecords';
 import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
@@ -120,6 +123,8 @@ export interface DataExportDeps<TTransaction> {
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  /** Only the setups are read; a provider's key never leaves (see modelProviders.ts). */
+  modelProviderStore: Pick<IModelProviderStore<TTransaction>, 'listProviders'>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
   listAgents: () => Promise<readonly AgentRecord[]>;
   memorySource: MemoryExportSource;
@@ -487,6 +492,15 @@ export async function runDataExport<TTransaction>(
     }
   }
   await writeJsonArrayEntry(context, 'connectors.json', connectorEntries());
+
+  // model_providers.json: each provider's setup (type, address, models), never its key.
+  async function* providerEntries(): AsyncIterable<unknown> {
+    const providers = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
+    for (const provider of providers) {
+      yield exportableModelProvider(provider, scrub);
+    }
+  }
+  await writeJsonArrayEntry(context, 'model_providers.json', providerEntries());
 
   // settings.json: the caller's own permission settings, plus instance toggles for administrators.
   const permissionSettings = await deps.sentinelSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });

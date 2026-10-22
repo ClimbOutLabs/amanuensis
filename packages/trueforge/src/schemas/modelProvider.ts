@@ -119,7 +119,10 @@ export type ModelProviderStreamTimeout = z.infer<typeof ModelProviderStreamTimeo
 
 const ModelProviderManifestBaseSchema = z
   .object({
-    auth: ModelProviderAuthSchema,
+    // A stored manifest may carry no key: an imported provider setup waits
+    // for its key, and a local endpoint may need none. The settings API
+    // still requires a key when a provider that needs one is first set up.
+    auth: ModelProviderAuthSchema.optional(),
     models: z.array(ConfiguredModelSchema).min(1).describe('Models exposed by this provider (at least one).'),
     stream_timeout: ModelProviderStreamTimeoutSchema.optional(),
   })
@@ -196,7 +199,6 @@ const TokenFactoryModelProviderSchema = wellKnownProviderSchema({
 const TrueFoundryModelProviderSchema = ModelProviderManifestBaseSchema.extend({
   type: z.literal('truefoundry'),
   base_url: z.url().describe('Base URL of the TrueFoundry AI gateway the models are invoked against.'),
-  auth: ModelProviderAuthSchema.optional(),
 })
   .strict()
   .openapi('TrueFoundryModelProvider');
@@ -206,7 +208,6 @@ const CustomModelProviderSchema = ModelProviderManifestBaseSchema.extend({
   type: z.literal('custom'),
   name: NameSchema,
   base_url: z.url().describe("Base URL of the provider's API."),
-  auth: ModelProviderAuthSchema.optional(),
 })
   .strict()
   .openapi('CustomModelProvider');
