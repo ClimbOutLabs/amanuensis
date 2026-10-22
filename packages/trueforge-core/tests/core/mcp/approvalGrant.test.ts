@@ -749,3 +749,38 @@ describe('search chat grant', () => {
     expect(SEARCH_CHAT_GRANT_KEY).not.toBe(approvalGrantKey(searchHold));
   });
 });
+
+describe('calendar changes never get a durable grant', () => {
+  it.each(['calendar_write', 'caldav_calendar_change', 'caldav_invitation_reply', 'connector_calendar_write'])(
+    'refuses chat and always scope for %s, even when the server calls the tool a read',
+    tier_reason => {
+      const info: InternalToolCallInfo = {
+        type: 'mcp',
+        mcp_server_id: 'Calendar',
+        mcp_server_name: 'Calendar',
+        original_tool_name: 'create_event',
+        is_approval_required: true,
+        effect: 'inspect',
+        tier: 3,
+        tier_reason,
+      };
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(offersChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+      const call: InternalEnrichedToolCall = {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'create_event', arguments: '{}' },
+        tool_info: info,
+      };
+      // A grant stored for this key, by an older rule, admits nothing.
+      const admissions = effectiveToolAdmissions({
+        calls: [call],
+        decisions: new Map(),
+        chatApprovalGrants: new Set([approvalGrantKey(info)]),
+        implementationPlanGrants: new Set(),
+      });
+      expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+    },
+  );
+});

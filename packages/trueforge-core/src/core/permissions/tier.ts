@@ -38,6 +38,9 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'mcp_open_world_hint',
   'connector_send',
   'calendar_write',
+  'caldav_calendar_change',
+  'caldav_invitation_reply',
+  'connector_calendar_write',
   'schedule_write',
   'persona_write',
 ]);

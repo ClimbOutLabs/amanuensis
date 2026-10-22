@@ -318,13 +318,23 @@ describe('the write tool itself', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
     const response = await built.tools.callTool(
       { name: 'create_event', arguments: { ...DENTIST, title: 'Dentist and lunch' } },
-      undefined,
+      { status: 'allow' },
       {
         admission_provenance: { source: 'user_approval', decision: 'allow' },
         approved_params: info.mint_canonical_params,
       },
     );
     expect(text(response)).toContain('changed after you approved them');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+  it('writes nothing for the exact approved call when no answer to that call came with it', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
+      admission_provenance: { source: 'user_approval', decision: 'allow' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).toContain('not approved');
     expect(writes(built.google.urls)).toEqual([]);
   });
 });
@@ -620,10 +630,14 @@ describe('on a demo instance', () => {
       services: { ...services, demoSendAllowlist: [ALLOWED] },
       google,
     });
-    const response = await demo.tools.callTool({ name: 'create_event', arguments: args }, undefined, {
-      admission_provenance: { source: 'user_approval', decision: 'allow' },
-      approved_params: approvedInfo.mint_canonical_params,
-    });
+    const response = await demo.tools.callTool(
+      { name: 'create_event', arguments: args },
+      { status: 'allow' },
+      {
+        admission_provenance: { source: 'user_approval', decision: 'allow' },
+        approved_params: approvedInfo.mint_canonical_params,
+      },
+    );
     expect(text(response)).toContain(DEMO_SEND_REFUSAL);
     expect(writes(google.urls)).toEqual([]);
   });

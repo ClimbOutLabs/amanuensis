@@ -74,6 +74,7 @@ import {
 import {
   escapeDisplayText,
   extractCardFields,
+  isCalendarChangeToolName,
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -2869,6 +2870,29 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: containsSecretPath(action.canonical_params),
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
+  // A connector call named as a calendar change asks every time, whatever the connector claims about it:
+  // no first-party pass and no standing grant, because a grant would cover every later event.
+  if (action.tool_type === 'mcp' && isCalendarChangeToolName(action.tool_name)) {
+    const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: {
+        ...card,
+        plain_what: `A calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check every detail below before you allow it.`,
+        cannot_be_undone: 'Check the details before you go ahead.',
+      },
+      reason: 'connector_calendar_write',
+      reason_detail: 'A calendar change from a connector always asks.',
+      sensitive_read: readsPrivateData,
+      secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
       approval_token_id: await mintPlainToken({
         ctx,
         tool_name: action.tool_name,

@@ -9,6 +9,7 @@ import {
   isRetrievalToolName,
   isUntrustedDocumentText,
   lastUserMessageText,
+  toolCallsThisTurn,
   untrustedDocumentTag,
   userAuthoredText,
 } from '../../../src/core/runtime/contextUtils';
@@ -225,5 +226,34 @@ describe('host-wrapped text predicates', () => {
   it('leaves what the user typed alone', () => {
     expect(isHostWrappedText('what does the lease say?')).toBe(false);
     expect(isUntrustedDocumentText('what does the lease say?')).toBe(false);
+  });
+});
+
+describe('toolCallsThisTurn', () => {
+  const call = (id: string) => ({
+    id,
+    type: 'function' as const,
+    function: { name: 'create_event', arguments: '{}' },
+    tool_info: {
+      type: 'mcp' as const,
+      mcp_server_id: 'Calendar',
+      mcp_server_name: 'Calendar',
+      original_tool_name: 'create_event',
+      is_approval_required: true,
+    },
+  });
+
+  it('returns the calls since the person last wrote, across host notes', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'add lunch' },
+      { role: 'assistant', content: null, tool_calls: [call('old')] },
+      { role: 'tool', tool_call_id: 'old', content: 'ok' },
+      { role: 'user', content: 'and dinner' },
+      { role: 'assistant', content: null, tool_calls: [call('a')] },
+      { role: 'tool', tool_call_id: 'a', content: 'ok' },
+      internalSystemMessage('Stop repeating that call.'),
+      { role: 'assistant', content: null, tool_calls: [call('b'), call('c')] },
+    ];
+    expect(toolCallsThisTurn(context).map(item => item.id)).toEqual(['a', 'b', 'c']);
   });
 });

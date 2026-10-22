@@ -479,6 +479,61 @@ function hasPhrase(words: string, ...phrases: string[]): boolean {
   return phrases.some(phrase => words.includes(`_${phrase}_`));
 }
 
+const CALENDAR_SUBJECT_WORDS = [
+  'event',
+  'events',
+  'calendar',
+  'calendars',
+  'meeting',
+  'meetings',
+  'appointment',
+  'appointments',
+  'invite',
+  'invitation',
+  'booking',
+];
+const CALENDAR_CHANGE_WORDS = [
+  'create',
+  'add',
+  'insert',
+  'new',
+  'import',
+  'update',
+  'edit',
+  'modify',
+  'patch',
+  'change',
+  'set',
+  'put',
+  'upsert',
+  'save',
+  'write',
+  'move',
+  'reschedule',
+  'schedule',
+  'book',
+  'delete',
+  'remove',
+  'cancel',
+  'respond',
+  'reply',
+  'rsvp',
+  'accept',
+  'decline',
+];
+
+/**
+ * A connector tool whose name says it changes a calendar, such as `create_event`. Judged on the name alone,
+ * because the connector's own read-only claim is exactly what such a tool cannot be trusted on.
+ */
+export function isCalendarChangeToolName(toolName: string): boolean {
+  const words = nameWords(toolName);
+  return (
+    (hasPhrase(words, ...CALENDAR_SUBJECT_WORDS) && hasPhrase(words, ...CALENDAR_CHANGE_WORDS)) ||
+    hasPhrase(words, 'rsvp', 'quickadd')
+  );
+}
+
 interface ConnectorCallInput {
   tool_name: string;
   words: string;

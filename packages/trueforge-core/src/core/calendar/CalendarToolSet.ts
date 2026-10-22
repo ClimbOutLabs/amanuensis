@@ -1,6 +1,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from 'winston';
 import type { z } from 'zod';
+import type { ApprovalDecision } from '../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../google/errors';
 import type { GoogleFeature } from '../google/scopes';
 import { errorResult, failureResult, jsonResult } from '../google/toolResults';
@@ -122,7 +123,7 @@ export class CalendarToolSet extends LocalToolMCP {
                 "Add an event to the user's primary Google Calendar. Use this, not a calendar file, when the user wants an event saved. Times are local wall-clock times (2026-10-19T09:00) in time_zone, or the user's own zone when it is left out; two dates make an all-day event. With attendees, send_updates must say whether Google emails them. The user sees the whole event and is asked first.",
               schema: CreateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
-              handler: (input, _approval, context) => this.#createEvent({ input, context }),
+              handler: (input, approval, context) => this.#createEvent({ input, approval, context }),
             }),
             defineTool({
               name: UPDATE_EVENT_TOOL_NAME,
@@ -130,7 +131,7 @@ export class CalendarToolSet extends LocalToolMCP {
                 'Move or rename an event the user organizes, by event_id from list_events. Set only what changes; a new start alone keeps the length. If the event has guests, send_updates must say whether Google emails them. Guests cannot be changed and events cannot be deleted. The user sees before and after and is asked first.',
               schema: UpdateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
-              handler: (input, _approval, context) => this.#updateEvent({ input, context }),
+              handler: (input, approval, context) => this.#updateEvent({ input, approval, context }),
             }),
           ]
         : []),
@@ -286,10 +287,16 @@ export class CalendarToolSet extends LocalToolMCP {
   #approvedWrite<T>(input: {
     call: T;
     schema: z.ZodType<T>;
+    approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
   }): { zone: string; hash: string } | { refusal: string } {
     if (this.#options.sentinel.services.unattended) {
       return { refusal: "Scheduled runs never change the calendar. This waits for the owner's OK." };
+    }
+    // The approved params are settled when the call is classified, before anyone answers, so only the person's
+    // answer to this very call lets it write.
+    if (input.approval?.status !== 'allow') {
+      return { refusal: NOT_APPROVED };
     }
     const {
       [APPROVED_ZONE_KEY]: zone,
@@ -412,8 +419,16 @@ export class CalendarToolSet extends LocalToolMCP {
     });
   }
 
-  async #createEvent({ input, context }: { input: CreateEventInput; context: ToolInvocationContext | undefined }) {
-    const approved = this.#approvedWrite({ call: input, schema: CreateEventSchema, context });
+  async #createEvent({
+    input,
+    approval,
+    context,
+  }: {
+    input: CreateEventInput;
+    approval: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }) {
+    const approved = this.#approvedWrite({ call: input, schema: CreateEventSchema, approval, context });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }
@@ -426,8 +441,16 @@ export class CalendarToolSet extends LocalToolMCP {
     });
   }
 
-  async #updateEvent({ input, context }: { input: UpdateEventInput; context: ToolInvocationContext | undefined }) {
-    const approved = this.#approvedWrite({ call: input, schema: UpdateEventSchema, context });
+  async #updateEvent({
+    input,
+    approval,
+    context,
+  }: {
+    input: UpdateEventInput;
+    approval: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }) {
+    const approved = this.#approvedWrite({ call: input, schema: UpdateEventSchema, approval, context });
     if ('refusal' in approved) {
       return errorResult(approved.refusal);
     }

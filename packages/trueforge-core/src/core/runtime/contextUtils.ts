@@ -482,6 +482,24 @@ export function scanApprovalDecisions(context: ContextMessage[]): Map<string, Ap
   return decisions;
 }
 
+/** Tool calls since the person's latest message; host notes sent as user messages do not start a new turn. */
+export function toolCallsThisTurn(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
+  const calls: InternalEnrichedToolCall[] = [];
+  for (let index = context.length - 1; index >= 0; index -= 1) {
+    const message = context[index];
+    if (message === undefined || !isLLMContextMessage(message)) {
+      continue;
+    }
+    if (message.role === 'user' && !isInternalSystemMessage(message)) {
+      break;
+    }
+    if (message.role === 'assistant') {
+      calls.unshift(...(message.tool_calls ?? []));
+    }
+  }
+  return calls;
+}
+
 /** Tool call ids the context has already used, in calls, results and decisions. */
 function usedToolCallIds(context: readonly ContextMessage[]): Set<string> {
   const used = new Set<string>();
