@@ -53,31 +53,39 @@ async function systemPromptFor(definition: {
   for await (const _event of thread.execute({ signal: new AbortController().signal })) {
     // Draining is enough; the assertion is on the request sent to the model.
   }
-  const systemMessage = create.mock.calls[0]?.[0].messages.find(m => m.role === 'system');
-  return String(systemMessage?.content);
+  // The static instruction is the first system message; the per-reply block follows it.
+  const systemMessages = (create.mock.calls[0]?.[0].messages ?? [])
+    .filter(m => m.role === 'system')
+    .map(m => String(m.content));
+  return { staticInstruction: systemMessages[0] ?? '', replyContext: systemMessages[1] ?? '' };
 }
 
 describe('AgentThread root identity', () => {
-  it('names the assistant and the person from the definition', async () => {
-    const system = await systemPromptFor({ identity: { assistantName: 'Nata', personName: 'Maya' } });
+  it('keeps the person out of the static identity and names them in the per-reply block', async () => {
+    const { staticInstruction, replyContext } = await systemPromptFor({
+      identity: { assistantName: 'Nata', personName: 'Maya' },
+    });
 
-    expect(system).toContain("You are Nata, Maya's chief of staff.");
-    expect(system).not.toContain('You are the Agent');
+    expect(staticInstruction).toContain('You are Nata, chief of staff to the person you work for.');
+    expect(staticInstruction).not.toContain('Maya');
+    expect(replyContext).toContain('<reply-context>');
+    expect(replyContext).toContain('The person you work for is Maya.');
   });
 
   it('falls back to the default assistant and neutral wording when the definition has no identity', async () => {
-    const system = await systemPromptFor({});
+    const { staticInstruction, replyContext } = await systemPromptFor({});
 
-    expect(system).toContain('You are Aman, chief of staff to the person you work for.');
+    expect(staticInstruction).toContain('You are Aman, chief of staff to the person you work for.');
+    expect(replyContext).not.toContain('The person you work for is');
   });
 
   it('keeps the persona or agent instructions after the identity', async () => {
-    const system = await systemPromptFor({
+    const { staticInstruction } = await systemPromptFor({
       identity: { assistantName: 'Nata', personName: 'Maya' },
       instruction: 'Speak like a pirate.',
     });
 
-    expect(system).toContain('Speak like a pirate.');
-    expect(system.indexOf("You are Nata, Maya's chief of staff.")).toBeLessThan(system.indexOf('Speak like a pirate.'));
+    expect(staticInstruction).toContain('Speak like a pirate.');
+    expect(staticInstruction.indexOf('You are Nata')).toBeLessThan(staticInstruction.indexOf('Speak like a pirate.'));
   });
 });

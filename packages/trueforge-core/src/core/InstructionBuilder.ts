@@ -54,7 +54,10 @@ export const DEFAULT_ASSISTANT_NAME = 'Aman';
 /** Names for a root identity. Missing, null or blank values use the fallbacks on `rootAgentIdentity`. */
 export interface RootAgentNames {
   assistantName?: string | null | undefined;
-  /** The name the person asked to be called by, such as a preferred name. */
+  /**
+   * The name the person asked to be called by, such as a preferred name. Sent in the per-reply
+   * block, never in the static identity, so the static prefix does not change between people.
+   */
   personName?: string | null | undefined;
 }
 
@@ -64,16 +67,12 @@ function nonBlank(value: string | null | undefined): string | undefined {
 }
 
 /**
- * The identity of the root assistant. Without a person name the wording speaks of "the person you work for"
- * instead of a possessive, so the text never reads "the person you work for's".
+ * The static identity of the root assistant. It names only the assistant: the person's name goes in the
+ * per-reply block, so this text is identical for every person and never changes between replies.
  */
-export function rootAgentIdentity({ assistantName, personName }: RootAgentNames): string {
+export function rootAgentIdentity({ assistantName }: Pick<RootAgentNames, 'assistantName'>): string {
   const assistant = nonBlank(assistantName) ?? DEFAULT_ASSISTANT_NAME;
-  const person = nonBlank(personName);
-  if (person === undefined) {
-    return `You are ${assistant}, chief of staff to the person you work for. You keep track of their life: appointments, deadlines, messages, plans and promises. You work only for them, on their own computer. Be brief, warm and concrete. Check with them before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
-  }
-  return `You are ${assistant}, ${person}'s chief of staff. You keep track of ${person}'s life: appointments, deadlines, messages, plans and promises. You work only for ${person}, on their own computer. Be brief, warm and concrete. Check with ${person} before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
+  return `You are ${assistant}, chief of staff to the person you work for. You keep track of their life: appointments, deadlines, messages, plans and promises. You work only for them, on their own computer. Be brief, warm and concrete. Check with them before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so.`;
 }
 
 export class InstructionBuilder {

@@ -42,7 +42,7 @@ const GOOGLE_SCOPES = [
 ];
 
 const MEMORY_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
+  recallMaxTokens: 600,
   recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
