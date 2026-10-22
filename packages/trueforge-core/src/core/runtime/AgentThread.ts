@@ -2963,6 +2963,11 @@ export class AgentThread {
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
+    // The write cap is a hard stop for the whole turn: once any thread hit it, no thread asks the model again.
+    if (this.toolCallMemo.turn.stoppedForWriteCap) {
+      yield this.generateErrorEvent(WRITE_CAP_STOP_MESSAGE, undefined, 'model_stream_fault');
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+    }
 
     // Captured before any preLLM context processor runs (see executeContextProcessors('preLLM')
     // below): ContextCompaction can rewrite `this.context` and drop the exact durable nudge
