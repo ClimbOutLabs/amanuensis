@@ -93,6 +93,7 @@ export interface SessionTable {
   /** Inline spec binding; XOR with `agent_id`. */
   agent_spec: JsonbColumn<AgentSpec> | null;
   title: string | null;
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   last_turn_id: string | null;

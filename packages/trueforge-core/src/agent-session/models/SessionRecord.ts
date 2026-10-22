@@ -1,5 +1,11 @@
 import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
-import type { SessionAgent, SessionMetadata, SessionMetrics, SessionSource } from '../schemas/session';
+import type {
+  SessionAgent,
+  SessionMetadata,
+  SessionMetrics,
+  SessionSource,
+  SessionTitleSource,
+} from '../schemas/session';
 import type { CreatedBySubject } from '../schemas/subject';
 import type { TaskChecklist } from '../schemas/taskChecklist';
 
@@ -19,6 +25,8 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
    * update_session_title_if_not_exist (first write wins; caller derives).
    */
   title: string | null;
+  /** Who set `title`; null when no title is set (or the chat predates title tracking). */
+  title_source: SessionTitleSource | null;
   /** Optional owner-scoped folder. Folder changes are not session activity. */
   folder_id: string | null;
   /** Optional host-owned repository registry binding. */

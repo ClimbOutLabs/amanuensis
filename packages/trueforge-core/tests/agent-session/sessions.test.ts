@@ -152,7 +152,7 @@ describe('Sessions / SessionHandle / TurnHandle (storage + createTurn)', () => {
       previous_turn_id: 'none',
       signal: new AbortController().signal,
       resolver: makeTestResolver(),
-      update_session_title_if_not_exist: 'From first message',
+      update_session_title_if_not_exist: { title: 'From first message', source: 'first_message' },
     });
     expect(turn.state.status).toBe('running');
     expect(turn.input).toHaveLength(1);

@@ -46,6 +46,7 @@ import {
   type ScheduleRecord,
   type ScheduleRunRecord,
 } from '../db/scheduleStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -68,6 +69,7 @@ import { scheduleRunsAs } from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
+import { scheduledSessionTitleSeed } from '../runtime/sessionTitle';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import type { Schedule, ScheduleRun } from '../schemas/schedule';
@@ -82,6 +84,7 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
   turnDrains: TurnDrainRegistry;
+  sentinelSettingsStore: ISentinelSettingsStore;
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
@@ -153,10 +156,16 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     userRef: prepared.userRef,
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
+    title_seed: scheduledSessionTitleSeed({
+      scheduleName: item.schedule.name,
+      timezone: item.schedule.manifest.timezone,
+      now: new Date(),
+    }),
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
       turnDrains: deps.turnDrains,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
       eventSubscriptions: deps.eventSubscriptions,
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore(c, prepared.agent),

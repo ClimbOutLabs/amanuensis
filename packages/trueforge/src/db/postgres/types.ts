@@ -102,6 +102,7 @@ export interface SessionTable {
    *      (COALESCE) targets it directly
    */
   title: string | null;
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   /**

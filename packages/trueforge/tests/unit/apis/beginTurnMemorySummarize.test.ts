@@ -41,6 +41,7 @@ import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemory
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Delegates to a real store while recording every `getSetting` call. */
@@ -138,6 +139,7 @@ describe('beginTurnExecution turn-summarization wiring', () => {
         previous_turn_id: undefined,
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
         deps: {
+          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: store,
           tokenFactoryBudget: uncappedTokenFactoryBudget,
