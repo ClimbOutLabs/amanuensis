@@ -31,6 +31,8 @@ import { resolveBrandChrome } from '../theme/brand.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useBrand } from '../theme/ThemeProvider.js';
 
+import { ChatHistoryPanel } from './ChatHistoryPanel.js';
+
 const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuilder/index.js'));
 const SchedulesPage = lazy(() =>
   import('../atoms/schedules/SchedulesPage.js').then(m => ({ default: m.SchedulesPage })),
@@ -63,10 +65,12 @@ function SidebarNavItems({
   showHistoryToggle = false,
   historyCollapsed = false,
   onToggleHistoryCollapsed,
+  historyToggleRef,
 }: {
   showHistoryToggle?: boolean;
   historyCollapsed?: boolean;
   onToggleHistoryCollapsed?: () => void;
+  historyToggleRef?: Ref<HTMLButtonElement>;
 }): ReactNode {
   const aui = useAui();
   const shell = useOptionalShellMode();
@@ -130,6 +134,7 @@ function SidebarNavItems({
       ) : null}
       {showHistoryToggle ? (
         <button
+          ref={historyToggleRef}
           type="button"
           aria-label={historyToggleLabel}
           aria-pressed={historyCollapsed}
@@ -178,6 +183,7 @@ function SidebarRail({
   showHistoryToggle = false,
   historyCollapsed = false,
   onToggleHistoryCollapsed,
+  historyToggleRef,
   ...dialogProps
 }: {
   onNavigate?: () => void;
@@ -188,6 +194,7 @@ function SidebarRail({
   /** Whether the user has hidden the recent-chats history panel. */
   historyCollapsed?: boolean;
   onToggleHistoryCollapsed?: () => void;
+  historyToggleRef?: Ref<HTMLButtonElement>;
 } & Omit<ComponentPropsWithoutRef<'aside'>, 'children' | 'className'>): ReactNode {
   const brand = useBrand();
   const chrome = resolveBrandChrome(brand);
@@ -221,6 +228,7 @@ function SidebarRail({
           showHistoryToggle={showHistoryToggle}
           historyCollapsed={historyCollapsed}
           onToggleHistoryCollapsed={onToggleHistoryCollapsed}
+          historyToggleRef={historyToggleRef}
         />
         <ShellActions labeled className="flex-col" />
         <UserAvatar labeled className="mt-1" />
@@ -242,6 +250,7 @@ export function SidebarLayout({ className }: { className?: string }) {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  const historyToggleRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
   const isIdle = shell?.mode.status === 'idle';
   const settingsOpen = shell?.settingsOpen === true;
@@ -259,6 +268,7 @@ export function SidebarLayout({ className }: { className?: string }) {
     () => shell?.setHistoryCollapsed(!historyCollapsed),
     [shell, historyCollapsed],
   );
+  const closeRecentHistory = useCallback(() => shell?.setHistoryCollapsed(true), [shell]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -292,6 +302,7 @@ export function SidebarLayout({ className }: { className?: string }) {
         showHistoryToggle={recentHistoryAvailable}
         historyCollapsed={historyCollapsed}
         onToggleHistoryCollapsed={toggleHistoryCollapsed}
+        historyToggleRef={historyToggleRef}
       />
 
       {showAgentConfig ? (
@@ -345,12 +356,11 @@ export function SidebarLayout({ className }: { className?: string }) {
 
         <div className="flex min-h-0 min-w-0 flex-1">
           {showRecentHistory ? (
-            <aside
-              aria-label="Recent chats"
-              className="hidden min-h-0 w-64 shrink-0 border-r border-border bg-sidebar-bg md:flex"
-            >
-              <ThreadListContainer variant="recent-history" />
-            </aside>
+            <ChatHistoryPanel
+              conversationRef={mainRef}
+              returnFocusRef={historyToggleRef}
+              onClose={closeRecentHistory}
+            />
           ) : null}
 
           <div ref={mainRef} className="min-h-0 min-w-0 flex-1">
