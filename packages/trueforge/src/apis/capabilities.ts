@@ -240,6 +240,36 @@ export interface ComputeCapabilitiesDataDeps<TTransaction> {
   tenantId?: string;
 }
 
+/** The sandbox is usable only when its image build reports ready (or the local fallback applies with no status). */
+export function sandboxEnabledFromBuildStatus(status: SandboxBuildStatus | undefined): boolean {
+  return status === 'ready' || (status === undefined && isLocalSandboxFallbackEnabled());
+}
+
+/**
+ * Whether this server has a sandbox at all, from the same persisted status the bug-report path reads: no
+ * remote refresh and no write-back. Fails closed (no sandbox) if the read throws.
+ */
+export async function readServerSandboxAvailable({
+  store,
+  tenant_id,
+  logger,
+}: {
+  store: ISandboxProviderStore;
+  tenant_id: string;
+  logger: Logger;
+}): Promise<boolean> {
+  if (slotsBackendEnabled()) {
+    return sandboxEnabledFromBuildStatus((await slotSandboxBuildStatus({ logger })).status);
+  }
+  try {
+    const persisted = await readPersistedSnapshotStatus({ store, tenant_id });
+    return sandboxEnabledFromBuildStatus(persisted?.status);
+  } catch (error) {
+    logger.warn('Sandbox status read failed; reporting no sandbox on the server', extractErrorLogFields(error));
+    return false;
+  }
+}
+
 /**
  * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
  * settings to the capability flags. The memory-provider read is a local DB read only, so this
@@ -260,7 +290,7 @@ async function capabilitiesFromSandboxStatus({
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<CapabilitiesData> {
-  const sandboxEnabled = status === 'ready' || (status === undefined && isLocalSandboxFallbackEnabled());
+  const sandboxEnabled = sandboxEnabledFromBuildStatus(status);
   return {
     sandbox: { enabled: sandboxEnabled },
     // Skills download from the network, which the slots do not have.
