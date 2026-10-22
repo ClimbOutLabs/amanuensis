@@ -46,7 +46,8 @@ export const ThreadViewportShell = forwardRef<HTMLDivElement, ThreadViewportShel
       <div
         className={cn(
           'mx-auto flex w-full min-w-0 max-w-(--thread-max-width) flex-col px-3 pt-3',
-          isEmpty ? 'min-h-full justify-center pb-4' : 'pb-24',
+          // Safe centring keeps a first frame taller than the screen scrollable from its top.
+          isEmpty ? 'min-h-full justify-[safe_center] pb-4' : 'pb-24',
         )}
       >
         {children}

@@ -218,8 +218,14 @@ export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
-export { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from './components/AmanFirstRunGuide.js';
+export {
+  AmanFirstRunGuide,
+  AmanFirstRunSummary,
+  amanFirstRunItems,
+  isFirstRunGuideVisible,
+} from './components/AmanFirstRunGuide.js';
 export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './components/AmanFirstRunGuide.js';
+export { AmanPandaSourceProvider } from './components/AmanPanda.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';

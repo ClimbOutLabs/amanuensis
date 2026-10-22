@@ -192,10 +192,12 @@ import {
   isLLMToolMessage,
   lastUserMessageText,
   makeUnknownToolInfo,
+  NO_SANDBOX_PROMPT,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
+  SANDBOX_OFF_PROMPT,
   scanApprovalDecisions,
   toEnrichedToolCall,
   toToolCallInfo,
@@ -1502,6 +1504,7 @@ export class AgentThread {
   // point as before.
   private stagedDocumentsToExtract: readonly StagedDocumentFile[] = [];
   private sandbox?: Sandbox | undefined;
+  private readonly serverSandboxAvailable: boolean;
   private readonly tracing: AgentTracing;
   private readonly logger: Logger;
 
@@ -1590,6 +1593,7 @@ export class AgentThread {
     this.preComputedCompletion = input.preComputedCompletion;
     // A read-only definition gets no sandbox at all, so no sandbox tool, staged upload, or repository refresh can run.
     this.sandbox = this.definition.readOnly ? undefined : input.sandbox;
+    this.serverSandboxAvailable = input.serverSandboxAvailable ?? false;
     this.chatApprovalGrants = input.chatApprovalGrants ?? new Set<string>();
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
@@ -1733,10 +1737,12 @@ export class AgentThread {
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
+    // The sandbox bundle's guidance and its exec tool go out together, and only when this chat has a sandbox.
+    const sandboxLoaded = this.sandbox !== undefined && loaded('sandbox');
     if (loaded('web')) {
       capabilities.addSection(
         'source-discovery',
-        createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
+        createSourceDiscoveryContract({ shellCanFetch: sandboxLoaded && this.sandbox?.hasNetwork() === true }),
       );
     }
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
@@ -1749,6 +1755,15 @@ export class AgentThread {
 
     if (this.sandbox && loaded('sandbox')) {
       this.sandbox.buildInstruction(capabilities);
+    }
+    // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
+    // comes from the host's server status, never from this chat alone.
+    if (this.sandbox === undefined && !this.parent) {
+      if (this.serverSandboxAvailable) {
+        capabilities.addSection('sandbox-off', SANDBOX_OFF_PROMPT);
+      } else {
+        capabilities.addSection('no-sandbox', NO_SANDBOX_PROMPT);
+      }
     }
     this.toolBundles?.buildInstruction(capabilities);
     if (this.deferredTool) {

@@ -77,6 +77,11 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * Undefined disables the hook.
    */
   readonly toolCallPolicy?: HostToolCallPolicy | undefined;
+  /**
+   * Whether this server has a sandbox at all, from the host's sandbox status (not this chat's switch).
+   * Undefined is read as no sandbox on the server.
+   */
+  readonly serverSandboxAvailable?: boolean | undefined;
   /** Host-resolved T2 repository binding, available even when the sandbox capability is disabled. */
   readonly boundRepository?: BoundRepository | undefined;
   /**

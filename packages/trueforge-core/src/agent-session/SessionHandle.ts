@@ -1130,6 +1130,7 @@ export class SessionHandle<
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
       sandbox,
+      serverSandboxAvailable: input.resolver.serverSandboxAvailable ?? false,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
