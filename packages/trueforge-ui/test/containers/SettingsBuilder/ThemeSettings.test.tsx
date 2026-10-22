@@ -8,7 +8,7 @@ import { MODEL_USAGE_DISPLAY_STORAGE_KEY, setModelUsageVisible } from '@/utils/m
 const PICKER_CARDS = [
   { label: 'Paper', description: 'Warm paper, ink and gold' },
   { label: 'Forest', description: 'Calm greens, natural tones' },
-  { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
+  { label: 'Midnight', description: 'Deep blue-grays, gold accents' },
   { label: 'High contrast', description: 'Maximum legibility, stark surfaces' },
 ];
 
