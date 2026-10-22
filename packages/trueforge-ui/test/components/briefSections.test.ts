@@ -56,6 +56,17 @@ describe('buildBriefView', () => {
     const view = buildBriefView({ brief: BRIEF, hiddenKeys: new Set([key]), expanded: true });
     expect(view.sections.some(section => section.section === 'check_first')).toBe(false);
   });
+
+  it('shows an item written twice with the same section and title only once', () => {
+    const brief: MorningBrief = {
+      digest: 'Twice.',
+      items: [item('decision', 'Reply to Ines'), item('decision', 'Reply to Ines')],
+    };
+    const view = buildBriefView({ brief, hiddenKeys: new Set(), expanded: true });
+    expect(view.sections.map(section => section.items.length)).toEqual([1]);
+    expect(view.sections[0]?.count).toBe(1);
+    expect(view.hiddenCount).toBe(0);
+  });
 });
 
 describe('briefTopBarTitle', () => {

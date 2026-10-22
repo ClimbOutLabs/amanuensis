@@ -9,7 +9,7 @@ import {
 export type { BriefItem, BriefSection, MorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 /** Section headings in the order they show. */
-export const BRIEF_SECTION_LABELS: Record<BriefSection, string> = {
+const BRIEF_SECTION_LABELS: Record<BriefSection, string> = {
   check_first: 'Check first',
   decision: 'Needs a decision',
   coming_up: 'Coming up',
@@ -17,7 +17,7 @@ export const BRIEF_SECTION_LABELS: Record<BriefSection, string> = {
 };
 
 /** Items shown before the "+ N more items" line. */
-export const BRIEF_VISIBLE_LIMIT = 6;
+const BRIEF_VISIBLE_LIMIT = 6;
 
 export type BriefViewItem = BriefItem & { key: string };
 
@@ -50,9 +50,15 @@ export function buildBriefView({
   expanded: boolean;
   limit?: number;
 }): BriefView {
+  // Items with the same section and title are one item, so only the first of them shows.
+  const seen = new Set<string>();
   const live: BriefViewItem[] = brief.items
     .map(item => ({ ...item, key: briefItemKey({ section: item.section, title: item.title }) }))
-    .filter(item => !hiddenKeys.has(item.key));
+    .filter(item => {
+      if (seen.has(item.key)) return false;
+      seen.add(item.key);
+      return !hiddenKeys.has(item.key);
+    });
   let budget = expanded ? Number.POSITIVE_INFINITY : limit;
   const sections: BriefViewSection[] = [];
   for (const section of BRIEF_SECTION_VALUES) {

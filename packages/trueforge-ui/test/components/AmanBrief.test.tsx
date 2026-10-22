@@ -140,12 +140,29 @@ describe('AmanBrief', () => {
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
-  it('makes a link target the real link of the row, opening in a new window without a referrer', () => {
-    renderBrief(BRIEF);
-    const link = screen.getByRole('link', { name: 'Compare' });
-    expect(link).toHaveAttribute('href', 'https://calendar.example.com/slots');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  it('shows a link target as its site name in plain text, never as a link', () => {
+    const payload = {
+      digest: 'One invoice is due.',
+      items: [
+        {
+          section: 'deadline',
+          title: 'Invoice due today',
+          subtitle: [],
+          action: {
+            label: 'Pay invoice',
+            target: { kind: 'link', url: 'https://pay-invoices.example.net/login?id=7' },
+          },
+        },
+      ],
+    };
+    const brief = parseMorningBrief(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (brief === null) throw new Error('Expected the brief to parse');
+    renderBrief(brief);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByText('Pay invoice')).toBeNull();
+    expect(screen.getByTestId('brief-link-site')).toHaveTextContent('pay-invoices.example.net');
+    fireEvent.keyDown(screen.getByRole('listitem', { name: 'Invoice due today' }), { key: 'Enter' });
+    expect(composer.send).not.toHaveBeenCalled();
   });
 
   it('marks a row done with a click on its status mark', () => {
@@ -186,10 +203,7 @@ describe('AmanBrief', () => {
     const card = screen.getByTestId('aman-brief');
     expect(card.textContent).not.toMatch(/[*_`#[\]]/);
     expect(screen.getByText('Fri 10/23, 10:00 AM Dentist')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Check the route' })).toHaveAttribute(
-      'href',
-      'https://maps.example.com/route',
-    );
+    expect(screen.getByTestId('brief-link-site')).toHaveTextContent('maps.example.com');
     expect(screen.getByRole('button', { name: 'Draft a reply' })).toBeInTheDocument();
     expect(screen.getAllByTestId('brief-source').map(label => label.textContent)).toEqual(['email', 'calendar']);
   });

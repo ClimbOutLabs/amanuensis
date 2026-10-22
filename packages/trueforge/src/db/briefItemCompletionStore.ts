@@ -23,7 +23,7 @@ export interface BriefItemCompletionDatabase {
   brief_item_completion: BriefItemCompletionTable;
 }
 
-export interface BriefItemOwner {
+interface BriefItemOwner {
   tenant_id: string;
   created_by: string;
 }
@@ -38,7 +38,7 @@ export interface UndoBriefItemInput extends BriefItemOwner {
   item_key: string;
 }
 
-export interface ListCompletedBriefItemsInput extends BriefItemOwner {
+interface ListCompletedBriefItemsInput extends BriefItemOwner {
   since: Date;
 }
 

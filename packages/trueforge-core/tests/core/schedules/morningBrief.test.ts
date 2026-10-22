@@ -47,6 +47,11 @@ describe('MORNING_BRIEF_PROMPT', () => {
     expect(MORNING_BRIEF_PROMPT).toContain('"check_first" | "decision" | "coming_up" | "deadline"');
     expect(MORNING_BRIEF_PROMPT).toContain('Put anything that may be wrong');
   });
+
+  it('asks only for prompt next steps, never web links', () => {
+    expect(MORNING_BRIEF_PROMPT).not.toContain('"link"');
+    expect(MORNING_BRIEF_PROMPT).not.toContain('https link');
+  });
 });
 
 describe('isMorningBriefPrompt', () => {

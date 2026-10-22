@@ -228,8 +228,8 @@ function BriefRow({
   const when = item.section === 'coming_up' && item.when !== undefined ? briefWhenLabel(item.when) : undefined;
   const { action } = item;
   const target = action.target;
-  const actionClass =
-    'aui-brief-action col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end';
+  const actionPlace = 'col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end';
+  const actionClass = cn('aui-brief-action', actionPlace);
 
   function onKeyDown(event: KeyboardEvent<HTMLLIElement>) {
     if (event.target !== event.currentTarget || done) return;
@@ -308,9 +308,13 @@ function BriefRow({
           Undo
         </button>
       ) : target.kind === 'link' ? (
-        <a data-brief-action className={actionClass} href={target.url} target="_blank" rel="noopener noreferrer">
-          {action.label}
-        </a>
+        // The brief is written from mail anyone can send, so its web addresses never become links.
+        <span
+          data-testid="brief-link-site"
+          className={cn(actionPlace, 'whitespace-nowrap text-sm text-text-secondary')}
+        >
+          {new URL(target.url).hostname}
+        </span>
       ) : (
         <button data-brief-action type="button" className={actionClass} onClick={() => sendPrompt(target.text)}>
           {action.label}
