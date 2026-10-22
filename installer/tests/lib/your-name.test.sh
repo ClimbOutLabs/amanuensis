@@ -26,6 +26,7 @@ install_answering() { # reply...
   run_install_tty "Name for this instance=>
 Your email=>$EMAIL$replies
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for $EMAIL=>$SENTINEL_PASSWORD

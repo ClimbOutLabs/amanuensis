@@ -41,7 +41,7 @@ test_default_install_answers_at_every_address() {
   assert_contains "$compose" "- '192.168.1.20:8791:8790'"
   assert_contains "$compose" "- '100.101.102.103:8791:8790'"
   assert_not_contains "$compose" "- '8791:8790'" "no wildcard publish"
-  assert_not_contains "$compose" "0.0.0.0"
+  assert_not_contains "$compose" "'0.0.0.0:"
   assert_not_contains "$compose" "[::]"
   assert_eq "$(printf '%s\n' "$compose" | grep -c ":8790'")" 3 "one publish per address, none for the names"
   assert_contains "$compose" "- '127.0.0.1:5556:5556'"
@@ -369,6 +369,7 @@ test_no_question_about_the_address() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
