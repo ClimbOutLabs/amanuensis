@@ -81,6 +81,27 @@ password_problem() {
   esac
 }
 
+# The answers given on stdin, one line each, in this fixed order: sign-in password (--password-stdin), Token Factory key
+# (--token-factory-key-stdin), calendar app password (--calendar-password-stdin), email app password
+# (--email-password-stdin). A line is there only when its option is given. main reads every line here, once, before any
+# question, so an answer can never be taken for another one. A dry run reads none of them.
+STDIN_SIGNIN_PASSWORD=
+STDIN_CAL_PASSWORD=
+STDIN_EMAIL_PASSWORD=
+
+stdin_answers_read() {
+  local line
+  [ "$DRY_RUN" != 1 ] || return 0
+  if [ "$PASSWORD_FROM_STDIN" = 1 ]; then IFS= read -r STDIN_SIGNIN_PASSWORD || true; fi
+  if [ "$OPT_TF_KEY_STDIN" = 1 ]; then
+    line=
+    IFS= read -r line || true
+    token_factory_key_take "$line"
+  fi
+  if [ "$OPT_CAL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_CAL_PASSWORD || true; fi
+  if [ "$OPT_EMAIL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_EMAIL_PASSWORD || true; fi
+}
+
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
 # memory: it is never put in argv, a file or the environment of a child process. Ending the input
 # (Ctrl-D) stops the run. The optional labels replace the two prompts.
@@ -88,7 +109,7 @@ ask_password() {
   local __var=$1 __first='' __second='' __problem __tries=0
   local __label_first=${2:-"Enter a password for ${I_EMAIL:-the owner account}"} __label_second=${3:-"Enter password again"}
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
-    IFS= read -r __first || true
+    __first=$STDIN_SIGNIN_PASSWORD
     [ -n "$__first" ] || usage_die "The first line of the input was empty, and --password-stdin reads the password from it."
     __problem=$(password_problem "$__first")
     [ -z "$__problem" ] || usage_die "$__problem"

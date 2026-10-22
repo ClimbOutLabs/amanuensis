@@ -23,7 +23,7 @@ describe('source discovery contract at the model request boundary', () => {
         instruction: 'test',
         toolSets: [],
       },
-      context: [{ role: 'user', content: 'hi' }],
+      context: [{ role: 'user', content: 'Look up the release notes.' }],
     });
 
     const execution = thread.execute({ signal: new AbortController().signal });

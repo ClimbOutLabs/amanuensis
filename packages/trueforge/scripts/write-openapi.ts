@@ -97,6 +97,7 @@ const app = createServerApp({
   googleConnectionStore: new SqliteGoogleConnectionStore(db),
   personalizationStore: new SqlitePersonalizationStore(db),
   personaStore: new SqlitePersonaStore(db),
+  modelProviderStore,
   spaceStore: new SqliteSpaceStore(db),
   repositoryStore: new SqliteRepositoryStore(db),
   resolveModelProviderStore: () => modelProviderStore,

@@ -16,6 +16,7 @@ describe('measurePromptRequest', () => {
           }),
         ],
       },
+      message: 'Report.',
     });
 
     const names = report.sections.map(row => row.name);
@@ -30,6 +31,7 @@ describe('measurePromptRequest', () => {
   it('counts each top-level section once and adds the tools to the total', async () => {
     const report = await measurePromptRequest({
       definition: { modelId: undefined, configuredModels: undefined, instruction: 'Be brief.', toolSets: [] },
+      message: 'Report.',
     });
 
     const topLevel = report.sections.filter(row => !row.name.includes('/'));
@@ -51,6 +53,7 @@ describe('measurePromptRequest', () => {
         instruction: 'Use <agent-identity>this</agent-identity> literally.',
         toolSets: [],
       },
+      message: 'Report.',
     });
 
     expect(report.sections.map(row => row.name)).toContain('user-instructions');
