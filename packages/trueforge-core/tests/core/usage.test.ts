@@ -100,7 +100,7 @@ describe('mergeUsage', () => {
 describe('AgentThreadMetrics', () => {
   it('initializes required token totals to zero and leaves optional totals undefined', () => {
     const target = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(target, createEmptyAgentThreadMetrics(), { isSubAgent: false });
+    addAgentThreadMetrics({ target, source: createEmptyAgentThreadMetrics(), isSubAgent: false });
 
     expect(target.total_input_tokens).toBe(0);
     expect(target.total_output_tokens).toBe(0);
@@ -164,8 +164,8 @@ describe('per-reply metrics', () => {
     recordToolCallResult(child, { toolName: 'search', disposition: 'executed_nonzero', reasonCode: null });
 
     const total = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(total, root, { isSubAgent: false });
-    addAgentThreadMetrics(total, child, { isSubAgent: true });
+    addAgentThreadMetrics({ target: total, source: root, isSubAgent: false });
+    addAgentThreadMetrics({ target: total, source: child, isSubAgent: true });
 
     expect(total.iterations).toBe(3);
     expect(total.sub_agent_steps).toBe(1);

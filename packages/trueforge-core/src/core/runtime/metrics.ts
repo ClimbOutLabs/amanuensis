@@ -3,9 +3,7 @@ import type { ToolResultDisposition } from '../events/schema';
 import type { CompletionUsage } from '../llm/LLMTypes';
 
 /** How one tool call ended, as the reply's per-reply counts report it. */
-export const ToolResultKindSchema = z.enum(['ok', 'refused', 'unavailable', 'error']).openapi('ToolResultKind');
-
-export type ToolResultKind = z.infer<typeof ToolResultKindSchema>;
+type ToolResultKind = 'ok' | 'refused' | 'unavailable' | 'error';
 
 /** Tool call counts for one reply, one count per result kind. */
 export const ReplyResultsByKindSchema = z
@@ -16,8 +14,6 @@ export const ReplyResultsByKindSchema = z
     error: z.number().int().nonnegative(),
   })
   .openapi('ReplyResultsByKind');
-
-export type ReplyResultsByKind = z.infer<typeof ReplyResultsByKindSchema>;
 
 /** Billable aggregate — thread/orchestrator totals (`total_*`), plus the per-reply counts behind the turn's row. */
 export const AgentThreadMetricsSchema = z
@@ -129,11 +125,15 @@ export function recordToolCallResult(
  * toward `sub_agent_steps`. `claim_mismatch`, `last_call_input_tokens` and `time_to_first_token_ms`
  * describe the root thread's reply only, so they are not summed here.
  */
-export function addAgentThreadMetrics(
-  target: AgentThreadMetrics,
-  source: AgentThreadMetrics,
-  { isSubAgent }: { isSubAgent: boolean },
-): void {
+export function addAgentThreadMetrics({
+  target,
+  source,
+  isSubAgent,
+}: {
+  target: AgentThreadMetrics;
+  source: AgentThreadMetrics;
+  isSubAgent: boolean;
+}): void {
   target.total_input_tokens += source.total_input_tokens;
   target.total_output_tokens += source.total_output_tokens;
   target.total_tokens += source.total_tokens;

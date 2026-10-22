@@ -353,11 +353,11 @@ export class AgentThreadOrchestrator {
    */
   public getMetrics(): AgentThreadMetrics {
     const total = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(total, this.finishedSubAgentMetrics, { isSubAgent: false });
+    addAgentThreadMetrics({ target: total, source: this.finishedSubAgentMetrics, isSubAgent: false });
     for (const thread of this.agentThreads.values()) {
       const threadMetrics = thread.getAgentThreadMetrics();
       const isSubAgent = thread.parent !== undefined;
-      addAgentThreadMetrics(total, threadMetrics, { isSubAgent });
+      addAgentThreadMetrics({ target: total, source: threadMetrics, isSubAgent });
       if (!isSubAgent) {
         // The reply's own signals come from the root thread only; sub-agents report their own.
         total.claim_mismatch = threadMetrics.claim_mismatch;
@@ -514,7 +514,9 @@ export class AgentThreadOrchestrator {
           yield chunk;
           // Move metrics to the finished bucket and drop the live entry with no `yield` between,
           // so getMetrics() counts this sub-agent once. After `yield chunk` per durable-state.
-          addAgentThreadMetrics(this.finishedSubAgentMetrics, currentThread.getAgentThreadMetrics(), {
+          addAgentThreadMetrics({
+            target: this.finishedSubAgentMetrics,
+            source: currentThread.getAgentThreadMetrics(),
             isSubAgent: true,
           });
           this.agentThreads.delete(chunk.thread_id);
