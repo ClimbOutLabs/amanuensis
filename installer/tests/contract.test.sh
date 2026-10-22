@@ -17,7 +17,7 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are ready.' "app_image, dex_image and stt_image read from release.json"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 4 images are ready.' "app_image, dex_image, stt_image and tts_image read from release.json"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"
@@ -80,6 +80,7 @@ test_layout_and_release_record() {
   release=$(cat "$AMAN_HOME/release/release.json")
   assert_contains "$release" '"app_image": "aman-app:'
   assert_contains "$release" '"stt_image": "aman-stt:'
+  assert_contains "$release" '"tts_image": "aman-tts:'
   assert_contains "$release" "\"dex_image\": \"$(sed -n 's/.*"dex_image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALLER_DIR/release.json")\""
   assert_mode "$AMAN_HOME/release/release.json" 600
   sandbox_drop

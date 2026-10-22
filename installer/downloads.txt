@@ -7,6 +7,8 @@ app-deps|700|Packages fetched while building the Aman app|registry.npmjs.org
 stt-base|50|Python base image for the speech-to-text build|registry-1.docker.io
 stt-deps|200|Python packages fetched while building the speech-to-text service|pypi.org files.pythonhosted.org
 stt-weights|464|Whisper small speech model weights, downloaded once at first start|huggingface.co
+tts-deps|60|Python packages fetched while building the voice that reads replies aloud|pypi.org files.pythonhosted.org
+tts-voice|124|Kokoro voice model and English word lists, downloaded once while the voice is built|github.com release-assets.githubusercontent.com files.pythonhosted.org
 dex|36|Sign-in service (pinned by digest)|ghcr.io
 mail-email|25|Email connector (pinned by digest)|ghcr.io
 https-front|20|The web front end that serves your instance over https on your network (pinned by digest)|registry-1.docker.io

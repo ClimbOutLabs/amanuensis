@@ -455,7 +455,7 @@ check_images() {
       "Run install.sh again from the folder Aman was installed from."
     return
   fi
-  for key in app_image dex_image stt_image; do
+  for key in app_image dex_image stt_image tts_image; do
     ref=$(json_value "$release" "$key")
     [ -n "$ref" ] || continue
     checked=$((checked + 1))
@@ -1560,14 +1560,14 @@ doctor_repair() { # kind
   exit "$failed"
 }
 
-# The Aman images this computer no longer needs: every aman-app and aman-stt image that is not the recorded release and
+# The Aman images this computer no longer needs: every aman-app, aman-stt and aman-tts image that is not the recorded release and
 # that no container uses.
 unused_aman_images() {
   local release="${AMAN_HOME}/release/release.json" keep image used
-  keep=" $(json_value "$release" app_image) $(json_value "$release" stt_image) "
+  keep=" $(json_value "$release" app_image) $(json_value "$release" stt_image) $(json_value "$release" tts_image) "
   used=" $(docker ps -a --format '{{.Image}}' 2>/dev/null | tr '\n' ' ') "
   while IFS= read -r image; do
-    case "$image" in aman-app:* | aman-stt:*) ;; *) continue ;; esac
+    case "$image" in aman-app:* | aman-stt:* | aman-tts:*) ;; *) continue ;; esac
     case "$keep$used" in *" $image "*) continue ;; esac
     printf '%s\n' "$image"
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)

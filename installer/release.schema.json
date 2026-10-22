@@ -31,6 +31,10 @@
       "description": "Local tag of the speech-to-text image built from ops/aman-stt, aman-stt:<source id>.",
       "type": "string"
     },
+    "tts_image": {
+      "description": "Local tag of the text-to-speech image built from ops/aman-tts, aman-tts:<source id>. Absent in releases from before it.",
+      "type": "string"
+    },
     "calendar_image": {
       "description": "Local tag of the calendar sidecar image built from ops/calendar-sidecar, aman-calendar-caldav:<source id>.",
       "type": "string"

@@ -69,6 +69,7 @@ release_resolve() {
   REL_REF=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
   REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
+  REL_TTS_TAG=aman-tts:$(source_id ops/aman-tts)
   REL_CALENDAR_TAG=aman-calendar-caldav:$(source_id ops/calendar-sidecar)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
   REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
@@ -85,6 +86,7 @@ release_write() {
     printf '  "source_ref": "%s",\n' "$REL_REF"
     printf '  "app_image": "%s",\n' "$REL_APP_TAG"
     printf '  "stt_image": "%s",\n' "$REL_STT_TAG"
+    printf '  "tts_image": "%s",\n' "$REL_TTS_TAG"
     printf '  "calendar_image": "%s",\n' "$REL_CALENDAR_TAG"
     printf '  "dex_image": "%s",\n' "$REL_DEX_IMAGE"
     printf '  "mail_email_image": "%s"\n' "$REL_MAIL_EMAIL_IMAGE"
@@ -107,6 +109,8 @@ release_load() {
   [ -f "$file" ] || return 1
   CUR_APP_TAG=$(json_get "$file" app_image)
   CUR_STT_TAG=$(json_get "$file" stt_image)
+  # Empty for a release from before the voice service.
+  CUR_TTS_TAG=$(json_get "$file" tts_image)
   CUR_CALENDAR_TAG=$(json_get "$file" calendar_image)
   CUR_DEX_IMAGE=$(json_get "$file" dex_image)
   CUR_MAIL_EMAIL_IMAGE=$(json_get "$file" mail_email_image)
@@ -142,6 +146,13 @@ build_stt_image() {
   step_ok "Built the speech-to-text service"
 }
 
+build_tts_image() {
+  [ -f "$REPO_ROOT/ops/aman-tts/Dockerfile" ] || die "The file ops/aman-tts/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
+  step_begin build-tts "Building the voice that reads replies aloud"
+  D build -t "$REL_TTS_TAG" "$REPO_ROOT/ops/aman-tts" >"$STEP_LOG" 2>&1 || step_fail "Building the voice that reads replies aloud failed" "Fix what the log says, then run install.sh again."
+  step_ok "Built the voice that reads replies aloud"
+}
+
 # Builds whatever is missing. Pulls the login image by digest. Nothing is pushed anywhere.
 images_ensure() {
   if docker_image_exists "$REL_APP_TAG"; then
@@ -153,6 +164,11 @@ images_ensure() {
     ui_skip "The speech-to-text service is already built"
   else
     build_stt_image
+  fi
+  if docker_image_exists "$REL_TTS_TAG"; then
+    ui_skip "The voice that reads replies aloud is already built"
+  else
+    build_tts_image
   fi
   if docker_image_exists "$REL_CALENDAR_TAG"; then
     ui_skip "The calendar connector is already built"
