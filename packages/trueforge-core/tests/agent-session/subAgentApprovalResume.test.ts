@@ -269,3 +269,109 @@ describe('a sub-agent card whose request ended after the person sent a new messa
     expect(callTool).not.toHaveBeenCalled();
   });
 });
+
+describe('an ended sub-agent card can be cleared but never run', () => {
+  async function endedCard() {
+    const fixture = await setup();
+    const pending = fixture.paused?.state.status === 'done' ? fixture.paused.state.required_actions : [];
+    const child = pending.find(action => action.type === EventType.TOOL_APPROVAL_REQUIRED);
+    const sessions = new Sessions({ sessionStore: fixture.store, sentinelServices: fixture.sentinelServices });
+    const next = await (
+      await sessions.get({ tenant_id: 't', session_id: 'helper-chat' })
+    )?.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'What else is on my list?' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver: fixture.resolver,
+    });
+    for await (const event of next?.stream() ?? []) {
+      void event;
+    }
+    return { ...fixture, sessions, threadId: child?.thread_id ?? '' };
+  }
+
+  function decision(threadId: string, approval: { status: 'allow' } | { status: 'deny'; reason: string }) {
+    return {
+      type: EventType.USER_TOOL_APPROVAL,
+      thread_id: threadId,
+      tool_call_id: 'call-send',
+      approval,
+    };
+  }
+
+  it('Dismiss records the dismissal, runs nothing, and leaves the session tip unchanged', async () => {
+    const fixture = await endedCard();
+    const tipBefore = await fixture.sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    const tipTurnId = tipBefore?.record.last_turn_id;
+
+    const tip = await tipBefore?.dismissEndedApprovals({
+      input: [decision(fixture.threadId, { status: 'deny', reason: 'Dismissed' })],
+    });
+
+    expect(tip?.turn_id).toBe(tipTurnId);
+    expect(fixture.callTool).not.toHaveBeenCalled();
+    await expect(fixture.store.listApprovalDismissals({ session_id: 'helper-chat' })).resolves.toEqual([
+      expect.objectContaining({ thread_id: fixture.threadId, tool_call_id: 'call-send' }),
+    ]);
+  });
+
+  it('Deny on an ended request is recognised as ended, so it is cleared like Dismiss', async () => {
+    const fixture = await endedCard();
+    const session = await fixture.sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    await expect(
+      session?.answersOnlyEndedApprovals({
+        input: [decision(fixture.threadId, { status: 'deny', reason: 'Not now' })],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('Approve runs nothing and gets the plain refusal', async () => {
+    const fixture = await endedCard();
+    const session = await fixture.sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    await expect(
+      session?.createTurn({
+        turn_id: mintTestTurnId(),
+        input: [decision(fixture.threadId, { status: 'allow' })],
+        signal: new AbortController().signal,
+        resolver: fixture.resolver,
+      }),
+    ).rejects.toThrow('This request ended. Ask again if you still need it.');
+    expect(fixture.callTool).not.toHaveBeenCalled();
+  });
+
+  it('an id this session never issued is not ended and keeps the unknown-thread refusal', async () => {
+    const fixture = await endedCard();
+    const session = await fixture.sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    const foreign = decision('thread-never-issued', { status: 'deny', reason: 'Dismissed' });
+    await expect(session?.answersOnlyEndedApprovals({ input: [foreign] })).resolves.toBe(false);
+    await expect(
+      session?.createTurn({
+        turn_id: mintTestTurnId(),
+        input: [foreign],
+        signal: new AbortController().signal,
+        resolver: fixture.resolver,
+      }),
+    ).rejects.toThrow('unknown thread_id');
+    expect(fixture.callTool).not.toHaveBeenCalled();
+  });
+
+  it('the dismissal is still there after the session is reopened from storage', async () => {
+    const fixture = await endedCard();
+    const session = await fixture.sessions.get({ tenant_id: 't', session_id: 'helper-chat' });
+    await session?.dismissEndedApprovals({
+      input: [decision(fixture.threadId, { status: 'deny', reason: 'Dismissed' })],
+    });
+    const reopened = await new Sessions({
+      sessionStore: fixture.store,
+      sentinelServices: fixture.sentinelServices,
+    }).get({
+      tenant_id: 't',
+      session_id: 'helper-chat',
+    });
+    await expect(
+      reopened?.answersOnlyEndedApprovals({ input: [decision(fixture.threadId, { status: 'allow' })] }),
+    ).resolves.toBe(true);
+    await expect(fixture.store.listApprovalDismissals({ session_id: 'helper-chat' })).resolves.toHaveLength(1);
+  });
+});

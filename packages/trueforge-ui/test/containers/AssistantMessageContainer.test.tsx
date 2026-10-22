@@ -1086,7 +1086,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'Okay.' }] },
     ]);
 
-    expect(screen.getByText('This request expired.')).toBeInTheDocument();
+    expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
   });

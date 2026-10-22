@@ -11,7 +11,12 @@ import {
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import {
+  toolInvocationRawId,
+  useTrueFoundryApprovals,
+  useTrueFoundryRespondToToolApproval,
+} from '@truefoundry/assistant-ui-runtime';
+import { MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
@@ -19,9 +24,11 @@ import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/perso
 import { useCallback, useEffect, useState } from 'react';
 
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
+import { Button } from '../atoms/primitives/Button.js';
 import { MapCard } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
+import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
@@ -59,6 +66,7 @@ import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedAp
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
 import { ToolApprovalContainer } from './ToolApprovalContainer.js';
 import { ToolCallContentBlockContainer } from './ToolCallContentBlockContainer.js';
+import { useEndedApprovalDismiss } from './useEndedApprovalDismiss.js';
 
 function NestedReasoningContainer() {
   const isRunning = useAuiState(s => s.part.status?.type === 'running');
@@ -106,11 +114,20 @@ function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<strin
   }
 }
 
-function ExpiredApprovalNote() {
+/** What a person sees on a card whose request ended. Dismiss clears it without running anything. */
+function EndedApprovalNote({ onDismiss, dismissing }: { onDismiss: (() => void) | undefined; dismissing: boolean }) {
   return (
-    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
-      This request expired.
-    </p>
+    <div
+      data-role="approval-expired"
+      className="text-text-secondary flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
+    >
+      <p>This request ended. Ask again if you still need it.</p>
+      {onDismiss !== undefined && (
+        <Button.Secondary size="small" onClick={onDismiss} disabled={dismissing}>
+          Dismiss
+        </Button.Secondary>
+      )}
+    </div>
   );
 }
 
@@ -403,10 +420,25 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   // Sub-agent messages live inside their parent's message and follow it.
   const isNestedMessage = useNestedApprovalBridge();
   const isNewestMessage = useAuiState(s => s.message.isLast);
+  // A sub-agent's card names its own thread; the chat's own cards are on the root thread.
+  const endedThreadId = isNestedMessage
+    ? (sentinelState?.approvalFor(part.toolCallId)?.threadId ?? null)
+    : MAIN_THREAD_ID;
+  const endedDismiss = useEndedApprovalDismiss({ toolCallId: part.toolCallId, threadId: endedThreadId });
   const hasPendingApproval = hasPendingToolApproval(approval);
-  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  // A card the server no longer lists as waiting belongs to a request that ended, even when it sits on the newest message.
+  const { pending: pendingApprovals } = useTrueFoundryApprovals();
+  const waitingToolCallIds = useWaitingToolCallIds(pendingApprovals.map(pending => pending.approvalId));
+  const endedOnServer =
+    hasPendingApproval &&
+    waitingToolCallIds !== undefined &&
+    !waitingToolCallIds.has(toolInvocationRawId(part.toolCallId));
+  const approvalExpired = hasPendingApproval && ((!isNestedMessage && !isNewestMessage) || endedOnServer);
   const showApproval = hasPendingApproval && !approvalExpired;
-  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
+  const expiredNote =
+    approvalExpired && !endedDismiss.cleared ? (
+      <EndedApprovalNote onDismiss={endedDismiss.onDismiss} dismissing={endedDismiss.dismissing} />
+    ) : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
