@@ -10146,6 +10146,14 @@
               "null"
             ]
           },
+          "reply_to": {
+            "default": null,
+            "description": "The address replies go to when it is not the sender, or null when replies go to the sender.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "subject": {
             "description": "Subject line.",
             "type": "string"

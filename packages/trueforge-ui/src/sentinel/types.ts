@@ -62,6 +62,8 @@ export type SentinelApprovalEmail = {
   replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
   reply_in_thread: { subject: string; from: string } | null;
+  /** The address replies go to when it is not the sender, or null when replies go to the sender. */
+  reply_to: string | null;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -412,6 +414,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const thread = value.reply_in_thread ?? value.replyInThread;
   const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
+  // A card from before this field existed has no reply address, so it replies to the sender as it did then.
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
   return {
     action,
     to,
@@ -423,6 +427,7 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
+    reply_to: replyTo,
   };
 }
 

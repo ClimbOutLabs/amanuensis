@@ -81,6 +81,12 @@ export const Tier3EmailSchema = z
       })
       .nullable()
       .describe('The message a reply answers in its thread, or null when the message is not a reply.'),
+    // Cards stored before this field existed read as replies going to the sender, as they did then.
+    reply_to: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The address replies go to when it is not the sender, or null when replies go to the sender.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');

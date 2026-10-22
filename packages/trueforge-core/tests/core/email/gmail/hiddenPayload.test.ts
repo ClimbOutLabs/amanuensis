@@ -140,7 +140,6 @@ describe('assessDraft allows only the headers a draft needs', () => {
 
   it.each([
     ['an empty Reply-To followed by a real one', [header('Reply-To', ''), header('Reply-To', 'mallory@example.com')]],
-    ['a Reply-To', [header('Reply-To', 'mallory@example.com')]],
     ['a Sender', [header('Sender', 'mallory@example.com')]],
     ['a Return-Path', [header('Return-Path', '<mallory@example.com>')]],
     ['a Delivered-To', [header('Delivered-To', 'mallory@example.com')]],
@@ -152,9 +151,20 @@ describe('assessDraft allows only the headers a draft needs', () => {
     ['a second To', [header('To', 'mallory@example.com')]],
     ['a second From', [header('From', 'mallory@example.com')]],
     ['a second Bcc', [header('Bcc', 'a@example.com'), header('Bcc', 'mallory@example.com')]],
-    ['a header whose name has other letters in it', [header('rEpLy-tO', 'mallory@example.com')]],
   ])('refuses %s', (_name, extraHeaders) => {
     expect(assess(plainDraft({ ...base, extraHeaders })).ok).toBe(false);
+  });
+
+  it.each([
+    ['a Reply-To elsewhere', 'Reply-To', 'mallory@example.com', 'mallory@example.com'],
+    ['a Reply-To in other letter case', 'rEpLy-tO', 'mallory@example.com', 'mallory@example.com'],
+    ['a Reply-To that is the account', 'Reply-To', 'ADA@example.com', null],
+    ['a Sender that is the account', 'Sender', 'ada@example.com', null],
+  ])('sends with %s and shows only a reply address that is not the account', (_name, name, value, replyTo) => {
+    expect(assess(plainDraft({ ...base, extraHeaders: [header(name, value)] }))).toMatchObject({
+      ok: true,
+      draft: { replyTo },
+    });
   });
 
   it.each([

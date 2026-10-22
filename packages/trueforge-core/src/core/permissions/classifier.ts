@@ -2070,6 +2070,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     `to ${recipientList(content.to) === '' ? 'no one' : recipientList(content.to)}`,
     ...(content.cc.length > 0 ? [`Copy: ${recipientList(content.cc)}`] : []),
     ...(content.bcc.length > 0 ? [`Hidden copy: ${recipientList(content.bcc)}`] : []),
+    ...(content.replyTo === null ? [] : [`Replies go to: ${escapeDisplayText(content.replyTo)}`]),
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
@@ -2111,6 +2112,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       bcc: content.bcc.map(escapedMailbox),
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
+      reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
       replaces:
         replaces === undefined
           ? null
