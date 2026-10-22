@@ -108,10 +108,14 @@ describe('AmanBrief', () => {
 
 describe('briefFooterLine', () => {
   it('says what was read and that nothing was sent when no action ran', () => {
-    expect(briefFooterLine({ readQuietly: 12, actionsRan: 0 })).toBe('12 things read quietly. Nothing was sent.');
+    expect(briefFooterLine({ readAllowed: 12, actionsRan: 0 })).toBe(
+      '12 things read, allowed by your settings. Nothing was sent.',
+    );
   });
 
   it('counts the actions that ran instead of claiming nothing was sent', () => {
-    expect(briefFooterLine({ readQuietly: 1, actionsRan: 2 })).toBe('1 thing read quietly. 2 actions ran.');
+    expect(briefFooterLine({ readAllowed: 1, actionsRan: 2 })).toBe(
+      '1 thing read, allowed by your settings. 2 actions ran.',
+    );
   });
 });
