@@ -6,7 +6,8 @@ import {
   type CaldavToolName,
 } from '../calendar/caldav/toolContract';
 import type { SentinelAction } from './classifier';
-import { escapeDisplayText, renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
+import { escapeDisplayText } from './displayText';
+import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 
 /**

@@ -71,12 +71,8 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import {
-  escapeDisplayText,
-  extractCardFields,
-  renderOutboundArguments,
-  type ExtractionResult,
-} from './extractorRegistry';
+import { escapeDisplayText } from './displayText';
+import { extractCardFields, renderOutboundArguments, type ExtractionResult } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import {
   isMapsToolName,
