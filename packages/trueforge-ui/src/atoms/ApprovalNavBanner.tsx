@@ -26,7 +26,7 @@ export function ApprovalNavBanner({
   onFocusCurrent,
   className,
 }: ApprovalNavBannerProps) {
-  const label = total === 1 ? '1 tool needs your input' : `${String(total)} tools need your input`;
+  const label = total === 1 ? '1 item needs your approval' : `${String(total)} items need your approval`;
 
   return (
     <div
