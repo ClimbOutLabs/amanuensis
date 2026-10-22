@@ -8,6 +8,7 @@ import { canSubmitComposer, ComposerContainer } from '@/containers/ComposerConta
 import { ToasterProvider } from '@/containers/ToasterContainer.js';
 import { ComposerBusyProvider, notifyComposerBusyFailure } from '@/hooks/useComposerBusyState.js';
 import { composerDraftKey, ComposerDraftScopeProvider } from '@/hooks/useComposerDraft.js';
+import { COMPOSER_PLACEHOLDER_LINES } from '@/hooks/useComposerPlaceholder.js';
 import {
   CustomActionRenderersProvider,
   type CustomActionRendererProps,
@@ -1061,5 +1062,24 @@ describe('ComposerContainer voice input', () => {
 
     expect(await screen.findByRole('button', MIC)).toBeInTheDocument();
     expect(screen.queryByTitle('Select model')).not.toBeInTheDocument();
+  });
+
+  it('shows one of the listed placeholder lines and keeps it through re-renders and typing', () => {
+    const { rerender } = renderComposer();
+    const input = screen.getByLabelText('Message input');
+    const first = input.getAttribute('placeholder');
+
+    expect(COMPOSER_PLACEHOLDER_LINES).toContain(first);
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+    fireEvent.change(input, { target: { value: 'typing' } });
+
+    expect(input.getAttribute('placeholder')).toBe(first);
   });
 });
