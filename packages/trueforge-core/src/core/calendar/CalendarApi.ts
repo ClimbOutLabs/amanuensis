@@ -40,6 +40,9 @@ interface EventPage {
   nextPageToken: string | undefined;
 }
 
+/** The public calls a Calendar source must answer. The live client and the eval fixtures both satisfy it. */
+export type CalendarApiPort = Pick<CalendarApi, keyof CalendarApi>;
+
 export class CalendarApi {
   readonly #rest: GoogleRestClient;
   readonly #writes: GoogleRestClient;

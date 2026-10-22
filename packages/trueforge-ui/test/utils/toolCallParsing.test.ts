@@ -13,6 +13,8 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseToolNotDoneReason,
+  parseToolRefusalNotice,
   parseToolResultDisposition,
   toStatus,
 } from '@/utils/toolCallParsing.js';
@@ -166,6 +168,35 @@ describe('toolCallParsing', () => {
       data: '{\n  "ok": true\n}',
       isJson: true,
     });
+  });
+
+  it('shows the plain line for a call refused before it started, and only for a refusal that asks the owner', () => {
+    const owner = 'Aman stopped a search: it had used all 40 tool steps for this question.';
+    const refused = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'never_ran',
+        remediation: { reason_code: 'tool_pre_dispatch_failed', message: owner, suggested_action: 'contact_user' },
+      },
+      result: 'ignored',
+    });
+    expect(parseToolRefusalNotice(refused)).toBe(owner);
+    expect(parseToolNotDoneReason(refused)).toBe(owner);
+
+    const unknownTool = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'never_ran',
+        remediation: {
+          reason_code: 'unknown_tool',
+          message: 'Use only a tool that is available.',
+          suggested_action: 'change_strategy',
+        },
+      },
+      result: 'ignored',
+    });
+    expect(parseToolRefusalNotice(unknownTool)).toBeUndefined();
+    expect(parseToolNotDoneReason(unknownTool)).toBe('it never started');
   });
 
   it('extracts a failure reason from remediation, then from the result content, and never for a success', () => {
