@@ -597,6 +597,13 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     }
   }
 
+  /** Forgets a turn that ends without ever streaming, so it is not left among its chat's unsaved turns. */
+  forgetUnstarted(): void {
+    if (!this.streamStarted && this.resolver !== undefined) {
+      chatFingerprintSaves.forget({ session_id: this.turn.session_id, state: this.resolver.webSearchTurn });
+    }
+  }
+
   /** Paginated read of this turn's persisted events. */
   async listEvents(input: {
     limit: number;

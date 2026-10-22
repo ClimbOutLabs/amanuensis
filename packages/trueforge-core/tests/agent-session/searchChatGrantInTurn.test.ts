@@ -4,6 +4,7 @@
  */
 import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
 import { EventType } from '../../src/agent-session/schemas/events';
+import { CancellationReason } from '../../src/agent-session/schemas/turn';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
@@ -376,6 +377,33 @@ describe('a turn whose fingerprints the store may not hold yet', () => {
     // The turn the new message stopped still saves what it read, so a later turn's record covers it.
     expect((await session.getTurn(outlookTurn.id))?.state).toMatchObject({ status: 'cancelled' });
     expect(saves).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep counting a turn that ended before it streamed', async () => {
+    const { loadChat, run, resolverForTurn, create, callTool, allowSearchesAfterMailRead } = await setup();
+    await allowSearchesAfterMailRead();
+    const searchesBefore = callTool.mock.calls.length;
+
+    // The server gives up on a turn before inference, for example when the chat's persona changed meanwhile.
+    const unstarted = resolverForTurn();
+    const abandoned = await (
+      await loadChat()
+    ).createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'Hello' }],
+      signal: new AbortController().signal,
+      resolver: unstarted,
+    });
+    // As if it inherited an unsaved earlier turn, so it would have something to save.
+    unstarted.webSearchTurn.fingerprintsLost = true;
+    abandoned.forgetUnstarted();
+    await (await loadChat()).freezeTurn({ turn_id: abandoned.id, reason: CancellationReason.Abandoned });
+
+    create.mockImplementationOnce(() => searchStream({ id: 'call-9', query: 'oldest cafe in Lisbon' }));
+    create.mockImplementation(() => textStream('Done.'));
+    await run({ messages: [{ type: EventType.USER_MESSAGE, content: 'Search for it' }] });
+
+    expect(callTool.mock.calls.length).toBe(searchesBefore + 1);
   });
 
   it('holds a later search when saving the connector-read turn failed', async () => {
