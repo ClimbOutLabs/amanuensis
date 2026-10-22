@@ -1149,6 +1149,12 @@ export interface SharedServerConfiguration {
    */
   MODEL_STREAM_IDLE_TIMEOUT_MS: number;
   /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
+  /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
    * Env: `MCP_DCR_OAUTH_CLIENT_NAME`. Default: "truefoundry-harness".
@@ -2006,6 +2012,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
     raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
     defaultValue: 60_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:

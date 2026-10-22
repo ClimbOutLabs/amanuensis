@@ -197,6 +197,8 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /** How long a web search or page read may take before the model gets a plain tool error instead. */
+      searchCallTimeoutMs?: number | undefined;
       /**
        * Host instance-wide bound in milliseconds on waiting for a model call's
        * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
@@ -456,6 +458,8 @@ export class TurnResourceResolver<
           }),
           pages: fetchedPages,
           pagesScope: pageScope,
+          searchCallTimeoutMs: this.deps.searchCallTimeoutMs,
+          logger: this.deps.logger,
         });
       }),
     );
