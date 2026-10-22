@@ -287,23 +287,40 @@ async function attemptRetainSubmission(
  * exact exchange when the op is missing or unreadable. The deterministic id makes resubmission
  * idempotent, and a queued or running op is left for the next sweep. Never throws; a
  * still-unverified op is logged with its operation id rather than dropped silently.
+ *
+ * Resolves `true` only when the provider holds the exchange (completed, queued, running, or
+ * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
-export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<void> {
+export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
   // Precompute the summary once; the retry path below must reuse it rather than
   // invoking the LLM a second time (cost, latency, and non-determinism).
   // The wrapper ensures even an undefined result is not recomputed.
   const precomputed = { summarizedContent: await maybeSummarizeTurn(params) };
   const result = await attemptRetainSubmission(params, precomputed);
   if (result === 'skipped') {
-    return;
+    return false;
   }
   const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
   const timeoutMs = configuration.MEMORY_RETAIN_TIMEOUT_MS;
+  // Vanished, never landed, or unreadable: resubmit the exact exchange once.
+  // Reuse the precomputed summary; do not invoke the LLM again.
+  const resubmitOnce = async (reason?: string): Promise<boolean> => {
+    const retryResult = await attemptRetainSubmission(params, precomputed);
+    if (retryResult !== 'submitted') {
+      params.logger.warn('Memory retain unverified after single retry pass', {
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        operationId,
+        ...(reason === undefined ? {} : { reason }),
+      });
+    }
+    return retryResult === 'submitted';
+  };
   try {
     const check = await params.client.getOperation(operationId, timeoutMs);
     if (check.ok) {
       if (isOperationCompletedStatus(check.status)) {
-        return;
+        return true;
       }
       if (isOperationFailedStatus(check.status)) {
         const retried = await params.client.retryOperation(operationId, timeoutMs);
@@ -314,20 +331,10 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
             operationId,
           });
         }
-        return;
+        return retried.ok;
       }
       if (check.status === 'unknown') {
-        // Vanished (or never landed): resubmit the exact exchange once.
-        // Reuse the precomputed summary; do not invoke the LLM again.
-        const retryResult = await attemptRetainSubmission(params, precomputed);
-        if (retryResult !== 'submitted') {
-          params.logger.warn('Memory retain unverified after single retry pass', {
-            sessionId: params.sessionId,
-            turnId: params.turnId,
-            operationId,
-          });
-        }
-        return;
+        return await resubmitOnce();
       }
       // Still queued/running (or an unrecognized status): leave it for the next turn's sweep.
       params.logger.debug('Memory retain operation still pending after drain submission', {
@@ -336,19 +343,11 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
         operationId,
         status: check.status,
       });
-      return;
+      return true;
     }
     // Status unreadable: one deterministic resubmission is safe and may recover a submission
-    // whose response was lost. Reuse the precomputed summary; do not invoke the LLM again.
-    const retryResult = await attemptRetainSubmission(params, precomputed);
-    if (retryResult !== 'submitted') {
-      params.logger.warn('Memory retain unverified after single retry pass', {
-        sessionId: params.sessionId,
-        turnId: params.turnId,
-        operationId,
-        reason: check.reason,
-      });
-    }
+    // whose response was lost.
+    return await resubmitOnce(check.reason);
   } catch (error) {
     params.logger.warn('Memory retain verification pass threw unexpectedly', {
       sessionId: params.sessionId,
@@ -356,5 +355,6 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
       operationId,
       reason: error instanceof Error ? error.message : String(error),
     });
+    return result === 'submitted';
   }
 }

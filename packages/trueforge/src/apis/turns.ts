@@ -1150,12 +1150,9 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
         };
         await flushUsage();
         if (memory !== undefined) {
-          if (memory.outcomeLog !== undefined) {
-            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
-          }
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
           // it, and the verification pass inside retries a failed retain once.
-          await submitRetainWithVerification({
+          const stored = await submitRetainWithVerification({
             client: memory.client,
             sessionId,
             turnId,
@@ -1168,6 +1165,11 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
             summarize: memory.summarize,
             outcomeLog: memory.outcomeLog,
           });
+          // Only a stored turn can have gone to the persona it started with; a skipped or failed
+          // retain is already explained by its own reason line.
+          if (stored && memory.outcomeLog !== undefined) {
+            await logTurnPersonaSwitch({ outcomeLog: memory.outcomeLog, sessionId, turnId, logger });
+          }
         }
         if (profileLearning !== undefined) {
           // The assistant's reply is deliberately not passed here: it is not a source of facts
