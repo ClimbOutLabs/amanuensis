@@ -59,6 +59,7 @@ import {
   GET_TOOL_OUTPUT_SCHEMA_NAME,
   LIST_TOOLS_NAME,
 } from '../runtime/DeferredTool';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
 import { extractErrorLogFields } from '../util/errorLogFields';
@@ -961,7 +962,7 @@ export const sandboxExecSchema = z.object({
   purpose: z
     .enum(SANDBOX_INVOCATION_PURPOSES)
     .describe(
-      'Host-enforced execution purpose. Use verify for any command whose successful result should authorize a later commit. The commit purpose is only for running a `git commit` command; to produce a patch, run `git diff` with purpose inspect and read its output, do not redirect it to a file.',
+      'verify authorizes a later commit; commit is only for `git commit`. For a patch, run `git diff` as inspect and read it; never redirect it to a file.',
     ),
   command: z.string().describe('Shell command to execute.'),
   cwd: z.string().optional().describe('Working directory.'),
@@ -1038,9 +1039,7 @@ export const sandboxApplyPatchSchema = z
     patch_lines: z
       .array(z.string())
       .optional()
-      .describe(
-        `The diff as line array, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} patch, not both. Preferred: single strings with escaped newlines can mangle hunk headers.`,
-      ),
+      .describe(`The diff as lines: ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} patch, not both. Preferred over patch.`),
   })
   // The targets are the patch's own; a path or target argument would only mislead the approval card.
   .strict()
@@ -1065,24 +1064,20 @@ export const sandboxReplaceTextSchema = z
   .object({
     intent: z.string().describe('Why you are making this change (user-facing).'),
     cwd: z.string().min(1).describe('Repository root path.'),
-    path: z.string().min(1).describe('File path relative to cwd.'),
+    path: z.string().min(1).describe('Path relative to cwd.'),
     old_text: z.string().optional().describe('Text to replace (or use old_text_lines).'),
     old_text_lines: z
       .array(z.string())
       .optional()
       .describe(
-        `The exact existing text to replace, as an array of lines, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} ` +
-          'old_text, not both. Preferred over old_text: a single string with escaped or missing newlines is ' +
-          'unreliable for some models and will fail the exact match.',
+        `The exact text to replace, as lines: ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} old_text, not both. Preferred over old_text.`,
       ),
     new_text: z.string().optional().describe('Replacement text (or use new_text_lines).'),
     new_text_lines: z
       .array(z.string())
       .optional()
       .describe(
-        `The replacement text as an array of lines, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} new_text, not ` +
-          'both. Preferred over new_text: a single string with escaped or missing newlines is unreliable for ' +
-          'some models.',
+        `The replacement text as lines: ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} new_text, not both. Preferred over new_text.`,
       ),
     replace_all: z.boolean().optional().default(false).describe('Replace all occurrences.'),
   })
@@ -1118,19 +1113,14 @@ export const sandboxWriteFileSchema = z
       .string()
       .min(1)
       .optional()
-      .describe(
-        'Absolute path to the checked-out Git repository or package root. Required when a repository is bound; ' +
-          'otherwise defaults to the provider workspace root.',
-      ),
+      .describe('Repository or package root. Required when a repository is bound; otherwise the workspace root.'),
     path: z.string().min(1).describe('New file path relative to cwd.'),
     content: z.string().optional().describe('File content (or use content_lines).'),
     content_lines: z
       .array(z.string())
       .optional()
       .describe(
-        `UTF-8 content for the new file as an array of lines, ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} content, ` +
-          'not both. Preferred over content: a single string with escaped or missing newlines is unreliable for ' +
-          'some models.',
+        `The file content as lines: ${STRUCTURED_EDIT_LINES_FIELD_DESCRIPTION} content, not both. Preferred over content.`,
       ),
   })
   .transform((value, ctx) => {
@@ -1366,12 +1356,11 @@ function execNetworkSentences({ offline }: { offline: boolean }): string {
 }
 
 export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Execute shell commands in a persistent sandbox environment. Use cwd for the checked-out repository; setting HOME does not change the working directory. Never list, print, or expose environment variables.
-Use write_file to create a file, apply_patch for source edits, and replace_text for one exact replacement. Do not bypass them with sed, Perl, Python, heredocs, or temporary patch files.
-For large output, pass output.head_lines, output.tail_lines, and/or output.grep.
-Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
-exec MUST NOT run python or node code: use run_code. Interpreter invocations are rejected by a harness guard.
-Result status is "ok" (success), "exited" (non-zero exit; check exit_code), or "failed" (the host could not run it).
+  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables.
+Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
+Large output: use output.head_lines, output.tail_lines or output.grep.
+Python and Node go to run_code; interpreter invocations are rejected.
+Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
 ${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
 `;
 }
@@ -1412,21 +1401,21 @@ export function createSandboxRunCodeDescription({
   packageDownloads: boolean;
   workspaceDir: string;
 }): string {
-  return `Run Python or Node.js code in an isolated, offline sandbox. language is 'python' (3.13) or 'node' (22). Pass exactly one of code (the source) or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). Code runs with cwd=/scratch; read inputs from /ingress/<name> and write result files under /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's own result, not an infra failure.
+  return `Run Python or Node.js code in an isolated, offline sandbox: language is 'python' (3.13) or 'node' (22). Pass exactly one of code or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). cwd is /scratch: read /ingress/<name>, write results to /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline, packageDownloads })}
-files_in is for content you compose yourself. Never re-upload an /ingress file via files_in.
+files_in is for content you compose; never re-upload an /ingress file.
 If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
 
 export const SANDBOX_APPLY_PATCH_DESCRIPTION =
-  "Apply one focused patch to the checked-out repository, as a git-format unified diff or OpenAI's apply_patch envelope (*** Begin Patch / *** Update File: <path> / *** End Patch). Each hunk needs a real header like @@ -1,2 +1,2 @@ with body lines starting with space, -, or +; placeholder hunk headers like @@… are rejected. Pass the patch as patch_lines, one element per line, blank lines as empty strings. If validation fails, correct the patch rather than editing through exec. This tool never stages, commits, or pushes.";
+  "Apply one focused patch to the repository: a git-format unified diff or OpenAI's apply_patch envelope (*** Begin Patch / *** Update File: <path> / *** End Patch). Hunks need real headers like @@ -1,2 +1,2 @@; placeholders like @@… are rejected. Pass patch_lines, one element per line, blank lines as empty strings. If validation fails, correct the patch rather than editing through exec. Never stages, commits or pushes.";
 
 export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
-  'Replace one exact text passage in a UTF-8 file beneath cwd. old_text must match exactly and uniquely. Pass old_text and new_text as old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Use this when unified-diff formatting is unnecessary. Writes atomically. This tool never stages, commits, or pushes.';
+  'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
 export const SANDBOX_WRITE_FILE_DESCRIPTION =
-  'Create one new UTF-8 file beneath cwd. Pass content as content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. This tool never stages, commits, or pushes.';
+  'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
 
 export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
@@ -2019,6 +2008,7 @@ function execResultOutputText(result: ExecResult): string {
 export class Sandbox extends LocalToolMCP {
   readonly name = SANDBOX_MCP_SERVER_ID;
   readonly displayName = 'Sandbox';
+  protected override readonly bundle: ToolBundleName = 'sandbox';
   override readonly description = 'Persistent sandbox environment for code execution';
 
   private readonly provider: SandboxProvider;
@@ -3111,22 +3101,25 @@ export class Sandbox extends LocalToolMCP {
         );
       }
     }
-    sandboxInstructions.addSection(
-      'repository-work',
-      dedent`
-        For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
-        Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
-        Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
-        Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
-        Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
-        Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
-        Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
-        Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
-        Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
-        Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
-        A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
-      `,
-    );
+    // Coding guidance is long and only applies once a repository is attached to the chat.
+    if (this.boundRepository !== undefined) {
+      sandboxInstructions.addSection(
+        'repository-work',
+        dedent`
+          For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
+          Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
+          Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
+          Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
+          Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
+          Before each tool call, write one short sentence in your visible reply stating what you are about to do and why. Put it in the answer, not in reasoning.
+          Resolve repository facts from the local checkout before asking the user. Ask only for genuinely missing external information or a product decision that would materially change the result.
+          Before delegating coding work, include the exact absolute repository cwd in workspace_cwd. A coding sub-agent must use that checkout and sandbox tools, not GitHub connectors, for inspection, editing, commands, and verification.
+          Once the evidence shows a narrow integration gap, make the smallest plausible change and let the typechecker or a focused test reveal missing details. Do not build parallel UI, storage, or domain abstractions the repository already provides. If the concept has no authoritative persisted model, report that limitation rather than faking it with labels, title parsing, or browser-local state.
+          Reproduce failures with the real command, edit local files, then run the relevant formatter, typecheck, tests, and build. Preserve command output and finish by showing the diff and verification results.
+          A commit and a push are separate consequential actions. Never combine them. Request approval for the commit only after showing the diff, and request a separate approval before pushing.
+        `,
+      );
+    }
 
     this.buildSchemaSection(sandboxInstructions);
     this.buildSkillsSection(sandboxInstructions);

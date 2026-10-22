@@ -16,6 +16,7 @@ import {
   type GetTurnPersonaActivationInput,
   type IPersonaStore,
   type IsManualSessionPersonaCurrentInput,
+  type ListPersonaOwnersInput,
   type ListPersonasInput,
   type ListSessionPersonaActivationsInput,
   type RecordPersonaActivationIfManualCurrentInput,
@@ -72,6 +73,18 @@ export class PostgresPersonaStore implements IPersonaStore<Transaction<Database>
       .orderBy('display_name')
       .execute();
     return rows.map(toPersona);
+  }
+
+  async listPersonaOwners(input: ListPersonaOwnersInput, transaction?: Transaction<Database>): Promise<string[]> {
+    const db = transaction ?? this.#db;
+    const rows = await db
+      .selectFrom('persona')
+      .select('created_by')
+      .distinct()
+      .where('tenant_id', '=', input.tenant_id)
+      .orderBy('created_by')
+      .execute();
+    return rows.map(row => row.created_by);
   }
 
   async getPersona(input: GetPersonaInput, transaction?: Transaction<Database>): Promise<Persona | undefined> {

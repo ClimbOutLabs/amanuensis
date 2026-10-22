@@ -23,7 +23,7 @@
 }
 
 .harness-logout-cancel {
-  border: 1px solid var(--border);
+  border: 0.0625rem solid var(--border);
   background: transparent;
   color: var(--text-primary);
 }

@@ -965,7 +965,7 @@ describe('repeat budget', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition,
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [askUserQuestion()],
     });
 
@@ -1090,7 +1090,7 @@ describe('repeat budget', () => {
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities,
     });
     const agentThreads = new Map<string, AgentThread>([['main', root]]);
@@ -1200,7 +1200,7 @@ describe('repeat budget', () => {
         instruction: 'test',
         toolSets: [toolSet],
       },
-      context: [{ role: 'user', content: 'Find the latest Qwen model.' }],
+      context: [{ role: 'user', content: 'Research the latest Qwen model.' }],
       capabilities: [{ preLLMProcessors: [compaction] }],
     });
 
