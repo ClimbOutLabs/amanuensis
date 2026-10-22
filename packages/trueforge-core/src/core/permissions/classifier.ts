@@ -71,9 +71,10 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
+import { escapeDisplayText } from './displayText';
 import {
-  escapeDisplayText,
   extractCardFields,
+  isCalendarChangeToolName,
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -2361,8 +2362,15 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
     review.action === 'create'
       ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
       : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
+  // Says why a guest change asks every time, since no grant can cover it.
+  const alwaysAsks =
+    review.attendees.length === 0
+      ? ''
+      : review.action === 'create'
+        ? ' This change sends an invitation to other people, so Aman always asks.'
+        : ' This change reaches the other people invited to this event, so Aman always asks.';
   return {
-    plain_what: plainWhat,
+    plain_what: `${plainWhat}${alwaysAsks}`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null,
     why_asked_again: null,
@@ -2396,6 +2404,20 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
             },
     },
   };
+}
+
+/** Whether an "Always allow" grant covers this call's tool, looked up as a connector call's grant is. */
+function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Promise<boolean> {
+  if (action.mcp_server_name === undefined) {
+    return Promise.resolve(false);
+  }
+  return ctx.services.tool_grants.hasToolGrant({
+    tenant_id: ctx.tenant_id,
+    created_by: ctx.created_by,
+    mcp_server_name: action.mcp_server_name,
+    tool_name: action.tool_name,
+    mcp_server_host: action.mcp_server_host ?? null,
+  });
 }
 
 /**
@@ -2450,10 +2472,21 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         });
       }
     }
+    // Only a change that reaches no guest can be covered by a standing grant; a guest change always asks.
+    const reachesGuests = review.attendees.length > 0;
+    if (!reachesGuests && (await hasStandingToolGrant(ctx, action))) {
+      return tier1Decision({
+        reason: TOOL_GRANT_REASON,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on your calendar.`,
+        sensitive_read: false,
+      });
+    }
     return tier3Decision({
       card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
-      reason: 'calendar_write',
-      reason_detail: 'Adding or changing a calendar event always asks.',
+      reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
+      reason_detail: reachesGuests
+        ? 'A calendar change that reaches guests always asks.'
+        : 'Adding or changing an event on your own calendar asks.',
       sensitive_read: false,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
@@ -2884,6 +2917,29 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // A connector call named as a calendar change asks every time, whatever the connector claims about it:
+  // no first-party pass and no standing grant, because a grant would cover every later event.
+  if (action.tool_type === 'mcp' && isCalendarChangeToolName(action.tool_name)) {
+    const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: {
+        ...card,
+        plain_what: `A calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check every detail below before you allow it.`,
+        cannot_be_undone: 'Check the details before you go ahead.',
+      },
+      reason: 'connector_calendar_write',
+      reason_detail: 'A calendar change from a connector always asks.',
+      sensitive_read: readsPrivateData,
+      secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
   // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
   // tool (the user's standing grant) skips the card, but only after every escalation above, never
   // for a sensitive path, and only while the tool still claims to be read-only and explicitly
@@ -3151,6 +3207,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,
+      hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
           ctx,

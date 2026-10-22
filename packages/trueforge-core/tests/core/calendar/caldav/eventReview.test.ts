@@ -26,6 +26,15 @@ describe('caldavEventReviewFrom', () => {
     ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null, attendees: null });
   });
 
+  it('keeps the guest list unknown when the answer leaves out the guest lines', () => {
+    expect(
+      caldavEventReviewFrom({
+        id: 'ev1',
+        result: { event: { summary: 'Standup', recurring: false, start: { value: '2026-10-22', all_day: true } } },
+      }).attendees,
+    ).toBeNull();
+  });
+
   it('lists the guests by name, or by address when there is no name, in the order given', () => {
     const start = { value: '2026-10-22T14:00:00+02:00', all_day: false };
     const review = caldavEventReviewFrom({

@@ -236,6 +236,17 @@ describe('a change to an event', () => {
     expect(review.guests_emailed).toBe(true);
   });
 
+  it('counts a guest with no address as a guest, so the email choice is still required and the card names them', () => {
+    const withNoAddress: CalendarEvent = {
+      ...STANDUP,
+      attendees: [{ email: ACCOUNT, self: true }, { displayName: 'Lin' }],
+    };
+    expect(update({ event_id: 'ev1', title: 'x' }, withNoAddress)).toMatchObject({ ok: false });
+    const { review } = ok(update({ event_id: 'ev1', title: 'x', send_updates: 'all' }, withNoAddress));
+    expect(review.attendees).toEqual(['a guest with no address']);
+    expect(review.guests_emailed).toBe(true);
+  });
+
   it('says when only one date of a repeating event changes', () => {
     const occurrence = { ...STANDUP, id: 'ev1_20261019', recurringEventId: 'ev1' };
     expect(ok(update({ event_id: 'ev1_20261019', title: 'x' }, occurrence)).review.one_of_repeating).toBe(true);

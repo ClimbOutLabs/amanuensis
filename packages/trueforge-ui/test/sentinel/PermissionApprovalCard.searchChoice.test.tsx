@@ -29,6 +29,7 @@ const SEARCH_CARD: SentinelApprovalCard = {
 function renderSearch(onApproveForChat = vi.fn()) {
   render(
     <PermissionApprovalCard
+      approvalId="approval-search"
       card={SEARCH_CARD}
       othersWaiting={0}
       onApprove={vi.fn()}
@@ -50,6 +51,7 @@ describe('PermissionApprovalCard for a held search', () => {
   it('keeps the generic chat choice for a card that is not a search', () => {
     render(
       <PermissionApprovalCard
+        approvalId="approval-search"
         card={{ ...SEARCH_CARD, plain_what: 'Send $250 to Acme Corp' }}
         othersWaiting={0}
         onApprove={vi.fn()}

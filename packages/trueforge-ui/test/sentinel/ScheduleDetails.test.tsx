@@ -34,7 +34,15 @@ const MORNING_BRIEF_CARD = {
 } satisfies SentinelApprovalCard;
 
 function renderCard(card: SentinelApprovalCard) {
-  render(<PermissionApprovalCard othersWaiting={0} card={card} onApprove={vi.fn()} onDeny={vi.fn()} />);
+  render(
+    <PermissionApprovalCard
+      approvalId="approval-1"
+      othersWaiting={0}
+      card={card}
+      onApprove={vi.fn()}
+      onDeny={vi.fn()}
+    />,
+  );
 }
 
 describe('schedule approval card', () => {

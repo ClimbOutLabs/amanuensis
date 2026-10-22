@@ -73,6 +73,7 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
 export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
 
