@@ -34,7 +34,7 @@ type ToolLabel = {
 };
 
 /** Bookkeeping tools that are never meaningful to an everyday user. */
-const INTERNAL_TOOLS = new Set(['record_finding']);
+const INTERNAL_TOOLS = new Set(['record_finding', 'load_bundle']);
 
 const TOOL_MATCHERS: Array<{ pattern: RegExp } & ToolLabel> = [
   { pattern: /^tavily_search/, kind: 'search', title: 'Searched the web', plural: 'searches' },

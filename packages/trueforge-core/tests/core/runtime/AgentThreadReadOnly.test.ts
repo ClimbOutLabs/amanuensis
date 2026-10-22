@@ -94,7 +94,8 @@ describe('AgentThread read-only definitions', () => {
 
   it('offers the sandbox tools to a definition that is not read-only, so the check above is not vacuous', async () => {
     const { modelClient, orchestrator } = threadFor({ readOnly: false, sandbox: makeStubPublicSandbox() });
-    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
+    // A message that asks for code, so the sandbox bundle is sent.
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Run a quick script.' }] });
     const requests = JSON.stringify(llmCreateInputs(modelClient));
     expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
   });
