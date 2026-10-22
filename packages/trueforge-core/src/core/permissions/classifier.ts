@@ -71,8 +71,8 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
+import { escapeDisplayText } from './displayText';
 import {
-  escapeDisplayText,
   extractCardFields,
   isCalendarChangeToolName,
   renderOutboundArguments,

@@ -29,18 +29,16 @@ import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
+import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
 import {
-  ASK_USER_TOOL_NAME,
-  MCP_META_TOOLS,
-  SANDBOX_TOOL_NAMES,
-  SUB_AGENT_TOOL_NAME,
   allowChatOptionId,
   allowOnceOptionId,
+  ASK_USER_TOOL_NAME,
   buildApprovalOptions,
   buildOutcomeText,
   formatDuration,
@@ -50,6 +48,7 @@ import {
   getToolResultContent,
   hasPendingAskUserResponse,
   hasPendingToolApproval,
+  MCP_META_TOOLS,
   mcpDisplayName,
   notDoneText,
   parseAskUserQuestionArgs,
@@ -61,6 +60,8 @@ import {
   parseToolOutputScreen,
   parseToolResultDisposition,
   resolveSubAgentMeta,
+  SANDBOX_TOOL_NAMES,
+  SUB_AGENT_TOOL_NAME,
   toStatus,
 } from '../utils/toolCallParsing.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
@@ -141,7 +142,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
   const isMobile = useIsMobile();
-  // The rail's Needs you ticket carries the one highlight on desktop; the approval ticket carries it only where the rail is hidden.
+  // The approval ticket takes the one highlight only where the rail is hidden; mail never takes it.
   const highlightedApprovalId = useHighlightedCard({
     firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
     nextAppointmentId: null,
@@ -254,8 +255,28 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
             }
           }
         : undefined;
+    // A draft option exists only when the server offers it on this approval; otherwise no button shows.
+    const saveDraftOption = options.find(option => option.id === SAVE_DRAFT_OPTION_ID);
+    // A "Change it" answer is a denial that carries the person's words, so the call never runs.
+    const onChangeRequest = offersChangeIt(approvalInfo.card)
+      ? (text: string) => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
+      : undefined;
+    if (approvalInfo.card.email !== null) {
+      return (
+        <EmailApprovalCard
+          approvalId={approvalInfo.toolCallId}
+          card={approvalInfo.card}
+          onApprove={() => onSelectOption(allowOnceId)}
+          onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+          onChangeRequest={onChangeRequest}
+          onSaveDraft={saveDraftOption === undefined ? undefined : () => onSelectOption(SAVE_DRAFT_OPTION_ID)}
+          disabled={isNestedReadonly}
+        />
+      );
+    }
     return (
       <PermissionApprovalCard
+        approvalId={approvalInfo.toolCallId}
         card={approvalInfo.card}
         highlighted={highlightedApprovalId === approvalInfo.toolCallId}
         othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== approvalInfo.toolCallId).length}
@@ -263,12 +284,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
-        // A "Change it" answer is a denial that carries the person's words, so the call never runs.
-        onChangeRequest={
-          offersChangeIt(approvalInfo.card)
-            ? text => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
-            : undefined
-        }
+        onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}

@@ -1388,7 +1388,7 @@ export interface SharedServerConfiguration {
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
-   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
+   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
   /**
@@ -2157,7 +2157,7 @@ const shared: SharedServerConfiguration = {
   MEMORY_RECALL_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_MAX_TOKENS',
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
-    defaultValue: 2048,
+    defaultValue: 600,
   }),
   MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
