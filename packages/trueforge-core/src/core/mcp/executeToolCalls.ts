@@ -1855,6 +1855,28 @@ export async function executeToolCalls({
     }
     return outcome;
   });
+  // A call refused while it was prepared never reaches classification, so it has no classify-time row.
+  // Record each refusal so Recent actions shows what was not done. Refused before classification means no tier
+  // was set, so it is recorded at Tier 3, the tier that always asks before a change.
+  if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
+    const audit = sentinel.services.audit;
+    for (const { toolCall } of results) {
+      const failure = toolCall.tool_info.pre_dispatch_failure;
+      if (failure === undefined) {
+        continue;
+      }
+      await audit.record({
+        tenant_id: sentinel.identity.tenant_id,
+        created_by: sentinel.identity.created_by,
+        conversation_id: sentinel.identity.conversation_id,
+        tier: toolCall.tool_info.tier ?? 3,
+        tool_name: toolCall.tool_info.original_tool_name,
+        description: `${toolCall.tool_info.original_tool_name}: not done. ${failure.owner_message ?? failure.message}`,
+        outcome: 'auto_denied',
+        auto_deny_reason: 'tool_not_prepared',
+      });
+    }
+  }
   // Sentinel: record outcomes once dispatch is settled. Auto-denied calls were
   // recorded at classify time; carded calls record the user's decision and
   // relaxed Tier 2 calls record that they ran.

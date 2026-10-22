@@ -3290,7 +3290,11 @@ export class AgentThread {
             tool_info: {
               ...call.tool_info,
               is_approval_required: false,
-              pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: problem },
+              pre_dispatch_failure: {
+                kind: 'pre_dispatch_failed',
+                message: problem,
+                owner_message: `Aman could not run one of the actions in this reply: ${problem} Ask again to try it once more.`,
+              },
             },
           };
         }),
@@ -3567,6 +3571,7 @@ export class AgentThread {
                 message:
                   `Research tool-call budget exhausted (${String(this.taskState.tool_calls_used)} of ${String(budget)} used). ` +
                   'This call was not executed. Bank remaining findings with record_finding and write the final answer.',
+                owner_message: `Aman stopped a search: it had used all ${String(budget)} tool steps for this question. Ask again to continue with a narrower question.`,
               },
             },
           },
