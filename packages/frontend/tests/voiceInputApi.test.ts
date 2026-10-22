@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { createVoiceInputApi } from '../src/voiceInputApi';
+import { createServerVoiceApi, createVoiceInputApi } from '../src/voiceInputApi';
 
 const transcription = {
   text: 'hello world',
@@ -195,4 +195,36 @@ test('transcribe aborts a hanging request at the client timeout', async () => {
   const api = createVoiceInputApi(hanging, { transcribeTimeoutMs: 30 });
 
   await assert.rejects(api.transcribe({ audio: new Blob(['x']) }), /timed out/);
+});
+
+test('server voice posts the reply text and returns the audio', async () => {
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/wav' } });
+  };
+
+  const audio = await createServerVoiceApi(fetcher).speak({ text: 'Hello there.' });
+
+  assert.equal(audio.size, 3);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]?.url ?? '', /\/api\/v1\/voice\/speak$/);
+  assert.equal(calls[0]?.init?.method, 'POST');
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ text: 'Hello there.' }));
+});
+
+test('server voice rejects with the server message when the voice is off', async () => {
+  const fetcher: typeof fetch = async () =>
+    jsonResponse(
+      { error: { message: 'The voice on this computer is not available right now.', code: 'tts_unavailable' } },
+      503,
+    );
+
+  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.' }), /not available right now/);
+});
+
+test('server voice rejects an answer that is not audio', async () => {
+  const fetcher: typeof fetch = async () => jsonResponse({}, 200);
+
+  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.' }), /not audio/);
 });

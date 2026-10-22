@@ -303,6 +303,7 @@ export type {
 } from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
@@ -437,6 +438,7 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export type { ServerVoiceApi, SpokenReplyPlayer, SpokenReplyVoice } from './utils/spokenReplyPlayer.js';
 
 // Curated chrome hooks (same instance as the SDK runtime). Deep primitives: install @assistant-ui/react.
 export { useAui, useAuiState } from './assistant-ui.js';
