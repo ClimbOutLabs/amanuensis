@@ -715,6 +715,7 @@ async function tourChat() {
     tracing: NOOP_AGENT_TRACING,
     logger: winston.createLogger({ silent: true }),
   });
+  const events: unknown[] = [];
   const run = async (sendBatch: AgentThreadSendBatch) => {
     for await (const _event of orchestrator.send(sendBatch)) {
       void _event;
@@ -722,6 +723,7 @@ async function tourChat() {
     const iterator = orchestrator.execute({ signal: new AbortController().signal });
     let step = await iterator.next();
     while (step.done !== true) {
+      events.push(step.value);
       step = await iterator.next();
     }
     return step.value;
@@ -741,7 +743,7 @@ async function tourChat() {
         approval,
       })),
     );
-  return { built, card, answer };
+  return { built, card, answer, events };
 }
 
 describe('the Tour check-in prompt, run through a scripted model', () => {
@@ -758,7 +760,7 @@ describe('the Tour check-in prompt, run through a scripted model', () => {
   });
 
   it('tells the person a card left unanswered expired, never that they said no, and saves nothing', async () => {
-    const { built, answer } = await tourChat();
+    const { built, answer, events } = await tourChat();
 
     const done = await answer({ status: 'deny', reason: approvalExpiredReason() });
 
@@ -774,6 +776,14 @@ describe('the Tour check-in prompt, run through a scripted model', () => {
         tool_name: 'create_schedule',
         outcome: 'auto_denied',
         auto_deny_reason: 'approval_expired',
+      }),
+    );
+    // The chat's step reads the result's code, so it shows the card expired rather than "you said no".
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: EventType.TOOL_RESPONSE_V2,
+        disposition: 'denied',
+        remediation: expect.objectContaining({ reason_code: 'approval_expired' }),
       }),
     );
   });

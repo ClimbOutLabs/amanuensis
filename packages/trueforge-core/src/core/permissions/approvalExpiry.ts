@@ -11,6 +11,9 @@ export function approvalExpiredReason(): string {
   return APPROVAL_EXPIRED_REASON;
 }
 
+/** The stable code for an expired card: its activity row's reason and its tool result's remediation. */
+export const APPROVAL_EXPIRED_REASON_CODE = 'approval_expired';
+
 /** True for a card the app closed because nobody answered it in time. */
 export function isApprovalExpiredReason(reason: string | undefined): boolean {
   return reason === APPROVAL_EXPIRED_REASON;

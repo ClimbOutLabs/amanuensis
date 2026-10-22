@@ -30,7 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
-import { isExpiredApproval } from '../permissions/approvalExpiry';
+import { APPROVAL_EXPIRED_REASON_CODE, isExpiredApproval } from '../permissions/approvalExpiry';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
@@ -51,7 +51,7 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallResponse } from './ToolSet';
+import { deniedToolCallRemediation, deniedToolCallResponse } from './ToolSet';
 
 /** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
 export interface ToolResultImage {
@@ -1525,7 +1525,7 @@ export async function executeToolCalls({
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
           disposition: 'denied',
-          remediation: undefined,
+          remediation: deniedToolCallRemediation(approvalDecision.reason),
           admissionProvenance: admission,
         };
       }
@@ -2126,7 +2126,7 @@ export async function executeToolCalls({
         tool_name: info.original_tool_name,
         description: heldCallAuditText(info),
         outcome,
-        auto_deny_reason: outcome === 'auto_denied' ? 'approval_expired' : null,
+        auto_deny_reason: outcome === 'auto_denied' ? APPROVAL_EXPIRED_REASON_CODE : null,
       });
     }
   }

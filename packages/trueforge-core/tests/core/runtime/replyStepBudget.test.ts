@@ -2,6 +2,7 @@ import { ToolPolicyBlockedError } from '../../../src/core/errors';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
@@ -290,6 +291,19 @@ describe('reply step budget', () => {
     const done = JSON.stringify(doneEvents(events));
     expect(done).toContain('The script failed, so I could not finish. Want me to try again?');
     expect(done).not.toContain(escaped(unfinishedNotice('failed')));
+  });
+
+  it('a reply that claims a blocked step as done still gets the nothing-was-changed line', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: true, runFails: false });
+    const model = scriptedModel(step =>
+      step === 1
+        ? toolCallStream({ id: 'c-1', name: 'create_event', args: { title: 'Lunch' } })
+        : finalAnswerStream("I've created the event for you."),
+    );
+
+    const { events } = await runThread({ toolSet, create: model.create });
+
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTE));
   });
 
   it('a retryable error gets one retry, then becomes final', async () => {

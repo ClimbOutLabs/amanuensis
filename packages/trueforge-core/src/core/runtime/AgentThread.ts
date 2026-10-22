@@ -3449,13 +3449,12 @@ export class AgentThread {
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
       // The model is told why a reply did not finish and says so in its own words. The host adds a line
-      // only when the reply has none, so the person is never left with nothing.
+      // only when the reply has none, so the person is never left with nothing; a reply with words
+      // still gets the checks below, so it cannot claim the step that did not run as done.
       const unfinishedKind = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
       const notice =
-        unfinishedKind !== undefined
-          ? replyText.trim() === ''
-            ? unfinishedNotice(unfinishedKind)
-            : undefined
+        unfinishedKind !== undefined && replyText.trim() === ''
+          ? unfinishedNotice(unfinishedKind)
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
             : claimsUnbackedAction({ text: replyText, successfulWrites })

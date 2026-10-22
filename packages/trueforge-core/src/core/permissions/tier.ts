@@ -5,6 +5,7 @@
  */
 import { z } from '@hono/zod-openapi';
 
+import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
 import { Tier3MailboxSchema } from './tierMailbox';
 
@@ -48,7 +49,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied: without a card, or after its card went unanswered. */
 export const AUTO_DENY_REASONS = [
-  'approval_expired',
+  APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
   'incomplete_send_card',
   'offline_mode',

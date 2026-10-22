@@ -1,6 +1,6 @@
-import { approvalExpiredReason } from '../../../src/core/permissions/approvalExpiry';
+import { APPROVAL_EXPIRED_REASON_CODE, approvalExpiredReason } from '../../../src/core/permissions/approvalExpiry';
 import { changeRequestReason } from '../../../src/core/permissions/changeRequest';
-import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
+import { deniedToolCallRemediation, deniedToolCallText } from '../../../src/core/mcp/ToolSet';
 
 describe('deniedToolCallText', () => {
   it('hands a change request to the model as exactly the request sentence', () => {
@@ -20,5 +20,11 @@ describe('deniedToolCallText', () => {
     const text = deniedToolCallText(approvalExpiredReason());
     expect(text).toContain('They did not say no');
     expect(text).not.toContain('User denied');
+  });
+
+  it('marks only an expired card on the result, so the chat does not say the person said no', () => {
+    expect(deniedToolCallRemediation(approvalExpiredReason())?.reason_code).toBe(APPROVAL_EXPIRED_REASON_CODE);
+    expect(deniedToolCallRemediation('not now')).toBeUndefined();
+    expect(deniedToolCallRemediation(undefined)).toBeUndefined();
   });
 });

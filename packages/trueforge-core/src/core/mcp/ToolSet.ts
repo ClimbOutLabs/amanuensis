@@ -2,7 +2,7 @@ import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
-import type { ApprovalDecision } from '../events/schema';
+import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
@@ -10,7 +10,11 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
-import { APPROVAL_EXPIRED_RESULT, isApprovalExpiredReason } from '../permissions/approvalExpiry';
+import {
+  APPROVAL_EXPIRED_REASON_CODE,
+  APPROVAL_EXPIRED_RESULT,
+  isApprovalExpiredReason,
+} from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
@@ -75,6 +79,13 @@ export function deniedToolCallText(reason: string | undefined): string {
     return JSON.stringify({ error: APPROVAL_EXPIRED_RESULT });
   }
   return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+}
+
+/** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
+export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
+  return isApprovalExpiredReason(reason)
+    ? { reason_code: APPROVAL_EXPIRED_REASON_CODE, message: APPROVAL_EXPIRED_RESULT, suggested_action: 'request_approval' }
+    : undefined;
 }
 
 /**
