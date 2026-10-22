@@ -412,6 +412,7 @@ describe('hasMixedScriptWord', () => {
     '\u041A\u0430\u0444\u0435 \u041C\u043E\u0441\u043A\u0432\u0430',
     '\u3059\u3057\u6771\u4EAC\u30BF\u30EF\u30FC',
     'Ｓｕｓｈｉ Bar 12',
+    'ABC\u30DE\u30FC\u30C8, Cafe\u6771\u4EAC',
   ])('keeps words in one script each: %s', text => {
     expect(hasMixedScriptWord(text)).toBe(false);
   });

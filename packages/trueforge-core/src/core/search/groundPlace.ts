@@ -84,7 +84,7 @@ function unfoldedWords(text: string): string[] {
   return plain === '' ? [] : plain.split(' ');
 }
 
-/** Scripts that hold Latin look-alikes. Every other script counts as one, so Japanese or Korean words are not mixed. */
+/** Scripts whose letters pass for one another. Other scripts are ignored, so "ABCマート" or "Cafe東京" is not mixed. */
 const LOOKALIKE_SCRIPTS = [
   /\p{Script=Latin}/u,
   /\p{Script=Greek}/u,
@@ -93,22 +93,17 @@ const LOOKALIKE_SCRIPTS = [
   /\p{Script=Cherokee}/u,
 ];
 
-function scriptOf(letter: string): number {
-  const found = LOOKALIKE_SCRIPTS.findIndex(script => script.test(letter));
-  return found === -1 ? LOOKALIKE_SCRIPTS.length : found;
-}
-
 /**
- * Whether any one word mixes letters from two scripts, such as a Cyrillic "к" inside "kowalski". No
- * look-alike table is complete (Unicode's own maps "к" to "ĸ", not "k"), so such a word is refused
- * rather than folded. A real name or address keeps each word in one script.
+ * Whether any one word mixes letters from two of those scripts, such as a Cyrillic "к" inside
+ * "kowalski". No look-alike table is complete (Unicode's own maps "к" to "ĸ", not "k"), so such a
+ * word is refused rather than folded. A real name or address keeps each word in one script.
  */
 export function hasMixedScriptWord(text: string): boolean {
   const words = text
     .normalize('NFKD')
     .replace(/[\p{M}\p{Cf}]+/gu, '')
     .split(/[^\p{L}\p{N}]+/u);
-  return words.some(word => new Set(Array.from(word.replace(/[^\p{L}]+/gu, ''), scriptOf)).size > 1);
+  return words.some(word => LOOKALIKE_SCRIPTS.filter(script => script.test(word)).length > 1);
 }
 
 function pageHas({ pageWords, value }: { pageWords: string; value: string }): boolean {
