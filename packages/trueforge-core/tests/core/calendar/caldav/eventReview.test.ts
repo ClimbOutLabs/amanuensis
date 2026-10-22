@@ -23,7 +23,16 @@ describe('caldavEventReviewFrom', () => {
         id: 'ev1',
         result: { event: { summary: 'Dentist', start: { value: '2026-10-22T14:00:00+02:00', all_day: false } } },
       }),
-    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null, attendees: null });
+    ).toEqual({ id: 'ev1', title: 'Dentist', when: '22 Oct 2026, 14:00', organizer: null, attendees: [] });
+  });
+
+  it('keeps the guest list unknown for a repeating series with no guest lines, since one date may differ', () => {
+    expect(
+      caldavEventReviewFrom({
+        id: 'ev1',
+        result: { event: { summary: 'Standup', recurring: true, start: { value: '2026-10-22', all_day: true } } },
+      }).attendees,
+    ).toBeNull();
   });
 
   it('lists the guests by name, or by address when there is no name, in the order given', () => {

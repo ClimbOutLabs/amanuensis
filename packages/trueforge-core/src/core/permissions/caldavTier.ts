@@ -94,10 +94,17 @@ function reachFor({ tool, review }: { tool: CaldavToolName; review: CaldavEventR
     };
   }
   // A create's card lists no guest field, so a call that names guests never gets this card.
-  const noGuests =
-    tool === 'create_event' || (review !== null && review.attendees !== null && review.attendees.length === 0);
+  const noGuests = tool === 'create_event' || review?.attendees?.length === 0;
   if (noGuests) {
     return { reason: 'caldav_calendar_change', own: true, sentence: null };
+  }
+  const guests = review?.attendees ?? null;
+  if (guests === null) {
+    return {
+      reason: 'caldav_calendar_guests',
+      own: false,
+      sentence: ' Aman could not check who is invited, so it always asks.',
+    };
   }
   return {
     reason: 'caldav_calendar_guests',
