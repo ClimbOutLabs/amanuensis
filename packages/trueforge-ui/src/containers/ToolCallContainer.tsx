@@ -18,9 +18,11 @@ import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissio
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
+import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
+import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
@@ -119,6 +121,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
   const sentinel = useOptionalSentinelState();
   const aui = useAui();
+  const isMobile = useIsMobile();
+  // The rail's Needs you ticket carries the one highlight on desktop; the approval ticket carries it only where the rail is hidden.
+  const highlightedApprovalId = useHighlightedCard({
+    firstWaitingApprovalId: isMobile ? (pendingApprovals[0]?.approvalId ?? null) : null,
+    nextAppointmentId: null,
+  });
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -229,9 +237,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         : undefined;
     return (
       <PermissionApprovalCard
-        toolName={part.toolName}
         card={approvalInfo.card}
-        tier={approvalInfo.tier}
+        highlighted={highlightedApprovalId === approvalInfo.toolCallId}
+        othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== approvalInfo.toolCallId).length}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}

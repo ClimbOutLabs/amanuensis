@@ -1030,6 +1030,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.queryByText(/The name is not on that page/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Checked places for a map'));
+    expect(screen.getByText('Left out')).toBeInTheDocument();
     expect(screen.getByText(/The name is not on that page/)).toBeInTheDocument();
   });
 

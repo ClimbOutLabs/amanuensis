@@ -4,13 +4,36 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PageHeader } from '@/atoms/PageHeader.js';
 import { HelpProvider, useOptionalHelp, type HelpApi, type HelpSession } from '@/help/HelpProvider.js';
-import { HelpStuckButton } from '@/help/HelpStuckButton.js';
+import { HelpNewChatBridge, HelpStuckButton } from '@/help/HelpStuckButton.js';
 import { rememberErrorText } from '@/help/lastError.js';
+
+const { runtime, shell } = vi.hoisted(() => ({
+  runtime: { localThreadId: 'thread-1' },
+  shell: { openDraft: vi.fn(), enabled: false },
+}));
 
 vi.mock('@assistant-ui/react', () => ({
   useAui: () => ({ threads: () => ({ switchToNewThread: () => Promise.resolve() }) }),
-  useAuiState: () => 'thread-1',
+  useAuiState: () => runtime.localThreadId,
 }));
+
+vi.mock('@/server/ShellModeContext.js', () => {
+  const noop = () => undefined;
+  return {
+    useOptionalShellMode: () =>
+      shell.enabled
+        ? {
+            isComposerEnabled: true,
+            openDraft: shell.openDraft,
+            setLibraryOpen: noop,
+            setSessionsOpen: noop,
+            setSettingsOpen: noop,
+            setSchedulesOpen: noop,
+            closeSpaces: noop,
+          }
+        : null,
+  };
+});
 
 const API: HelpApi = {
   getHealthCheck: () => Promise.reject(new Error('not used here')),
@@ -61,5 +84,43 @@ describe('HelpStuckButton', () => {
     const { container } = render(<HelpStuckButton />);
 
     expect(container.innerHTML).toBe('');
+  });
+
+  it('opens one fresh chat per press, even when the runtime remounts for it', () => {
+    shell.enabled = true;
+    shell.openDraft.mockClear();
+    runtime.localThreadId = 'thread-1';
+    const seen: (HelpSession | null)[] = [];
+    // Stands in for the runtime key: opening a draft remounts everything under the chat provider.
+    const runtimeTree = (runtimeKey: string) => (
+      <div key={runtimeKey}>
+        <HelpNewChatBridge />
+      </div>
+    );
+    const { rerender } = render(
+      <HelpProvider api={API}>
+        <HelpStuckButton />
+        <SessionProbe onSession={session => seen.push(session)} />
+        {runtimeTree('chat:0')}
+      </HelpProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: "Help, I'm stuck" }));
+    expect(shell.openDraft).toHaveBeenCalledTimes(1);
+
+    // The draft replaces the runtime, so the bridge mounts again with the new thread.
+    runtime.localThreadId = 'thread-2';
+    rerender(
+      <HelpProvider api={API}>
+        <HelpStuckButton />
+        <SessionProbe onSession={session => seen.push(session)} />
+        {runtimeTree('chat:1')}
+      </HelpProvider>,
+    );
+
+    expect(shell.openDraft).toHaveBeenCalledTimes(1);
+    expect(seen.at(-1)?.idBeforeOpen).toBe('thread-1');
+    expect(seen.at(-1)?.boundThreadId).toBe('thread-2');
+    shell.enabled = false;
   });
 });

@@ -604,11 +604,14 @@ describe('MapCard with several found places', () => {
     });
     expect(screen.getByTestId('map-card')).toBeInTheDocument();
     await waitFor(() => expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything()));
-    expect(screen.queryByText(/left out/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
-    expect(screen.getByText('Details')).toBeInTheDocument();
-    expect(screen.getByText('Canal Practice')).toBeInTheDocument();
-    expect(screen.getByText('River Clinic')).toBeInTheDocument();
+    const details = screen.getByText('Details').closest('details');
+    if (details === null) {
+      throw new Error('the left-out list sits behind a Details disclosure');
+    }
+    expect(within(details).getByText('Left out')).toBeInTheDocument();
+    expect(within(details).getByText('Canal Practice')).toBeInTheDocument();
+    expect(within(details).getByText('River Clinic')).toBeInTheDocument();
   });
 
   it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {
