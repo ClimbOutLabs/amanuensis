@@ -22,8 +22,10 @@ export function useWaitingToolCallIds(pendingApprovalIds: readonly string[]): Re
 
   useEffect(() => {
     if (server == null || !hasSessionResync(server) || sessionId == null) return;
+    const port = server;
+    const id = sessionId;
     let current = true;
-    async function readWaiting(port: typeof server, id: string) {
+    async function readWaiting() {
       try {
         const tip = await port.peekSessionTip({ sessionId: id });
         if (!current) return;
@@ -33,7 +35,7 @@ export function useWaitingToolCallIds(pendingApprovalIds: readonly string[]): Re
         // A failed read leaves the cards as they are; the server still refuses a stale answer.
       }
     }
-    void readWaiting(server, sessionId);
+    void readWaiting();
     return () => {
       current = false;
     };

@@ -16,7 +16,6 @@ import {
   useTrueFoundryApprovals,
   useTrueFoundryRespondToToolApproval,
 } from '@truefoundry/assistant-ui-runtime';
-import { MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
@@ -33,6 +32,7 @@ import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approva
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { MAIN_THREAD_ID } from '../utils/sessionEventTimeline.js';
 import {
   ASK_USER_TOOL_NAME,
   MCP_META_TOOLS,
