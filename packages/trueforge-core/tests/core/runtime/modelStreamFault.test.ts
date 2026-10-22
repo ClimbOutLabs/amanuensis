@@ -153,7 +153,7 @@ describe('ModelStreamFault retry', () => {
       unknown
     > {
       await Promise.resolve();
-      throw new ModelOutputRepetitionError('reasoning');
+      throw new ModelOutputRepetitionError();
     }
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       repetitionFaultStream(),
@@ -186,7 +186,7 @@ describe('ModelStreamFault retry', () => {
       throw new Error('expected an error-status AGENT_DONE event');
     }
     // The user gets the actionable guidance, not the misleading context-too-long text.
-    expect(doneEvent.error).toBe(new ModelOutputRepetitionError('reasoning').message);
+    expect(doneEvent.error).toBe(new ModelOutputRepetitionError().message);
     expect(doneEvent.error).toMatch(/smaller parts/);
   });
 

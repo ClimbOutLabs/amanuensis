@@ -67,6 +67,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { noticeAfter, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -209,10 +210,12 @@ import {
 import {
   getClosableOpenToolCallOutcomes,
   getClosableOpenToolCalls,
+  isSafeToRepeat,
   OpenToolCallCloser,
   unknownOutcomeCloseout,
   type ClosableToolOutcome,
 } from './OpenToolCallCloser';
+import { claimsUnbackedAction, TOOL_MARKUP_GIVE_UP_MESSAGE, TOOL_MARKUP_RETRY_MESSAGE } from './replyActionChecks';
 import {
   admitToolCallsForBudget,
   cloneTaskState,
@@ -1476,6 +1479,11 @@ export class AgentThread {
   // for every turn and latches true the first time the grounding nudge fires,
   // so a turn gets at most one.
   private groundingNudgeSentThisTurn = false;
+  // Calls that ran and changed something this turn; a final reply that claims an action with none
+  // of these gets the unbacked-claim note.
+  private successfulWriteCalls = 0;
+  // Set when the model wrote a tool call as text; that gets one retry this turn, then the turn ends.
+  private toolMarkupRetrySentThisTurn = false;
   // When a loop guard fires, the turn gets one bounded recovery pass: a host
   // note telling the model to write its final answer from gathered results
   // instead of ending with no answer. This latches true so a second guard
@@ -3226,6 +3234,38 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
+    if (result.value.tool_markup === 'leaked') {
+      // The call written as text never ran and is not in the reply. One retry, reusing this
+      // call's id as the empty-answer nudge does; a second leak in the turn ends it.
+      if (this.toolMarkupRetrySentThisTurn) {
+        yield this.generateErrorEvent(TOOL_MARKUP_GIVE_UP_MESSAGE, undefined, 'model_stream_fault');
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      }
+      this.toolMarkupRetrySentThisTurn = true;
+      yield* this.appendToContext({
+        context: [internalSystemMessage(TOOL_MARKUP_RETRY_MESSAGE)],
+        output: [],
+        currentContextUsage: undefined,
+        usage: result.value.usage,
+      });
+      this.currentState = null;
+      return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: modelMessageEventId };
+    }
+
+    if (result.value.repetition_stopped === true) {
+      this.logger.info('Stopped a reply that was repeating itself', { threadId: this.threadId });
+    }
+
+    const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
+    if (
+      result.value.output.tool_calls === undefined &&
+      claimsUnbackedAction({ text: replyText, successfulWrites: this.successfulWriteCalls })
+    ) {
+      const notice = noticeAfter({ text: replyText, notice: UNBACKED_CLAIM_NOTE });
+      result.value.output.content = replyText + notice;
+      yield { type: EventType.MODEL_MESSAGE_DELTA, id: modelMessageEventId, thread_id: this.threadId, content: notice };
+    }
+
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
     // exact duplicate calls merged, calls that must not run flagged, and a reply over the
     // per-reply call cap stops the turn before anything in it is classified or run. An
@@ -3812,6 +3852,13 @@ export class AgentThread {
       throw new Error('Unreachable');
     }
     this.metrics.total_tool_calls += toolCallResults.length;
+    for (const result of toolCallResults) {
+      // Calls with no metadata count as writes, as isSafeToRepeat treats them.
+      const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
+      if (result.disposition === 'executed_ok' && !result.failure && writes) {
+        this.successfulWriteCalls += 1;
+      }
+    }
     this.metrics.total_sub_agents += createThreadEvents.length;
     // Host-owned research-budget accounting. The next task state is built as a
     // clone — the pre-dispatch reservation refunded, staged findings folded

@@ -393,12 +393,15 @@ export interface RawAssistantMessageWithUsage {
   /** null when the stream ended without a finish_reason chunk (e.g. provider omitted it). */
   finish_reason: FinishReason | null;
   /**
-   * Set when the reply's answer text carried leaked tool-call markup. 'recovered' means the
-   * markup was rebuilt into output.tool_calls and the markup itself is not in the content;
-   * 'broken' means the markup could not be rebuilt and the runtime must stop the answer without
-   * running or trusting anything in it. Absent when the reply had no markup.
+   * Set when the reply's answer text carried leaked tool-call markup. The markup is held out of
+   * output.content and never runs; the runtime retries the model. Absent when the reply had none.
    */
-  tool_markup?: 'recovered';
+  tool_markup?: 'leaked';
+  /**
+   * Set when a repetition guard cut the answer short. output.content ends with the stop notice and
+   * nothing after the first copy of the loop. Absent when the reply was not cut.
+   */
+  repetition_stopped?: true;
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

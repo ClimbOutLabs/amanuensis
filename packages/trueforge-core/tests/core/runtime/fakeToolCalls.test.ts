@@ -5,6 +5,7 @@
  * ran, what the person was shown, and what was saved.
  */
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type {
   ExtendedChatCompletionChunk,
@@ -12,11 +13,14 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import { TOOL_MARKUP_GIVE_UP_MESSAGE, TOOL_MARKUP_RETRY_MESSAGE } from '../../../src/core/runtime/replyActionChecks';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { isRecord } from '../../../src/core/util/records';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
 const CREATE_SCHEMA = {
@@ -107,7 +111,7 @@ function rawCall(spec: CallSpec): RawToolCall {
 async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
-  toolMarkup?: 'recovered';
+  toolMarkup?: 'leaked';
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls = (input.calls ?? []).map(rawCall);
   if (input.text !== undefined) {
@@ -199,25 +203,77 @@ function callToolNames(toolSet: ReturnType<typeof makeToolSet>): string[] {
   return jest.mocked(toolSet.callTool).mock.calls.map(call => call[0].name);
 }
 
+function deliveredText(events: unknown[]): string {
+  return events
+    .map(event => (isRecord(event) && event['type'] === EventType.MODEL_MESSAGE_DELTA ? event['content'] : undefined))
+    .filter((content): content is string => typeof content === 'string')
+    .join('');
+}
+
 describe('leaked markup', () => {
-  it('runs a call recovered from markup through the normal path', async () => {
+  it('never runs a call written as text, and retries the model once with the plain note', async () => {
     const toolSet = makeToolSet();
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
       if (round === 1) {
-        return replyStream({
-          text: 'Let me add that for you. ',
-          calls: [{ id: 'markup-recovered-0', name: 'create_event', args: VALID_CREATE_ARGS }],
-          toolMarkup: 'recovered',
-        });
+        return replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' });
       }
       return finalAnswerStream();
     });
     const thread = makeThread({ toolSet, create });
     const events = await drain(thread);
-    expect(callToolNames(toolSet)).toEqual(['create_event']);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(create.mock.calls.at(1)?.[0])).toContain(TOOL_MARKUP_RETRY_MESSAGE);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('ends the turn with the plain message when the model writes a call as text a second time', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: TOOL_MARKUP_GIVE_UP_MESSAGE,
+    });
+  });
+
+  it('adds the unbacked-claim note when the reply says it set something and no write call ran', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: "Done, I've set a 9:10 reminder." }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTE}`);
+  });
+
+  it('leaves the reply alone when a write call succeeded in the same turn', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-create', name: 'create_event', args: VALID_CREATE_ARGS }] });
+      }
+      return replyStream({ text: "Done, I've set a 9:10 reminder." });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(deliveredText(events)).toBe("Done, I've set a 9:10 reminder.");
   });
 });
 
