@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 
 import { Icon } from '../icons/Icon.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { plainStepTitle } from '../utils/toolCallParsing.js';
 import { cn } from './lib/cn.js';
 import type { ToolCallStatus } from './ToolCallCard.js';
 
@@ -250,7 +251,7 @@ export function SandboxToolCallCard({
 
   return (
     <ToolCallCard
-      toolName={intent || name}
+      toolName={intent || plainStepTitle(name)}
       icon="cube"
       iconClassName="text-primary-button-bg shrink-0"
       expanded={expanded}

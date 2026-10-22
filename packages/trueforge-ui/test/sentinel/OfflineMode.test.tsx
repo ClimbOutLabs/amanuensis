@@ -117,7 +117,11 @@ describe('SentinelSettings', () => {
     await waitFor(() => {
       expect(toggle).toBeChecked();
     });
-    expect(screen.getByText(/Run without asking\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'On: Aman searches the web without asking and shows you what it searched. After a chat reads your email, calendar or files, Aman asks once before searching in that chat. Searches go to your search provider, which sees the words searched and your internet address. To stop all searching, turn on Offline mode.',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ search_without_asking: false });
@@ -125,7 +129,12 @@ describe('SentinelSettings', () => {
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Run web searches without asking' })).not.toBeChecked();
     });
-    expect(screen.getByText(/Every web search shows an approval card/)).toBeInTheDocument();
+    // The page copy does not change with the switch; it says what On means and how to stop all searching.
+    expect(
+      screen.getByText(
+        'On: Aman searches the web without asking and shows you what it searched. After a chat reads your email, calendar or files, Aman asks once before searching in that chat. Searches go to your search provider, which sees the words searched and your internet address. To stop all searching, turn on Offline mode.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it.each([true, false])(
@@ -145,7 +154,7 @@ describe('SentinelSettings', () => {
       );
       expect(
         await screen.findByText(
-          "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.",
+          'On: Aman searches the web without asking and shows you what it searched. After a chat reads your email, calendar or files, Aman asks once before searching in that chat. Searches go to your search provider, which sees the words searched and your internet address. To stop all searching, turn on Offline mode.',
         ),
       ).toBeInTheDocument();
     },
@@ -184,7 +193,11 @@ describe('SentinelSettings', () => {
     );
     const toggle = await screen.findByRole('switch', { name: 'Show maps without asking' });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText('Maps ask before each one.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'On: maps show without asking. After a chat reads your email or calendar, Aman asks first if a map would include a name, email address or phone number from them.',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ maps_without_asking: true });
@@ -192,9 +205,10 @@ describe('SentinelSettings', () => {
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Show maps without asking' })).toBeChecked();
     });
+    // The page copy does not change with the switch; it says what On means.
     expect(
       screen.getByText(
-        'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.',
+        'On: maps show without asking. After a chat reads your email or calendar, Aman asks first if a map would include a name, email address or phone number from them.',
       ),
     ).toBeInTheDocument();
   });

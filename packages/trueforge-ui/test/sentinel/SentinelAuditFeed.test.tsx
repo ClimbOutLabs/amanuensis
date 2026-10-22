@@ -84,6 +84,11 @@ describe('SentinelAuditFeed', () => {
     expect(screen.queryByText('mystery_tool')).not.toBeInTheDocument();
   });
 
+  it('heads the rows with Recent actions', async () => {
+    renderFeed([makeEntry({ id: 'entry-1' })]);
+    expect(await screen.findByText('Recent actions')).toBeInTheDocument();
+  });
+
   it('shows five rows and a Show all control with the entry count for the rest', async () => {
     const entries = ['gmail_read', 'calendar_read', 'web_search', 'exec', 'write_file', 'space_read'].map(
       (action, index) =>

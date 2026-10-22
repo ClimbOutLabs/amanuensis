@@ -79,6 +79,20 @@ export function activityVerbOf(actionType: string): string {
   return ACTION_VERBS.get(actionType) ?? ACTIVITY_FALLBACK_VERB;
 }
 
+/** Plain words for the machine reasons a call can be refused without asking. */
+export const SENTINEL_AUDIT_REASON_LABELS: Record<string, string> = {
+  destination_unverifiable: 'Aman could not check where it would go',
+  incomplete_send_card: 'the card was missing details Aman needs to check it',
+  offline_mode: 'Offline mode is on',
+  outbound_guard: 'it carries something that must not leave this computer',
+  unattended_run: 'no one was there to ask',
+};
+
+/** The reason an audit row shows: plain words for a known machine reason, the text itself otherwise. */
+export function plainAuditReason(reason: string): string {
+  return SENTINEL_AUDIT_REASON_LABELS[reason] ?? reason;
+}
+
 /** One receipt row: the same verb and state, counted over the entries it stands for. */
 export type ReceiptRow = {
   key: string;

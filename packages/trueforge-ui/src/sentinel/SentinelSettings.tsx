@@ -104,17 +104,23 @@ export const SentinelSettings: FC = () => {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <p className="text-sm font-medium text-text-primary">When the assistant asks, you can choose</p>
+        <p className="text-sm font-medium text-text-primary">When Aman asks, you can choose</p>
         <dl className="mt-2 space-y-1.5 text-sm">
           {[
-            APPROVAL_CHOICES.approve,
-            APPROVAL_CHOICES.approveForChat,
-            APPROVAL_CHOICES.alwaysAllow,
-            APPROVAL_CHOICES.deny,
-          ].map(choice => (
+            { choice: APPROVAL_CHOICES.approve, text: 'Do it this once. Aman asks again next time.' },
+            {
+              choice: APPROVAL_CHOICES.approveForChat,
+              text: 'Do it, and stop asking about the same kind of thing for the rest of this chat. Example: approving one web search lets the next searches in this chat run without asking. A new chat asks again.',
+            },
+            {
+              choice: APPROVAL_CHOICES.alwaysAllow,
+              text: 'Do it, and never ask about this kind of thing again, in any chat. You can take this back below, under "Always allowed".',
+            },
+            { choice: APPROVAL_CHOICES.deny, text: "Don't do it." },
+          ].map(({ choice, text }) => (
             <div key={choice.label} className="flex flex-col sm:flex-row sm:gap-2">
               <dt className="shrink-0 font-medium text-text-primary sm:w-44">{choice.label}</dt>
-              <dd className="text-text-secondary">{choice.hint}</dd>
+              <dd className="text-text-secondary">{text}</dd>
             </div>
           ))}
         </dl>
@@ -124,8 +130,8 @@ export const SentinelSettings: FC = () => {
         <div>
           <p className="text-sm font-medium text-text-primary">Offline mode</p>
           <p className="mt-1 text-sm text-text-secondary">
-            While on, actions outside this device that would need your approval are denied automatically instead of
-            showing an approval card. Reads and workspace actions you allowed are unaffected.
+            While on, Aman does nothing that leaves this computer. Anything that would need your OK is turned down
+            instead of asked. Reading your own files, and things you've already allowed, still work.
           </p>
           {error !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">
@@ -146,13 +152,8 @@ export const SentinelSettings: FC = () => {
         <div>
           <p className="text-sm font-medium text-text-primary">Web searches</p>
           <p className="mt-1 text-sm text-text-secondary">
-            {searchWithoutAsking
-              ? 'Run without asking. Searches through the connector you set as your search provider run on their own and show a Searched chip.'
-              : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
-          </p>
-          <p className="mt-1 text-sm text-text-secondary">
             {
-              "Searches go to Parallel, which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode."
+              'On: Aman searches the web without asking and shows you what it searched. After a chat reads your email, calendar or files, Aman asks once before searching in that chat. Searches go to your search provider, which sees the words searched and your internet address. To stop all searching, turn on Offline mode.'
             }
           </p>
           {searchError !== null && (
@@ -174,9 +175,8 @@ export const SentinelSettings: FC = () => {
         <div>
           <p className="text-sm font-medium text-text-primary">Maps</p>
           <p className="mt-1 text-sm text-text-secondary">
-            {mapsWithoutAsking
-              ? 'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.'
-              : 'Maps ask before each one.'}
+            On: maps show without asking. After a chat reads your email or calendar, Aman asks first if a map would
+            include a name, email address or phone number from them.
           </p>
           {mapsError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">
@@ -217,7 +217,7 @@ export const SentinelSettings: FC = () => {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <p className="text-sm font-medium text-text-primary">Always allow</p>
+        <p className="text-sm font-medium text-text-primary">Always allowed</p>
         <p className="mt-1 text-sm text-text-secondary">
           Off means the assistant asks before each of these. On means it runs them without asking.
         </p>

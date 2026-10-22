@@ -136,7 +136,7 @@ export type SentinelApprovalCard = {
   amount: string | null;
   /** Server-parsed command structure for shell actions, or null. */
   parsed_command: string | null;
-  /** Exact arguments sent to a connector, one "name: value" line each, or null. */
+  /** Exact arguments sent to a connector, one "name: value" line each, or the exact code a run_code card shows, or null. */
   outbound_text: string | null;
   /** Host of the connector server that receives the call, or null. */
   destination_host: string | null;

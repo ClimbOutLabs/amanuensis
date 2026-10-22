@@ -218,8 +218,8 @@ describe('runDataImport', () => {
           'Good to know:',
           '  • Connectors (dcr-connector, header-connector, plain-connector) come without an agent. Attach them on the Agents page.',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
-          '  • 3 past permission decisions came along.',
+          "  • 'Approve for this chat' choices do not carry over.",
+          '  • Your permission history came along, with 3 past choices in it.',
           '  • Not brought over: model keys, connector sign-ins, your own skills.',
           '    Add your model again and sign in to your connectors.',
           '  • Permissions start fresh, so each tool will ask again.',
@@ -467,7 +467,7 @@ describe('runDataImport', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('missing its sessions/0001.json section');
+      expect(error instanceof Error && error.message).toContain('missing the part that holds your chats');
     } finally {
       await source.close();
       await target.close();
@@ -486,6 +486,28 @@ describe('runDataImport', () => {
       );
       expect(error).toBeInstanceOf(DataImportError);
       expect(error).toMatchObject({ status: 400 });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('names the rejected part and why, in plain words, never its file name or a machine code', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-rejected');
+    try {
+      const broken = await repack(archive, entries => {
+        entries.set('personas.json', Buffer.from('[42]'));
+      });
+      const error: unknown = await runDataImport(importDeps(target), importRequest(broken)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      const message = error instanceof Error ? error.message : '';
+      expect(message).toContain('The part of this export that holds your personas could not be read');
+      expect(message).toContain('Export again from the Aman it came from, then import the new file.');
+      expect(message).not.toContain('personas.json');
+      expect(message).not.toContain('invalid_type');
     } finally {
       await source.close();
       await target.close();
@@ -2413,7 +2435,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
           .reverse()
           .map(activation => [activation.id, activation.persona_id, activation.source]),
       );
-      expect(result.summary).toContain('3 past permission decisions came along.');
+      expect(result.summary).toContain('Your permission history came along, with 3 past choices in it.');
     } finally {
       await source.close();
       await target.close();
@@ -2437,7 +2459,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
       expect(
         await target.stores.auditStore.listOwned({ tenant_id: TENANT, created_by: 'bob', limit: 10, offset: 0 }),
       ).toEqual([]);
-      expect(result.summary).not.toContain('past permission decisions');
+      expect(result.summary).not.toContain('permission history came along');
     } finally {
       await source.close();
       await target.close();
@@ -3849,7 +3871,7 @@ describe('runDataImport tells the person everything it left out', () => {
           '',
           'Good to know:',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
+          "  • 'Approve for this chat' choices do not carry over.",
           '  • Not brought over: model keys, connector sign-ins, your own skills.',
           '    Add your model again and sign in to your connectors.',
           '  • Permissions start fresh, so each tool will ask again.',

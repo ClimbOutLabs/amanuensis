@@ -8,6 +8,8 @@ import { parse as parsePartialJson } from 'partial-json';
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
 import type { MapCardData, MapPin, MapPlace, MapRefusedPlace } from '../components/MapCard.js';
 import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
+import { parseTier2ActionKind, TIER2_ACTION_LABELS } from '../sentinel/types.js';
+import { humanizeToolName } from './activityFeed.js';
 
 export type ApprovalOptionView = {
   id: string;
@@ -190,7 +192,7 @@ function findErrorText(value: unknown, depth: number): string | undefined {
         const nested = findErrorText(JSON.parse(trimmed), depth + 1);
         if (nested) return nested;
       } catch {
-        // Not JSON after all — fall through and use the raw string.
+        // Not JSON after all: fall through and use the raw string.
       }
     }
     return trimmed;
@@ -221,7 +223,7 @@ function findErrorText(value: unknown, depth: number): string | undefined {
  * The failure reason to show alongside a tool step's outcome badge: the host's own remediation
  * message when it set one (the rejection-contract text, or an `error_summary`-derived note), else
  * whatever error text the tool result itself carries. Returns undefined for a successful outcome,
- * or when no reason is present — callers must not invent one.
+ * or when no reason is present; callers must not invent one.
  */
 export function getToolFailureReason(
   content: unknown,
@@ -244,8 +246,10 @@ export function truncateInlineReason(text: string): string {
 
 /**
  * Builds the outcome text shown next to a tool step: the disposition label alone when there is no
- * failure reason (or nothing has run yet), and the label plus the reason's first line otherwise —
+ * failure reason (or nothing has run yet), and the label plus the reason's first line otherwise,
  * so a step never shows a bare "Execution failed" when the tool result carries an explanation.
+ * A step that ran and failed is the exception: it shows the reason itself, in full, with no
+ * label in front of it and nothing cut off, so an error like a Google one reads exactly as written.
  */
 export function buildOutcomeText(
   disposition: ToolDispositionView | undefined,
@@ -253,6 +257,10 @@ export function buildOutcomeText(
 ): string | undefined {
   if (disposition === undefined) return undefined;
   if (!failureReason) return disposition.label;
+  if (disposition.disposition === 'executed_nonzero') {
+    const reason = failureReason.trim();
+    return reason === '' ? disposition.label : reason;
+  }
   const inline = truncateInlineReason(failureReason);
   return inline ? `${disposition.label}: ${inline}` : disposition.label;
 }
@@ -590,18 +598,77 @@ export function resolveSubAgentMeta(part: ToolCallMessagePartProps): {
   };
 }
 
-export function mcpDisplayName(
-  toolName: string,
-  mcpServer: string | undefined,
-  innerToolName: string | undefined,
-): string {
-  if (toolName === 'call_tool' && innerToolName) {
-    return mcpServer ? `call_tool: ${innerToolName} (${mcpServer})` : `call_tool: ${innerToolName}`;
+/** Plain action titles for the built-in tools, in the past tense the step list uses. */
+const PLAIN_STEP_TITLES: Record<string, string> = {
+  list_inbox_threads: 'Checked your inbox',
+  get_thread: 'Read an email thread',
+  read_email: 'Read an email',
+  download_attachment: 'Downloaded an attachment',
+  list_drafts: 'Checked your drafts',
+  get_draft: 'Read a draft',
+  draft_email: 'Wrote a draft email',
+  update_draft: 'Updated a draft email',
+  send_draft: 'Sent an email',
+  list_events: 'Checked your calendar',
+  get_event: 'Checked your calendar',
+  create_event: 'Added an event to your calendar',
+  update_event: 'Changed a calendar event',
+  list_spaces: 'Checked your spaces',
+  get_space: 'Looked at a space',
+  create_space: 'Created a space',
+  update_space: 'Updated a space',
+  revert_space: 'Put a space back to an earlier version',
+  list_blocks: 'Looked at a space',
+  create_schedule: 'Set up a schedule',
+  list_schedules: 'Checked your schedules',
+  pause_schedule: 'Paused a schedule',
+  resume_schedule: 'Resumed a schedule',
+  delete_schedule: 'Deleted a schedule',
+  run_code: 'Ran code',
+  web_search: 'Searched the web',
+  web_fetch: 'Read a web page',
+  fetch_url: 'Read a web page',
+  tavily_search: 'Searched the web',
+  tavily_extract: 'Read web pages',
+  get_current_datetime: 'Checked the time and date',
+  list_tools: 'Checked which tools are available',
+  exec: 'Ran a command',
+  sandbox_exec: 'Ran a command',
+  run_registered_command: 'Ran a command',
+  submit_implementation_plan: 'Sent a plan for review',
+};
+
+/** The file a read_file call names, when its arguments carry one. */
+function readFileTarget(argsText: string | undefined): string | undefined {
+  if (argsText === undefined) return undefined;
+  try {
+    const parsed: unknown = parsePartialJson(argsText);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const path = Reflect.get(parsed, 'path');
+    return typeof path === 'string' && path !== '' ? path : undefined;
+  } catch {
+    return undefined;
   }
-  if (toolName === 'get_tool_info' && innerToolName && mcpServer) {
-    return `get_tool_info: ${innerToolName} (${mcpServer})`;
+}
+
+/**
+ * The plain title a step shows for a tool call: what happened, in words, never the tool's own
+ * name. A connector call (`server__tool`) is titled by its inner tool. A file read names its
+ * file ("Read: <path>"); anything unlisted falls back to the activity feed's humanized name.
+ */
+export function plainStepTitle(toolName: string, argsText?: string): string {
+  const inner = toolName.includes('__') ? (toolName.split('__').pop() ?? toolName) : toolName;
+  if (inner === 'read_file') {
+    const target = readFileTarget(argsText);
+    return target === undefined ? 'Read a file' : `Read: ${target}`;
   }
-  return toolName;
+  return PLAIN_STEP_TITLES[inner] ?? humanizeToolName(inner);
+}
+
+/** The plain label an audit row shows for the tool that ran: the "Always allow" label for a relaxable kind, the step title otherwise. */
+export function plainActionTypeLabel(actionType: string): string {
+  const kind = parseTier2ActionKind(actionType);
+  return kind !== undefined ? TIER2_ACTION_LABELS[kind] : plainStepTitle(actionType);
 }
 
 export interface ParsedMapsResult {

@@ -6,6 +6,7 @@ import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { Icon } from '../icons/Icon.js';
 import { buildSessionResumeHref } from '../routing/paths.js';
 import { useOptionalResolvedRoutes } from '../routing/ResolvedRoutesContext.js';
+import { plainActionTypeLabel } from '../utils/toolCallParsing.js';
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
 import { outcomeTone } from './SentinelAuditFeed.js';
 import {
@@ -45,7 +46,7 @@ const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> =
     </div>
     <p className="text-sm text-text-primary">{entry.description}</p>
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
-      <span className="min-w-0 truncate font-mono">{entry.action_type}</span>
+      <span className="min-w-0 truncate">{plainActionTypeLabel(entry.action_type)}</span>
       {!entry.chat_exists ? (
         <span>Chat deleted</span>
       ) : chatHref !== null ? (

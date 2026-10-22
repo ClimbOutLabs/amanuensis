@@ -106,7 +106,7 @@ describe('approval card for connector calls', () => {
     [
       'web_fetch',
       { urls: ['https://www.usps.com/'], objective: 'o' },
-      'Fetch a web page with web_fetch on parallel-web.',
+      'Fetch the web page at https://www.usps.com/.',
     ],
     ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web with web_search on parallel-web.'],
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {

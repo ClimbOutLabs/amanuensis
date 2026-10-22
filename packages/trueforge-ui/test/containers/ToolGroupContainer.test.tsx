@@ -60,7 +60,7 @@ describe('AgentSteps grouping', () => {
     ]);
     // With the chat-level switch off, the turn collapses into the faint one-line summary.
     expect(screen.getByRole('region', { name: '2 steps · 2 tools' })).toBeInTheDocument();
-    expect(screen.getByText('first_tool')).not.toBeVisible();
+    expect(screen.getByText('First Tool')).not.toBeVisible();
   });
 
   it('renders both nested tool calls once expanded (defaultOpen)', () => {
@@ -68,8 +68,8 @@ describe('AgentSteps grouping', () => {
       { type: 'tool-call', toolCallId: '1', toolName: 'first_tool', args: {} },
       { type: 'tool-call', toolCallId: '2', toolName: 'second_tool', args: {} },
     ]);
-    expect(screen.getByText('first_tool')).toBeInTheDocument();
-    expect(screen.getByText('second_tool')).toBeInTheDocument();
+    expect(screen.getByText('First Tool')).toBeInTheDocument();
+    expect(screen.getByText('Second Tool')).toBeInTheDocument();
   });
 
   it('reveals the grouped tool calls when the chat-level switch is on', async () => {
@@ -80,8 +80,8 @@ describe('AgentSteps grouping', () => {
       ],
       { expanded: true },
     );
-    expect(await screen.findByText('first_tool')).toBeVisible();
-    expect(screen.getByText('second_tool')).toBeVisible();
+    expect(await screen.findByText('First Tool')).toBeVisible();
+    expect(screen.getByText('Second Tool')).toBeVisible();
   });
 
   it('uses singular label for exactly one tool call in the group', () => {

@@ -74,7 +74,7 @@ function capitalize(word: string): string {
 }
 
 /** Turn `get_weather_forecast` into `Checked weather forecast`. Never leaks snake_case. */
-function humanizeToolName(name: string): string {
+export function humanizeToolName(name: string): string {
   const parts = name.split('_').filter(part => part.length > 0);
   const head = parts[0];
   if (head === undefined) return 'Used a tool';

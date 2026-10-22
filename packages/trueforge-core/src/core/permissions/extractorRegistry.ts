@@ -626,7 +626,11 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
-    describe: ({ tool_name, where }) => `Fetch a web page with ${tool_name}${where}.`,
+    describe: ({ fields, params }) => {
+      // Some fetch tools carry the page in a `urls` list instead of a destination key.
+      const target = fields.destination ?? firstOrNull(stringValues(params, ['urls']));
+      return target !== null ? `Fetch the web page at ${escapeDisplayText(target)}.` : 'Fetch a web page.';
+    },
   },
   {
     match: words => hasPhrase(words, 'search'),

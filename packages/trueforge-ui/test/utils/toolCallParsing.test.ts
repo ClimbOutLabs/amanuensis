@@ -8,16 +8,41 @@ import {
   getJsonDisplayValue,
   getToolFailureReason,
   getToolResultContent,
-  mcpDisplayName,
   parseAskUserQuestionArgs,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
   parseToolResultDisposition,
+  plainActionTypeLabel,
+  plainStepTitle,
   toStatus,
 } from '@/utils/toolCallParsing.js';
 
 describe('toolCallParsing', () => {
+  it('titles steps with plain actions, never tool names', () => {
+    expect(plainStepTitle('list_inbox_threads')).toBe('Checked your inbox');
+    expect(plainStepTitle('list_events')).toBe('Checked your calendar');
+    expect(plainStepTitle('run_code')).toBe('Ran code');
+    expect(plainStepTitle('web_search')).toBe('Searched the web');
+    // A connector call is titled by its inner tool, with no server name attached.
+    expect(plainStepTitle('exa__web_fetch')).toBe('Read a web page');
+    // A file read names the file it read.
+    expect(plainStepTitle('read_file', JSON.stringify({ path: '/home/sam/notes.md' }))).toBe(
+      'Read: /home/sam/notes.md',
+    );
+    expect(plainStepTitle('read_file', '{}')).toBe('Read a file');
+    expect(plainStepTitle('read_file', 'not json')).toBe('Read a file');
+    // An unlisted tool is humanized, never shown in snake_case.
+    expect(plainStepTitle('frobnicate_thing')).toBe('Frobnicate Thing');
+    expect(plainStepTitle('get_weather_forecast')).toBe('Checked weather forecast');
+  });
+
+  it('labels audit rows in plain words, never with the tool id', () => {
+    expect(plainActionTypeLabel('file_write')).toBe('Write files');
+    expect(plainActionTypeLabel('web_search')).toBe('Searched the web');
+    expect(plainActionTypeLabel('exec')).toBe('Ran a command');
+  });
+
   it('parses ask-user args', () => {
     expect(parseAskUserQuestionArgs(JSON.stringify({ question: 'Pick one', options: ['a', 'b', 3] }))).toEqual({
       question: 'Pick one',
@@ -143,7 +168,6 @@ describe('toolCallParsing', () => {
       innerToolName: 'search',
       input: { q: 'x' },
     });
-    expect(mcpDisplayName('call_tool', 'github', 'search')).toBe('call_tool: search (github)');
   });
 
   it('pretty-prints json display values', () => {
@@ -208,8 +232,26 @@ describe('toolCallParsing', () => {
       }),
     );
     expect(buildOutcomeText(disposition, undefined)).toBe('Execution failed');
-    expect(buildOutcomeText(disposition, 'the tool timed out')).toBe('Execution failed: the tool timed out');
+    expect(buildOutcomeText(disposition, 'the tool timed out')).toBe('the tool timed out');
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
+  });
+
+  it('shows a long failure reason in full, with no label in front of it', () => {
+    const disposition = parseToolResultDisposition(
+      JSON.stringify({
+        schema_version: 'tool.response.v2',
+        outcome: { disposition: 'executed_nonzero' },
+        result: 'irrelevant here',
+      }),
+    );
+    const apiOff =
+      "The Google Calendar API isn't turned on in your Google project. Open Settings, Connectors, Google, open the Calendar API link in the Calendar section, select Enable, then try again.";
+    const noPermission =
+      "Google hasn't given Aman permission to read your calendar. Open Settings, Connectors, Google and connect Calendar.";
+    expect(apiOff.length).toBeGreaterThan(140);
+    expect(buildOutcomeText(disposition, apiOff)).toBe(apiOff);
+    expect(buildOutcomeText(disposition, noPermission)).toBe(noPermission);
+    expect(buildOutcomeText(disposition, apiOff)).not.toContain('Execution failed');
   });
 
   it('builds default approval options when none declared', () => {

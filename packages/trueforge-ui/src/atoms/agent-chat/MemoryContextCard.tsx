@@ -50,7 +50,8 @@ function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }
   let statusText = 'No memory recalled';
   if (stats.outcome === 'ok') {
     status = 'success';
-    statusText = `${plural(stats.items, { singular: 'item' })}, ${plural(stats.entities, { singular: 'entity', pluralForm: 'entities' })}`;
+    // The entity count is a detail: it stays in this row's expanded body, not in the line itself.
+    statusText = plural(stats.items, { singular: 'memory', pluralForm: 'memories' });
   } else if (stats.outcome === 'timeout' || stats.outcome === 'error') {
     status = 'warning';
     statusText = stats.outcome === 'timeout' ? 'Recall timed out' : 'Recall failed';

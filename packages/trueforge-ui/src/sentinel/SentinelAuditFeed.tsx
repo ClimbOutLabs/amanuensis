@@ -96,6 +96,10 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         </p>
       )}
 
+      <p className="px-3 pt-2 text-[0.6875rem] font-medium uppercase tracking-wide text-text-secondary">
+        Recent actions
+      </p>
+
       {entries.length === 0 && error === null ? (
         <p className="py-4 text-center text-xs text-text-secondary">Nothing has happened in this chat yet.</p>
       ) : (

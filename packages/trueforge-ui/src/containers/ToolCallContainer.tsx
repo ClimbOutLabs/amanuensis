@@ -50,7 +50,6 @@ import {
   getToolResultContent,
   hasPendingAskUserResponse,
   hasPendingToolApproval,
-  mcpDisplayName,
   parseAskUserQuestionArgs,
   parseMapsResult,
   parseMcpToolArgs,
@@ -58,6 +57,7 @@ import {
   parseSandboxResult,
   parseToolOutputScreen,
   parseToolResultDisposition,
+  plainStepTitle,
   resolveSubAgentMeta,
   toStatus,
 } from '../utils/toolCallParsing.js';
@@ -592,7 +592,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       });
       return (
         <ToolCallCard
-          toolName={`Listing tools · ${mcpServer}`}
+          toolName={plainStepTitle('list_tools')}
           icon="mcp-server"
           expanded={expanded}
           onToggle={onToggle}
@@ -601,7 +601,6 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
           outcomeText={outcomeText}
           status={status}
           showResponseLine={status !== 'running' && !!resultDisplay.data}
-          mcpServerName={mcpServer}
           {...slots}
           approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
@@ -618,7 +617,10 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
     return (
       <ToolCallCard
-        toolName={mcpDisplayName(part.toolName, mcpServer, innerToolName)}
+        toolName={plainStepTitle(
+          innerToolName ?? part.toolName,
+          input === undefined ? undefined : JSON.stringify(input),
+        )}
         icon="mcp-server"
         expanded={expanded}
         onToggle={onToggle}
@@ -627,7 +629,6 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
         outcomeText={outcomeText}
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
-        mcpServerName={mcpServer}
         searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
@@ -645,7 +646,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
 
   return (
     <ToolCallCard
-      toolName={part.toolName}
+      toolName={plainStepTitle(part.toolName, part.argsText)}
       expanded={expanded}
       onToggle={onToggle}
       awaiting={status === 'running'}
