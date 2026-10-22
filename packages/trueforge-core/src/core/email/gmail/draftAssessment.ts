@@ -20,8 +20,8 @@ import { addressListIsPlain, mailboxesIn } from './results';
 const MAX_SENDABLE_BODY_CHARS = 20_000;
 
 /**
- * The only headers a sendable draft may carry. Anything else (a Reply-To, a Sender, a receipt request, a
- * Content-Disposition) can change who gets the message or what it is, so a draft with one is refused.
+ * The headers a sendable draft may carry. Anything else (a receipt request, a Content-Disposition) can change what
+ * is delivered, so a draft with one is refused by name. Reply-To and Sender are checked against the account below.
  */
 const ALLOWED_HEADERS = new Set([
   'from',
@@ -53,6 +53,9 @@ const STRICT_HEADERS: Record<string, (value: string) => boolean> = {
       value,
     ),
 };
+
+/** Headers that name an address other than the body's recipients; each is allowed only when it is the account. */
+const ADDRESS_HEADERS = new Set(['reply-to', 'sender']);
 
 /** The transfer encodings a reader decodes the same way. */
 const TRANSFER_ENCODINGS = new Set(['7bit', '8bit', 'binary', 'quoted-printable', 'base64']);
@@ -116,6 +119,20 @@ const REFUSALS = {
     'This draft contains characters that do not show, so what you see would not be all of what is sent. Ask me to write it again.',
 } as const;
 
+/** A header name is shown only when it is a plain token, so a refusal never prints anything odd. */
+function headerNameForDisplay(name: string): string {
+  return /^[A-Za-z0-9-]{1,80}$/.test(name) ? ` (${name})` : '';
+}
+
+function unknownHeaderRefusal(name: string): string {
+  return `This draft has a header Aman cannot check${headerNameForDisplay(name)}, so it was not sent. Ask Aman to write it again without it.`;
+}
+
+function repeatedHeaderRefusal(name: string): string {
+  const shown = /^[A-Za-z0-9-]{1,80}$/.test(name) ? name : 'header';
+  return `This draft has more than one ${shown} header, so Aman cannot tell what would be sent. Ask Aman to write it again.`;
+}
+
 /** What a draft would deliver, or why it cannot be shown and sent as it stands. */
 export function assessDraft(input: { message: GmailMessage; account: string; forSend: boolean }): DraftAssessment {
   const { message } = input;
@@ -137,10 +154,41 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
   const seen = new Set<string>();
   for (const header of payload.headers ?? []) {
     const name = header.name.toLowerCase();
-    if (!ALLOWED_HEADERS.has(name) || seen.has(name)) {
-      return { ok: false, reason: REFUSALS.headers };
+    if (seen.has(name)) {
+      return { ok: false, reason: repeatedHeaderRefusal(name) };
+    }
+    if (!ALLOWED_HEADERS.has(name) && !ADDRESS_HEADERS.has(name)) {
+      return { ok: false, reason: unknownHeaderRefusal(header.name) };
     }
     seen.add(name);
+  }
+  const account = input.account.toLowerCase();
+  let replyTo: string | null = null;
+  for (const name of ADDRESS_HEADERS) {
+    if (!seen.has(name)) {
+      continue;
+    }
+    const shown = name === 'sender' ? 'Sender' : 'Reply-To';
+    const address = fromAddress(rawHeaderOf({ part: payload, name }));
+    if (address === null) {
+      return { ok: false, reason: unknownHeaderRefusal(shown) };
+    }
+    if (address === account) {
+      continue;
+    }
+    // A Reply-To elsewhere is shown on the card before approval. A Sender elsewhere would send as someone else.
+    if (name === 'sender') {
+      return { ok: false, reason: unknownHeaderRefusal(shown) };
+    }
+    replyTo = address;
+  }
+  // A change rewrites the draft from the call, which carries no reply address, so one kept here would be dropped.
+  if (!input.forSend && replyTo !== null) {
+    return {
+      ok: false,
+      reason:
+        'This draft replies to another address, which Aman cannot keep when it changes a draft, so it was not changed. Ask Aman to write it again.',
+    };
   }
   for (const [name, check] of Object.entries(STRICT_HEADERS)) {
     const value = rawHeaderOf({ part: payload, name });
@@ -200,6 +248,7 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     fromName,
     // A saved draft's headers are delivered as Gmail holds them, names included, so none is left off.
     nameLeftOff: false,
+    replyTo,
   };
   if (input.forSend) {
     if (

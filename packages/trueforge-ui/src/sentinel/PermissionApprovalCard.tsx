@@ -126,6 +126,9 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       {email.bcc.length > 0 && (
         <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
       )}
+      {email.reply_to !== null && (
+        <p className="break-words text-sm text-text-primary">Replies go to: {email.reply_to}</p>
+      )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
         Message, exactly as sent

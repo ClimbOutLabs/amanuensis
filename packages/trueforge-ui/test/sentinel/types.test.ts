@@ -267,6 +267,7 @@ describe('extractSentinelFromEvent', () => {
       body: 'Thursday works.\n\nAda',
       replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
       reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
+      reply_to: null,
     });
   });
 
@@ -290,6 +291,7 @@ describe('extractSentinelFromEvent', () => {
       body: 'b',
       replaces: null,
       reply_in_thread: null,
+      reply_to: null,
     });
   });
 

@@ -64,6 +64,7 @@ const MAIL: NonNullable<SentinelApprovalCard['email']> = {
   body: 'Lunch at noon?',
   replaces: null,
   reply_in_thread: null,
+  reply_to: null,
 };
 
 function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
