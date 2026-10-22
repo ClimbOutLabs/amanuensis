@@ -269,7 +269,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 Needs you · {pendingCount}
               </h3>
               <p className="aman-runtime-rail__needs-body">Answer {pendingCount === 1 ? 'it' : 'them'} in the chat.</p>
-              <p className="aui-panda__role text-gold-ink">{ACTIVITY_STATE_LABELS.waiting}</p>
+              <p className="aui-panda__role">{ACTIVITY_STATE_LABELS.waiting}</p>
             </section>
           )}
 

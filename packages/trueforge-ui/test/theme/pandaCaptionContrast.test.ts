@@ -86,18 +86,23 @@ function worstCaptionContrast({ text, from, to }: { text: string; from: string; 
   return Math.min(...gradientLuminances(from, to).map(glow => contrastRatio(glow, textLuminance)));
 }
 
-describe('panda caption contrast', () => {
-  for (const [name, preset] of Object.entries(PRESETS)) {
-    for (const mode of ['light', 'dark'] as const) {
-      it(`${name} / ${mode}: caption text passes AA at the worst point of the panda glow`, () => {
-        const tokens = preset[mode];
-        const ratio = worstCaptionContrast({
-          text: tokens.textPrimary,
-          from: tokens.pandaGlowFrom,
-          to: tokens.pandaGlowTo,
+// Both labels sit on the panda glow and take the primary text colour (`.aui-panda__role`).
+const PANDA_LABELS = ['caption', 'waiting label'] as const;
+
+describe('panda label contrast', () => {
+  for (const label of PANDA_LABELS) {
+    for (const [name, preset] of Object.entries(PRESETS)) {
+      for (const mode of ['light', 'dark'] as const) {
+        it(`${name} / ${mode}: ${label} passes AA at the worst point of the panda glow`, () => {
+          const tokens = preset[mode];
+          const ratio = worstCaptionContrast({
+            text: tokens.textPrimary,
+            from: tokens.pandaGlowFrom,
+            to: tokens.pandaGlowTo,
+          });
+          expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_RATIO);
         });
-        expect(ratio).toBeGreaterThanOrEqual(AA_TEXT_RATIO);
-      });
+      }
     }
   }
 
