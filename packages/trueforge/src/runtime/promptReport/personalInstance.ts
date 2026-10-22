@@ -23,10 +23,14 @@ import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapabi
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
-export type PersonalInstanceName = 'personal' | 'personal-with-google';
+export type PersonalInstanceName = 'personal' | 'personal-with-google' | 'personal-no-sandbox';
 
 /** Every standard setup the report measures, in report order. */
-export const PERSONAL_INSTANCE_NAMES = ['personal', 'personal-with-google'] satisfies PersonalInstanceName[];
+export const PERSONAL_INSTANCE_NAMES = [
+  'personal',
+  'personal-with-google',
+  'personal-no-sandbox',
+] satisfies PersonalInstanceName[];
 
 const MODEL_NAME = 'personal/model';
 /** Never sent anywhere: stands in for a credential field the report does not read. */
@@ -200,11 +204,11 @@ function webSearchConnector(): { url: string; headers: Record<string, string>; s
   };
 }
 
-function personalSpec(): AgentSpec {
+function personalSpec(input: { sandbox: boolean }): AgentSpec {
   return AgentSpecSchema.parse({
     model: { name: MODEL_NAME },
     instructions: '',
-    config: { sandbox: { enabled: true } },
+    config: { sandbox: { enabled: input.sandbox } },
     mcp_servers: [{ name: WEB_SEARCH_SERVER }],
   });
 }
@@ -275,7 +279,9 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  const spec = personalSpec();
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name !== 'personal-no-sandbox';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,
@@ -290,11 +296,11 @@ export async function measurePersonalInstance(input: { name: PersonalInstanceNam
     definition,
     compactionModel: resolved.compactionModel,
     isChild: false,
-    sandbox,
-    sandboxAvailable: true,
+    sandbox: sandboxEnabled ? sandbox : undefined,
+    sandboxAvailable: sandboxEnabled,
     tracing,
     logger,
     extraCapabilities: resolved.extraCapabilities,
   });
-  return measurePromptRequest({ definition, capabilities, sandbox });
+  return measurePromptRequest({ definition, capabilities, sandbox: sandboxEnabled ? sandbox : undefined });
 }

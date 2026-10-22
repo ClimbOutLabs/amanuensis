@@ -379,7 +379,7 @@ export class DeferredTool extends LocalToolMCP {
   private serverNotFoundText(mcpServer: string): string {
     const servers = [...this.serverMap.keys()];
     const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
-    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are called directly by name, not through list_tools.`;
+    return `No server named '${mcpServer}'. Servers: ${serverList}. Built-in tools are already in your tool list; do not look them up here.`;
   }
 
   private serverNotFoundResponse(mcpServer: string): CallToolResponse {

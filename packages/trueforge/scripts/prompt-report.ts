@@ -10,6 +10,7 @@ import { measurePersonalInstance, type PersonalInstanceName } from '../src/runti
 const SETUPS: { name: PersonalInstanceName; title: string }[] = [
   { name: 'personal', title: 'Personal instance: web search, maps, spaces, schedules, memory (no Google)' },
   { name: 'personal-with-google', title: 'Personal instance with Gmail and Google Calendar connected' },
+  { name: 'personal-no-sandbox', title: 'Personal instance with the sandbox turned off (no exec tool)' },
 ];
 
 const NAME_WIDTH = 60;

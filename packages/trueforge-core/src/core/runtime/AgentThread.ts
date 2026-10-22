@@ -188,6 +188,7 @@ import {
   isLLMToolMessage,
   lastUserMessageText,
   makeUnknownToolInfo,
+  NO_SANDBOX_PROMPT,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
   PLAIN_SPEECH_PROMPT,
@@ -1679,9 +1680,10 @@ export class AgentThread {
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
+    // Without a sandbox there is no exec tool, so the contract must not name one.
     capabilities.addSection(
       'source-discovery',
-      createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
+      createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() === true }),
     );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
     capabilities.addSection('web-images', WEB_IMAGES_PROMPT);
@@ -1691,6 +1693,8 @@ export class AgentThread {
 
     if (this.sandbox) {
       this.sandbox.buildInstruction(capabilities);
+    } else if (!this.parent) {
+      capabilities.addSection('no-sandbox', NO_SANDBOX_PROMPT);
     }
     if (this.deferredTool) {
       this.deferredTool.buildInstruction(capabilities);

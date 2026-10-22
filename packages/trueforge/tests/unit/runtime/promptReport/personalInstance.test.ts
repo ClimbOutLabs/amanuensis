@@ -130,6 +130,55 @@ const BASELINE: Record<PersonalInstanceName, { total: number; rows: Record<strin
       tavily_search: 134,
     },
   },
+  'personal-no-sandbox': {
+    total: 7962,
+    rows: {
+      'agent-identity': 97,
+      'current-date': 36,
+      'model-identity': 79,
+      'agent-capabilities': 2650,
+      'agent-capabilities/internal-messages': 59,
+      'agent-capabilities/untrusted-tool-output': 104,
+      'agent-capabilities/source-discovery': 342,
+      'agent-capabilities/ability-boundaries': 91,
+      'agent-capabilities/web-images': 80,
+      'agent-capabilities/no-task-no-tools': 75,
+      'agent-capabilities/check-before-asking': 69,
+      'agent-capabilities/plain-speech': 114,
+      'agent-capabilities/no-sandbox': 83,
+      'agent-capabilities/deferred-tools-instructions': 91,
+      'agent-capabilities/sub-agents': 184,
+      'agent-capabilities/openui': 159,
+      'agent-capabilities/active-speaker-context': 91,
+      'agent-capabilities/spaces': 1035,
+      'agent-capabilities/schedules': 57,
+      ask_user_question: 261,
+      get_current_datetime: 100,
+      call_tool: 208,
+      get_tool_info: 153,
+      get_tool_output_schema: 183,
+      list_tools: 108,
+      render_map: 227,
+      render_places: 412,
+      render_route: 366,
+      get_openui_instructions: 101,
+      create_schedule: 324,
+      delete_schedule: 91,
+      list_schedules: 75,
+      pause_schedule: 94,
+      resume_schedule: 97,
+      create_space: 292,
+      get_space: 201,
+      list_blocks: 127,
+      list_spaces: 98,
+      revert_space: 192,
+      update_space: 554,
+      create_sub_agent: 272,
+      usage_summary: 300,
+      tavily_extract: 130,
+      tavily_search: 134,
+    },
+  },
 };
 
 /** Fail when a setup grows past the baseline by more than this share. */
@@ -162,5 +211,34 @@ describe('personal instance prompt budget', () => {
       );
     }
     expect(report.totalTokens).toBeLessThanOrEqual(budget);
+  });
+});
+
+/** Each sandbox-backed section and the tools it describes; with the sandbox off, neither may be sent. */
+const SANDBOX_SECTIONS: Record<string, string[]> = {
+  'agent-capabilities/sandbox': ['exec', 'run_code', 'apply_patch', 'replace_text', 'write_file'],
+  'agent-capabilities/sandbox/repository-work': ['exec', 'apply_patch', 'replace_text', 'write_file'],
+  'agent-capabilities/sandbox/sandbox-schema-infer': ['exec'],
+  'agent-capabilities/sandbox/sandbox-file-uploads': ['exec'],
+  'agent-capabilities/documents': ['create_document_report', 'extract_document_text', 'summarize_net_worth'],
+};
+
+describe('system prompt sections follow the tools a chat has', () => {
+  it('sends the sandbox and document sections, with their tools, only when the sandbox is on', async () => {
+    const on = await measurePersonalInstance({ name: 'personal' });
+    const off = await measurePersonalInstance({ name: 'personal-no-sandbox' });
+    const onSections = new Set(on.sections.map(row => row.name));
+    const offSections = new Set(off.sections.map(row => row.name));
+    const onTools = new Set(on.tools.map(row => row.name));
+    const offTools = new Set(off.tools.map(row => row.name));
+
+    for (const [section, tools] of Object.entries(SANDBOX_SECTIONS)) {
+      expect(onSections.has(section)).toBe(true);
+      expect(tools.every(tool => onTools.has(tool))).toBe(true);
+      expect(offSections.has(section)).toBe(false);
+      expect(tools.some(tool => offTools.has(tool))).toBe(false);
+    }
+    expect(offSections.has('agent-capabilities/no-sandbox')).toBe(true);
+    expect(onSections.has('agent-capabilities/no-sandbox')).toBe(false);
   });
 });

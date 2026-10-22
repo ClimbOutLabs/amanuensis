@@ -38,7 +38,7 @@ describe('DeferredTool scripted model session', () => {
 
     const unknownServer = (name: string) =>
       JSON.stringify({
-        error: `No server named '${name}'. Servers: parallel-web. Built-in tools are called directly by name, not through list_tools.`,
+        error: `No server named '${name}'. Servers: parallel-web. Built-in tools are already in your tool list; do not look them up here.`,
       });
     expect(results).toEqual([unknownServer('gmail'), unknownServer('sub_agents'), 'parallel-web:\n  search, fetch']);
   });

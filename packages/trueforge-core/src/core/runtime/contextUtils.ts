@@ -54,6 +54,14 @@ The Agent has only the tools listed in this prompt. It cannot generate, edit, or
 `;
 
 /**
+ * Only for a chat with no sandbox: without this line the model guesses that a shell exists and searches
+ * for one. The control names are the ones the person sees in the app.
+ */
+export const NO_SANDBOX_PROMPT = dedent`
+This chat has no sandbox, so it cannot run commands, edit files, or clone repositories. If the person asks for any of these, say so plainly and tell them how to get one: use Work on a repo in the composer, or turn on Sandbox in Settings. Do not search the web or list servers to look for a command tool.
+`;
+
+/**
  * Web pages carry banners, logos and adverts. Left to itself a model embeds them in a reply, and the
  * person sees pictures they never asked for. The chat only shows an image the person asked for.
  */
