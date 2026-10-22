@@ -32,6 +32,7 @@ const BLOCKED_PROBLEMS: ReadonlySet<PublicFetchProblem['kind']> = new Set([
 export async function fetchRemoteImage(input: {
   url: string;
   allowUrl: (url: URL) => boolean;
+  userAgent?: string;
   deps: RemoteImageFetchDeps;
 }): Promise<RemoteImageFetchOutcome> {
   let fetched: Awaited<ReturnType<typeof fetchPublicUrl>>;
@@ -41,7 +42,10 @@ export async function fetchRemoteImage(input: {
       resolveAddresses: input.deps.resolveAddresses,
       timeoutMs: CHAT_IMAGE_FETCH_TIMEOUT_MS,
       maxRedirects: CHAT_IMAGE_FETCH_MAX_REDIRECTS,
-      headers: { 'user-agent': 'Amanuensis-Image/1.0', accept: 'image/png, image/jpeg, image/gif, image/webp' },
+      headers: {
+        'user-agent': input.userAgent ?? 'Amanuensis-Image/1.0',
+        accept: 'image/png, image/jpeg, image/gif, image/webp',
+      },
       allowHop: input.allowUrl,
       describe: problem => `Image fetch stopped: ${problem.kind}`,
     });

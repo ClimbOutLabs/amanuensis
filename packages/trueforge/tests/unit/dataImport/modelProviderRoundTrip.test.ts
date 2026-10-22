@@ -93,6 +93,7 @@ function importDeps(instance: Instance): DataImportDeps<Tx> {
     withTransaction: callback => instance.db.transaction().execute(callback),
     memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
     personaKnowledgeDir: instance.knowledgeDir,
+    ownerName: '',
     knowledgeEmbedder: {
       ensureReady: () => Promise.resolve(true),
       embedPassages: texts => Promise.resolve(texts.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0.5))),
@@ -147,6 +148,7 @@ describe('model provider export and import round trip', () => {
         address_as: 'Tester',
         user_profile: null,
         pinned_preferences: [],
+        help_areas: [],
         learned_profile: null,
         learning_enabled: true,
         updated_by: 'alice',
