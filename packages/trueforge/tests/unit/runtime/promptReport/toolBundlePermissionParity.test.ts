@@ -168,7 +168,7 @@ async function toolTable(): Promise<ToolRow[]> {
   const instance = await instanceFor({ mode: 'online', audit: [] });
   const builtIns: IToolSet[] = [
     ...instance.capabilities.flatMap(capability => capability.systemToolSets ?? []),
-    instance.sandbox,
+    ...(instance.sandbox === undefined ? [] : [instance.sandbox]),
   ];
   const { convertedTools } = await convertMCPServersToTools({
     tfyManagedServers: builtIns,
