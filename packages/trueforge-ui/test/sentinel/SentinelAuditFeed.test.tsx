@@ -57,7 +57,7 @@ describe('SentinelAuditFeed', () => {
       makeEntry({ id: 'entry-3', action_type: 'gmail_read', outcome: 'logged', tier: 1 }),
     ]);
     expect(await screen.findByText('Read your email · 3')).toBeInTheDocument();
-    expect(screen.getByText('Done quietly')).toBeInTheDocument();
+    expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
   });
 
   it('shows the five state words, one per row, and never the raw tool name or the description', async () => {
@@ -72,7 +72,7 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText('You approved')).toBeInTheDocument();
     expect(screen.getByText('You declined')).toBeInTheDocument();
     expect(screen.getByText('Turned down automatically')).toBeInTheDocument();
-    expect(screen.getByText('Done quietly')).toBeInTheDocument();
+    expect(screen.getByText('Done · allowed by your settings')).toBeInTheDocument();
     expect(screen.getByText('Waiting for you')).toBeInTheDocument();
     expect(screen.queryByText('gmail_send')).not.toBeInTheDocument();
     expect(screen.queryByText('Sent to Rui')).not.toBeInTheDocument();
