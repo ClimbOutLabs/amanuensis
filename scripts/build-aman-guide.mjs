@@ -2,9 +2,10 @@
 // Builds the built-in Aman guide knowledge pack. Run by `pnpm guide:build`.
 //
 // Topic pages are plain-words prose in packages/trueforge/guide/topics. The
-// Tour cards in AmanTour.tsx are the source of truth for what Aman offers, so
-// the build fails when a card has no page or a page names a card that does not
-// exist. Output is a generated TypeScript module; do not edit it by hand.
+// Tour cards in packages/trueforge-ui/src/components/tourPrompts.ts are the
+// source of truth for what Aman offers. Cards listed in required-cards.json must
+// have a page, or the build fails. Any other card without a page is a warning.
+// Output is a generated TypeScript module; do not edit it by hand.
 
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,6 +14,9 @@ import prettier from 'prettier';
 import ts from 'typescript';
 
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// The exported constants that hold every Tour card, in the order they are read.
+const TOUR_CARD_EXPORTS = ['MORNING_BRIEF', 'GENERAL_DAY_PROMPTS', 'HELP_AREAS', 'CAPABILITY_PROMPTS'];
 
 export class AmanGuideBuildError extends Error {
   constructor(message, options) {
@@ -23,14 +27,15 @@ export class AmanGuideBuildError extends Error {
 
 function defaultPaths(repoRoot) {
   return {
-    tourPath: path.join(repoRoot, 'packages/trueforge-ui/src/components/AmanTour.tsx'),
+    tourPath: path.join(repoRoot, 'packages/trueforge-ui/src/components/tourPrompts.ts'),
     topicsDir: path.join(repoRoot, 'packages/trueforge/guide/topics'),
+    requiredCardsPath: path.join(repoRoot, 'packages/trueforge/guide/required-cards.json'),
     outPath: path.join(repoRoot, 'packages/trueforge/src/personas/amanGuide/knowledgePack.generated.ts'),
   };
 }
 
 function literalText(node, where) {
-  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+  if (node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
     return node.text;
   }
   throw new AmanGuideBuildError(`${where} must be a plain string.`);
@@ -46,11 +51,12 @@ function propertyMap(objectLiteral) {
   return values;
 }
 
-/** Reads the Tour card arrays and the TourCapabilities type straight from source, without running the UI. */
+/** Reads the Tour cards from tourPrompts.ts source, following the constants that hold them, without running the UI. */
 function readTour(source, fileName) {
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const capabilityKeys = new Set();
-  const cards = new Map();
+  const declarations = new Map();
+  const exported = new Set();
   for (const statement of file.statements) {
     if (ts.isTypeAliasDeclaration(statement) && statement.name.text === 'TourCapabilities') {
       for (const member of statement.type.members) {
@@ -62,39 +68,96 @@ function readTour(source, fileName) {
     if (!ts.isVariableStatement(statement)) {
       continue;
     }
+    const isExported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
     for (const declaration of statement.declarationList.declarations) {
-      const name = declaration.name.getText(file);
-      if (!['TRY_A_DAY_PROMPTS', 'CAPABILITY_PROMPTS'].includes(name)) {
+      if (declaration.initializer === undefined) {
         continue;
       }
-      if (!declaration.initializer || !ts.isArrayLiteralExpression(declaration.initializer)) {
-        throw new AmanGuideBuildError(`${name} must be an array literal.`);
-      }
-      for (const element of declaration.initializer.elements) {
-        if (!ts.isObjectLiteralExpression(element)) {
-          throw new AmanGuideBuildError(`Every entry in ${name} must be an object literal.`);
-        }
-        const props = propertyMap(element);
-        const key = literalText(props.get('key'), `${name} key`);
-        const needs = props.has('needs') ? literalText(props.get('needs'), `Tour card "${key}" needs`) : null;
-        if (cards.has(key)) {
-          throw new AmanGuideBuildError(`Duplicate Tour card "${key}".`);
-        }
-        cards.set(key, { label: literalText(props.get('label'), `Tour card "${key}" label`), needs });
+      const name = declaration.name.getText(file);
+      declarations.set(name, declaration.initializer);
+      if (isExported) {
+        exported.add(name);
       }
     }
   }
-  if (cards.size === 0) {
-    throw new AmanGuideBuildError('No Tour cards found in AmanTour.tsx.');
+
+  const cards = new Map();
+  const resolving = new Set();
+
+  function addCard(node) {
+    const props = propertyMap(node);
+    const key = literalText(props.get('key'), 'A Tour card key');
+    const label = literalText(props.get('label'), `Tour card "${key}" label`);
+    const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
+    const existing = cards.get(key);
+    if (existing !== undefined) {
+      if (existing.node === node) {
+        return;
+      }
+      throw new AmanGuideBuildError(`Duplicate Tour card "${key}".`);
+    }
+    for (const name of needs) {
+      if (!capabilityKeys.has(name)) {
+        throw new AmanGuideBuildError(`Tour card "${key}" needs "${name}", which TourCapabilities does not declare.`);
+      }
+    }
+    cards.set(key, { node, label, needs });
   }
-  for (const [key, card] of cards) {
-    if (card.needs !== null && !capabilityKeys.has(card.needs)) {
+
+  // Walks a card list or help-area table, following names to the constants they point at.
+  function collect(node, where) {
+    if (ts.isIdentifier(node)) {
+      const name = node.text;
+      const target = declarations.get(name);
+      if (target === undefined) {
+        throw new AmanGuideBuildError(`${where} uses "${name}", which tourPrompts.ts does not declare.`);
+      }
+      if (resolving.has(name)) {
+        throw new AmanGuideBuildError(`"${name}" in tourPrompts.ts refers back to itself.`);
+      }
+      resolving.add(name);
+      collect(target, where);
+      resolving.delete(name);
+      return;
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) {
+        collect(element, where);
+      }
+      return;
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      if (propertyMap(node).has('key')) {
+        addCard(node);
+        return;
+      }
+      for (const value of propertyMap(node).values()) {
+        if (ts.isIdentifier(value) || ts.isArrayLiteralExpression(value) || ts.isObjectLiteralExpression(value)) {
+          collect(value, where);
+        }
+      }
+    }
+  }
+
+  for (const name of TOUR_CARD_EXPORTS) {
+    if (!exported.has(name)) {
       throw new AmanGuideBuildError(
-        `Tour card "${key}" needs "${card.needs}", which TourCapabilities does not declare.`,
+        `tourPrompts.ts must export ${name}. The guide build reads the Tour cards from it.`,
       );
     }
+    collect(declarations.get(name), name);
+  }
+  if (cards.size === 0) {
+    throw new AmanGuideBuildError('No Tour cards found in tourPrompts.ts.');
   }
   return { cards, capabilityKeys };
+}
+
+function capabilityList(node, where) {
+  if (!ts.isArrayLiteralExpression(node)) {
+    throw new AmanGuideBuildError(`${where} must be a list of capability names.`);
+  }
+  return node.elements.map(element => literalText(element, where));
 }
 
 /** Parses the `---` front matter block: id, title and a comma list of Tour cards the page covers. */
@@ -135,8 +198,25 @@ async function readTopics(topicsDir) {
   return topics;
 }
 
-/** Fails loudly on any gap between the Tour cards and the guide pages. */
-function checkTopics({ topics, cards }) {
+/** The Tour card keys that must have a guide page. The build fails if one of them does not. */
+async function readRequiredCards(requiredCardsPath) {
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile(requiredCardsPath, 'utf8'));
+  } catch (error) {
+    throw new AmanGuideBuildError(`${requiredCardsPath} must be a JSON list of Tour card keys.`, { cause: error });
+  }
+  if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'string')) {
+    throw new AmanGuideBuildError(`${requiredCardsPath} must be a JSON list of Tour card keys.`);
+  }
+  return parsed;
+}
+
+/**
+ * Fails on a broken page or a required card with no page. Returns the Tour cards
+ * that have no page yet; those are warnings, not errors.
+ */
+function checkTopics({ topics, cards, requiredKeys }) {
   const ids = new Set();
   for (const topic of topics) {
     if (ids.has(topic.id)) {
@@ -150,11 +230,15 @@ function checkTopics({ topics, cards }) {
     }
   }
   const covered = new Set(topics.flatMap(topic => topic.covers));
-  for (const key of cards.keys()) {
+  for (const key of requiredKeys) {
+    if (!cards.has(key)) {
+      throw new AmanGuideBuildError(`required-cards.json lists "${key}", which is not a Tour card.`);
+    }
     if (!covered.has(key)) {
-      throw new AmanGuideBuildError(`Tour card "${key}" has no guide entry. Add it to a page's covers list.`);
+      throw new AmanGuideBuildError(`Tour card "${key}" must have a guide page. Add it to a page's covers list.`);
     }
   }
+  return [...cards.keys()].filter(key => !covered.has(key));
 }
 
 async function render({ topics, repoRoot, outPath }) {
@@ -177,14 +261,15 @@ async function render({ topics, repoRoot, outPath }) {
 
 /**
  * Builds the pack and writes the generated module. Throws AmanGuideBuildError
- * on any gap; the CLI turns that into a non-zero exit.
+ * on any gap that must be fixed; the CLI turns that into a non-zero exit.
  */
 export async function buildAmanGuide(options = {}) {
   const repoRoot = options.repoRoot ?? DEFAULT_REPO_ROOT;
   const paths = { ...defaultPaths(repoRoot), ...pickDefined(options) };
   const tour = readTour(await readFile(paths.tourPath, 'utf8'), paths.tourPath);
   const topics = await readTopics(paths.topicsDir);
-  checkTopics({ topics, cards: tour.cards });
+  const requiredKeys = await readRequiredCards(paths.requiredCardsPath);
+  const uncoveredKeys = checkTopics({ topics, cards: tour.cards, requiredKeys });
   const output = await render({ topics, repoRoot, outPath: paths.outPath });
   await mkdir(path.dirname(paths.outPath), { recursive: true });
   await writeFile(paths.outPath, output);
@@ -192,20 +277,28 @@ export async function buildAmanGuide(options = {}) {
     outPath: paths.outPath,
     topics: topics.map(({ id, covers }) => ({ id, covers })),
     tourKeys: [...tour.cards.keys()],
+    uncoveredKeys,
   };
 }
 
 function pickDefined(options) {
   return Object.fromEntries(
-    ['tourPath', 'topicsDir', 'outPath'].filter(key => options[key] !== undefined).map(key => [key, options[key]]),
+    ['tourPath', 'topicsDir', 'requiredCardsPath', 'outPath']
+      .filter(key => options[key] !== undefined)
+      .map(key => [key, options[key]]),
   );
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   buildAmanGuide()
     .then(result => {
-      console.log(`Aman guide: ${result.topics.length} pages, ${result.tourKeys.length} Tour cards covered.`);
+      console.log(`Aman guide: ${result.topics.length} pages, ${result.tourKeys.length} Tour cards.`);
       console.log(`Wrote ${path.relative(process.cwd(), result.outPath)}`);
+      if (result.uncoveredKeys.length > 0) {
+        console.warn(
+          `Warning: ${result.uncoveredKeys.length} Tour cards have no guide page yet, so Aman cannot explain them: ${result.uncoveredKeys.join(', ')}. The build still passes.`,
+        );
+      }
     })
     .catch(error => {
       console.error(error instanceof AmanGuideBuildError ? error.message : error);

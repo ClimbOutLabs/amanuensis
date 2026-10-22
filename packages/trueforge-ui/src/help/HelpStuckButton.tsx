@@ -1,7 +1,7 @@
 'use client';
 
 import { useAui, useAuiState } from '@assistant-ui/react';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { useOptionalShellMode, type ShellModeContextValue } from '../server/ShellModeContext.js';
@@ -78,16 +78,16 @@ export function HelpNewChatBridge() {
   const openNonce = session?.openNonce;
   const idBeforeOpen = session?.idBeforeOpen ?? null;
   const boundThreadId = session?.boundThreadId;
-  const openedFor = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    if (help === null || openNonce === undefined || openedFor.current === openNonce) {
+    // Opening a draft remounts this bridge with the runtime, so "already opened" must live in the
+    // provider's session. A ref here resets on remount and reopens the draft in a loop.
+    if (help === null || openNonce === undefined || idBeforeOpen !== null) {
       return;
     }
-    openedFor.current = openNonce;
     help.update({ idBeforeOpen: localId });
     openFreshChat({ shell, switchToNewThread: () => aui.threads().switchToNewThread() });
-  }, [help, openNonce, localId, shell, aui]);
+  }, [help, openNonce, idBeforeOpen, localId, shell, aui]);
 
   useEffect(() => {
     if (help === null || session === null || boundThreadId !== undefined) {
