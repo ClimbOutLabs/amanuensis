@@ -98,6 +98,7 @@ describe('Tavily through the designated search provider path', () => {
       /This chat has read your private data, so Aman is checking before searching\.$/,
     );
     expect(info.tier3_card?.destination_host).toBe('Tavily');
+    expect(info.tier3_card?.destination).toBeNull();
     expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
     expect(h.sent).toEqual([]);
   });
@@ -132,6 +133,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier).toBe(3);
     expect(info.tier3_card?.plain_what).toMatch(/This opens a link that didn't come from your search results\.$/);
     expect(info.tier3_card?.destination_host).toBe('Tavily');
+    expect(info.tier3_card?.destination).toBeNull();
     expect(h.sent).toEqual([]);
   });
 

@@ -1780,7 +1780,8 @@ async function holdSearchCall(input: {
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
-      destination: action.mcp_server_name ?? null,
+      // The connector id is never shown; "Sends to" carries the provider's brand instead.
+      destination: null,
       recipient: null,
       amount: null,
       parsed_command: null,

@@ -56,6 +56,17 @@ describe('approval copy', () => {
     });
   });
 
+  it('never shows a search connector id on a held search stub', () => {
+    const card = cardWith({
+      plain_what: 'Search the web with Tavily for: harbour tides.',
+      destination: null,
+      destination_host: 'Tavily',
+    });
+    const stub = approvalStub(card, { sentAt: null });
+    expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
+    expect(stub.detail).toBe('Open Details to see what it does');
+  });
+
   it('counts the other recipients of a new email', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null, to: [bare('a@x.com'), bare('b@x.com')] } });
     expect(approvalQuestion(card)).toBe('Send this email to a@x.com and 1 more?');
