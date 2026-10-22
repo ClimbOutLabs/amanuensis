@@ -196,6 +196,31 @@ function sanitizeOneAssistantMessage(message: ContextMessage, sanitize: (text: s
   return message;
 }
 
+interface StreamingTurnControl {
+  cancelAndSettle(reason: CancellationReason): Promise<void>;
+}
+
+/** Turns whose stream runs in this process. Installs are single-replica, so this registry is the only owner. */
+const streamingTurns = new Map<string, StreamingTurnControl>();
+
+function streamingTurnKey(input: { session_id: string; turn_id: string }): string {
+  return `${input.session_id}\u0000${input.turn_id}`;
+}
+
+/**
+ * Cancels a turn this process is streaming and resolves once the stream has written its steps
+ * and terminal state. A turn no stream is running for returns at once. Callers must not await
+ * this from the consumer that drives the stream, since the stream cannot finish while that
+ * consumer is suspended.
+ */
+export async function cancelStreamingTurn(input: {
+  session_id: string;
+  turn_id: string;
+  reason: CancellationReason;
+}): Promise<void> {
+  await streamingTurns.get(streamingTurnKey(input))?.cancelAndSettle(input.reason);
+}
+
 export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private readonly store: ISessionStore<object, TTurnCustom>;
   private turn: TurnRecord<TTurnCustom>;
@@ -211,6 +236,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     { leaseId: string; renewalTimer: ReturnType<typeof setInterval> }
   >();
   private streamStarted = false;
+  private settleStream: (() => void) | undefined;
+  private readonly streamSettled = new Promise<void>(resolve => {
+    this.settleStream = resolve;
+  });
 
   constructor(options: {
     store: ISessionStore<object, TTurnCustom>;
@@ -333,6 +362,31 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     if (!orchestrator || !resolver || !signal) {
       throw new Error('TurnHandle.stream() is only available on turns returned from SessionHandle.createTurn()');
     }
+
+    const key = streamingTurnKey(this.turn);
+    streamingTurns.set(key, this);
+    try {
+      yield* this.runStream({ orchestrator, resolver, signal });
+    } finally {
+      if (streamingTurns.get(key) === this) {
+        streamingTurns.delete(key);
+      }
+      this.settleStream?.();
+    }
+  }
+
+  /** Cancels this stream and resolves once its steps and terminal state are written. */
+  async cancelAndSettle(reason: CancellationReason): Promise<void> {
+    this.abort?.(reason);
+    await this.streamSettled;
+  }
+
+  private async *runStream(parts: {
+    orchestrator: TurnExecutionSource;
+    resolver: ITurnResourceResolver<TTurnCustom>;
+    signal: AbortSignal;
+  }): AsyncGenerator<TurnStreamingEvent> {
+    const { orchestrator, resolver, signal } = parts;
 
     let caughtError: Error | undefined;
     const lifecycle = { frozenByStore: false };

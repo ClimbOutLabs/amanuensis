@@ -2755,6 +2755,48 @@ export function runStoreContractSuite<
       expect(data.filter(event => event.type === EventType.TURN_DONE)).toHaveLength(0);
     });
 
+    it('keeps steps and their events appended before the freeze', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-steps' }));
+      const keys = { session_id: sessionId, turn_id: 'turn-steps' };
+      const step = createToolResponseV2({
+        id: 'step-result',
+        thread_id: MAIN_THREAD_ID,
+        tool_call_id: 'step-call',
+        created_at: new Date().toISOString(),
+        raw_content: JSON.stringify({ ok: true }),
+        model_content: null,
+        screen: null,
+        disposition: 'executed_ok',
+        remediation: undefined,
+        admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+        memoized: false,
+        repeat_count: 1,
+      }).event;
+      await store.appendToThreadContext({
+        ...keys,
+        thread_id: MAIN_THREAD_ID,
+        context: [userMessage('step ran')],
+        current_context_usage: null,
+        completion: null,
+        tool_call_memo: undefined,
+        task_state: undefined,
+      });
+      await store.appendToEvents({ ...keys, events: [step] });
+
+      await store.freezeAndGetTurn({
+        ...keys,
+        turn_done_event: makeTurnDoneEvent(makeCancelledTurnState(CancellationReason.CancelledForNextTurn)),
+      });
+
+      const record = mustGet(await store.getTurn(keys));
+      expect(record.state.status).toBe('cancelled');
+      expect(contextContents(record.snapshot.threads[MAIN_THREAD_ID]?.context)).toContain('step ran');
+      const { data } = await store.listTurnEvents({ ...keys, limit: 10, page_token: undefined, order: undefined });
+      expect(data.map(event => event.id)).toContain('step-result');
+    });
+
     it('cancels a running turn, persists turn.done, and fences all turn-scoped writes', async () => {
       const store = createStore();
       await seedSession(store);
