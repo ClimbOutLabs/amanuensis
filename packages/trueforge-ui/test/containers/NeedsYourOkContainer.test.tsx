@@ -16,6 +16,7 @@ const { answerHeldAction, reload, server } = vi.hoisted(() => {
     value: {
       peekSessionTip: vi.fn(),
       dismissPendingApprovals: vi.fn(),
+      dismissEndedApproval: vi.fn(),
       answerHeldAction: answer,
       getLastCompactionStatus: vi.fn(),
       getLastTurnInputTokens: vi.fn(),

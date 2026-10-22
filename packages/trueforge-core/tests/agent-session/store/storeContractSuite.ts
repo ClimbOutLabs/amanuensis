@@ -3933,6 +3933,75 @@ export function runStoreContractSuite<
     );
   });
 
+  describe('approval dismissals', () => {
+    it('records a dismissal once per thread and tool call, keeping the first record', async () => {
+      const store = createStore();
+      await seedSession(store);
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T11:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([
+        {
+          thread_id: 'thread-child',
+          tool_call_id: 'call-send',
+          dismissed_at: '2026-10-22T10:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('keeps dismissals scoped to their own session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'other-session',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: 'other-session' })).resolves.toEqual([]);
+    });
+
+    it("drops a session's dismissals when the session is deleted", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+    });
+  });
+
   describe('pagination', () => {
     // Offset-token pagination does not isolate readers from concurrent inserts:
     // rows added while a client walks pages may appear twice or be skipped.
