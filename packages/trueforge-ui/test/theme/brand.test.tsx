@@ -116,7 +116,7 @@ describe('BrandLogo', () => {
 
   it('renders the default mark and name when brand is omitted', () => {
     const { container } = render(
-      <ThemeProvider theme={{ preset: 'claude' }}>
+      <ThemeProvider theme={{ preset: 'paper' }}>
         <BrandNameProbe />
         <BrandLogo className="host-logo" />
       </ThemeProvider>,

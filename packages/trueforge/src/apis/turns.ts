@@ -4,6 +4,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
+  ApprovalRequestEndedError,
   CancellationReason,
   EventType,
   PreviousTurnRunningError,
@@ -11,6 +12,7 @@ import {
   SessionStoreNotFoundError,
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
+  withoutClearedApprovals,
   type SessionHandle,
   type TurnHandle,
   type TurnInputItem,
@@ -205,6 +207,7 @@ export const TurnConflictCode = {
   PREVIOUS_TURN_RUNNING: 'previous_turn_running',
   TURN_ALREADY_EXISTS: 'turn_already_exists',
   APPROVAL_CONFLICT: 'approval_conflict',
+  APPROVAL_REQUEST_ENDED: 'approval_request_ended',
 } as const;
 
 /** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
@@ -222,6 +225,9 @@ export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConfl
   }
   if (error instanceof TurnAlreadyExistsError) {
     return TurnConflictCode.TURN_ALREADY_EXISTS;
+  }
+  if (error instanceof ApprovalRequestEndedError) {
+    return TurnConflictCode.APPROVAL_REQUEST_ENDED;
   }
   return null;
 }
@@ -1498,7 +1504,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         limit: query.limit,
         page_token: query.page_token,
       });
-      return c.json({ data: data.map(toWireTurn), pagination }, 200);
+      const cleared = await session.clearedApprovalKeys();
+      return c.json({ data: data.map(turn => toWireTurn(withoutClearedApprovals(turn, cleared))), pagination }, 200);
     } catch (error) {
       if (error instanceof SessionStoreConflictError) {
         return c.json({ error: { message: error.message } }, 400);
@@ -1578,7 +1585,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     if (!turn) {
       return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
     }
-    return c.json({ data: toWireTurn(turn.record) }, 200);
+    const cleared = await session.clearedApprovalKeys();
+    return c.json({ data: toWireTurn(withoutClearedApprovals(turn.record, cleared)) }, 200);
   };
 
   const downloadSandboxFileHandler: RouteHandler<typeof downloadSandboxFileRoute> = async c => {
@@ -1767,6 +1775,19 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       })
     ) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
+    }
+
+    // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
+    // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
+    if (await session.answersOnlyEndedApprovals({ previous_turn_id: body.previous_turn_id, input: body.input })) {
+      const decisions = body.input ?? [];
+      if (decisions.every(item => item.type === EventType.USER_TOOL_APPROVAL && item.approval.status === 'deny')) {
+        const named = await session.dismissEndedApprovals({
+          previous_turn_id: body.previous_turn_id,
+          input: body.input,
+        });
+        return c.json({ data: toWireTurn(named) }, 200);
+      }
     }
 
     let referencedAgent: AgentRecord | undefined;
@@ -2222,6 +2243,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
      */
     const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
       abortController.abort(CancellationReason.Abandoned);
+      turn.forgetUnstarted();
       await resolver.close().catch((closeError: unknown) => {
         deps.logger.error(`Failed to close turn resources after ${context}`, {
           sessionId,

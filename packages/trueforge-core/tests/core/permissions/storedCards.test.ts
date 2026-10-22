@@ -31,6 +31,9 @@ const UPGRADED_EMAIL = {
   reply_in_thread: null,
 };
 
+/** What the archive upgrade returns: the same card, with a reply address that defaults to the sender. */
+const ARCHIVED_UPGRADED_EMAIL = { ...UPGRADED_EMAIL, reply_to: null };
+
 const CARD = {
   plain_what: 'Change',
   plain_why: null,
@@ -66,12 +69,12 @@ function storedAs<T>(value: unknown): T {
 describe('upgradeArchivedApprovalEvent', () => {
   it('reads each bare address stored on a card as a recipient with no name', () => {
     expect(upgradeArchivedApprovalEvent(APPROVAL)).toMatchObject({
-      tool_calls: [{ tier3_card: { email: UPGRADED_EMAIL } }],
+      tool_calls: [{ tier3_card: { email: ARCHIVED_UPGRADED_EMAIL } }],
     });
   });
 
   it('leaves a card already in the name-and-address form as it is', () => {
-    const named = { ...UPGRADED_EMAIL, to: [{ name: 'Grace Lee', address: 'grace@example.com' }] };
+    const named = { ...ARCHIVED_UPGRADED_EMAIL, to: [{ name: 'Grace Lee', address: 'grace@example.com' }] };
     const event = { ...APPROVAL, tool_calls: [{ ...CALL, tier3_card: { ...CARD, email: named } }] };
     expect(upgradeArchivedApprovalEvent(event)).toEqual(event);
   });
@@ -88,7 +91,7 @@ describe('upgradeArchivedTurnState', () => {
     expect(upgradeArchivedTurnState(state)).toMatchObject({
       status: 'done',
       completed_at: '2026-09-30T10:05:00.000Z',
-      required_actions: [{ tool_calls: [{ tier3_card: { email: UPGRADED_EMAIL } }] }],
+      required_actions: [{ tool_calls: [{ tier3_card: { email: ARCHIVED_UPGRADED_EMAIL } }] }],
     });
   });
 

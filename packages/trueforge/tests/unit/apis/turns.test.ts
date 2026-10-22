@@ -456,6 +456,8 @@ describe('turns', () => {
               agent: { type: 'inline', spec: agentSpec },
             },
             answersOnlyDeniedHeldActions: () => Promise.resolve(false),
+            answersOnlyEndedApprovals: () => Promise.resolve(false),
+            dismissEndedApprovals: () => Promise.reject(new Error('unexpected dismissal')),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-non-stream',
@@ -726,6 +728,8 @@ describe('turns', () => {
               agent: { type: 'inline', spec: agentSpec },
             },
             answersOnlyDeniedHeldActions: () => Promise.resolve(false),
+            answersOnlyEndedApprovals: () => Promise.resolve(false),
+            dismissEndedApprovals: () => Promise.reject(new Error('unexpected dismissal')),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-gone',

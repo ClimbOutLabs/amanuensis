@@ -1,24 +1,53 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import ThemeSettings from '@/containers/SettingsBuilder/ThemeSettings.js';
 import { ThemeProvider } from '@/theme/ThemeProvider.js';
 import { MODEL_USAGE_DISPLAY_STORAGE_KEY, setModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 
-const EXPECTED_LABELS = ['Paper', 'Clay', 'Mint', 'Denim', 'Midnight', 'Forest', 'Sunset', 'Volt'];
+const PICKER_CARDS = [
+  { label: 'Paper', description: 'Warm paper, ink and gold' },
+  { label: 'Forest', description: 'Calm greens, natural tones' },
+  { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
+  { label: 'High contrast', description: 'Maximum legibility, stark surfaces' },
+];
 
 describe('ThemeSettings', () => {
-  it('lists every theme preset with the Volt rename applied', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('shows four theme cards in order with their descriptions', () => {
     render(
       <ThemeProvider>
         <ThemeSettings />
       </ThemeProvider>,
     );
 
-    for (const label of EXPECTED_LABELS) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
-    expect(screen.queryByText('NVIDIA')).not.toBeInTheDocument();
+    const cards = screen.getAllByRole('button', { name: /^(Paper|Forest|Midnight|High contrast)\b/ });
+    const labelsInOrder = cards.map(card =>
+      PICKER_CARDS.find(
+        ({ label, description }) =>
+          within(card).queryByText(label) !== null && within(card).queryByText(description) !== null,
+      ),
+    );
+    expect(labelsInOrder).toEqual(PICKER_CARDS);
+  });
+
+  it('switches the preset as soon as a card is chosen and remembers it', () => {
+    const { container } = render(
+      <ThemeProvider>
+        <ThemeSettings />
+      </ThemeProvider>,
+    );
+    const root = container.querySelector('.aui-theme-root');
+    expect(root).toHaveAttribute('data-preset', 'paper');
+
+    fireEvent.click(screen.getByRole('button', { name: /High contrast/ }));
+
+    expect(root).toHaveAttribute('data-preset', 'high-contrast');
+    expect(screen.getByRole('button', { name: /High contrast/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(window.localStorage.getItem('aui-theme-preset')).toBe('high-contrast');
   });
 });
 

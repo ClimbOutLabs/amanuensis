@@ -1,10 +1,11 @@
 'use client';
 
 import { useAuiState } from '@assistant-ui/react';
-import { useTrueFoundryApprovals } from '@truefoundry/assistant-ui-runtime';
+import { toolInvocationRawId, useTrueFoundryApprovals } from '@truefoundry/assistant-ui-runtime';
 import { useMemo } from 'react';
 
 import { pendingApprovalIdsOf } from '../utils/pendingApprovalIds.js';
+import { useWaitingToolCallIds } from './useWaitingToolCallIds.js';
 
 /**
  * Pending tool approvals the user can still answer. The runtime lists every card that never got a
@@ -15,9 +16,14 @@ export function useAnswerableApprovals(): ReturnType<typeof useTrueFoundryApprov
   const approvals = useTrueFoundryApprovals();
   const newestMessage = useAuiState(state => state.thread.messages.at(-1));
   const { pending: allPending } = approvals;
+  const waiting = useWaitingToolCallIds(allPending.map(approval => approval.approvalId));
   const pending = useMemo(() => {
     const answerable = pendingApprovalIdsOf(newestMessage);
-    return allPending.filter(approval => answerable.has(approval.approvalId));
-  }, [allPending, newestMessage]);
+    return allPending.filter(
+      approval =>
+        answerable.has(approval.approvalId) &&
+        (waiting === undefined || waiting.has(toolInvocationRawId(approval.approvalId))),
+    );
+  }, [allPending, newestMessage, waiting]);
   return { ...approvals, pending };
 }

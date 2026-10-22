@@ -40,11 +40,15 @@ describe('activityStateOf', () => {
     expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'auto_denied', tier: 3 }))]).toBe(
       'Turned down automatically',
     );
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'ran', tier: 2 }))]).toBe('Done quietly');
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'ran', tier: 2 }))]).toBe(
+      'Done · allowed by your settings',
+    );
   });
 
-  it('splits a logged row by tier: a read that ran is done quietly, a held call is waiting for you', () => {
-    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 1 }))]).toBe('Done quietly');
+  it('splits a logged row by tier: a read the settings allow is allowed, a held call is waiting for you', () => {
+    expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 1 }))]).toBe(
+      'Done · allowed by your settings',
+    );
     expect(ACTIVITY_STATE_LABELS[activityStateOf(entry({ outcome: 'logged', tier: 2 }))]).toBe('Waiting for you');
   });
 });
@@ -58,9 +62,9 @@ describe('receiptRowsOf', () => {
     ]);
     expect(rows).toEqual([
       {
-        key: 'done_quietly:Read your email',
+        key: 'allowed:Read your email',
         verb: 'Read your email',
-        state: 'done_quietly',
+        state: 'allowed',
         count: 3,
         latestAt: '2026-10-21T09:05:00.000Z',
       },

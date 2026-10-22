@@ -1,5 +1,6 @@
 'use client';
 
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import { useRef, useState, type FC } from 'react';
 
@@ -22,7 +23,12 @@ import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
-import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
+import {
+  WAITING_FOR_YOU_LABEL,
+  type SentinelApprovalCard,
+  type SentinelApprovalEmail,
+  type SentinelApprovalMailbox,
+} from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
@@ -126,6 +132,9 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       {email.bcc.length > 0 && (
         <p className="break-words text-sm text-text-primary">Hidden copy: {mailboxListText(email.bcc)}</p>
       )}
+      {email.reply_to !== null && (
+        <p className="break-words text-sm text-text-primary">Replies go to: {email.reply_to}</p>
+      )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
         Message, exactly as sent
@@ -142,6 +151,36 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       </div>
     </div>
   );
+}
+
+/** The search service's own fields: kept out of the way, but still listed, behind a closed disclosure. */
+function PlumbingDetails({ text }: { text: string }) {
+  return (
+    <details className="rounded border border-border bg-primary-bg px-3 py-2">
+      <summary className="cursor-pointer text-sm text-text-secondary">Search service details</summary>
+      <p className="mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        Also sent by the search service
+      </p>
+      <FoldedText
+        text={text}
+        as="pre"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+      />
+    </details>
+  );
+}
+
+/**
+ * The main block of "Exactly what will be sent": every line except the search service's own, which the
+ * Details disclosure lists. Lines are matched exactly, so nothing is dropped from the full list.
+ */
+function visibleOutboundText(text: string, plumbing: string | null): string {
+  if (plumbing === null) return text;
+  const folded = new Set(plumbing.split('\n'));
+  return text
+    .split('\n')
+    .filter(line => !folded.has(line))
+    .join('\n');
 }
 
 function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
@@ -192,6 +231,13 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card, { sentAt });
+  // A held search's chat choice only lifts its private-read check, so it says what it lets through.
+  const chatChoice = isSearchHoldCardText(card.plain_what)
+    ? APPROVAL_CHOICES.allowSearchesForChat
+    : APPROVAL_CHOICES.approveForChat;
+  const plumbingText = card.outbound_plumbing_text ?? null;
+  const outboundShown =
+    card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
 
   // The stub tears only for an approval the ledger allows; otherwise it simply goes.
   const markSent = (send: () => void) => () => {
@@ -225,7 +271,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <h3 className="aui-ticket__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
           {sentAt === null ? (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              Waiting for you
+              {WAITING_FOR_YOU_LABEL}
             </span>
           ) : (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
@@ -332,18 +378,17 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         <details className="text-sm">
           <summary className="cursor-pointer text-text-secondary underline">Details</summary>
           <div className="mt-2 space-y-3">
-            {card.outbound_text !== null && (
-              <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />
-            )}
+            {outboundShown !== null && <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />}
+            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
             {onApproveForChat !== undefined && !newRecipients && (
               <Button
                 variant="secondary"
                 size="small"
-                title={APPROVAL_CHOICES.approveForChat.hint}
+                title={chatChoice.hint}
                 onClick={markSent(onApproveForChat)}
                 disabled={disabled || sentAt !== null}
               >
-                {APPROVAL_CHOICES.approveForChat.label}
+                {chatChoice.label}
               </Button>
             )}
             {onApproveAlways !== undefined && !newRecipients && (

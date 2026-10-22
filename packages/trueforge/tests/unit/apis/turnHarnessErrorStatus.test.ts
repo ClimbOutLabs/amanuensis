@@ -70,6 +70,8 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
           workspace_cwd: null,
         },
         answersOnlyDeniedHeldActions: () => Promise.resolve(false),
+        answersOnlyEndedApprovals: () => Promise.resolve(false),
+        dismissEndedApprovals: () => Promise.reject(new Error('unexpected dismissal')),
         createTurn: () => Promise.reject(error),
         classifyApprovalResubmission: () => Promise.resolve({ outcome: 'unrecorded' }),
       }),
