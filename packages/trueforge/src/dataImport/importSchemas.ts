@@ -470,9 +470,9 @@ export type ImportFolderRecord = z.infer<typeof ImportFolderRecordSchema>;
 export const ImportFoldersFileSchema = z.array(ImportFolderRecordSchema);
 
 /**
- * An agent archived with stored model params but no reasoning effort mode imports as automatic,
- * written out. Older archives keep their stored effort, which only fixed mode sends. Without params
- * nothing is stored, and absent already means automatic.
+ * An agent archived with stored model params but no reasoning effort mode imports as fixed, written
+ * out, so it keeps the stored effort on every step. Without params nothing is stored, and absent
+ * already means fixed.
  */
 function withReasoningEffortMode(manifest: unknown): unknown {
   if (!isRecord(manifest) || !isRecord(manifest['model'])) {
@@ -483,7 +483,7 @@ function withReasoningEffortMode(manifest: unknown): unknown {
   if (!isRecord(params) || params['reasoning_effort_mode'] !== undefined) {
     return manifest;
   }
-  return { ...manifest, model: { ...model, params: { ...params, reasoning_effort_mode: 'automatic' } } };
+  return { ...manifest, model: { ...model, params: { ...params, reasoning_effort_mode: 'fixed' } } };
 }
 
 export const ImportAgentRecordSchema = z.object({

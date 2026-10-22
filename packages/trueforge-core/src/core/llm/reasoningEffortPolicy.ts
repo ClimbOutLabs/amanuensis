@@ -10,7 +10,8 @@ export type ReasoningStepKind = (typeof REASONING_STEP_KINDS)[number];
 
 /**
  * `automatic` picks an effort per step kind. `fixed` sends the persona's stored effort on every
- * step, which is what every step did before per-step effort existed. Absent means `automatic`.
+ * step, which is what every step did before per-step effort existed. Absent means `fixed`, so a
+ * persona keeps its stored effort until someone picks `automatic`.
  */
 export const REASONING_EFFORT_MODES = ['automatic', 'fixed'] as const;
 export type ReasoningEffortMode = (typeof REASONING_EFFORT_MODES)[number];
@@ -119,9 +120,9 @@ export function stepMaxOutputTokens({
   return configured === undefined ? cap : Math.min(configured, cap);
 }
 
-/** Reads the persisted mode key; anything other than `fixed` (including absent) is `automatic`. */
+/** Reads the persisted mode key; only an explicit `automatic` is automatic, anything else is `fixed`. */
 export function readReasoningEffortMode(params: Record<string, unknown> | undefined): ReasoningEffortMode {
-  return Reflect.get(params ?? {}, 'reasoning_effort_mode') === 'fixed' ? 'fixed' : 'automatic';
+  return Reflect.get(params ?? {}, 'reasoning_effort_mode') === 'automatic' ? 'automatic' : 'fixed';
 }
 
 /** The persona's stored effort, or undefined when it is absent or not a string. */

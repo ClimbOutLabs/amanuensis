@@ -46,6 +46,7 @@ interface TurnExecutionSource {
     signal: AbortSignal;
   }): AsyncGenerator<AgentThreadExecutionEvent | ToolResponseEvent, AgentThreadExecutionResult>;
   getMetrics(): AgentThreadMetrics;
+  getLastCallInputTokens(): number | null;
   activateThreadCreated?(threadId: string): void;
   buildAbnormalHandoff?(input: { cause: AbnormalHandoffCause }): Promise<AbnormalHandoff>;
 }
@@ -123,7 +124,11 @@ function toMCPAuthRequiredEvent(event: InternalMCPAuthRequiredEvent): MCPAuthReq
   };
 }
 
-function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics): TurnMetrics {
+export function turnMetricsFromAgentThreadMetrics(
+  metrics: AgentThreadMetrics,
+  lastCallInputTokens: number | null,
+  wallTimeMs: number,
+): TurnMetrics {
   return {
     total_input_tokens: metrics.total_input_tokens,
     total_output_tokens: metrics.total_output_tokens,
@@ -134,6 +139,15 @@ function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics): TurnMet
     total_cost_in_usd: metrics.total_cost_in_usd,
     step_reasoning_efforts: metrics.step_reasoning_efforts,
     total_truncated_tool_calls: metrics.total_truncated_tool_calls,
+    steps: metrics.iterations,
+    sub_agent_steps: metrics.sub_agent_steps,
+    last_call_input_tokens: lastCallInputTokens ?? undefined,
+    tool_calls_by_tool: metrics.tool_calls_by_tool,
+    results_by_kind: metrics.results_by_kind,
+    guard_fired: metrics.guard_fired,
+    claim_mismatch: metrics.claim_mismatch,
+    wall_time_ms: wallTimeMs,
+    time_to_first_token_ms: metrics.time_to_first_token_ms,
   };
 }
 
@@ -198,6 +212,31 @@ function sanitizeOneAssistantMessage(message: ContextMessage, sanitize: (text: s
   return message;
 }
 
+interface StreamingTurnControl {
+  cancelAndSettle(reason: CancellationReason): Promise<void>;
+}
+
+/** Turns whose stream runs in this process. Installs are single-replica, so this registry is the only owner. */
+const streamingTurns = new Map<string, StreamingTurnControl>();
+
+function streamingTurnKey(input: { session_id: string; turn_id: string }): string {
+  return `${input.session_id}\u0000${input.turn_id}`;
+}
+
+/**
+ * Cancels a turn this process is streaming and resolves once the stream has written its steps
+ * and terminal state. A turn no stream is running for returns at once. Callers must not await
+ * this from the consumer that drives the stream, since the stream cannot finish while that
+ * consumer is suspended.
+ */
+export async function cancelStreamingTurn(input: {
+  session_id: string;
+  turn_id: string;
+  reason: CancellationReason;
+}): Promise<void> {
+  await streamingTurns.get(streamingTurnKey(input))?.cancelAndSettle(input.reason);
+}
+
 export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private readonly store: ISessionStore<object, TTurnCustom>;
   private turn: TurnRecord<TTurnCustom>;
@@ -213,6 +252,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     { leaseId: string; renewalTimer: ReturnType<typeof setInterval> }
   >();
   private streamStarted = false;
+  private settleStream: (() => void) | undefined;
+  private readonly streamSettled = new Promise<void>(resolve => {
+    this.settleStream = resolve;
+  });
 
   constructor(options: {
     store: ISessionStore<object, TTurnCustom>;
@@ -336,6 +379,31 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       throw new Error('TurnHandle.stream() is only available on turns returned from SessionHandle.createTurn()');
     }
 
+    const key = streamingTurnKey(this.turn);
+    streamingTurns.set(key, this);
+    try {
+      yield* this.runStream({ orchestrator, resolver, signal });
+    } finally {
+      if (streamingTurns.get(key) === this) {
+        streamingTurns.delete(key);
+      }
+      this.settleStream?.();
+    }
+  }
+
+  /** Cancels this stream and resolves once its steps and terminal state are written. */
+  async cancelAndSettle(reason: CancellationReason): Promise<void> {
+    this.abort?.(reason);
+    await this.streamSettled;
+  }
+
+  private async *runStream(parts: {
+    orchestrator: TurnExecutionSource;
+    resolver: ITurnResourceResolver<TTurnCustom>;
+    signal: AbortSignal;
+  }): AsyncGenerator<TurnStreamingEvent> {
+    const { orchestrator, resolver, signal } = parts;
+    const streamStartedAt = Date.now();
     let caughtError: Error | undefined;
     const lifecycle = { frozenByStore: false };
     let executeResult: AgentThreadExecutionResult | undefined;
@@ -383,7 +451,11 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
             const createdAtIso = updatedAt.toISOString();
             const state: TerminalTurnState = {
               ...error.state,
-              metrics: turnMetricsFromAgentThreadMetrics(orchestrator.getMetrics()),
+              metrics: turnMetricsFromAgentThreadMetrics(
+                orchestrator.getMetrics(),
+                orchestrator.getLastCallInputTokens(),
+                Date.now() - streamStartedAt,
+              ),
             };
             this.turn = { ...this.turn, state, updated_at: updatedAt };
             yield {
@@ -429,7 +501,11 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       } else {
         const updatedAt = new Date();
         const createdAtIso = updatedAt.toISOString();
-        const metrics = turnMetricsFromAgentThreadMetrics(orchestrator.getMetrics());
+        const metrics = turnMetricsFromAgentThreadMetrics(
+          orchestrator.getMetrics(),
+          orchestrator.getLastCallInputTokens(),
+          Date.now() - streamStartedAt,
+        );
         // Abnormal handoffs are mechanical. In particular, cancellation must not
         // revive work through another model inference.
         const abnormalHandoffInput: { cause: AbnormalHandoffCause } | undefined = signal.aborted

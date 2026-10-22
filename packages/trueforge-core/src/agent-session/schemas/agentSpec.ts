@@ -36,7 +36,7 @@ const ModelParamsSchema = z
       .enum(REASONING_EFFORT_MODES)
       .optional()
       .describe(
-        'How reasoning effort is chosen. automatic (default) picks it per step; fixed sends reasoning_effort on every step.',
+        'How reasoning effort is chosen. fixed (default) sends reasoning_effort on every step; automatic picks it per step.',
       ),
   })
   .loose() // this ensures extra model params are allowed

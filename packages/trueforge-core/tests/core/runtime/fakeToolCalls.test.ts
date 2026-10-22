@@ -5,6 +5,7 @@
  * ran, what the person was shown, and what was saved.
  */
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type {
   ExtendedChatCompletionChunk,
@@ -12,11 +13,27 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import {
+  createToolCallMemoState,
+  createTurnToolCallLedger,
+  MAX_TOOL_MARKUP_RETRIES_PER_TURN,
+  MAX_WRITE_CALLS_PER_TURN,
+  mergeTurnToolCallLedgers,
+  type TurnToolCallLedger,
+} from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import {
+  REPEATED_ACTION_RESULT,
+  TOOL_MARKUP_RETRY_MESSAGE,
+  WRITE_CAP_BLOCKED_RESULT,
+  WRITE_CAP_STOP_MESSAGE,
+} from '../../../src/core/runtime/replyActionChecks';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { isRecord } from '../../../src/core/util/records';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
 const CREATE_SCHEMA = {
@@ -107,7 +124,7 @@ function rawCall(spec: CallSpec): RawToolCall {
 async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
-  toolMarkup?: 'recovered';
+  toolMarkup?: 'leaked';
   /** Overrides the finish reason, e.g. `length` for a reply cut off at the output limit. */
   finishReason?: 'length';
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
@@ -155,11 +172,13 @@ function makeThread(input: {
   toolSet: ReturnType<typeof makeToolSet>;
   create: ILLM['create'];
   context?: ContextMessage[];
+  turnToolCallLedger?: TurnToolCallLedger | undefined;
 }) {
   return new AgentThread({
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: input.turnToolCallLedger,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
@@ -201,25 +220,93 @@ function callToolNames(toolSet: ReturnType<typeof makeToolSet>): string[] {
   return jest.mocked(toolSet.callTool).mock.calls.map(call => call[0].name);
 }
 
+function deliveredText(events: unknown[]): string {
+  return events
+    .map(event => (isRecord(event) && event['type'] === EventType.MODEL_MESSAGE_DELTA ? event['content'] : undefined))
+    .filter((content): content is string => typeof content === 'string')
+    .join('');
+}
+
 describe('leaked markup', () => {
-  it('runs a call recovered from markup through the normal path', async () => {
+  it('never runs a call written as text, tells the model it did not run, and adds the plain line when no write succeeded', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      return round === 1
+        ? replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' })
+        : replyStream({ text: 'I could not set it.\n' });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(create.mock.calls[1]?.[0])).toContain(TOOL_MARKUP_RETRY_MESSAGE);
+    // The retried answer reuses the leaked step's message id, so live clients replace that stream; the
+    // delivered deltas end with the retried answer and the plain line.
+    expect(deliveredText(events)).toMatch(new RegExp(`I could not set it\\.\\n\\n${TOOL_MARKUP_NOTICE}$`));
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('ends the turn after the retry cap, still with no call run', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(create).toHaveBeenCalledTimes(MAX_TOOL_MARKUP_RETRIES_PER_TURN + 1);
+    expect(deliveredText(events)).toContain(TOOL_MARKUP_NOTICE);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('adds nothing for leaked markup when a write already succeeded in the turn', async () => {
     const toolSet = makeToolSet();
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
       if (round === 1) {
-        return replyStream({
-          text: 'Let me add that for you. ',
-          calls: [{ id: 'markup-recovered-0', name: 'create_event', args: VALID_CREATE_ARGS }],
-          toolMarkup: 'recovered',
-        });
+        return replyStream({ calls: [{ id: 'call-create', name: 'create_event', args: VALID_CREATE_ARGS }] });
       }
-      return finalAnswerStream();
+      return replyStream({ text: 'The reminder is in place.\n', toolMarkup: 'leaked' });
     });
     const thread = makeThread({ toolSet, create });
     const events = await drain(thread);
+
     expect(callToolNames(toolSet)).toEqual(['create_event']);
-    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+    expect(deliveredText(events)).not.toContain(TOOL_MARKUP_NOTICE);
+  });
+
+  it('adds the unbacked-claim note when the reply says it set something and no write call ran', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: "Done, I've set a 9:10 reminder." }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(deliveredText(events)).toBe(`Done, I've set a 9:10 reminder.\n\n${UNBACKED_CLAIM_NOTE}`);
+  });
+
+  it('leaves the reply alone when a write call succeeded in the same turn', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-create', name: 'create_event', args: VALID_CREATE_ARGS }] });
+      }
+      return replyStream({ text: "Done, I've set a 9:10 reminder." });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(deliveredText(events)).toBe("Done, I've set a 9:10 reminder.");
   });
 });
 
@@ -491,5 +578,256 @@ describe('duplicates, floods and dependent reads', () => {
       }),
     );
     expect(toolSet.callTool).not.toHaveBeenCalled();
+  });
+});
+
+/** The calendar tool set with create_event classified as a tier 3 write, as the permission layer does. */
+function makeTier3WriteToolSet() {
+  const toolSet = makeToolSet();
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'mcp',
+      mcp_server_id: toolSet.id,
+      mcp_server_name: toolSet.name,
+      original_tool_name: params.name,
+      is_approval_required: false,
+      ...(params.name === 'create_event' ? { tier: 3 as const } : {}),
+    }),
+  );
+  return toolSet;
+}
+
+function createArgs(title: string) {
+  return { ...VALID_CREATE_ARGS, title };
+}
+
+describe('per-turn tool loop guard', () => {
+  it('runs an identical call once in a reply and refuses every repeat in that reply', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const repeats = Array.from({ length: 19 }, (_, index) => ({
+      id: `call-${String(index)}`,
+      name: 'create_event',
+      args: VALID_CREATE_ARGS,
+    }));
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => replyStream({ calls: repeats }));
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    const refused = toolResults(thread).filter(result => result.content.includes(REPEATED_ACTION_RESULT));
+    expect(refused.length).toBeGreaterThan(0);
+  });
+
+  it('refuses an identical call made again in a later step of the same turn', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round <= 2) {
+        return replyStream({ calls: [{ id: `call-${String(round)}`, name: 'create_event', args: VALID_CREATE_ARGS }] });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+  });
+
+  it('stops the turn at the write cap: the write past it never runs and the person is told why', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      return replyStream({
+        calls: [{ id: `call-${String(round)}`, name: 'create_event', args: createArgs(`Dentist ${String(round)}`) }],
+      });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(MAX_WRITE_CALLS_PER_TURN).toBe(5);
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('leaves a normal turn with two writes untouched', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({ calls: [{ id: 'call-1', name: 'create_event', args: createArgs('Dentist') }] });
+      }
+      if (round === 2) {
+        return replyStream({ calls: [{ id: 'call-2', name: 'create_event', args: createArgs('Cleaning') }] });
+      }
+      return replyStream({ text: 'Both appointments are in place.' });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event']);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+    expect(deliveredText(events)).toBe('Both appointments are in place.');
+  });
+});
+
+describe('turn-wide counts across a resumed turn', () => {
+  /** One create_event call per reply, with the given titles, then a plain final answer. */
+  function scriptedWrites(titles: string[]): ILLM['create'] {
+    let round = 0;
+    return jest.fn((_request: LLMCreateParamsStreaming) => {
+      const title = titles[round];
+      round += 1;
+      return title === undefined
+        ? finalAnswerStream()
+        : replyStream({ calls: [{ id: `call-${String(round)}`, name: 'create_event', args: createArgs(title) }] });
+    });
+  }
+
+  it('keeps the write cap when a sub-agent resumes after an approval pause', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const paused = makeThread({
+      toolSet,
+      create: scriptedWrites(['Main 1', 'Main 2', 'Main 3']),
+      turnToolCallLedger: createTurnToolCallLedger(),
+    });
+    await drain(paused);
+    const resumedLedger = mergeTurnToolCallLedgers([createToolCallMemoState(paused.toSnapshot().tool_call_memo).turn]);
+    const resumedSub = makeThread({
+      toolSet,
+      create: scriptedWrites(['A 1', 'A 2', 'A 3']),
+      turnToolCallLedger: resumedLedger,
+    });
+
+    const events = await drain(resumedSub);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(resumedLedger.writeCallsThisTurn).toBe(MAX_WRITE_CALLS_PER_TURN);
+    expect(resumedLedger.stoppedForWriteCap).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+});
+
+describe('mergeTurnToolCallLedgers', () => {
+  it('takes the largest count from each snapshot and the root thread last call', () => {
+    const root = createTurnToolCallLedger();
+    root.writeCallsThisTurn = 2;
+    root.lastCallSignature = 'root-call';
+    root.callSignatures.set('shared', { count: 1, writesAtLastRun: 1 });
+    const child = createTurnToolCallLedger();
+    child.writeCallsThisTurn = 4;
+    child.lastCallSignature = 'child-call';
+    child.callSignatures.set('shared', { count: 2, writesAtLastRun: 4 });
+
+    const merged = mergeTurnToolCallLedgers([root, child]);
+
+    expect(merged.writeCallsThisTurn).toBe(4);
+    expect(merged.lastCallSignature).toBe('root-call');
+    expect(merged.callSignatures.get('shared')).toEqual({ count: 2, writesAtLastRun: 4 });
+  });
+});
+
+describe('turn-wide counts across threads', () => {
+  /** One create_event call per reply, with the given titles, then a plain final answer. */
+  function scriptedWrites({ prefix, titles }: { prefix: string; titles: string[] }): ILLM['create'] {
+    const replies = [
+      ...titles.map((title, index) => ({
+        calls: [{ id: `${prefix}-${String(index)}`, name: 'create_event', args: createArgs(title) }],
+      })),
+    ];
+    let round = 0;
+    return jest.fn((_request: LLMCreateParamsStreaming) => {
+      const reply = replies[round];
+      round += 1;
+      return reply === undefined ? finalAnswerStream() : replyStream(reply);
+    });
+  }
+
+  it('counts writes from the main thread and two sub-agents toward one turn cap', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Main 1', 'Main 2'] }),
+      turnToolCallLedger,
+    });
+    const subA = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'a', titles: ['A 1', 'A 2'] }),
+      turnToolCallLedger,
+    });
+    const subB = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'b', titles: ['B 1', 'B 2', 'B 3'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    await drain(subA);
+    const subBEvents = await drain(subB);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(turnToolCallLedger.writeCallsThisTurn).toBe(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(subB).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(subBEvents.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('refuses an identical call that a sibling thread already ran when no write ran since', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+    const sub = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'sub', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    await drain(sub);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+  });
+
+  it('runs an identical call again when a sibling thread has run a write since it last ran', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+    const sub = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'sub', titles: ['Other', 'Shared'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    await drain(sub);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event', 'create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
   });
 });

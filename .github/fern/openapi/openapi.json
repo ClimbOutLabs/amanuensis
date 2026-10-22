@@ -6577,7 +6577,7 @@
             "type": "string"
           },
           "reasoning_effort_mode": {
-            "description": "How reasoning effort is chosen. automatic (default) picks it per step; fixed sends reasoning_effort on every step.",
+            "description": "How reasoning effort is chosen. fixed (default) sends reasoning_effort on every step; automatic picks it per step.",
             "enum": [
               "automatic",
               "fixed"
@@ -7729,6 +7729,34 @@
           "name",
           "url",
           "description"
+        ],
+        "type": "object"
+      },
+      "ReplyResultsByKind": {
+        "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
+        "properties": {
+          "error": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refused": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "refused",
+          "unavailable",
+          "error"
         ],
         "type": "object"
       },
@@ -11585,12 +11613,57 @@
       "TurnMetrics": {
         "description": "Optional billable aggregate for the whole turn.",
         "properties": {
+          "claim_mismatch": {
+            "description": "True when the last tool call in this reply did not succeed.",
+            "type": "boolean"
+          },
+          "guard_fired": {
+            "description": "Reason code of the first guard that blocked a tool call, or null when none did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_call_input_tokens": {
+            "description": "Input tokens of the last model call in this turn: the context size the model last saw.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "results_by_kind": {
+            "$ref": "#/components/schemas/ReplyResultsByKind"
+          },
           "step_reasoning_efforts": {
             "additionalProperties": {
               "minimum": 0,
               "type": "integer"
             },
             "description": "Model requests per reasoning effort in this turn. The key unset means no effort was sent.",
+            "type": "object"
+          },
+          "steps": {
+            "description": "Model steps in this reply, including sub-agent steps.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sub_agent_steps": {
+            "description": "Model steps run by sub-agents in this reply.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time_to_first_token_ms": {
+            "description": "Milliseconds from the first model request to its first output, or null when there was none.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool_calls_by_tool": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Tool calls in this reply, counted per tool name.",
             "type": "object"
           },
           "total_cache_read_tokens": {
@@ -11625,6 +11698,16 @@
           },
           "total_tokens": {
             "description": "Total tokens (input + output) across model calls in this turn.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_truncated_tool_calls": {
+            "description": "Tool calls in this turn whose arguments were cut off at the output limit and not sent.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wall_time_ms": {
+            "description": "Milliseconds from turn start to finish.",
             "minimum": 0,
             "type": "integer"
           }

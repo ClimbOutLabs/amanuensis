@@ -157,12 +157,12 @@ describe('stepMaxOutputTokens', () => {
 });
 
 describe('persisted reasoning fields', () => {
-  it('reads the mode, defaulting to automatic for anything but fixed', () => {
-    expect(readReasoningEffortMode(undefined)).toBe('automatic');
-    expect(readReasoningEffortMode({})).toBe('automatic');
+  it('reads the mode, defaulting to fixed unless automatic is stored', () => {
+    expect(readReasoningEffortMode(undefined)).toBe('fixed');
+    expect(readReasoningEffortMode({})).toBe('fixed');
     expect(readReasoningEffortMode({ reasoning_effort_mode: 'automatic' })).toBe('automatic');
     expect(readReasoningEffortMode({ reasoning_effort_mode: 'fixed' })).toBe('fixed');
-    expect(readReasoningEffortMode({ reasoning_effort_mode: 'sometimes' })).toBe('automatic');
+    expect(readReasoningEffortMode({ reasoning_effort_mode: 'sometimes' })).toBe('fixed');
   });
 
   it('reads the stored effort only when it is a string', () => {

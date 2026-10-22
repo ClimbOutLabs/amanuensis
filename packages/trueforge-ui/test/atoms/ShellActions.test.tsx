@@ -18,18 +18,18 @@ afterEach(() => {
 });
 
 describe('ShellActions tour entry', () => {
-  it('offers Show the tour only while the owner has the tour hidden', () => {
+  it('offers Replay the tour only while the owner has the tour hidden', () => {
     renderActions();
-    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
   });
 
   it('brings the tour back from the footer and clears the stored hide', () => {
     window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
     renderActions();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show the tour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replay the tour' }));
 
-    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
   });
 });

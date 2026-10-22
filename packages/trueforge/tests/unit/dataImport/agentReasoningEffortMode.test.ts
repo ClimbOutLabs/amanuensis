@@ -20,14 +20,14 @@ function importedModelParams(record: Record<string, unknown>): Record<string, un
 }
 
 describe('imported agent reasoning effort mode', () => {
-  it('imports an older agent with a stored effort as automatic, keeping the effort', () => {
+  it('imports an older agent with a stored effort as fixed, keeping the effort on every step', () => {
     expect(importedModelParams(olderAgentRecord({ reasoning_effort: 'low' }))).toEqual({
       reasoning_effort: 'low',
-      reasoning_effort_mode: 'automatic',
+      reasoning_effort_mode: 'fixed',
     });
   });
 
-  it('leaves an agent with no params alone, since absent already means automatic', () => {
+  it('leaves an agent with no params alone, since absent already means fixed', () => {
     expect(importedModelParams(olderAgentRecord(undefined))).toBeUndefined();
   });
 

@@ -162,6 +162,7 @@ describe('orchestration: dynamic sub-agent', () => {
       capabilities: [dynamicSubAgents({ sandboxAvailable: false, tracing: NOOP_AGENT_TRACING })],
       capabilityState: undefined,
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       // Default
@@ -207,6 +208,7 @@ describe('orchestration: dynamic sub-agent', () => {
         capabilities: undefined,
         capabilityState: undefined,
         toolCallMemo: undefined,
+        turnToolCallLedger: undefined,
         taskState: undefined,
         isRequestContinuation: undefined,
         tracing: NOOP_AGENT_TRACING,
@@ -235,5 +237,14 @@ describe('orchestration: dynamic sub-agent', () => {
     if (childLLM === undefined) {
       throw new Error('expected child LLM to be created');
     }
+
+    const metrics = orchestrator.getMetrics();
+    expect(metrics.iterations).toBe(3);
+    expect(metrics.sub_agent_steps).toBe(1);
+    // Sub-agent creation is counted in total_sub_agents, not as a tool result, as total_tool_calls already does.
+    expect(metrics.tool_calls_by_tool).toEqual({});
+    expect(metrics.total_sub_agents).toBe(1);
+    expect(metrics.total_cache_read_tokens).toBeUndefined();
+    expect(metrics.total_reasoning_tokens).toBeUndefined();
   });
 });

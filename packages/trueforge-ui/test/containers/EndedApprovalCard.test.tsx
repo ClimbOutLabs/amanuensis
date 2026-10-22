@@ -81,7 +81,7 @@ function fakeServer(waitingIds: string[], statuses: string[] = ['done']) {
     dismissPendingApprovals: vi.fn(),
     answerHeldAction: vi.fn(),
     getLastCompactionStatus: vi.fn(),
-    getLastTurnInputTokens: vi.fn(),
+    getLastCallInputTokens: vi.fn(),
     dismissEndedApproval: vi.fn(async () => undefined),
   };
 }

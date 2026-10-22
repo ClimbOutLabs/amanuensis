@@ -36,7 +36,7 @@ import type {
   LLMToolMessage,
   LLMUserMessage,
 } from '../llm/LLMTypes';
-import type { ToolCallMemoSnapshot } from '../mcp/executeToolCalls';
+import type { ToolCallMemoSnapshot, TurnToolCallLedger } from '../mcp/executeToolCalls';
 import type { SentinelHostContext } from '../permissions';
 import type { Sandbox } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
@@ -232,6 +232,8 @@ export interface AgentThreadConstructorInput {
   currentContextUsage?: CurrentContextUsage | undefined;
   preComputedCompletion?: SubAgentCompletionMarker | undefined;
   sandbox?: Sandbox | undefined;
+  /** Whether this server has a sandbox at all, from the host's status. Decides which no-sandbox line the chat gets. */
+  serverSandboxAvailable?: boolean | undefined;
   capabilities?: readonly AgentCapability[] | undefined;
   /**
    * Previous turn's capability_state for hydration. Optional — omit on first
@@ -240,6 +242,8 @@ export interface AgentThreadConstructorInput {
   capabilityState?: CapabilityState | undefined;
   /** Previous turn's canonical tool-call memo for continuation hydration. */
   toolCallMemo: ToolCallMemoSnapshot | undefined;
+  /** The turn's shared counts when a sub-agent is started within it; undefined for the main thread. */
+  turnToolCallLedger: TurnToolCallLedger | undefined;
   /**
    * Previous request's task-state scratchpad for continuation hydration.
    * Only consumed when `isRequestContinuation` is true; a genuinely new user

@@ -116,3 +116,11 @@ describe('modelPatchForComposerEffort', () => {
     expect(existing).toEqual({ reasoningEffortMode: 'automatic', reasoningEffort: 'medium' });
   });
 });
+
+describe('readThinkingMode', () => {
+  it('reads an absent mode as fixed, so a persona keeps its stored effort on every step', () => {
+    expect(readThinkingMode({ reasoningEffort: 'low' })).toBe('fixed');
+    expect(readThinkingMode(undefined)).toBe('fixed');
+    expect(readThinkingMode({ reasoningEffortMode: 'automatic' })).toBe('automatic');
+  });
+});

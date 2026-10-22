@@ -24,13 +24,13 @@ describe('reasoning effort step counts', () => {
     addReasoningEffortStep(child, 'low');
     addReasoningEffortStep(child, 'low');
 
-    addAgentThreadMetrics(parent, child);
+    addAgentThreadMetrics({ target: parent, source: child, isSubAgent: false });
     expect(parent.step_reasoning_efforts).toEqual({ high: 1, low: 2 });
   });
 
   it('stays absent when no request was counted', () => {
     const parent = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(parent, createEmptyAgentThreadMetrics());
+    addAgentThreadMetrics({ target: parent, source: createEmptyAgentThreadMetrics(), isSubAgent: false });
     expect(parent.step_reasoning_efforts).toBeUndefined();
   });
 });
@@ -42,13 +42,13 @@ describe('truncated tool call counts', () => {
     const child = createEmptyAgentThreadMetrics();
     addTruncatedToolCalls(child, 2);
 
-    addAgentThreadMetrics(parent, child);
+    addAgentThreadMetrics({ target: parent, source: child, isSubAgent: false });
     expect(parent.total_truncated_tool_calls).toBe(3);
   });
 
   it('stays absent when no reply was cut off with a call', () => {
     const parent = createEmptyAgentThreadMetrics();
-    addAgentThreadMetrics(parent, createEmptyAgentThreadMetrics());
+    addAgentThreadMetrics({ target: parent, source: createEmptyAgentThreadMetrics(), isSubAgent: false });
     expect(parent.total_truncated_tool_calls).toBeUndefined();
   });
 });

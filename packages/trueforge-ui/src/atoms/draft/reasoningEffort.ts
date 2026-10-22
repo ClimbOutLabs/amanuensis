@@ -47,10 +47,10 @@ export function modelPatchWithReasoningEffort(
 /** How the agent picks reasoning effort: per step, or the stored effort on every step. */
 export type ThinkingMode = 'automatic' | 'fixed';
 
-/** Absent means automatic, matching the server's reading of a stored mode. */
+/** Absent means fixed, matching the server's reading of a stored mode. */
 export function readThinkingMode(params: ModelParams | undefined): ThinkingMode {
   const mode: unknown = params?.reasoningEffortMode;
-  return mode === 'fixed' ? 'fixed' : 'automatic';
+  return mode === 'automatic' ? 'automatic' : 'fixed';
 }
 
 /**

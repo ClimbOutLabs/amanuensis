@@ -7,23 +7,30 @@ import {
 } from '../../../src/core/llm/reasoningEffortPolicy';
 import type { ModelParams } from '../../../src/core/runtime/AgentDefinition';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
-import type { AgentThreadEvent, ContextMessage } from '../../../src/core/runtime/AgentThread.types';
+import {
+  InternalEventType,
+  type AgentThreadEvent,
+  type ContextMessage,
+} from '../../../src/core/runtime/AgentThread.types';
+import { LENGTH_CUT_OFF_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-async function* answerStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+async function* answerStream(
+  finishReason: 'stop' | 'length',
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   yield {
     id: 'chunk-1',
     object: 'chat.completion.chunk',
     created: 0,
     model: 'test-model',
-    choices: [{ index: 0, delta: { role: 'assistant', content: 'answer' }, finish_reason: 'stop' }],
+    choices: [{ index: 0, delta: { role: 'assistant', content: 'answer' }, finish_reason: finishReason }],
   };
   return {
     output: { role: 'assistant', content: 'answer' },
     usage: getEmptyUsage(),
-    finish_reason: 'stop',
+    finish_reason: finishReason,
   };
 }
 
@@ -31,12 +38,14 @@ function makeThread({
   context,
   modelParams,
   reasoningEfforts,
+  finishReason = 'stop',
 }: {
   context?: ContextMessage[];
   modelParams?: ModelParams;
   reasoningEfforts: readonly string[] | undefined;
+  finishReason?: 'stop' | 'length';
 }) {
-  const create = jest.fn(answerStream);
+  const create = jest.fn(() => answerStream(finishReason));
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
@@ -44,6 +53,7 @@ function makeThread({
     toolCallMemo: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
+    turnToolCallLedger: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     definition: {
@@ -78,7 +88,7 @@ async function drain(thread: AgentThread): Promise<AgentThreadEvent[]> {
 describe('per-step reasoning effort and output cap', () => {
   const supported = ['none', 'low', 'medium', 'high'];
 
-  it('sends high on the first step of a reply in automatic mode, with no mode key', async () => {
+  it('sends high on the first step of a reply in automatic mode', async () => {
     const { thread, create } = makeThread({
       modelParams: { reasoning_effort: 'low', reasoning_effort_mode: 'automatic' },
       reasoningEfforts: supported,
@@ -88,6 +98,31 @@ describe('per-step reasoning effort and output cap', () => {
     const body = firstRequest(create);
     expect(body['reasoning_effort']).toBe('high');
     expect(body).not.toHaveProperty('reasoning_effort_mode');
+  });
+
+  it('a persona with no mode keeps its stored effort on every step, including the final answer', async () => {
+    const { thread, create } = makeThread({
+      context: [
+        { role: 'user', content: 'Look it up.' },
+        { role: 'tool', tool_call_id: 'call-1', content: 'result' },
+      ],
+      modelParams: { reasoning_effort: 'low' },
+      reasoningEfforts: supported,
+    });
+    await drain(thread);
+
+    expect(firstRequest(create)['reasoning_effort']).toBe('low');
+  });
+
+  it('a reply with no tool calls is not capped, however long the answer is asked to be', async () => {
+    const { thread, create } = makeThread({
+      context: [{ role: 'user', content: 'Write a long essay.' }],
+      modelParams: { reasoning_effort: 'high', max_tokens: 16_000, reasoning_effort_mode: 'automatic' },
+      reasoningEfforts: supported,
+    });
+    await drain(thread);
+
+    expect(firstRequest(create)['max_tokens']).toBe(16_000);
   });
 
   it('sends no effort parameter for a model that advertises no efforts', async () => {
@@ -116,7 +151,7 @@ describe('per-step reasoning effort and output cap', () => {
         { role: 'user', content: 'Look it up.' },
         { role: 'tool', tool_call_id: 'call-1', content: 'result' },
       ],
-      modelParams: { reasoning_effort: 'high', max_tokens: 16_000 },
+      modelParams: { reasoning_effort: 'high', max_tokens: 16_000, reasoning_effort_mode: 'automatic' },
       reasoningEfforts: supported,
     });
     await drain(thread);
@@ -126,8 +161,33 @@ describe('per-step reasoning effort and output cap', () => {
     expect(body['max_tokens']).toBe(FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS);
   });
 
+  it('a wrap-up answer cut at the cap ends with the cut-off line, not silently', async () => {
+    const { thread, create } = makeThread({
+      context: [
+        { role: 'user', content: 'Look it up.' },
+        { role: 'tool', tool_call_id: 'call-1', content: 'result' },
+      ],
+      modelParams: { reasoning_effort: 'high' },
+      reasoningEfforts: supported,
+      finishReason: 'length',
+    });
+    const events = await drain(thread);
+
+    expect(firstRequest(create)['max_tokens']).toBe(
+      FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS,
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: LENGTH_CUT_OFF_MESSAGE,
+    });
+  });
+
   it('records each request under the effort it was sent with', async () => {
-    const { thread } = makeThread({ reasoningEfforts: supported });
+    const { thread } = makeThread({
+      modelParams: { reasoning_effort: 'high', reasoning_effort_mode: 'automatic' },
+      reasoningEfforts: supported,
+    });
     await drain(thread);
 
     expect(thread.getAgentThreadMetrics().step_reasoning_efforts).toEqual({ high: 1 });

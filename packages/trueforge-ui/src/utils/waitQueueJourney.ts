@@ -1,4 +1,4 @@
-import { formatDuration, parseMcpToolArgs } from './toolCallParsing.js';
+import { formatDuration, notDoneText, parseMcpToolArgs } from './toolCallParsing.js';
 
 /**
  * The wait queue: a turn's journey rendered as winding stations, Disneyland-queue
@@ -33,6 +33,8 @@ export type WaitQueuePart = {
   statusType: WaitQueuePartStatus;
   toolName?: string | undefined;
   argsText?: string | undefined;
+  /** Set when the call did not run; its progress line then says so instead of "Finished". */
+  notDoneReason?: string | undefined;
 };
 
 export type WaitQueueMemory = {
@@ -147,6 +149,7 @@ function fileFromArgs(argsText: string | undefined): string | undefined {
 /** One quiet staged-reveal tick for a finished tool call, e.g. `Read schema.sql`. */
 function toolTick(part: WaitQueuePart): string {
   const name = safeToolName(part);
+  if (part.notDoneReason !== undefined) return notDoneText({ toolName: name, reason: part.notDoneReason });
   const file = fileFromArgs(part.argsText);
   if (EDIT_TOOLS.has(name)) return file ? `Updated ${file}` : 'Updated files';
   if (READ_TOOLS.has(name)) return file ? `Read ${file}` : 'Read files';
