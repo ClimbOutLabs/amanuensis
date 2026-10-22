@@ -1,20 +1,16 @@
 import type { ReactNode } from 'react';
 
-import { useSlot } from '../theme/SlotsProvider.js';
 import { useOptionalThemePreset } from '../theme/ThemeProvider.js';
 import { cn } from './lib/cn.js';
 
 export type WelcomeScreenProps = {
-  heading?: string;
+  heading?: ReactNode;
   icon?: ReactNode;
   className?: string;
 };
 
-export function WelcomeScreen({ heading = 'How can I help you today?', icon, className }: WelcomeScreenProps) {
+export function WelcomeScreen({ heading = 'How can I help you today?', icon = null, className }: WelcomeScreenProps) {
   const preset = useOptionalThemePreset();
-  const BrandLogo = useSlot('BrandLogo');
-  const resolvedIcon =
-    icon !== undefined ? icon : preset === 'high-contrast' ? null : <BrandLogo variant="icon" className="size-10" />;
 
   return (
     <div
@@ -24,20 +20,16 @@ export function WelcomeScreen({ heading = 'How can I help you today?', icon, cla
         className,
       )}
     >
-      {resolvedIcon !== null && (
-        <div
-          className={cn(
-            'fill-mode-both mb-4 duration-200 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:animate-none',
-          )}
-        >
-          {resolvedIcon}
+      {icon !== null && (
+        <div className="fill-mode-both mb-4 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:animate-none duration-200">
+          {icon}
         </div>
       )}
       <h1
         className={cn(
           'aui-thread-welcome-message-inner fill-mode-both text-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:animate-none',
           preset === 'paper' ? 'font-semibold' : 'font-normal',
-          resolvedIcon !== null && 'delay-75',
+          icon !== null && 'delay-75',
           'duration-200',
         )}
       >

@@ -13,7 +13,7 @@ import {
 } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
-import { dayPartForHour } from './dayPart.js';
+import { dayPartForHour, msUntilNextDayPart, type DayPart } from './dayPart.js';
 import { ensureStyles } from './ensureStyles.js';
 import { resolvePresetTokens, resolveThemePreset } from './presets/index.js';
 import {
@@ -177,6 +177,20 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
     }
   }, []);
 
+  // The paper follows the local hour while the app stays open: re-arm on each band boundary.
+  const [dayPart, setDayPart] = useState<DayPart>(() => dayPartForHour(new Date().getHours()));
+  useEffect(() => {
+    let timer: number | undefined;
+    const arm = () => {
+      timer = window.setTimeout(() => {
+        setDayPart(dayPartForHour(new Date().getHours()));
+        arm();
+      }, msUntilNextDayPart(new Date()));
+    };
+    arm();
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const hostTokens = useMemo(() => resolveHostTokens(theme?.tokens, mode), [theme?.tokens, mode]);
 
   const value = useMemo<ThemeContextValue>(
@@ -210,7 +224,7 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
         className={cn('aui-theme-root h-full min-h-0', mode === 'dark' && 'dark', theme?.className)}
         data-theme={mode}
         data-preset={preset}
-        data-day={dayPartForHour(new Date().getHours())}
+        data-day={dayPart}
         style={rootStyle}
       >
         {children}

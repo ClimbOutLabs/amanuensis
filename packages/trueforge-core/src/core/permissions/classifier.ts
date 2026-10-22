@@ -105,6 +105,7 @@ import {
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
+  searchProviderLabel,
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
@@ -1791,7 +1792,7 @@ async function holdSearchCall(input: {
   const { action, ctx, fields } = input;
   const shown =
     input.summary.length > SEARCH_CARD_TEXT_MAX ? `${input.summary.slice(0, SEARCH_CARD_TEXT_MAX)}...` : input.summary;
-  const server = action.mcp_server_name ?? SEARCH_SERVER_FALLBACK;
+  const provider = searchProviderLabel({ host: action.mcp_server_host });
   const tavilyText =
     input.params === undefined
       ? null
@@ -1811,7 +1812,8 @@ async function holdSearchCall(input: {
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
-      destination: action.mcp_server_name ?? null,
+      // The connector id is never shown; "Sends to" carries the provider's brand instead.
+      destination: null,
       recipient: null,
       amount: null,
       parsed_command: null,
@@ -1820,7 +1822,8 @@ async function holdSearchCall(input: {
         params: input.params,
         plumbingFields: action.mcp_search_plumbing_fields ?? [],
       }),
-      destination_host: fields.destination_host,
+      // The card's "Sends to" line names the provider, not the host it is reached on.
+      destination_host: provider ?? SEARCH_SERVER_FALLBACK,
       outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
@@ -1834,7 +1837,10 @@ async function holdSearchCall(input: {
       connector: connectorBindingFor(action),
     }),
   });
-  return { ...decision, audit_description: searchHoldAuditText({ server, say: input.say }) };
+  return {
+    ...decision,
+    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say }),
+  };
 }
 
 /**

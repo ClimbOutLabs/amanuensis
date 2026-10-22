@@ -61,7 +61,7 @@ export default function MemorySection() {
     <div className="flex h-full min-h-0 flex-col gap-4">
       <MemoryTabs ariaLabel="Memory sections" tabs={MEMORY_TABS} activeTab={tab} onTabChange={selectTab} />
 
-      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} /> : null}
+      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} onOpenSettings={() => selectTab('settings')} /> : null}
       {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : null}
       {tab === 'settings' ? (
         <Suspense fallback={<MemorySettingsFallback />}>
