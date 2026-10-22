@@ -14,35 +14,29 @@ EM_IMAP_MODE=
 EM_SMTP_HOST=
 EM_SMTP_PORT=
 EM_SMTP_MODE=
-EM_VERIFY=
 EM_PASSWORD=
 EM_TARGET=
 EM_SKIP=
 
-# One preset per line: key, incoming host, port, mode, outgoing host, port, mode, check the certificate.
-# A mode is ssl (encrypted from the start) or starttls (upgraded after connecting). Proton Bridge runs on this computer
-# with its own certificate, which is why only its preset turns the certificate check off.
-EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl true
-yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl true
-aol imap.aol.com 993 ssl smtp.aol.com 465 ssl true
-icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls true
-fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl true
-zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl true
-gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl true
-webde imap.web.de 993 ssl smtp.web.de 587 starttls true
-proton 127.0.0.1 1143 starttls 127.0.0.1 1025 starttls false'
+# One preset per line: key, incoming host, port, mode, outgoing host, port, mode.
+# A mode is ssl (encrypted from the start) or starttls (upgraded after connecting). The certificate is always checked.
+EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl
+yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl
+aol imap.aol.com 993 ssl smtp.aol.com 465 ssl
+icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls
+fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl
+zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl
+gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl
+webde imap.web.de 993 ssl smtp.web.de 587 starttls'
 
 # The one sign-in check after saving. It runs from this computer, so the Email connector does not have to be running.
-# Its six input lines (server, port, mode, certificate check, address, password) come on stdin, never on the command line.
+# Its five input lines (server, port, mode, address, password) come on stdin, never on the command line.
 # It prints ok, login (the server refused the sign-in) or server (the server could not be reached or trusted).
 EMAIL_CHECK_PY=$(
   cat <<'PY'
 import imaplib, ssl, sys
-host, port, mode, verify, user, password = sys.stdin.read().split("\n")[:6]
+host, port, mode, user, password = sys.stdin.read().split("\n")[:5]
 ctx = ssl.create_default_context()
-if verify != "true":
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
 try:
     if mode == "ssl":
         conn = imaplib.IMAP4_SSL(host, int(port), ssl_context=ctx, timeout=20)
@@ -52,10 +46,9 @@ try:
 except (OSError, ssl.SSLError, imaplib.IMAP4.error, ValueError):
     print("server")
     sys.exit(0)
-# Quoted, so a password with spaces or symbols reaches the server as one string.
-quoted = '"' + password.replace("\\", "\\\\").replace('"', '\\"') + '"'
+# imaplib quotes the password itself, so it is passed as it is.
 try:
-    conn.login(user, quoted)
+    conn.login(user, password)
 except imaplib.IMAP4.error:
     print("login")
     sys.exit(0)
@@ -80,8 +73,7 @@ email_provider_key() { # number or name -> key, nothing when unknown
     6 | zoho) echo zoho ;;
     7 | gmx) echo gmx ;;
     8 | webde) echo webde ;;
-    9 | proton) echo proton ;;
-    10 | other) echo other ;;
+    9 | other) echo other ;;
   esac
 }
 
@@ -95,14 +87,13 @@ email_provider_name() { # key -> the name a person sees
     zoho) echo Zoho ;;
     gmx) echo GMX ;;
     webde) echo web.de ;;
-    proton) echo "Proton Mail Bridge" ;;
     *) echo "Other provider" ;;
   esac
 }
 
 email_provider_problem() {
   if [ -z "$(email_provider_key "$1")" ]; then
-    echo "Type a number from 1 to 10, or one of gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, proton, other."
+    echo "Type a number from 1 to 9, or one of gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, other."
   fi
 }
 
@@ -121,8 +112,14 @@ email_port_problem() {
   echo "A port is a number from 1 to 65535, for example 993."
 }
 
-# Spaces are how providers display an app password; they are not part of it. Only what remains is checked.
-email_clean_password() { printf '%s' "${1// /}"; }
+# Some providers show an app password in groups split by spaces; the spaces are not part of it. Other passwords are
+# kept as typed.
+email_clean_password() { # key password
+  case "$1" in
+    gmail | icloud | yahoo | aol | fastmail) printf '%s' "${2// /}" ;;
+    *) printf '%s' "$2" ;;
+  esac
+}
 
 email_secret_problem() {
   local LC_ALL=C
@@ -133,13 +130,13 @@ email_secret_problem() {
   fi
 }
 
-# Sets E_* from the preset row of a provider key. Returns 1 for an unknown key.
+# Sets EM_* from the preset row of a provider key. Returns 1 for an unknown key.
 email_preset() {
   local row
   row=$(printf '%s\n' "$EMAIL_PRESETS" | sed -n "/^$1 /p")
   [ -n "$row" ] || return 1
   # shellcheck disable=SC2034 # the key column is only there to find the row
-  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE EM_VERIFY <<<"$row"
+  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE <<<"$row"
 }
 
 # The encryption of a server the person typed: port 993 and 465 are encrypted from the start, others upgrade.
@@ -148,21 +145,20 @@ email_other_modes() {
   [ "$EM_IMAP_PORT" != 993 ] || EM_IMAP_MODE=ssl
   EM_SMTP_MODE=starttls
   [ "$EM_SMTP_PORT" != 465 ] || EM_SMTP_MODE=ssl
-  EM_VERIFY=true
 }
 
-# Outlook, Hotmail and Live addresses need a Microsoft sign-in, which is not part of this installer yet.
+# Microsoft addresses need a Microsoft sign-in, which is not part of this installer yet.
 email_is_microsoft() {
   local address
   address=$(lowercase "$1")
   case "$address" in
-    *@outlook.* | *@hotmail.* | *@live.*) return 0 ;;
+    *@outlook.* | *@hotmail.* | *@live.* | *@msn.com | *@passport.com | *@windowslive.com | *@*.onmicrosoft.com) return 0 ;;
   esac
   return 1
 }
 
 email_microsoft_message() {
-  echo "Outlook, Hotmail and Live addresses need a Microsoft sign-in. That comes in a later update, so skip email for now."
+  echo "Microsoft addresses, such as Outlook, Hotmail, Live and MSN, need a Microsoft sign-in. That comes in a later update, so skip email for now."
 }
 
 # The one sentence on how to make an app password for each provider.
@@ -176,14 +172,13 @@ email_password_hint() { # key
     zoho) echo "In your Zoho account security settings, create an application-specific password." ;;
     gmx) echo "Turn on IMAP in your GMX settings first, then type your GMX password." ;;
     webde) echo "Turn on POP3 and IMAP access in your web.de mail settings first, then make an app password if you use two-step sign-in." ;;
-    proton) echo "Open Proton Mail Bridge on this computer and copy the Bridge password it shows for your account, not your Proton login password." ;;
     *) echo "Type the password your provider gave you for mail apps." ;;
   esac
 }
 
 # With --yes nobody can answer, so the provider, the address and, for Other, the servers must come from flags.
 email_require_flags() {
-  [ -n "$OPT_EMAIL_PROVIDER" ] || usage_die "With --yes the email account needs --email-provider: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, proton or other."
+  [ -n "$OPT_EMAIL_PROVIDER" ] || usage_die "With --yes the email account needs --email-provider: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde or other."
   [ -n "$OPT_EMAIL_ADDRESS" ] || usage_die "With --yes the email account needs --email-address ADDRESS, the address to connect."
   if [ "$(email_provider_key "$OPT_EMAIL_PROVIDER")" = other ]; then
     [ -n "$OPT_EMAIL_IMAP_HOST" ] || usage_die "With --yes, --email-provider other needs --email-imap-host, the incoming mail server."
@@ -191,26 +186,27 @@ email_require_flags() {
   fi
 }
 
-# The app password is read without echo on a terminal and from the next input line otherwise. It never goes on the
+# The app password is read without echo on a terminal, or taken from its line of the input. It never goes on the
 # command line, and it is cleared once the file is written.
 email_ask_password() { # key
   local tries=0 problem
   if [ "$OPT_EMAIL_PASSWORD_STDIN" = 1 ]; then
-    IFS= read -r EM_PASSWORD || EM_PASSWORD=
-    EM_PASSWORD=$(email_clean_password "$EM_PASSWORD")
+    if [ "$DRY_RUN" = 1 ]; then return 0; fi
+    EM_PASSWORD=$(email_clean_password "$1" "$STDIN_EMAIL_PASSWORD")
+    STDIN_EMAIL_PASSWORD=
     problem=$(email_secret_problem "$EM_PASSWORD")
     [ -z "$problem" ] || usage_die "$problem"
     return 0
   fi
   if [ "$DRY_RUN" = 1 ]; then return 0; fi
   if [ "$ASSUME_YES" = 1 ]; then
-    usage_die "With --yes the email account needs its app password. Add --email-password-stdin and put the password on the next line of the input."
+    usage_die "With --yes the email account needs its app password. Add --email-password-stdin and put the password on its own line of the input, in the order install.sh --help gives."
   fi
   ui_line "An app password is a separate password for mail apps. Your normal password often does not work with it."
   ui_line "$(email_password_hint "$1")"
   while [ "$tries" -lt "$UI_MAX_TRIES" ]; do
     ui_password EM_PASSWORD "App password for the email account" || die "No app password was entered, so the email account was not set up."
-    EM_PASSWORD=$(email_clean_password "$EM_PASSWORD")
+    EM_PASSWORD=$(email_clean_password "$1" "$EM_PASSWORD")
     problem=$(email_secret_problem "$EM_PASSWORD")
     if [ -z "$problem" ]; then return 0; fi
     UI_FD=2 ui_fail "$problem"
@@ -267,8 +263,7 @@ email_collect() { # install|instance
     ui_line "  6 Zoho"
     ui_line "  7 GMX"
     ui_line "  8 web.de"
-    ui_line "  9 Proton Mail Bridge, on this computer"
-    ui_line "  10 Other provider: you type its servers"
+    ui_line "  9 Other provider: you type its servers"
   fi
   ask_valid EM_PROVIDER "Your provider (type a number)" "" "" email_provider_problem
   EM_PROVIDER=$(email_provider_key "$EM_PROVIDER")
@@ -288,7 +283,7 @@ email_collect() { # install|instance
     if [ -n "$OPT_EMAIL_IMAP_HOST$OPT_EMAIL_IMAP_PORT$OPT_EMAIL_SMTP_HOST$OPT_EMAIL_SMTP_PORT" ]; then
       usage_die "The server options are for --email-provider other. $(email_provider_name "$EM_PROVIDER") fills in its own servers."
     fi
-    email_preset "$EM_PROVIDER" || usage_die "No preset for $EM_PROVIDER."
+    email_preset "$EM_PROVIDER" || usage_die "This installer has no servers saved for $EM_PROVIDER. Use --email-provider other and give its servers."
   fi
   email_ask_password "$EM_PROVIDER"
   ui_line "Email: $(email_provider_name "$EM_PROVIDER") at $EM_IMAP_HOST, signed in as $EM_ADDRESS."
@@ -345,12 +340,12 @@ email_env_text() {
     "MCP_EMAIL_SERVER_IMAP_PORT=$EM_IMAP_PORT" \
     "MCP_EMAIL_SERVER_IMAP_SSL=$imap_ssl" \
     "MCP_EMAIL_SERVER_IMAP_START_SSL=$imap_start" \
-    "MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=$EM_VERIFY" \
+    "MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=true" \
     "MCP_EMAIL_SERVER_SMTP_HOST=$EM_SMTP_HOST" \
     "MCP_EMAIL_SERVER_SMTP_PORT=$EM_SMTP_PORT" \
     "MCP_EMAIL_SERVER_SMTP_SSL=$smtp_ssl" \
     "MCP_EMAIL_SERVER_SMTP_START_SSL=$smtp_start" \
-    "MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=$EM_VERIFY"
+    "MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true"
 }
 
 # Signs in once. The password reaches python3 on stdin only. Without python3 the check is skipped and says so.
@@ -361,8 +356,8 @@ email_check() { # name
       "Install python3, then run: install.sh instance email $name"
     return 0
   fi
-  answer=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$EM_IMAP_HOST" "$EM_IMAP_PORT" "$EM_IMAP_MODE" "$EM_VERIFY" "$EM_ADDRESS" "$EM_PASSWORD" |
-    python3 -c "$EMAIL_CHECK_PY" 2>/dev/null || true)
+  answer=$(printf '%s\n%s\n%s\n%s\n%s\n' "$EM_IMAP_HOST" "$EM_IMAP_PORT" "$EM_IMAP_MODE" "$EM_ADDRESS" "$EM_PASSWORD" |
+    (cd / && python3 -I -c "$EMAIL_CHECK_PY") 2>/dev/null || true)
   case "$answer" in
     ok)
       ui_ok "Signed in to $EM_IMAP_HOST as $EM_ADDRESS. The email connector can read this account."
@@ -431,6 +426,8 @@ cmd_instance_email() {
     ui_ok "The Email connector is removed. Any saved app password has been deleted from this computer."
     return 0
   fi
+  [ -n "$REL_MAIL_EMAIL_IMAGE" ] ||
+    die "The installed version of Aman has no email connector yet. Run install.sh upgrade first, then run this command again."
   email_collect instance
   if [ -n "$EM_SKIP" ]; then return 0; fi
   email_apply "$name"

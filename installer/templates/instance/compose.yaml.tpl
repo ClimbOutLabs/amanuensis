@@ -185,6 +185,10 @@ services:
 @@IF_EMAIL@@      - mail-email-data:/data
 @@IF_EMAIL@@    expose:
 @@IF_EMAIL@@      - '9557'
+@@IF_EMAIL@@    cap_drop:
+@@IF_EMAIL@@      - ALL
+@@IF_EMAIL@@    security_opt:
+@@IF_EMAIL@@      - no-new-privileges:true
 @@IF_EMAIL@@    restart: unless-stopped
 
   dex:

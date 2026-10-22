@@ -170,7 +170,7 @@ short key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 2
-  assert_flat_contains "$ERR" "--token-factory-key-stdin reads the Token Factory key from it"
+  assert_flat_contains "$ERR" "The Token Factory key line of the input was empty. Put the key on its own line"
   install_with_key_stdin --token-factory-model 'bad model'
   assert_rc 2
   install_with_key_stdin --token-factory-model '-leading'

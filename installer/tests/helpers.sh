@@ -243,6 +243,27 @@ with_input() {
 
 clear_input() { INPUT_FILE=; }
 
+# The email sign-in check runs python3 with -c. This stand-in records what it was given and answers with the text in
+# imap_answer (ok when absent). Every other python3 call goes to the real one, so the rest of the installer is unchanged.
+install_python_stub() {
+  local real
+  real=$(command -v python3)
+  rm -f "$SB_BIN/python3"
+  cat >"$SB_BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *imaplib*)
+    printf '%s\n' "$*" >>"$STUB_STATE/imap_argv"
+    cat >"$STUB_STATE/imap_stdin"
+    cat "$STUB_STATE/imap_answer" 2>/dev/null || echo ok
+    ;;
+  *) exec "$STUB_REAL_PY3" "$@" ;;
+esac
+STUB
+  chmod 755 "$SB_BIN/python3"
+  RUN_ENV_EXTRA+=("STUB_REAL_PY3=$real")
+}
+
 os_release_ubuntu() {
   printf 'ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble\n' >"$SB/os-release"
 }

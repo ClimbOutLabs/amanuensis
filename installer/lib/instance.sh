@@ -620,14 +620,10 @@ print_proxy_requirements() {
   say "    the app contacts the login origin from inside its container."
 }
 
-# With --password-stdin the password is the first line of stdin, read before any prompt can take it; with
-# --token-factory-key-stdin the key is the next line.
+# The stdin answers were read before any prompt could take one; the sign-in password is checked here.
 read_password_first() {
   if [ "$PASSWORD_FROM_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     ask_password AMAN_PASSWORD
-  fi
-  if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
-    read_token_factory_key_stdin
   fi
 }
 
@@ -768,6 +764,7 @@ load_installed_release() {
   REL_STT_TAG=$CUR_STT_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
+  REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
 }
 

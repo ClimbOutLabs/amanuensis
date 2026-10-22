@@ -188,9 +188,11 @@ Options
   --email ADDRESS       the email you sign in with
   --your-name NAME      what Aman should call you (default: asked, or the start of your email)
   --instance NAME       which instance demo-seed and password apply to (default: the only one)
-  --password-stdin      read the password from the first line of the input instead of asking for it
-  --token-factory-key-stdin  read the Token Factory key from the input (the line after the password with --password-stdin); never put the key on the command line
-                        With several stdin options the lines come in this order: password, Token Factory key, email app password.
+  --password-stdin      read the sign-in password from the input instead of asking for it
+  --token-factory-key-stdin  read the Token Factory key from the input; never put the key on the command line
+                        Each option that ends in -stdin reads one line of the input. The lines come in this order:
+                        sign-in password, Token Factory key, calendar app password, email app password.
+                        Leave out the line of an option you do not give.
   --token-factory-model ID   the Token Factory model to use (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
   --demo                make the instance a demo and fill it with example data once it runs
@@ -210,16 +212,16 @@ Options
   --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
-  --email-provider NAME  with the email options: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, proton or other
+  --email-provider NAME  with the email options: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde or other
   --email-address ADDRESS  the email address to connect
-  --email-password-stdin  read the email app password from the input (see the line order below)
+  --email-password-stdin  read the email app password from the input (see the line order above)
   --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
                         the incoming and outgoing servers, for --email-provider other only
   --calendar-provider NAME  the calendar provider: fastmail, yahoo, gmx, webde or other (with --yes: required)
   --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
   --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
   --calendar-user NAME  the calendar login name (default: the email address)
-  --calendar-password-stdin  read the calendar app password from the next input line (with --yes: required)
+  --calendar-password-stdin  read the calendar app password from the input (see the line order above; with --yes: required)
   --remove              with instance email or instance calendar, remove that connection
   --print-root-steps    show the admin steps that install Docker, and stop
   --print-network       show every site the installer may contact, and stop
@@ -401,6 +403,10 @@ on_exit() {
   AMAN_PASSWORD=
   AMAN_TF_KEY=
   EM_PASSWORD=
+  CAL_PASSWORD=
+  STDIN_SIGNIN_PASSWORD=
+  STDIN_CAL_PASSWORD=
+  STDIN_EMAIL_PASSWORD=
   ui_step_abort
   upgrade_on_exit
   import_on_exit
@@ -447,6 +453,7 @@ main() {
       *) usage_die "--dry-run applies to install, upgrade, instance add and instance import" ;;
     esac
   fi
+  stdin_answers_read
   case "$COMMAND" in
     install) cmd_install ;;
     backup) cmd_backup ;;

@@ -109,19 +109,21 @@ calendar_require_flags() {
   [ -n "$CAL_EMAIL" ] || usage_die "With --yes the calendar needs --calendar-email ADDRESS, the email address of the calendar account."
 }
 
-# The app password is read without echo on a terminal and from the next input line otherwise. It never goes on the
+# The app password is read without echo on a terminal, or taken from its line of the input. It never goes on the
 # command line, and it is cleared once the file is written.
 calendar_ask_password() {
   local tries=0 problem
   if [ "$OPT_CAL_PASSWORD_STDIN" = 1 ]; then
-    IFS= read -r CAL_PASSWORD || CAL_PASSWORD=
+    if [ "$DRY_RUN" = 1 ]; then return 0; fi
+    CAL_PASSWORD=$STDIN_CAL_PASSWORD
+    STDIN_CAL_PASSWORD=
     problem=$(calendar_secret_problem "$CAL_PASSWORD")
     [ -z "$problem" ] || usage_die "$problem"
     return 0
   fi
   if [ "$DRY_RUN" = 1 ]; then return 0; fi
   if [ "$ASSUME_YES" = 1 ]; then
-    usage_die "With --yes the calendar needs its app password. Add --calendar-password-stdin and put the password on the next line of the input."
+    usage_die "With --yes the calendar needs its app password. Add --calendar-password-stdin and put the password on its own line of the input, in the order install.sh --help gives."
   fi
   ui_line "Create an app password at your provider and use it here. Your normal password does not work."
   while [ "$tries" -lt "$UI_MAX_TRIES" ]; do
