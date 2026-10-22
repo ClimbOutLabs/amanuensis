@@ -6,7 +6,13 @@ import { HelpStuckButton } from '../help/HelpStuckButton.js';
 import { rememberErrorText } from '../help/lastError.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
-import { EXPIRED_REQUEST_DESCRIPTION, EXPIRED_REQUEST_TITLE, isStaleApprovalError } from '../utils/staleApproval.js';
+import {
+  EXPIRED_REQUEST_DESCRIPTION,
+  EXPIRED_REQUEST_TITLE,
+  isEndedApprovalError,
+  isStaleApprovalError,
+  REQUEST_ENDED_LINE,
+} from '../utils/staleApproval.js';
 import {
   DAILY_BUDGET_DESCRIPTION,
   DAILY_BUDGET_TITLE,
@@ -45,6 +51,10 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
 }
 
 function normalizeError(error: unknown): ToastContent {
+  if (isEndedApprovalError(error)) {
+    // One plain line, and nothing from the server's error beyond it.
+    return { title: REQUEST_ENDED_LINE };
+  }
   if (isStaleApprovalError(error)) {
     return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
   }
