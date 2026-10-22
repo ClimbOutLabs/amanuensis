@@ -27,6 +27,7 @@ describe('AgentThread unknown tool logging', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -61,11 +62,19 @@ describe('AgentThread unknown tool logging', () => {
     // (recoverFromLoopOrExit): its first firing in a turn only appends a corrective note and lets
     // the turn continue, so the model gets one more chance before a second repeat actually stops
     // the turn with loop_detected. That's three model calls, not two.
+    // The repeats use different arguments: an identical repeat is refused by the identical-call
+    // guard and would end the turn at once as a repeat, not as the unavailable-tool stop below.
     const create = jest
       .fn()
-      .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-1' }))
-      .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-2' }))
-      .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-3' }))
+      .mockImplementationOnce(() =>
+        unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-1', args: '{"attempt":1}' }),
+      )
+      .mockImplementationOnce(() =>
+        unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-2', args: '{"attempt":2}' }),
+      )
+      .mockImplementationOnce(() =>
+        unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-3', args: '{"attempt":3}' }),
+      )
       .mockImplementation(() => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
@@ -73,6 +82,7 @@ describe('AgentThread unknown tool logging', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
 export const TurnStateErrorMetrics: core.serialization.ObjectSchema<serializers.TurnStateErrorMetrics.Raw, TrueForge.TurnStateErrorMetrics> = core.serialization.object({
+        "lastCallInputTokens": core.serialization.property("last_call_input_tokens", core.serialization.number().optional()),
         "totalCacheReadTokens": core.serialization.property("total_cache_read_tokens", core.serialization.number().optional()),
         "totalCacheWriteTokens": core.serialization.property("total_cache_write_tokens", core.serialization.number().optional()),
         "totalCostInUsd": core.serialization.property("total_cost_in_usd", core.serialization.number().optional()),
@@ -16,6 +17,7 @@ export const TurnStateErrorMetrics: core.serialization.ObjectSchema<serializers.
 
 export declare namespace TurnStateErrorMetrics {
     export interface Raw {
+        last_call_input_tokens?: number | null;
         total_cache_read_tokens?: number | null;
         total_cache_write_tokens?: number | null;
         total_cost_in_usd?: number | null;

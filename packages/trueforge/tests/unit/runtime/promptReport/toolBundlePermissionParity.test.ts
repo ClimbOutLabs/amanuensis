@@ -277,6 +277,7 @@ async function judge(input: { mode: Mode; row: ToolRow; loading: Loading }): Pro
     definition: { ...instance.definition, modelClient },
     threadId: 'main',
     title: 'Main',
+    turnToolCallLedger: undefined,
     sandbox: instance.sandbox,
     capabilities,
     // A message that asks for no bundle, so only the loading under test decides what is sent.

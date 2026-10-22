@@ -32,7 +32,6 @@ export const AgentThreadMetricsSchema = z
     results_by_kind: ReplyResultsByKindSchema,
     guard_fired: z.string().nullable(),
     claim_mismatch: z.boolean(),
-    last_call_input_tokens: z.number().int().nonnegative().nullable(),
     time_to_first_token_ms: z.number().int().nonnegative().nullable(),
     total_summarizations: z.number().int().nonnegative(),
     total_sub_agents: z.number().int().nonnegative(),
@@ -60,7 +59,6 @@ export function createEmptyAgentThreadMetrics(): AgentThreadMetrics {
     results_by_kind: { ok: 0, refused: 0, unavailable: 0, error: 0 },
     guard_fired: null,
     claim_mismatch: false,
-    last_call_input_tokens: null,
     time_to_first_token_ms: null,
     total_summarizations: 0,
     total_sub_agents: 0,
@@ -76,7 +74,6 @@ export function updateMetricsFromUsage(target: AgentThreadMetrics, usage: Comple
   target.total_cache_write_tokens = sumOptional(target.total_cache_write_tokens, usage.cache_write_tokens);
   target.total_reasoning_tokens = sumOptional(target.total_reasoning_tokens, usage.reasoning_tokens);
   target.total_cost_in_usd = sumOptional(target.total_cost_in_usd, usage.cost_in_usd);
-  target.last_call_input_tokens = usage.input_tokens;
 }
 
 /**
@@ -122,7 +119,7 @@ export function recordToolCallResult(
 
 /**
  * Adds a thread's metrics into a total. Sub-agent threads pass `isSubAgent` so their steps count
- * toward `sub_agent_steps`. `claim_mismatch`, `last_call_input_tokens` and `time_to_first_token_ms`
+ * toward `sub_agent_steps`. `claim_mismatch` and `time_to_first_token_ms`
  * describe the root thread's reply only, so they are not summed here.
  */
 export function addAgentThreadMetrics({

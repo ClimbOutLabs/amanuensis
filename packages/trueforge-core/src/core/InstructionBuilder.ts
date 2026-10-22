@@ -48,8 +48,7 @@
  * // </system-prompt>
  */
 
-/** The assistant name used when the person has not set one. */
-export const DEFAULT_ASSISTANT_NAME = 'Aman';
+import { DEFAULT_ASSISTANT_NAME } from './personas/assistantName';
 
 /** Names for a root identity. Missing, null or blank values use the fallbacks on `rootAgentIdentity`. */
 export interface RootAgentNames {

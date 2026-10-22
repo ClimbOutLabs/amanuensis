@@ -3,6 +3,7 @@ import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
+import { REPEATED_ACTION_RESULT } from '../../../src/core/runtime/replyActionChecks';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
@@ -37,13 +38,17 @@ function makeWriteToolSet(): IToolSet {
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-async function* writeCallStream(
-  callId: string,
-): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+async function* writeCallStream({
+  callId,
+  content,
+}: {
+  callId: string;
+  content: string;
+}): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const call = {
     id: callId,
     type: 'function' as const,
-    function: { name: 'write_file', arguments: JSON.stringify({ path: 'smoke.md', content: 'hello' }) },
+    function: { name: 'write_file', arguments: JSON.stringify({ path: 'smoke.md', content }) },
   };
   yield {
     id: `chunk-${callId}`,
@@ -67,8 +72,11 @@ describe('repeated side effect with a genuinely unknown outcome', () => {
     const create = jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
       round += 1;
-      if (round === 1) return writeCallStream('write-1');
-      if (round === 2) return writeCallStream('write-2');
+      // A different write sits between the first attempt and its identical retry: an identical
+      // call straight after the one before it ends the turn, which is not what this test covers.
+      if (round === 1) return writeCallStream({ callId: 'write-1', content: 'hello' });
+      if (round === 2) return writeCallStream({ callId: 'write-2', content: 'draft' });
+      if (round === 3) return writeCallStream({ callId: 'write-3', content: 'hello' });
       return finalAnswerStream();
     });
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
@@ -76,6 +84,7 @@ describe('repeated side effect with a genuinely unknown outcome', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -95,12 +104,13 @@ describe('repeated side effect with a genuinely unknown outcome', () => {
       events.push(event);
     }
 
-    // The identical retry was refused before it dispatched a second time.
-    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
+    // Two dispatches: the first attempt (which dropped) and the different draft write. The identical
+    // retry of the first attempt was refused before it dispatched a second time.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(2);
     // No fatal turn error anywhere in the run: the refusal is a tool result, not a stop.
     expect(events).not.toContainEqual(expect.objectContaining({ status: 'error' }));
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
     // The model actually saw the refusal text in the next request it made.
-    expect(JSON.stringify(requests[2]?.messages)).toContain('already attempted');
+    expect(JSON.stringify(requests[3]?.messages)).toContain(REPEATED_ACTION_RESULT);
   });
 });

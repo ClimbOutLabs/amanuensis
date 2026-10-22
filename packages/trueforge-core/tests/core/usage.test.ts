@@ -156,7 +156,6 @@ describe('per-reply metrics', () => {
     const root = createEmptyAgentThreadMetrics();
     root.iterations = 2;
     root.claim_mismatch = true;
-    root.last_call_input_tokens = 50;
     recordToolCallResult(root, { toolName: 'search', disposition: 'executed_ok', reasonCode: null });
 
     const child = createEmptyAgentThreadMetrics();
@@ -172,6 +171,5 @@ describe('per-reply metrics', () => {
     expect(total.tool_calls_by_tool).toEqual({ search: 2 });
     expect(total.results_by_kind).toEqual({ ok: 1, refused: 0, unavailable: 0, error: 1 });
     expect(total.claim_mismatch).toBe(false);
-    expect(total.last_call_input_tokens).toBeNull();
   });
 });

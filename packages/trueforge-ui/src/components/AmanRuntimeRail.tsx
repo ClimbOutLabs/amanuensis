@@ -7,6 +7,7 @@ import { Icon } from '../icons/Icon.js';
 import { ACTIVITY_STATE_LABELS } from '../sentinel/activityVerbs.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 import { AmanAvatarMotion, AVATAR_ALT, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
   PersonalizationProvider,
@@ -230,7 +231,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </span>
             )}
             <div className="aman-runtime-rail__identity aui-panda__caption">
-              <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
+              <h2 id="aman-runtime-rail-title">{assistantDisplayName(profile?.assistant_name)}</h2>
               <p className="aui-panda__role">Your chief of staff</p>
             </div>
           </section>

@@ -1,17 +1,7 @@
 /**
- * Leaked tool-call markup: the streaming filter must never release markup text, and the parser
- * must rebuild only complete, well-formed calls. Anything half-formed or invented is broken.
+ * Leaked tool-call markup: the streaming filter never releases markup text, and no markup is ever run.
  */
-import { parseToolMarkup, ToolMarkupGuard } from '../../../src/core/llm/toolMarkup';
-
-const DSML_CREATE =
-  '<｜DSML｜tool_calls>\n' +
-  '<｜DSML｜invoke name="create_event">\n' +
-  '<｜DSML｜parameter name="title" string="true">Dentist appointment</｜DSML｜parameter>\n' +
-  '<｜DSML｜parameter name="start" string="false">{"date_time": "2026-10-27T14:30:00", "time_zone": "America/New_York"}</｜DSML｜parameter>\n' +
-  '<｜DSML｜parameter name="attendees" string="false">[{"email": "sam@example.com"}]</｜DSML｜parameter>\n' +
-  '</｜DSML｜invoke>\n' +
-  '</｜DSML｜tool_calls>';
+import { ToolMarkupGuard } from '../../../src/core/llm/toolMarkup';
 
 describe('ToolMarkupGuard streaming filter', () => {
   it('passes ordinary text through, holding back only a possible opener tail', () => {
@@ -19,7 +9,7 @@ describe('ToolMarkupGuard streaming filter', () => {
     expect(guard.push('Hello there. ')).toBe('Hello there. ');
     expect(guard.push('a < b and c > d')).toBe('a < b and c > d');
     expect(guard.inMarkup).toBe(false);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('holds a partial opener until the next piece settles it', () => {
@@ -27,7 +17,7 @@ describe('ToolMarkupGuard streaming filter', () => {
     // The piece ends mid-tag: nothing after the last safe character may be released yet.
     expect(guard.push('Working on it <')).toBe('Working on it ');
     expect(guard.push('b>not markup</b>')).toBe('<b>not markup</b>');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('never releases DSML markup split across pieces, nor the claim after it', () => {
@@ -43,14 +33,14 @@ describe('ToolMarkupGuard streaming filter', () => {
     expect(shown).toBe('Let me add that. ');
     expect(shown).not.toContain('DSML');
     expect(shown).not.toContain('added the appointment');
-    expect(guard.finish().status).toBe('recovered');
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('never releases a function_results block', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Checking now. <function_results>The event was added.</function_results> All done.');
     expect(shown).toBe('Checking now. ');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('keeps markup shown as an example inside a fenced code block as text', () => {
@@ -60,7 +50,7 @@ describe('ToolMarkupGuard streaming filter', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps a fenced example as text when it streams in pieces, split inside the fence and the markup', () => {
@@ -77,10 +67,10 @@ describe('ToolMarkupGuard streaming filter', () => {
       expect(guard.inMarkup).toBe(false);
     }
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('still captures markup that comes after a fenced example closes', () => {
+  it('still holds back markup that comes after a fenced example closes', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push(
       'Example:\n```\n<tool_call>{"name": "get_event", "arguments": {"event_id": "evt-1"}}</tool_call>\n```\nNow for real: ' +
@@ -88,10 +78,7 @@ describe('ToolMarkupGuard streaming filter', () => {
     );
     expect(shown).toContain('evt-1');
     expect(shown).not.toContain('evt-2');
-    expect(guard.finish()).toEqual({
-      status: 'recovered',
-      calls: [{ name: 'get_event', arguments: { event_id: 'evt-2' } }],
-    });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('keeps a tilde-fenced example as text too', () => {
@@ -99,7 +86,7 @@ describe('ToolMarkupGuard streaming filter', () => {
     const text = 'Shape:\n~~~\n<tool_call>{"name": "get_event", "arguments": {}}</tool_call>\n~~~\nDone.';
     const shown = guard.push(text);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 });
 
@@ -110,7 +97,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps that answer whole when the inline code streams in split pieces', () => {
@@ -121,7 +108,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
       expect(guard.inMarkup).toBe(false);
     }
     expect(shown + guard.heldText).toBe('Wrap the value in the `<parameter>` tag and save the file.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps a bare parameter mention with no backticks as text too', () => {
@@ -130,7 +117,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps prose that names the invoke and tool_call elements as text', () => {
@@ -139,7 +126,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps a sentence that shows a bare invoke tag as an example, byte for byte', () => {
@@ -148,7 +135,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps that sentence whole when it streams in pieces, split at the tag', () => {
@@ -158,7 +145,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     shown += guard.push(' to start a call.');
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe('Use <invoke name="x"> to start a call.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('releases an invoke whose envelope never completes when the reply ends', () => {
@@ -166,14 +153,14 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const text = 'It opens like <invoke name="create_event"><parameter name="title">Den';
     const shown = guard.push(text);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('still stops a lone invoke whose envelope completes, which is broken markup', () => {
+  it('holds back a lone invoke whose envelope completes as leaked markup', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('<invoke name="create_event"><parameter name="title">Dentist</parameter></invoke>');
     expect(shown).toBe('');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('keeps a [TOOL_CALLS] mention that no list follows as text', () => {
@@ -182,10 +169,10 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('still recovers a real call that follows an inline-code mention of the wrapper', () => {
+  it('holds back a real call that follows an inline-code mention of the wrapper', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push(
       'Aside: `<tool_call>` is the wrapper. For real now: ' +
@@ -193,27 +180,21 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
     );
     expect(shown).toContain('Aside:');
     expect(shown).not.toContain('evt-2');
-    expect(guard.finish()).toEqual({
-      status: 'recovered',
-      calls: [{ name: 'get_event', arguments: { event_id: 'evt-2' } }],
-    });
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('still stops a plain XML call attempt, which is broken markup', () => {
+  it('holds back a plain XML call attempt as leaked markup', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('<tool_calls><invoke name="create_event"></invoke></tool_calls>');
     expect(shown).toBe('');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('still recovers a Mistral list streamed through the guard', () => {
+  it('holds back a Mistral list streamed through the guard', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Doing it now. [TOOL_CALLS] [{"name": "get_event", "arguments": {"event_id": "evt-1"}}]');
     expect(shown).toBe('Doing it now. ');
-    expect(guard.finish()).toEqual({
-      status: 'recovered',
-      calls: [{ name: 'get_event', arguments: { event_id: 'evt-1' } }],
-    });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('does not let an unclosed backtick on one line hide a real leak on the next', () => {
@@ -222,7 +203,7 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
       'A stray ` backtick sits on this line.\n<｜DSML｜invoke name="create_event"></｜DSML｜invoke>',
     );
     expect(shown).toBe('A stray ` backtick sits on this line.\n');
-    expect(guard.finish()).toEqual({ status: 'recovered', calls: [{ name: 'create_event', arguments: {} }] });
+    expect(guard.finish()).toBe('leaked');
   });
 });
 
@@ -233,7 +214,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps that sentence whole when it streams in pieces, split inside the tag', () => {
@@ -243,7 +224,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     shown += guard.push('ults> ends the block.');
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe('The closing tag </function_results> ends the block.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps prose that names the DSML marker with no call shape around it as text', () => {
@@ -252,7 +233,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps that prose whole when the marker streams in split pieces', () => {
@@ -262,7 +243,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     shown += guard.push('ML｜ opens a call block in that format.');
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe('The marker <｜DSML｜ opens a call block in that format.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps prose that names the DSML wrapper as text', () => {
@@ -271,7 +252,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps prose that names the results block with no closing tag as text', () => {
@@ -279,7 +260,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     const text = 'A <function_results> block holds results the model made up.';
     const shown = guard.push(text);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('never releases a results block streamed in pieces', () => {
@@ -288,7 +269,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
     shown += guard.push('Checking now. <function_res');
     shown += guard.push('ults>The event was added.</function_results> All done.');
     expect(shown).toBe('Checking now. ');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('releases a prose invoke example and still captures the real DSML call after it, in one piece', () => {
@@ -298,10 +279,7 @@ describe('ToolMarkupGuard prose naming the strong tags', () => {
       '<｜DSML｜invoke name="create_event"><｜DSML｜parameter name="title" string="true">Dentist</｜DSML｜parameter></｜DSML｜invoke>';
     const shown = guard.push(text);
     expect(shown).toBe('Use <invoke name="x"> to start a call. Now: ');
-    expect(guard.finish()).toEqual({
-      status: 'recovered',
-      calls: [{ name: 'create_event', arguments: { title: 'Dentist' } }],
-    });
+    expect(guard.finish()).toBe('leaked');
   });
 });
 
@@ -314,7 +292,7 @@ describe('ToolMarkupGuard indented code blocks', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps it whole when the block streams in pieces, split inside the envelope', () => {
@@ -325,7 +303,7 @@ describe('ToolMarkupGuard indented code blocks', () => {
     shown += guard.push('ate_event"><parameter name="title">Dentist</parameter></invoke>');
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(`Review:\n\n    ${ENVELOPE}`);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps it whole when the split falls inside the indentation', () => {
@@ -336,15 +314,15 @@ describe('ToolMarkupGuard indented code blocks', () => {
     shown += guard.push(ENVELOPE);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(`Review:\n\n    ${ENVELOPE}`);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('still captures a genuine envelope after the indented block ends', () => {
+  it('still holds back a genuine envelope after the indented block ends', () => {
     const guard = new ToolMarkupGuard();
     const text = `Review:\n\n    <invoke name="x">an example</invoke>\n\nFor real: ${ENVELOPE}`;
     const shown = guard.push(text);
     expect(shown).toBe('Review:\n\n    <invoke name="x">an example</invoke>\n\nFor real: ');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 
   it('streams an indented block followed by ordinary prose whole', () => {
@@ -353,7 +331,7 @@ describe('ToolMarkupGuard indented code blocks', () => {
     const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('does not treat a two-space indent as a code block', () => {
@@ -361,7 +339,7 @@ describe('ToolMarkupGuard indented code blocks', () => {
     const text = `Review:\n\n  ${ENVELOPE}`;
     const shown = guard.push(text);
     expect(shown).toBe('Review:\n\n  ');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 });
 
@@ -370,7 +348,7 @@ describe('ToolMarkupGuard stray closing tags', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Let me look.\n</tool_call>\nThe space is ready.');
     expect(shown).toBe('Let me look.\nThe space is ready.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('hides a stray closing tag that streams in split pieces', () => {
@@ -380,14 +358,14 @@ describe('ToolMarkupGuard stray closing tags', () => {
       shown += guard.push(piece);
     }
     expect(shown + guard.heldText).toBe('Let me look.\nNext.');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('hides a stray closing tag at the very end of the reply', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Done.\n</tool_call>');
     expect(shown + guard.heldText).toBe('Done.\n');
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps a closing tag named inside a sentence as text', () => {
@@ -395,98 +373,67 @@ describe('ToolMarkupGuard stray closing tags', () => {
     const text = 'Close the block with </tool_call> at the end.';
     const shown = guard.push(text);
     expect(shown + guard.heldText).toBe(text);
-    expect(guard.finish()).toEqual({ status: 'clean' });
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('stops a wrapper with a closing tag and no call inside as broken markup', () => {
+  it('holds back a wrapper with a closing tag and no call inside as leaked markup', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Before. <tool_call>not json</tool_call>');
     expect(shown).toBe('Before. ');
-    expect(guard.finish()).toEqual({ status: 'broken' });
+    expect(guard.finish()).toBe('leaked');
   });
 });
 
-describe('parseToolMarkup', () => {
-  it('rebuilds a DSML call, with JSON parameters parsed and string parameters kept as text', () => {
-    const outcome = parseToolMarkup(DSML_CREATE);
-    expect(outcome).toEqual({
-      status: 'recovered',
-      calls: [
-        {
-          name: 'create_event',
-          arguments: {
-            title: 'Dentist appointment',
-            start: { date_time: '2026-10-27T14:30:00', time_zone: 'America/New_York' },
-            attendees: [{ email: 'sam@example.com' }],
-          },
-        },
-      ],
-    });
+describe('ToolMarkupGuard chat-template and function-name forms', () => {
+  it('holds back a lone DSML parameter line, the shape the model wrote as text', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(
+      'Setting the reminder now.\n<｜DSML｜parameter name="start" string="true">2026-10-23T09:10</｜DSML｜parameter>\n',
+    );
+    expect(shown).toBe('Setting the reminder now.\n');
+    expect(shown).not.toContain('DSML');
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('rebuilds more than one DSML invoke', () => {
-    const markup =
-      '<｜DSML｜tool_calls>' +
-      '<｜DSML｜invoke name="get_event"><｜DSML｜parameter name="event_id" string="true">evt-1</｜DSML｜parameter></｜DSML｜invoke>' +
-      '<｜DSML｜invoke name="get_event"><｜DSML｜parameter name="event_id" string="true">evt-2</｜DSML｜parameter></｜DSML｜invoke>' +
-      '</｜DSML｜tool_calls>';
-    const outcome = parseToolMarkup(markup);
-    expect(outcome.status).toBe('recovered');
-    if (outcome.status === 'recovered') {
-      expect(outcome.calls.map(call => call.arguments['event_id'])).toEqual(['evt-1', 'evt-2']);
-    }
+  it('holds back the same parameter line when it streams in pieces', () => {
+    const guard = new ToolMarkupGuard();
+    const released = [
+      'Ok. <｜DS',
+      'ML｜parameter name="start"',
+      ' string="true">2026',
+      '-10-23T09:10</｜DSML｜parameter>',
+    ].map(piece => guard.push(piece));
+    expect(released.join('')).toBe('Ok. ');
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('treats a DSML call with a half-formed JSON parameter as broken', () => {
-    const markup =
-      '<｜DSML｜tool_calls><｜DSML｜invoke name="create_event">' +
-      '<｜DSML｜parameter name="start" string="false">{"date_time": "2026-10-27T14:3</｜DSML｜parameter>' +
-      '</｜DSML｜invoke></｜DSML｜tool_calls>';
-    expect(parseToolMarkup(markup)).toEqual({ status: 'broken' });
+  it('holds back a complete chat-template token', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Calling it.<｜tool▁call▁begin｜>create_event');
+    expect(shown).toBe('Calling it.');
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('treats a truncated DSML call as broken', () => {
-    const markup =
-      '<｜DSML｜tool_calls><｜DSML｜invoke name="create_event"><｜DSML｜parameter name="title" string="true">Den';
-    expect(parseToolMarkup(markup)).toEqual({ status: 'broken' });
+  it('holds back a function-name tag and its parameters', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Searching.\n<function=get_event>\n<parameter=event_id>evt-1</parameter>\n</function>');
+    expect(shown).toBe('Searching.\n');
+    expect(guard.finish()).toBe('leaked');
   });
 
-  it('never rebuilds a function_results block, even beside a well-formed call', () => {
-    const markup = `${DSML_CREATE}<function_results>Event added with id evt-9.</function_results>`;
-    expect(parseToolMarkup(markup)).toEqual({ status: 'broken' });
+  it('keeps a function-name tag named inside inline code as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Write it as `<function=name>` when you name the call.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
   });
 
-  it('rebuilds a Hermes tool_call JSON block', () => {
-    const markup =
-      '<tool_call>{"name": "create_event", "arguments": {"title": "Dentist", "start": {"date_time": "2026-10-27T14:30:00"}}}</tool_call>';
-    expect(parseToolMarkup(markup)).toEqual({
-      status: 'recovered',
-      calls: [
-        {
-          name: 'create_event',
-          arguments: { title: 'Dentist', start: { date_time: '2026-10-27T14:30:00' } },
-        },
-      ],
-    });
-  });
-
-  it('treats a Hermes block with broken JSON as broken', () => {
-    expect(parseToolMarkup('<tool_call>{"name": "create_event", "arguments": {"title": </tool_call>')).toEqual({
-      status: 'broken',
-    });
-  });
-
-  it('rebuilds a Mistral [TOOL_CALLS] list', () => {
-    const markup = '[TOOL_CALLS] [{"name": "get_event", "arguments": {"event_id": "evt-1"}}]';
-    expect(parseToolMarkup(markup)).toEqual({
-      status: 'recovered',
-      calls: [{ name: 'get_event', arguments: { event_id: 'evt-1' } }],
-    });
-  });
-
-  it('treats markup in an unknown shape as broken', () => {
-    expect(parseToolMarkup('<tool_calls><invoke name="create_event"></invoke></tool_calls>')).toEqual({
-      status: 'broken',
-    });
+  it('keeps prose that names the fullwidth bar as text', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The fullwidth bar "<｜" opens a token name in the template.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
   });
 });

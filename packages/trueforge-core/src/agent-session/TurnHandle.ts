@@ -46,6 +46,7 @@ interface TurnExecutionSource {
     signal: AbortSignal;
   }): AsyncGenerator<AgentThreadExecutionEvent | ToolResponseEvent, AgentThreadExecutionResult>;
   getMetrics(): AgentThreadMetrics;
+  getLastCallInputTokens(): number | null;
   activateThreadCreated?(threadId: string): void;
   buildAbnormalHandoff?(input: { cause: AbnormalHandoffCause }): Promise<AbnormalHandoff>;
 }
@@ -123,7 +124,11 @@ function toMCPAuthRequiredEvent(event: InternalMCPAuthRequiredEvent): MCPAuthReq
   };
 }
 
-export function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics, wallTimeMs: number): TurnMetrics {
+export function turnMetricsFromAgentThreadMetrics(
+  metrics: AgentThreadMetrics,
+  lastCallInputTokens: number | null,
+  wallTimeMs: number,
+): TurnMetrics {
   return {
     total_input_tokens: metrics.total_input_tokens,
     total_output_tokens: metrics.total_output_tokens,
@@ -134,11 +139,7 @@ export function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics, w
     total_cost_in_usd: metrics.total_cost_in_usd,
     steps: metrics.iterations,
     sub_agent_steps: metrics.sub_agent_steps,
-    input_tokens: metrics.total_input_tokens,
-    cached_input_tokens: metrics.total_cache_read_tokens ?? null,
-    output_tokens: metrics.total_output_tokens,
-    reasoning_tokens: metrics.total_reasoning_tokens ?? null,
-    last_call_input_tokens: metrics.last_call_input_tokens,
+    last_call_input_tokens: lastCallInputTokens ?? undefined,
     tool_calls_by_tool: metrics.tool_calls_by_tool,
     results_by_kind: metrics.results_by_kind,
     guard_fired: metrics.guard_fired,
@@ -395,7 +396,11 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
             const createdAtIso = updatedAt.toISOString();
             const state: TerminalTurnState = {
               ...error.state,
-              metrics: turnMetricsFromAgentThreadMetrics(orchestrator.getMetrics(), Date.now() - streamStartedAt),
+              metrics: turnMetricsFromAgentThreadMetrics(
+                orchestrator.getMetrics(),
+                orchestrator.getLastCallInputTokens(),
+                Date.now() - streamStartedAt,
+              ),
             };
             this.turn = { ...this.turn, state, updated_at: updatedAt };
             yield {
@@ -441,7 +446,11 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       } else {
         const updatedAt = new Date();
         const createdAtIso = updatedAt.toISOString();
-        const metrics = turnMetricsFromAgentThreadMetrics(orchestrator.getMetrics(), Date.now() - streamStartedAt);
+        const metrics = turnMetricsFromAgentThreadMetrics(
+          orchestrator.getMetrics(),
+          orchestrator.getLastCallInputTokens(),
+          Date.now() - streamStartedAt,
+        );
         // Abnormal handoffs are mechanical. In particular, cancellation must not
         // revive work through another model inference.
         const abnormalHandoffInput: { cause: AbnormalHandoffCause } | undefined = signal.aborted

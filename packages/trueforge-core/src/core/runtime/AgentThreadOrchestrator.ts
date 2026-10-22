@@ -35,6 +35,7 @@ import {
 } from './contextUtils';
 import type { CreateDynamicSubAgentThread } from './CreateDynamicSubAgentThread';
 import { addAgentThreadMetrics, createEmptyAgentThreadMetrics, type AgentThreadMetrics } from './metrics';
+import { WRITE_CAP_STOP_MESSAGE } from './replyActionChecks';
 
 const MAX_PARALLEL_SUB_AGENTS = 5;
 
@@ -361,11 +362,23 @@ export class AgentThreadOrchestrator {
       if (!isSubAgent) {
         // The reply's own signals come from the root thread only; sub-agents report their own.
         total.claim_mismatch = threadMetrics.claim_mismatch;
-        total.last_call_input_tokens = threadMetrics.last_call_input_tokens;
         total.time_to_first_token_ms = threadMetrics.time_to_first_token_ms;
       }
     }
     return total;
+  }
+
+  /**
+   * Input tokens of the root thread's latest model call. The root finishes last, so its final call is
+   * the request the model saw most recently; sub-agent calls are not the chat's context.
+   */
+  public getLastCallInputTokens(): number | null {
+    for (const thread of this.agentThreads.values()) {
+      if (!thread.parent) {
+        return thread.getLastCallInputTokens();
+      }
+    }
+    return null;
   }
 
   /** Called by TurnHandle immediately after durable THREAD_CREATED persistence. */
@@ -520,7 +533,8 @@ export class AgentThreadOrchestrator {
             isSubAgent: true,
           });
           this.agentThreads.delete(chunk.thread_id);
-          return { shouldStopExecution: false };
+          // The write cap ends the whole turn, even when a sub-agent is the thread that hit it.
+          return { shouldStopExecution: currentThread.turnToolCallLedger.stoppedForWriteCap };
         }
         yield chunk;
         return { shouldStopExecution: true };
@@ -537,6 +551,7 @@ export class AgentThreadOrchestrator {
         const subAgentThread = await resolveBeforeAbort(
           this.createDynamicSubAgentThread({
             parentDefinition: currentThread.definition,
+            turnToolCallLedger: currentThread.turnToolCallLedger,
             request: chunk.agent_info,
             threadId: subAgentThreadId,
             parent,
@@ -684,6 +699,13 @@ export class AgentThreadOrchestrator {
                 if (chunk.handoff_cause !== undefined) {
                   rootAgentError.handoff_cause = chunk.handoff_cause;
                 }
+              }
+              if (!rootAgentError && mainThread.turnToolCallLedger.stoppedForWriteCap) {
+                rootAgentError = {
+                  error: WRITE_CAP_STOP_MESSAGE,
+                  output: undefined,
+                  handoff_cause: 'model_stream_fault',
+                };
               }
               if (chunk.type !== InternalEventType.PASSTHROUGH) {
                 const { output: outputContribution, requiredAction } = agentThreadEventToTerminalFields(chunk);
