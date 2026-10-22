@@ -209,25 +209,18 @@ describe('orchestration: pause then resume on tool approval', () => {
         ],
       },
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
+      // The reply already says it in its own words, so the host adds no line of its own.
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
-      {
-        type: EventType.MODEL_MESSAGE_DELTA,
-        thread_id: ROOT_ID,
-        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
-      },
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
         thread_id: ROOT_ID,
-        context: [{ role: 'assistant', content: expect.stringContaining(ROOT_FINAL) }],
+        context: [{ role: 'assistant', content: ROOT_FINAL }],
       },
       { type: InternalEventType.AGENT_DONE, thread_id: ROOT_ID, status: 'done' },
     ];
 
     const TURN_2_OUTPUT = {
-      output: {
-        thread_id: ROOT_ID,
-        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
-      },
+      output: { thread_id: ROOT_ID, content: ROOT_FINAL },
       required_actions: [],
     };
 

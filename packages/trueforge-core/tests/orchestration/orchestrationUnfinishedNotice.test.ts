@@ -133,39 +133,53 @@ function denyTurn(reason: string) {
 }
 
 describe('unfinished reply notice', () => {
-  it('says a card that expired unanswered expired, and never that the person said no', async () => {
+  it('tells the model a card that expired unanswered expired, never that the person said no', async () => {
     const { toolSet, callTool } = makeApprovalGatedWriteNoteToolSet();
-    const { orchestrator, thread } = harness(toolSet, ['The note was not written.']);
+    const reply = 'The request for your OK expired, so the note was not written.';
+    const { orchestrator, thread } = harness(toolSet, [reply]);
 
     await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
     const expired = await runTurn({ orchestrator, sendBatch: denyTurn(approvalExpiredReason()) });
 
     expect(callTool).not.toHaveBeenCalled();
-    expect(expired.result.output?.content).toContain(EXPIRED_LINE);
-    expect(expired.result.output?.content).not.toMatch(SAID_NO);
-    // The model reads the true reason, so it has no grounds to say the person declined.
+    // The reply says it in its own words; the host adds nothing.
+    expect(expired.result.output?.content).toBe(reply);
     const sent = lastModelMessages(thread);
     expect(sent).toContain('They did not say no');
     expect(sent).not.toMatch(SAID_NO);
   });
 
+  it('gives a reply with no words an honest line for an expired card', async () => {
+    const { toolSet } = makeApprovalGatedWriteNoteToolSet();
+    const { orchestrator } = harness(toolSet, ['']);
+
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
+    const expired = await runTurn({ orchestrator, sendBatch: denyTurn(approvalExpiredReason()) });
+
+    expect(expired.result.output?.content).toBe(EXPIRED_LINE);
+    expect(EXPIRED_LINE).not.toMatch(SAID_NO);
+  });
+
   it('reports a rule-blocked call as blocked, not as a decline', async () => {
-    const { orchestrator, thread } = harness(ruleBlockedWriteNoteToolSet(), ['I could not write the note.']);
+    const { orchestrator, thread } = harness(ruleBlockedWriteNoteToolSet(), ['']);
 
     const blocked = await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
 
-    expect(blocked.result.output?.content).toContain(BLOCKED_LINE);
-    expect(blocked.result.output?.content).not.toMatch(SAID_NO);
+    expect(blocked.result.output?.content).toBe(BLOCKED_LINE);
+    expect(BLOCKED_LINE).not.toMatch(SAID_NO);
+    expect(lastModelMessages(thread)).toContain('offline mode is on');
     expect(lastModelMessages(thread)).not.toMatch(SAID_NO);
   });
 
-  it('adds the decline line only to the reply that had the decline', async () => {
+  it('adds the decline line only to the reply that had the decline, and only when that reply had no words', async () => {
     const { toolSet } = makeApprovalGatedWriteNoteToolSet();
-    const { orchestrator, thread } = harness(toolSet, ['Skipping the note.', 'Here is a plan for today.']);
+    const { orchestrator, thread } = harness(toolSet, ['', 'Here is a plan for today.']);
 
     await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
     const declined = await runTurn({ orchestrator, sendBatch: denyTurn('not now') });
-    expect(declined.result.output?.content).toContain(DECLINE_LINE);
+    expect(declined.result.output?.content).toBe(DECLINE_LINE);
+    // The model is told the choice once, plainly, and not to ask again.
+    expect(lastModelMessages(thread)).toContain('Do not try it again or ask again');
 
     const later = await runTurn({
       orchestrator,
@@ -173,7 +187,5 @@ describe('unfinished reply notice', () => {
     });
 
     expect(later.result.output?.content).toBe('Here is a plan for today.');
-    // The earlier line is the person's, not the model's: left in, the model repeats it on replies it does not fit.
-    expect(lastModelMessages(thread)).not.toContain(DECLINE_LINE);
   });
 });

@@ -1,5 +1,5 @@
-import { changeRequestReason } from '../../../src/core/permissions/changeRequest';
 import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
+import { changeRequestReason } from '../../../src/core/permissions/changeRequest';
 
 describe('deniedToolCallText', () => {
   it('hands a change request to the model as exactly the request sentence', () => {
@@ -10,8 +10,6 @@ describe('deniedToolCallText', () => {
 
   it('keeps the error wording for an ordinary denial', () => {
     expect(deniedToolCallText('not allowed')).toBe(JSON.stringify({ error: 'User denied tool call: not allowed' }));
-    expect(deniedToolCallText(undefined)).toBe(
-      JSON.stringify({ error: 'User denied tool call: no reason provided' }),
-    );
+    expect(deniedToolCallText(undefined)).toBe(JSON.stringify({ error: 'User denied tool call: no reason provided' }));
   });
 });

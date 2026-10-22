@@ -1479,7 +1479,7 @@ export function replaceImagePartsForNonVisionModel(
   });
 }
 
-/** An earlier reply as the model reads it: the line the host added for the person is left out. */
+/** An earlier reply as the model reads it: a line an older version added for the person is left out. */
 function withoutHostNotices(message: ChatCompletionMessageParam): ChatCompletionMessageParam {
   if (message.role !== 'assistant' || typeof message.content !== 'string') {
     return message;
@@ -3448,11 +3448,14 @@ export class AgentThread {
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
-      // A reply whose last action did not finish says so, so it cannot read as done over a failure.
+      // The model is told why a reply did not finish and says so in its own words. The host adds a line
+      // only when the reply has none, so the person is never left with nothing.
       const unfinishedKind = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
       const notice =
         unfinishedKind !== undefined
-          ? unfinishedNotice(unfinishedKind)
+          ? replyText.trim() === ''
+            ? unfinishedNotice(unfinishedKind)
+            : undefined
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
             : claimsUnbackedAction({ text: replyText, successfulWrites })
@@ -3546,7 +3549,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: `Aman could not run one of the actions in this reply: ${problem} Ask again to try it once more.`,
+                owner_message: `One of the actions in this reply could not run: ${problem} Ask again to try it once more.`,
               },
             },
           };
@@ -3913,7 +3916,7 @@ export class AgentThread {
                 message:
                   `Research tool-call budget exhausted (${String(this.taskState.tool_calls_used)} of ${String(budget)} used). ` +
                   'This call was not executed. Bank remaining findings with record_finding and write the final answer.',
-                owner_message: `Aman stopped a search: it had used all ${String(budget)} tool steps for this question. Ask again to continue with a narrower question.`,
+                owner_message: `A search was stopped: all ${String(budget)} tool steps for this question were used. Ask again with a narrower question.`,
               },
             },
           },

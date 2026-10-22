@@ -171,7 +171,7 @@ describe('toolCallParsing', () => {
   });
 
   it('shows the plain line for a call refused before it started, and only for a refusal that asks the owner', () => {
-    const owner = 'Aman stopped a search: it had used all 40 tool steps for this question.';
+    const owner = 'A search was stopped: all 40 tool steps for this question were used.';
     const refused = JSON.stringify({
       schema_version: 'tool.response.v2',
       outcome: {

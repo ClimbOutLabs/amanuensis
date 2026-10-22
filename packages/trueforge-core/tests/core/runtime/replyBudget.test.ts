@@ -105,7 +105,7 @@ describe('step budget', () => {
 describe('removed tool wording', () => {
   it('says what the person declined, in plain words, and what to do next', () => {
     expect(removedToolMessage({ toolName: 'create_event', reason: 'declined' })).toBe(
-      'The person declined create event. Do not try it again. Tell them what you did and did not do.',
+      'The person declined create event. Do not try it again or ask again. Say once, plainly, that it was skipped, and carry on with the rest.',
     );
     expect(removedToolMessage({ toolName: 'create_event', reason: 'unavailable' })).toBe(
       'create event is not available here. Do not try it again. Tell them what you did and did not do.',
@@ -119,14 +119,10 @@ describe('unfinished reply', () => {
     expect(unfinishedKindFor('ok')).toBeNull();
     expect(unfinishedKindFor('declined')).toBe('declined');
     expect(unfinishedKindFor('error_final')).toBe('failed');
-    expect(unfinishedNotice('declined')).toBe(
-      'You said no to one step, so Aman did not finish. Ask again if you want that step done.',
-    );
-    expect(unfinishedNotice('failed')).toBe(
-      'Aman could not finish because a step failed. Reply "try again" to let it retry.',
-    );
+    expect(unfinishedNotice('declined')).toBe('Skipped, as you asked.');
+    expect(unfinishedNotice('failed')).toBe('One step failed, so this is not finished. Reply "try again" to retry.');
     expect(unfinishedNotice('budget')).toBe(
-      'Aman stopped after many steps without finishing. Reply "continue" to let it carry on.',
+      'Stopped after many steps without finishing. Reply "continue" to carry on.',
     );
   });
 
@@ -147,17 +143,18 @@ describe('unfinished reply', () => {
     expect(clearUnfinished({ current: 'expired' })).toBe('expired');
   });
 
-  it('only says "You said no" for the person\'s own decline', () => {
+  it("names no assistant and only reads as the person's choice for their own decline", () => {
     for (const kind of UnfinishedKindSchema.options) {
-      expect(/you said no/i.test(unfinishedNotice(kind))).toBe(kind === 'declined');
+      const line = unfinishedNotice(kind);
+      expect(line).not.toMatch(/\bAman\b/);
+      expect(/as you asked|you said no|you declined/i.test(line)).toBe(kind === 'declined');
     }
   });
 
-  it('leaves the host line out of an earlier reply the model reads again', () => {
+  it("leaves an older version's line out of an earlier reply the model reads again", () => {
     const answer = 'Understood, skipping the reminder.';
-    for (const kind of UnfinishedKindSchema.options) {
-      expect(withoutUnfinishedNotices(`${answer}\n\n${unfinishedNotice(kind)}`)).toBe(answer);
-    }
+    const older = 'You said no to one step, so Aman did not finish. Ask again if you want that step done.';
+    expect(withoutUnfinishedNotices(`${answer}\n\n${older}`)).toBe(answer);
     expect(withoutUnfinishedNotices(answer)).toBe(answer);
   });
 });

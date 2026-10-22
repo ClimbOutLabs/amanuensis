@@ -20,7 +20,6 @@ import {
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { approvalExpiredReason } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
-import { unfinishedNotice } from '@truefoundry/trueforge-core/core/runtime/replyBudget';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -670,7 +669,9 @@ function scriptedModel(): ILLM['create'] {
       ? 'Do the first small step now. Your check-in is set.'
       : said.includes('They did not say no')
         ? 'Do the first small step now. The check-in request expired before you answered, so it is not set.'
-        : 'Do the first small step now. I could not set the check-in.';
+        : said.includes('User denied')
+          ? 'Do the first small step now. No check-in, as you asked.'
+          : 'Do the first small step now. I could not set the check-in.';
     return scriptedStream({ role: 'assistant', content: reply });
   };
 }
@@ -751,8 +752,10 @@ describe('the Tour check-in prompt, run through a scripted model', () => {
     const done = await answer({ status: 'deny', reason: approvalExpiredReason() });
 
     expect(await built.listAll()).toEqual([]);
-    expect(done.output?.content).toContain('The check-in request expired before you answered');
-    expect(done.output?.content).toContain(unfinishedNotice('expired'));
+    // The model read the true reason and said it in its own words; the host added nothing.
+    expect(done.output?.content).toBe(
+      'Do the first small step now. The check-in request expired before you answered, so it is not set.',
+    );
     expect(done.output?.content).not.toMatch(SAID_NO);
     // The activity log does not record the person turning it down either.
     expect(built.audit).toContainEqual(
@@ -764,13 +767,13 @@ describe('the Tour check-in prompt, run through a scripted model', () => {
     );
   });
 
-  it('keeps the "You said no" line for the person\'s own decline', async () => {
+  it("lets the reply acknowledge the person's own decline once, with no extra line", async () => {
     const { built, answer } = await tourChat();
 
     const done = await answer({ status: 'deny', reason: 'not now' });
 
     expect(await built.listAll()).toEqual([]);
-    expect(done.output?.content).toContain(unfinishedNotice('declined'));
+    expect(done.output?.content).toBe('Do the first small step now. No check-in, as you asked.');
     expect(built.audit).toContainEqual(expect.objectContaining({ tool_name: 'create_schedule', outcome: 'denied' }));
   });
 });

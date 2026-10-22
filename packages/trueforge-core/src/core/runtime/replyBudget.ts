@@ -40,7 +40,8 @@ export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 /** Why a step is answered with no tools. */
 export type ForcedAnswer = 'budget' | 'removed_streak';
 
-export const STEP_BUDGET_SPENT_MESSAGE = 'The step budget for this reply is spent. Answer with what you have.';
+export const STEP_BUDGET_SPENT_MESSAGE =
+  'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and they can reply "continue".';
 
 export const REMOVED_TOOL_STREAK_MESSAGE =
   'Tools that were declined or are not available keep being called. Answer with what you have.';
@@ -66,8 +67,10 @@ export function removedToolMessage({
   reason: 'declined' | 'unavailable';
 }): string {
   const action = toolActionName(toolName);
-  const cause = reason === 'declined' ? `The person declined ${action}` : `${action} is not available here`;
-  return `${cause}. Do not try it again. Tell them what you did and did not do.`;
+  if (reason === 'declined') {
+    return `The person declined ${action}. Do not try it again or ask again. Say once, plainly, that it was skipped, and carry on with the rest.`;
+  }
+  return `${action} is not available here. Do not try it again. Tell them what you did and did not do.`;
 }
 
 /**
@@ -177,37 +180,44 @@ export function clearUnfinished({ current }: { current: UnfinishedKind | undefin
   return current !== undefined && staysForReply(current) ? current : undefined;
 }
 
-/** Every line `unfinishedNotice` can add. A later reply's model request leaves them out; see withoutUnfinishedNotices. */
-function allUnfinishedNotices(): string[] {
-  return UnfinishedKindSchema.options.map(kind => unfinishedNotice(kind));
-}
-
 /**
- * An earlier reply's text as the model reads it: without the line the host added for the person. The
- * line is about that reply only; left in, the model repeats it on replies it does not fit.
+ * Lines older versions added after every unfinished reply. Saved chats still hold them, and a model that
+ * reads one in its own earlier reply repeats it on replies it does not fit.
  */
+const LEGACY_UNFINISHED_NOTICES = [
+  'You said no to one step, so Aman did not finish. Ask again if you want that step done.',
+  'Aman could not do one step because it is not allowed here. Tell Aman another way to do it, or ask for something else.',
+  'Aman could not finish because a tool it needed is not available right now. Check that its app is connected, then ask again.',
+  'Aman could not finish because a step failed. Reply "try again" to let it retry.',
+  'Aman stopped after many steps without finishing. Reply "continue" to let it carry on.',
+];
+
+/** An earlier reply's text as the model reads it: without a line an older version added for the person. */
 export function withoutUnfinishedNotices(text: string): string {
   let result = text;
-  for (const notice of allUnfinishedNotices()) {
+  for (const notice of LEGACY_UNFINISHED_NOTICES) {
     result = result.split(`\n\n${notice}`).join('').split(notice).join('');
   }
   return result;
 }
 
-/** The one sentence the person reads when a reply did not finish: what stopped it, and what to do next. */
+/**
+ * The line the person reads when a reply stopped with no words of its own. A reply with text says why in
+ * the model's own words, since the model is told the true reason; this only keeps a reply from being empty.
+ */
 export function unfinishedNotice(kind: UnfinishedKind): string {
   switch (kind) {
     case 'declined':
-      return 'You said no to one step, so Aman did not finish. Ask again if you want that step done.';
+      return 'Skipped, as you asked.';
     case 'expired':
-      return 'Aman asked for your OK on one step, but the request expired before you answered, so that step was not done. Ask again if you still want it.';
+      return 'Not done: the request for your OK expired before you answered. Ask again if you still want it.';
     case 'blocked':
-      return 'Aman could not do one step because it is not allowed here. Tell Aman another way to do it, or ask for something else.';
+      return 'One step is not allowed here, so it was not done. Ask for it another way, or ask for something else.';
     case 'unavailable':
-      return 'Aman could not finish because a tool it needed is not available right now. Check that its app is connected, then ask again.';
+      return 'A tool this needs is not available right now. Check that its app is connected, then ask again.';
     case 'failed':
-      return 'Aman could not finish because a step failed. Reply "try again" to let it retry.';
+      return 'One step failed, so this is not finished. Reply "try again" to retry.';
     case 'budget':
-      return 'Aman stopped after many steps without finishing. Reply "continue" to let it carry on.';
+      return 'Stopped after many steps without finishing. Reply "continue" to carry on.';
   }
 }
