@@ -12591,6 +12591,13 @@
             ],
             "type": "string"
           },
+          "session_title": {
+            "description": "Title of the chat the entry came from; null when the chat is deleted or has no title yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tier": {
             "maximum": 3,
             "minimum": 1,
@@ -12609,7 +12616,8 @@
           "outcome",
           "auto_deny_reason",
           "created_at",
-          "chat_exists"
+          "chat_exists",
+          "session_title"
         ],
         "type": "object"
       },

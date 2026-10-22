@@ -114,6 +114,7 @@ describe('per-user audit log route', () => {
         description: 'Send an email to the landlord',
         outcome: 'approved',
         chat_exists: false,
+        session_title: null,
       }),
     ]);
     expect(second.pagination.next_page_token).toBeUndefined();
