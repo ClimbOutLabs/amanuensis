@@ -5,6 +5,7 @@ import {
   DEFAULT_PREVIEW_NUMBER_OF_CHARACTERS,
   DEFAULT_TOTAL_TOOL_TOKEN_THRESHOLD,
 } from '../../core/capabilities/builtins/LargeToolResponse';
+import { REASONING_EFFORT_MODES } from '../../core/llm/reasoningEffortPolicy';
 import { ResponseFormatSchema } from '../../core/llm/responseFormat';
 import {
   DEFAULT_DISABLE_TOOLS,
@@ -31,6 +32,12 @@ const ModelParamsSchema = z
       .optional()
       .describe('Whether the model may emit multiple tool calls in one response.'),
     reasoning_effort: z.string().optional().describe('Provider-specific reasoning effort (e.g. low/medium/high).'),
+    reasoning_effort_mode: z
+      .enum(REASONING_EFFORT_MODES)
+      .optional()
+      .describe(
+        'How reasoning effort is chosen. fixed (default) sends reasoning_effort on every step; automatic picks it per step.',
+      ),
   })
   .loose() // this ensures extra model params are allowed
   .describe(

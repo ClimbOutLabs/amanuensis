@@ -469,11 +469,28 @@ export const ImportFolderRecordSchema = z.object({
 export type ImportFolderRecord = z.infer<typeof ImportFolderRecordSchema>;
 export const ImportFoldersFileSchema = z.array(ImportFolderRecordSchema);
 
+/**
+ * An agent archived with stored model params but no reasoning effort mode imports as fixed, written
+ * out, so it keeps the stored effort on every step. Without params nothing is stored, and absent
+ * already means fixed.
+ */
+function withReasoningEffortMode(manifest: unknown): unknown {
+  if (!isRecord(manifest) || !isRecord(manifest['model'])) {
+    return manifest;
+  }
+  const model = manifest['model'];
+  const params = model['params'];
+  if (!isRecord(params) || params['reasoning_effort_mode'] !== undefined) {
+    return manifest;
+  }
+  return { ...manifest, model: { ...model, params: { ...params, reasoning_effort_mode: 'fixed' } } };
+}
+
 export const ImportAgentRecordSchema = z.object({
   id: z.string().min(1),
   name: NameSchema,
   description: z.string(),
-  manifest: AgentSpecSchema,
+  manifest: z.preprocess(withReasoningEffortMode, AgentSpecSchema),
   external_id: z.string().nullable(),
   /** Absent from exports made before host-made schedule agents were marked. */
   host_managed: z.boolean().default(false),

@@ -113,7 +113,7 @@ describe('TurnResourceResolver.resolveAgentDefinition', () => {
           defaultModelParams: resolvedModelParams,
           modelId: undefined,
           modelSupportsVision: false,
-          modelProperties: { contextLength: 128_000 },
+          modelProperties: { contextLength: 128_000, reasoningEfforts: undefined },
         }),
       mcp: () => Promise.reject(new Error('unused')),
       mcpRequestTimeoutMs: 1_000,

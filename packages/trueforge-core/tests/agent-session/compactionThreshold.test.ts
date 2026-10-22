@@ -44,7 +44,7 @@ async function compacts(input: {
       }),
       modelId: undefined,
       configuredModels: undefined,
-      modelProperties: { contextLength: input.contextLength },
+      modelProperties: { contextLength: input.contextLength, reasoningEfforts: undefined },
     },
     compactionModel: undefined,
     isChild: false,

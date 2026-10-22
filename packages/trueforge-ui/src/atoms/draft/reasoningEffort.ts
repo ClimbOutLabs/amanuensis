@@ -43,3 +43,45 @@ export function modelPatchWithReasoningEffort(
     params: { ...existingParams, reasoningEffort: nextEffort },
   };
 }
+
+/** How the agent picks reasoning effort: per step, or the stored effort on every step. */
+export type ThinkingMode = 'automatic' | 'fixed';
+
+/** Absent means fixed, matching the server's reading of a stored mode. */
+export function readThinkingMode(params: ModelParams | undefined): ThinkingMode {
+  const mode: unknown = params?.reasoningEffortMode;
+  return mode === 'automatic' ? 'automatic' : 'fixed';
+}
+
+/**
+ * Composer pick: the chosen effort for this chat, with the chat's mode set to fixed so it applies
+ * even when the persona is automatic. The persona's own stored mode is not changed.
+ */
+export function modelPatchForComposerEffort(
+  name: string,
+  existingParams: ModelParams | undefined,
+  effort: string,
+  efforts: ReasoningEfforts,
+): Model {
+  return modelPatchWithReasoningEffort(
+    name,
+    { ...existingParams, reasoningEffort: effort, reasoningEffortMode: 'fixed' },
+    efforts,
+  );
+}
+
+/** Model params with the thinking mode set; "always high" also stores the nearest supported high effort. */
+export function paramsWithThinkingMode(
+  existingParams: ModelParams | undefined,
+  mode: ThinkingMode,
+  efforts: ReasoningEfforts,
+): ModelParams {
+  if (mode === 'automatic') {
+    return { ...existingParams, reasoningEffortMode: 'automatic' };
+  }
+  return {
+    ...existingParams,
+    reasoningEffortMode: 'fixed',
+    reasoningEffort: resolveReasoningEffort(efforts, 'high'),
+  };
+}

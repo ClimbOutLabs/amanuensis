@@ -67,6 +67,13 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import {
+  readReasoningEffortMode,
+  readStoredReasoningEffort,
+  resolveStepReasoningEffort,
+  stepMaxOutputTokens,
+  type ReasoningStepKind,
+} from '../llm/reasoningEffortPolicy';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
@@ -112,6 +119,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import { parseToolCallArguments } from '../mcp/toolArgumentCheck';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import {
@@ -208,6 +216,8 @@ import {
 import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
+  addReasoningEffortStep,
+  addTruncatedToolCalls,
   createEmptyAgentThreadMetrics,
   recordToolCallResult,
   updateMetricsFromUsage,
@@ -613,6 +623,8 @@ function requestHasAnsweredClarification(context: readonly ContextMessage[]): bo
 type StepOutcome = 'exit' | 'continue';
 
 interface StepLLMCallOptions {
+  /** Which kind of request this is; picks the reasoning effort and output cap. */
+  reasoningStepKind: ReasoningStepKind;
   /** Sub-agent completion message sent to the parent when the model returns no tool calls and no
    * visible content. `undefined` when the caller does not want a terminal-failure fallback. */
   emptyTerminalFallback: string | undefined;
@@ -2524,7 +2536,29 @@ export class AgentThread {
     return total;
   }
 
-  private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
+  /**
+   * Which kind of model call the next request is. A sub-agent always counts as one. A request
+   * right after tool results is a continuation, or the final answer when no tools are left to offer.
+   * Anything else answers the user's message, which is a first step.
+   */
+  private reasoningStepKind({
+    offeredToolCount,
+    finalAnswerPhase,
+  }: {
+    offeredToolCount: number;
+    finalAnswerPhase: boolean;
+  }): ReasoningStepKind {
+    if (this.parent !== undefined) {
+      return 'sub_agent';
+    }
+    const last = this.context.at(-1);
+    if (last === undefined || !('role' in last) || last.role !== 'tool') {
+      return 'first';
+    }
+    return finalAnswerPhase || offeredToolCount === 0 ? 'final_answer' : 'continuation';
+  }
+
+  private transformToLLMRequest(tools: ChatCompletionTool[], stepKind: ReasoningStepKind): LLMCreateParamsStreaming {
     let messages: ChatCompletionMessageParam[] = [];
 
     if (this.instruction) {
@@ -2596,6 +2630,36 @@ export class AgentThread {
     if (this.definition.modelParams) {
       Object.assign(requestBody, this.definition.modelParams);
     }
+
+    // The effort and output cap are chosen per request, so they overwrite whatever the persona
+    // stored. `reasoning_effort_mode` is harness config and must not reach the provider.
+    Reflect.deleteProperty(requestBody, 'reasoning_effort_mode');
+    const reasoningEffort = resolveStepReasoningEffort({
+      stepKind,
+      mode: readReasoningEffortMode(this.definition.modelParams),
+      storedEffort: readStoredReasoningEffort(this.definition.modelParams),
+      supported: this.definition.modelProperties?.reasoningEfforts,
+    });
+    if (reasoningEffort === undefined) {
+      Reflect.deleteProperty(requestBody, 'reasoning_effort');
+    } else {
+      Reflect.set(requestBody, 'reasoning_effort', reasoningEffort);
+    }
+    const configuredMaxTokens = resolveMaxOutputTokens(requestBody);
+    const maxTokens = stepMaxOutputTokens({
+      stepKind,
+      offersTools: tools.length > 0,
+      configured: configuredMaxTokens,
+      reasoningEffort,
+    });
+    if (maxTokens !== undefined && maxTokens !== configuredMaxTokens) {
+      Reflect.set(
+        requestBody,
+        Reflect.has(requestBody, 'max_completion_tokens') ? 'max_completion_tokens' : 'max_tokens',
+        maxTokens,
+      );
+    }
+    addReasoningEffortStep(this.metrics, reasoningEffort ?? 'unset');
 
     if (tools.length > 0) {
       requestBody.tools = tools;
@@ -3249,7 +3313,8 @@ export class AgentThread {
       }
     }
 
-    let requestBody = this.transformToLLMRequest(tools);
+    const { reasoningStepKind } = options;
+    let requestBody = this.transformToLLMRequest(tools, reasoningStepKind);
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -3381,7 +3446,7 @@ export class AgentThread {
         if (signal?.aborted) {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
-        requestBody = this.transformToLLMRequest(tools);
+        requestBody = this.transformToLLMRequest(tools, reasoningStepKind);
       }
     }
 
@@ -3576,10 +3641,16 @@ export class AgentThread {
       }
     }
     const finishReason = result.value.finish_reason;
-    // A reply cut off at the output limit can stop mid tool call, leaving arguments that are not
-    // complete. Those calls are dropped rather than saved; the text the reply produced is kept.
+    // A reply cut off at the output limit can stop mid tool call. Its calls stay in the reply: the
+    // reply guard resolves a call with incomplete arguments as not run, with the correction, so the
+    // model sends it again. Counted so these cut-offs stay visible in the metrics.
     if (finishReason === 'length') {
-      assistantMessage = withoutToolCalls(assistantMessage);
+      const incompleteCalls = (result.value.output.tool_calls ?? []).filter(
+        call => parseToolCallArguments(call) === undefined,
+      ).length;
+      if (incompleteCalls > 0) {
+        addTruncatedToolCalls(this.metrics, incompleteCalls);
+      }
     }
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
@@ -3673,7 +3744,7 @@ export class AgentThread {
 
     let completion: SubAgentCompletionMarker | undefined;
     if (this.parent) {
-      if (finishReason === 'length') {
+      if (finishReason === 'length' && !hasToolCalls(assistantMessage)) {
         const errorMessage = assistantMessageContentToStringForSubAgent(
           assistantMessage.content,
           'max_tokens breached',
@@ -3704,7 +3775,9 @@ export class AgentThread {
       }
     }
 
-    const completedWithinTokenBudget = finishReason !== 'length';
+    // A cut-off reply that carries tool calls is kept in context, so the next step sees the calls'
+    // corrections and the text the reply produced.
+    const completedWithinTokenBudget = finishReason !== 'length' || hasToolCalls(assistantMessage);
     yield* this.appendToContext({
       context: completedWithinTokenBudget ? [assistantMessage] : [],
       output: [agentAssistantMessage],
@@ -3715,7 +3788,7 @@ export class AgentThread {
       completion,
     });
 
-    if (finishReason === 'length') {
+    if (finishReason === 'length' && !hasToolCalls(assistantMessage)) {
       const errorContent = completion?.error_message ?? LENGTH_CUT_OFF_MESSAGE;
       yield this.generateErrorEvent(errorContent, agentAssistantMessage);
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -5053,6 +5126,22 @@ export class AgentThread {
                 ? 'removed_streak'
                 : null;
             replyLedger.stepsByThread.set(this.threadId, stepsSoFar + 1);
+            const sentTools =
+              forcedAnswer !== null
+                ? []
+                : requestTools.filter(
+                    tool =>
+                      tool.type !== 'function' ||
+                      !replyLedger.removedTools.includes(
+                        toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
+                      ),
+                  );
+            // Read before the forced-answer notice joins the context: that notice is a user-role message,
+            // so a forced wrap-up would otherwise read as a first step.
+            const reasoningStepKind = this.reasoningStepKind({
+              offeredToolCount: sentTools.length,
+              finalAnswerPhase: finalAnswerPhase || forcedAnswer !== null,
+            });
             if (forcedAnswer !== null) {
               yield* this.appendToContext({
                 context: [
@@ -5065,17 +5154,8 @@ export class AgentThread {
                 usage: undefined,
               });
             }
-            const sentTools =
-              forcedAnswer !== null
-                ? []
-                : requestTools.filter(
-                    tool =>
-                      tool.type !== 'function' ||
-                      !replyLedger.removedTools.includes(
-                        toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
-                      ),
-                  );
             const llmResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
+              reasoningStepKind,
               emptyTerminalFallback: undefined,
               retryModelMessageEventId: pendingRetryModelMessageEventId,
               forcedAnswer,

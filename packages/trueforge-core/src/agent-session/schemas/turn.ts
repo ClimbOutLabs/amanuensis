@@ -72,6 +72,16 @@ export const TurnMetricsSchema = z
       .optional()
       .describe('Total reasoning tokens across model calls in this turn.'),
     total_cost_in_usd: z.number().nonnegative().optional().describe('Estimated total cost in USD for this turn.'),
+    step_reasoning_efforts: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional()
+      .describe('Model requests per reasoning effort in this turn. The key unset means no effort was sent.'),
+    total_truncated_tool_calls: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Tool calls in this turn whose arguments were cut off at the output limit and not sent.'),
     last_call_input_tokens: z
       .number()
       .int()

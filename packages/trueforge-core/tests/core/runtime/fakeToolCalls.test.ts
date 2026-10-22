@@ -125,6 +125,8 @@ async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
   toolMarkup?: 'leaked';
+  /** Overrides the finish reason, e.g. `length` for a reply cut off at the output limit. */
+  finishReason?: 'length';
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls = (input.calls ?? []).map(rawCall);
   if (input.text !== undefined) {
@@ -161,7 +163,7 @@ async function* replyStream(input: {
       ...(calls.length > 0 ? { tool_calls: calls } : {}),
     },
     usage: getEmptyUsage(),
-    finish_reason: calls.length > 0 ? 'tool_calls' : 'stop',
+    finish_reason: input.finishReason ?? (calls.length > 0 ? 'tool_calls' : 'stop'),
     ...(input.toolMarkup === undefined ? {} : { tool_markup: input.toolMarkup }),
   };
 }
@@ -400,6 +402,44 @@ describe('argument checking', () => {
     const results = toolResults(thread);
     expect(results).toHaveLength(1);
     expect(results[0]?.content).toContain('arguments were not complete');
+  });
+
+  it('keeps a tool call a length-cut reply left incomplete, so the model gets the correction and the turn goes on', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [
+            { id: 'call-1', name: 'create_event', args: '{"title": "Dentist", "start": {"date_time": "2026-10-27T14:' },
+          ],
+          finishReason: 'length',
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    const results = toolResults(thread);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.content).toContain('arguments were not complete');
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+    expect(thread.getAgentThreadMetrics().total_truncated_tool_calls).toBe(1);
+  });
+
+  it('still ends the turn with the cut-off error when a length-cut reply has no tool call', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({ text: 'The answer is', finishReason: 'length' }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'error' });
+    expect(thread.getAgentThreadMetrics().total_truncated_tool_calls).toBeUndefined();
   });
 });
 

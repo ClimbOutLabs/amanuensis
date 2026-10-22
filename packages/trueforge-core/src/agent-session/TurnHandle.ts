@@ -137,6 +137,8 @@ export function turnMetricsFromAgentThreadMetrics(
     total_cache_write_tokens: metrics.total_cache_write_tokens,
     total_reasoning_tokens: metrics.total_reasoning_tokens,
     total_cost_in_usd: metrics.total_cost_in_usd,
+    step_reasoning_efforts: metrics.step_reasoning_efforts,
+    total_truncated_tool_calls: metrics.total_truncated_tool_calls,
     steps: metrics.iterations,
     sub_agent_steps: metrics.sub_agent_steps,
     last_call_input_tokens: lastCallInputTokens ?? undefined,

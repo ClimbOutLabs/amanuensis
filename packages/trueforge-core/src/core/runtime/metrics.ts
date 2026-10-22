@@ -35,6 +35,10 @@ export const AgentThreadMetricsSchema = z
     time_to_first_token_ms: z.number().int().nonnegative().nullable(),
     total_summarizations: z.number().int().nonnegative(),
     total_sub_agents: z.number().int().nonnegative(),
+    /** Tool calls whose arguments a model reply cut off at the output limit left incomplete. */
+    total_truncated_tool_calls: z.number().int().nonnegative().optional(),
+    /** Model requests per reasoning effort sent, keyed by effort name; `unset` means no effort parameter. */
+    step_reasoning_efforts: z.record(z.string(), z.number().int().nonnegative()).optional(),
   })
   .openapi('AgentThreadMetrics');
 
@@ -74,6 +78,31 @@ export function updateMetricsFromUsage(target: AgentThreadMetrics, usage: Comple
   target.total_cache_write_tokens = sumOptional(target.total_cache_write_tokens, usage.cache_write_tokens);
   target.total_reasoning_tokens = sumOptional(target.total_reasoning_tokens, usage.reasoning_tokens);
   target.total_cost_in_usd = sumOptional(target.total_cost_in_usd, usage.cost_in_usd);
+}
+
+/** Count one model request under the effort it was sent with. */
+export function addReasoningEffortStep(target: AgentThreadMetrics, effort: string): void {
+  const counts = target.step_reasoning_efforts ?? {};
+  target.step_reasoning_efforts = { ...counts, [effort]: (counts[effort] ?? 0) + 1 };
+}
+
+/** Count tool calls a length-cut reply left with incomplete arguments. */
+export function addTruncatedToolCalls(target: AgentThreadMetrics, count: number): void {
+  target.total_truncated_tool_calls = (target.total_truncated_tool_calls ?? 0) + count;
+}
+
+function mergeEffortCounts(
+  target: Record<string, number> | undefined,
+  source: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (source === undefined) {
+    return target;
+  }
+  const merged = { ...target };
+  for (const [effort, count] of Object.entries(source)) {
+    merged[effort] = (merged[effort] ?? 0) + count;
+  }
+  return merged;
 }
 
 /**
@@ -151,4 +180,6 @@ export function addAgentThreadMetrics({
   target.guard_fired ??= source.guard_fired;
   target.total_summarizations += source.total_summarizations;
   target.total_sub_agents += source.total_sub_agents;
+  target.total_truncated_tool_calls = sumOptional(target.total_truncated_tool_calls, source.total_truncated_tool_calls);
+  target.step_reasoning_efforts = mergeEffortCounts(target.step_reasoning_efforts, source.step_reasoning_efforts);
 }

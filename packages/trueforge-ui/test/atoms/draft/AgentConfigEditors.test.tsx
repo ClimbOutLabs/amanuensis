@@ -222,6 +222,47 @@ describe('AgentConfigEditors', () => {
     expect(screen.queryByText('Parallel tool calls')).not.toBeInTheDocument();
   });
 
+  it('sets thinking to always high, and back to automatic by step', () => {
+    const spec: AgentSpec = { model: { name: 'openai/gpt', params: { reasoningEffort: 'low' } } };
+    const onChange = vi.fn();
+    const models = [
+      {
+        id: 'openai/gpt',
+        name: 'openai/gpt',
+        provider: { name: 'OpenAI' },
+        properties: { reasoningEfforts: ['low', 'medium', 'high'] },
+      },
+    ];
+    render(
+      <SlotsProvider>
+        <AgentConfigEditors
+          editor="model-settings"
+          spec={spec}
+          models={models}
+          connectors={[]}
+          skills={[]}
+          loading={false}
+          error={null}
+          onChange={onChange}
+          onClose={vi.fn()}
+        />
+      </SlotsProvider>,
+    );
+
+    expect(screen.getByText(/Automatic thinks hard when planning and lightly between tool steps/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking mode' }), { target: { value: 'fixed' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...spec,
+      model: { ...spec.model, params: { reasoningEffort: 'high', reasoningEffortMode: 'fixed' } },
+    });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking mode' }), { target: { value: 'automatic' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...spec,
+      model: { ...spec.model, params: { reasoningEffort: 'low', reasoningEffortMode: 'automatic' } },
+    });
+  });
+
   it('explicitly clears a model parameter when its toggle is disabled', () => {
     const spec: AgentSpec = {
       model: {
