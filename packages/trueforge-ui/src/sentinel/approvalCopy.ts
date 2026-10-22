@@ -1,6 +1,12 @@
 import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
 import type { SentinelApprovalCard, SentinelApprovalMailbox } from './types.js';
 
+/** Labels over the text an approval sends. Every card kind reads them from here. */
+export const SENT_CONTENT_LABELS = {
+  whatWillBeSent: 'What will be sent',
+  messageBody: 'Message body',
+} as const;
+
 /** The people a card sends to, in plain words: the first name, then how many more. */
 function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string {
   const [first, ...rest] = recipients;

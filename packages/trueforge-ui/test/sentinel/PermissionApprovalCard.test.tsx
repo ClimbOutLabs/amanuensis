@@ -67,7 +67,7 @@ describe('PermissionApprovalCard', () => {
     expect(screen.queryByText('Command')).not.toBeInTheDocument();
     expect(screen.queryByText(/Cannot be undone/)).not.toBeInTheDocument();
     expect(screen.queryByText('Sends to')).not.toBeInTheDocument();
-    expect(screen.queryByText('Exactly what will be sent')).not.toBeInTheDocument();
+    expect(screen.queryByText('What will be sent')).not.toBeInTheDocument();
   });
 
   it('renders the outbound arguments and connector host for connector tools', () => {
@@ -77,7 +77,7 @@ describe('PermissionApprovalCard', () => {
     });
     expect(screen.getByText('Sends to')).toBeInTheDocument();
     expect(screen.getByText('mcp.exa.ai')).toBeInTheDocument();
-    expect(screen.getByText('Exactly what will be sent')).toBeInTheDocument();
+    expect(screen.getByText('What will be sent')).toBeInTheDocument();
     expect(screen.getByText('query: sensitive internal project name')).toBeInTheDocument();
   });
 
@@ -303,10 +303,10 @@ describe('PermissionApprovalCard for mail', () => {
 
   it('shows the whole message in its own labelled box, with its line breaks, and no gutters or brackets', () => {
     renderMail();
-    expect(screen.getByText('Exactly what will be sent')).toBeInTheDocument();
+    expect(screen.getByText('What will be sent')).toBeInTheDocument();
     expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('Subject: Lease')).toBeInTheDocument();
-    const box = screen.getByRole('region', { name: 'Message, exactly as sent' });
+    const box = screen.getByRole('region', { name: 'Message body' });
     expect(box.textContent).toBe('Thursday works.\n\nBest,\nAda');
     expect(box.querySelector('p')).toHaveClass('whitespace-pre-wrap', 'break-words');
     expect(document.body.textContent).not.toMatch(/\(array\)|\[|\]|"audit|\|/);
@@ -315,7 +315,7 @@ describe('PermissionApprovalCard for mail', () => {
   it('never folds a long body: all of it is in the scrollable box', () => {
     const body = `${'Line of the lease. '.repeat(400)}THE-END`;
     renderMail({ body });
-    const box = screen.getByRole('region', { name: 'Message, exactly as sent' });
+    const box = screen.getByRole('region', { name: 'Message body' });
     expect(box.textContent).toBe(body);
     expect(box).toHaveClass('overflow-auto');
     expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
@@ -356,7 +356,7 @@ describe('PermissionApprovalCard for mail', () => {
     const { container } = render(
       <PermissionApprovalCard card={{ ...baseCard(), email }} othersWaiting={0} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    const root = container.firstElementChild;
+    const root = container.querySelector('[data-role="approval-ticket"]');
     expect(root).toHaveClass('aui-ticket');
     expect(root?.className).not.toContain('primary-button-bg');
   });

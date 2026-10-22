@@ -7,32 +7,30 @@ import { MessageGroup, ThreadComposerAreaShell, ThreadRootShell, ThreadViewportS
 describe('ThreadRootShell', () => {
   it('merges host styles over defaults and forwards its ref and attributes', () => {
     const ref = createRef<HTMLDivElement>();
-    const hostStyle = Object.assign({ color: 'red' }, { '--thread-max-width': '60rem' });
+    const hostStyle = Object.assign({ color: 'red' }, { '--prose-max-width': '40rem' });
     render(<ThreadRootShell ref={ref} data-testid="thread-root" className="host-thread" style={hostStyle} />);
 
     const root = screen.getByTestId('thread-root');
     expect(root).toBe(ref.current);
     expect(root).toHaveClass('aui-thread-root', 'host-thread');
-    expect(root.style.getPropertyValue('--thread-max-width')).toBe('60rem');
+    expect(root.style.getPropertyValue('--prose-max-width')).toBe('40rem');
     // Composer surface uses --input-box-bg on the theme root; thread shell must not set --composer-bg.
     expect(root.style.getPropertyValue('--composer-bg')).toBe('');
     expect(root.style.color).toBe('red');
   });
 
-  it('defaults the readable column to a reasonable width, not a near-full-bleed one', () => {
+  it('defaults plain chat text to a readable measure', () => {
     const ref = createRef<HTMLDivElement>();
     render(<ThreadRootShell ref={ref} data-testid="thread-root" />);
 
     const root = screen.getByTestId('thread-root');
-    const width = root.style.getPropertyValue('--thread-max-width');
-    // Keeps the message list and composer column readable (roughly 880-960px) instead of
-    // leaving very large, disproportionate gutters on wide viewports.
-    expect(width).toBe('min(48rem, 100% - 2rem)');
+    // Only prose uses this measure; cards and tables take the full column beside the rail.
+    expect(root.style.getPropertyValue('--prose-max-width')).toBe('48rem');
   });
 });
 
-describe('the message list and composer share one width rule', () => {
-  it('both consume --thread-max-width so they can never drift apart', () => {
+describe('the message list and composer share the thread column', () => {
+  it('both fill the column the layout gives them, so they line up with each other', () => {
     render(
       <ThreadViewportShell data-testid="viewport">
         <p>Messages</p>
@@ -42,8 +40,10 @@ describe('the message list and composer share one width rule', () => {
 
     const viewportColumn = screen.getByTestId('viewport').firstElementChild;
     const composer = screen.getByTestId('composer');
-    expect(viewportColumn).toHaveClass('max-w-(--thread-max-width)', 'mx-auto');
-    expect(composer).toHaveClass('max-w-(--thread-max-width)', 'mx-auto');
+    expect(viewportColumn).toHaveClass('w-full', 'mx-auto');
+    expect(viewportColumn?.className ?? '').not.toMatch(/max-w-/);
+    expect(composer).toHaveClass('w-full', 'mx-auto');
+    expect(composer.className).not.toMatch(/max-w-/);
   });
 });
 
