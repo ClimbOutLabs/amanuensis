@@ -65,6 +65,8 @@ export type TrueForgeUIProps = {
    * audit feed.
    */
   onActiveSessionChange?: (sessionId: string | undefined) => void;
+  /** Reports the ids of approvals waiting on the person in the active chat, for the host's Needs you ticket. */
+  onPendingApprovalsChange?: (approvalIds: readonly string[]) => void;
   /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
