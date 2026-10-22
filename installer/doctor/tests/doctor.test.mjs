@@ -954,6 +954,20 @@ describe('doctor sandbox', () => {
     assert.ok(!world.calls().some(line => line.includes('--only run_code')));
   });
 
+  it('shows the plain safety check line the setup prints for an unhealthy slot', () => {
+    make();
+    ready();
+    world.set('node', {
+      out: 'Safety check network failed: interfaces: eth0 has a route off this computer\n',
+      rc: 1,
+    });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(result.stdout, /attestation FAILED/);
+    assert.ok(!world.calls().some(line => line.includes('--only run_code')));
+  });
+
   it('fails with the fix when the app cannot use the slots', () => {
     make();
     ready();

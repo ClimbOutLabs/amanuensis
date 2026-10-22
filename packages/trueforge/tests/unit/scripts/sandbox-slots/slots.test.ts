@@ -704,6 +704,38 @@ describe('runSandboxSlots modes', () => {
     expect(calls.some(call => call.command === 'sudo')).toBe(false);
   });
 
+  test('--check shows the plain failure line of an unhealthy slot, word for word, and reads it out loud', async () => {
+    const { result, calls } = await run(
+      call => {
+        const text = joined(call);
+        if (text.includes('sandbox-2') && text.includes('healthcheck')) {
+          return { exitCode: 1, stderr: 'Error response from daemon: container is not running' };
+        }
+        if (text.includes(' logs ')) {
+          return {
+            stdout:
+              'sandbox-2-1  | 2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer',
+          };
+        }
+        return undefined;
+      },
+      false,
+      { mode: 'check', command: 'aman doctor sandbox' },
+    );
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain(
+      'Safety check network failed: interfaces: eth0 has a route off this computer',
+    );
+    expect(!result.ok && result.error).not.toContain('attestation FAILED');
+    expect(
+      calls.some(
+        call =>
+          call.echo &&
+          joined(call).includes('Safety check network failed: interfaces: eth0 has a route off this computer'),
+      ),
+    ).toBe(true);
+  });
+
   test("--check says where the missing image is built, in the caller's own command", async () => {
     const { result } = await run(
       call => (joined(call).startsWith('image inspect') ? { exitCode: 1 } : undefined),
