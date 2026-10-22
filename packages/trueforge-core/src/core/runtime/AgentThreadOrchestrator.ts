@@ -360,6 +360,19 @@ export class AgentThreadOrchestrator {
     return total;
   }
 
+  /**
+   * Input tokens of the root thread's latest model call. The root finishes last, so its final call is
+   * the request the model saw most recently; sub-agent calls are not the chat's context.
+   */
+  public getLastCallInputTokens(): number | null {
+    for (const thread of this.agentThreads.values()) {
+      if (!thread.parent) {
+        return thread.getLastCallInputTokens();
+      }
+    }
+    return null;
+  }
+
   /** Called by TurnHandle immediately after durable THREAD_CREATED persistence. */
   public activateThreadCreated(threadId: string): void {
     const thread = this.pendingCreatedThreads.get(threadId);

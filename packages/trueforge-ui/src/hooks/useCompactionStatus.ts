@@ -77,7 +77,7 @@ export function useCompactionStatus(): CompactionStatusResult {
     setLoading(true);
     Promise.all([
       server.getLastCompactionStatus({ sessionId }).catch(() => null),
-      server.getLastTurnInputTokens({ sessionId }).catch(() => null),
+      server.getLastCallInputTokens({ sessionId }).catch(() => null),
     ])
       .then(([compaction, tokens]) => {
         if (cancelled) return;
