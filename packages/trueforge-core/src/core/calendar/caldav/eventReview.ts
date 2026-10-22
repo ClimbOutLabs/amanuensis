@@ -33,7 +33,6 @@ const GetEventResultSchema = z.object({
     start: TimeValueSchema.optional(),
     organizer: GuestSchema.optional(),
     attendees: z.array(GuestSchema).optional(),
-    recurring: z.boolean().optional(),
   }),
 });
 
@@ -74,32 +73,15 @@ export function caldavEventReviewFrom({ id, result }: { id: string; result: unkn
   if (!parsed.success) {
     return { id, title: null, when: null, organizer: null, attendees: null };
   }
-  const { summary, start, organizer, attendees, recurring } = parsed.data.event;
+  const { summary, start, organizer, attendees } = parsed.data.event;
   const title = summary === undefined || summary.trim() === '' ? null : summary;
   return {
     id,
     title,
     when: start === undefined ? null : formatCaldavWhen(start),
     organizer: organizerName(organizer),
-    attendees: guestListOf({ attendees, recurring }),
+    attendees: attendees === undefined ? null : attendees.map(guestName),
   };
-}
-
-/**
- * A parsed event with no ATTENDEE lines has no guests. A repeating series keeps its guest list unknown,
- * because one date in it may have guests that the series answer does not list.
- */
-function guestListOf({
-  attendees,
-  recurring,
-}: {
-  attendees: z.infer<typeof GuestSchema>[] | undefined;
-  recurring: boolean | undefined;
-}): string[] | null {
-  if (attendees !== undefined) {
-    return attendees.map(guestName);
-  }
-  return recurring === true ? null : [];
 }
 
 function organizerName(guest: z.infer<typeof GuestSchema> | undefined): string | null {

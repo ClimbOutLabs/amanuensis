@@ -58,7 +58,7 @@ export async function classifyCaldavTool({
   if (card === null) {
     return undefined;
   }
-  const reach = reachFor({ tool, review });
+  const reach = reachFor({ tool });
   if (reach.own && (await hasStandingGrant())) {
     return tier1Decision({
       reason: TOOL_GRANT_REASON,
@@ -69,50 +69,45 @@ export async function classifyCaldavTool({
   return tier3Decision({
     card: reach.sentence === null ? card : { ...card, plain_what: `${card.plain_what}${reach.sentence}` },
     reason: reach.reason,
-    reason_detail: reach.own
-      ? 'Calendar change on your own calendar asks.'
-      : 'Calendar change that reaches guests always asks.',
+    reason_detail: reach.reason_detail,
     sensitive_read: true,
     approval_token_id: await mintToken(),
   });
 }
 
 /**
- * Whether a change touches only the person's own calendar. Guests are assumed unless proven absent: a
- * change whose existing event could not be read, or whose guest list is unknown, reaches guests.
+ * Whether a change touches only the person's own calendar. Only a new event can be judged from its own
+ * arguments. Aman cannot see every entry in a CalDAV calendar file, so a change or cancellation of an
+ * existing event never counts as guest-free, whatever its fetched guest list says.
  */
-function reachFor({ tool, review }: { tool: CaldavToolName; review: CaldavEventReview | null }): {
+function reachFor({ tool }: { tool: CaldavToolName }): {
   reason: string;
+  reason_detail: string;
   own: boolean;
   sentence: string | null;
 } {
   if (tool === 'respond_to_event') {
     return {
       reason: 'caldav_invitation_reply',
+      reason_detail: 'Calendar change that reaches guests always asks.',
       own: false,
       sentence: ' This reply goes to the event organizer, so Aman always asks.',
     };
   }
-  // A create's card lists no guest field, so a call that names guests never gets this card.
-  const noGuests = tool === 'create_event' || review?.attendees?.length === 0;
-  if (noGuests) {
-    return { reason: 'caldav_calendar_change', own: true, sentence: null };
-  }
-  const guests = review?.attendees ?? null;
-  if (guests === null) {
+  if (tool === 'create_event') {
     return {
-      reason: 'caldav_calendar_guests',
-      own: false,
-      sentence: ' Aman could not check who is invited, so it always asks.',
+      reason: 'caldav_calendar_change',
+      reason_detail: 'Calendar change on your own calendar asks.',
+      own: true,
+      sentence: null,
     };
   }
+  const verb = tool === 'delete_event' ? 'deleting' : 'changing';
   return {
     reason: 'caldav_calendar_guests',
+    reason_detail: 'Change to an existing calendar event always asks.',
     own: false,
-    sentence:
-      tool === 'delete_event'
-        ? ' This cancellation reaches the other people invited to this event, so Aman always asks.'
-        : ' This change reaches the other people invited to this event, so Aman always asks.',
+    sentence: ` Aman always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
   };
 }
 

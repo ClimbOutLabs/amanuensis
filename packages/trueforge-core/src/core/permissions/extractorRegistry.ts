@@ -492,12 +492,13 @@ const CALENDAR_SUBJECT_WORDS = [
   'invitation',
   'booking',
 ];
-/** A tool that names its guests reaches them, so the name alone is enough. */
+/** A tool that names its guests and changes them reaches those guests, so the name alone is enough. */
 const CALENDAR_GUEST_WORDS = ['attendee', 'attendees', 'guest', 'guests'];
 const CALENDAR_CHANGE_WORDS = [
   'create',
   'add',
   'insert',
+  'invite',
   'new',
   'import',
   'update',
@@ -533,7 +534,7 @@ export function isCalendarChangeToolName(toolName: string): boolean {
   return (
     (hasPhrase(words, ...CALENDAR_SUBJECT_WORDS) && hasPhrase(words, ...CALENDAR_CHANGE_WORDS)) ||
     hasPhrase(words, 'rsvp', 'quickadd') ||
-    hasPhrase(words, ...CALENDAR_GUEST_WORDS)
+    (hasPhrase(words, ...CALENDAR_GUEST_WORDS) && hasPhrase(words, ...CALENDAR_CHANGE_WORDS))
   );
 }
 

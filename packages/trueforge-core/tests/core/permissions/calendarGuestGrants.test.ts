@@ -4,6 +4,7 @@ import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import { isCalendarChangeToolName } from '../../../src/core/permissions/extractorRegistry';
 import { TOOL_GRANT_REASON } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -157,16 +158,24 @@ describe('CalDAV changes and standing grants', () => {
     ).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON });
   });
 
-  it('asks by default for an update with no guests, and admits it under an Always grant', async () => {
+  it('shows a card for an update to an existing event with no guests, even with an Always grant', async () => {
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: CALDAV_NO_GUESTS };
     expect(await classifyTier(update, await ctxWithGrants([]))).toMatchObject({
       tier: 3,
-      reason: 'caldav_calendar_change',
+      reason: 'caldav_calendar_guests',
     });
-    expect(await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]))).toMatchObject({
-      tier: 1,
-      reason: TOOL_GRANT_REASON,
-    });
+    const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
+    expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
+    expect(decision.card?.plain_what).toContain(
+      'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+    );
+  });
+
+  it('shows a card for a new event that names a guest, even with an Always grant', async () => {
+    const invite = { ...CREATE_ARGS, attendees: ['lin@example.com'] };
+    expect(
+      await classifyTier(caldavAction('create_event', invite), await ctxWithGrants([[CALDAV, 'create_event']])),
+    ).toMatchObject({ tier: 3 });
   });
 
   it('shows a card for an update to an event that has guests, even with an Always grant', async () => {
@@ -235,6 +244,13 @@ describe('invitation replies and connector calendar tools', () => {
       expect(decision).toMatchObject({ tier: 3, reason: 'connector_calendar_write' });
     },
   );
+
+  it.each(['get_attendees', 'list_guests'])(
+    'does not treat a connector tool named %s as a calendar change',
+    tool_name => {
+      expect(isCalendarChangeToolName(tool_name)).toBe(false);
+    },
+  );
 });
 
 /** A get_event answer as the CalDAV server sends it: a guest-free event leaves the attendees key out. */
@@ -248,7 +264,7 @@ function fetchedCaldavEvent(event: Record<string, unknown>): CaldavEventReview {
 describe('a fetched CalDAV event decides whether guests are reached', () => {
   const ORGANIZER = { name: 'Ada' };
 
-  it('treats a parsed event with no guest lines as having no guests, so an Always grant admits its update and delete', async () => {
+  it('shows a card for an update and a delete of an event with no guest lines, even with an Always grant', async () => {
     const review = fetchedCaldavEvent({ organizer: ORGANIZER });
     const withGrant = await ctxWithGrants([
       [CALDAV, 'update_event'],
@@ -256,15 +272,15 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
     ]);
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: review };
     const deletion = { ...caldavAction('delete_event', { id: 'ev1', scope: 'this' }), caldav_event: review };
-    expect(await classifyTier(update, withGrant)).toMatchObject({ tier: 1, card: null, reason: TOOL_GRANT_REASON });
-    expect(await classifyTier(deletion, withGrant)).toMatchObject({ tier: 1, card: null, reason: TOOL_GRANT_REASON });
+    expect(await classifyTier(update, withGrant)).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
+    expect(await classifyTier(deletion, withGrant)).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
   });
 
   it('still asks for a guest-free event without a grant', async () => {
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: fetchedCaldavEvent({}) };
     expect(await classifyTier(update, await ctxWithGrants([]))).toMatchObject({
       tier: 3,
-      reason: 'caldav_calendar_change',
+      reason: 'caldav_calendar_guests',
     });
   });
 
@@ -285,7 +301,9 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: review };
     const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
     expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
-    expect(decision.card?.plain_what).toContain('Aman could not check who is invited, so it always asks.');
+    expect(decision.card?.plain_what).toContain(
+      'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+    );
   });
 });
 
