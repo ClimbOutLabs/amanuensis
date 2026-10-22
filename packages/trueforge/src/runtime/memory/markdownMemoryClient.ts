@@ -311,10 +311,10 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
       if (items.length === 0) {
         // Everything retained was an ability note: store nothing, but record the
-        // operation so the caller's verification pass sees it as completed.
+        // operation so a later sweep sees it as completed.
         seen.add(params.operationId);
         await this.writeOperationIds(seen);
-        return { ok: true, dropped: 'ability_notes_only' };
+        return { ok: true };
       }
 
       // Group items by day so one retain spanning midnight lands in both files.

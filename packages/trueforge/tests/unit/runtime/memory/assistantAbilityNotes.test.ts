@@ -280,7 +280,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
         operationId: 'op-note-only',
         timeoutMs: 5000,
       });
-      expect(outcome).toEqual({ ok: true, dropped: 'ability_notes_only' });
+      expect(outcome).toEqual({ ok: true });
       await expect(readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8')).rejects.toThrow();
       const operation = await client.getOperation('op-note-only', 5000);
       expect(operation).toEqual({ ok: true, status: 'completed' });

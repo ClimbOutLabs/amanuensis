@@ -13,6 +13,7 @@ import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 import { createMemoryClient } from '../../../../src/runtime/memory/createMemoryClient';
+import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 
 jest.mock('../../../../src/config', () => {
   const actual = jest.requireActual<typeof import('../../../../src/config')>('../../../../src/config');
@@ -462,21 +463,46 @@ describe('turn outcome log at info', () => {
     expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['model_unresolved', 'input_too_long']);
   });
 
-  it('logs one info line when the whole item only described what Aman could not do', async () => {
+  it('logs one info line when the Hindsight backend is given only an ability note', async () => {
     const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true, dropped: 'ability_notes_only' });
+    mockSummarize.mockResolvedValue({ status: 'summarized', summary: "I can't read email right now." });
     const { logger, lines } = captureLogger();
 
-    await submitRetain({ ...submitFor({ client, logger, interactive: true }), summarize: undefined });
+    await submitRetainWithVerification(submitFor({ client, logger, interactive: true }));
 
+    expect(retain).not.toHaveBeenCalled();
     const entries = infoEntries(lines);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       message: 'Turn memory not saved: it only described what Aman could not do',
       reason: 'ability_notes_only',
+      sessionId: 's1',
+      turnId: 't1',
       personaName: 'shared',
     });
     expect(lines.join('\n')).not.toContain('houseplant');
+  });
+
+  it('logs one info line when the Markdown backend is given only an ability note', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'retain-ability-'));
+    try {
+      const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
+      mockSummarize.mockResolvedValue({ status: 'summarized', summary: "I can't read email right now." });
+      const { logger, lines } = captureLogger();
+
+      await submitRetainWithVerification(submitFor({ client, logger, interactive: true }));
+
+      const entries = infoEntries(lines);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        message: 'Turn memory not saved: it only described what Aman could not do',
+        reason: 'ability_notes_only',
+        personaName: 'shared',
+      });
+      expect(fs.existsSync(path.join(dir, 'tenant-1', 'memory'))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('keeps a normal summarized turn silent at info', async () => {
@@ -492,7 +518,7 @@ describe('turn outcome log at info', () => {
 
   it('logs nothing at info for a scheduled turn, even when the summary falls back', async () => {
     const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true, dropped: 'ability_notes_only' });
+    retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
     const { logger, lines } = captureLogger();
 

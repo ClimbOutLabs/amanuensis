@@ -11,6 +11,7 @@ import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
+import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import type { MemoryClient } from './memoryClient';
@@ -215,6 +216,19 @@ function logFullTextFallback(params: SubmitRetainParams, reason: SummaryFallback
   });
 }
 
+/** Info line for a turn whose whole memory was Aman's ability notes, so nothing is stored; interactive turns only. */
+function logAbilityNotesOnly(params: SubmitRetainParams): void {
+  if (params.outcomeLog === undefined) {
+    return;
+  }
+  params.logger.info('Turn memory not saved: it only described what Aman could not do', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    reason: 'ability_notes_only',
+  });
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -232,6 +246,12 @@ async function attemptRetainSubmission(
   if (item === undefined) {
     return 'skipped';
   }
+  // Decided here, before any backend call, so every backend behaves the same. Returning
+  // 'skipped' also ends the verification pass, so this info line is logged once per turn.
+  if (stripAssistantAbilityNotes(item.content) === '') {
+    logAbilityNotesOnly(params);
+    return 'skipped';
+  }
   try {
     const outcome = await params.client.retain({
       items: [item],
@@ -245,14 +265,6 @@ async function attemptRetainSubmission(
         reason: outcome.reason,
       });
       return 'failed';
-    }
-    if (outcome.dropped !== undefined && params.outcomeLog !== undefined) {
-      params.logger.info('Turn memory not saved: it only described what Aman could not do', {
-        sessionId: params.sessionId,
-        turnId: params.turnId,
-        personaName: params.outcomeLog.personaName,
-        reason: outcome.dropped,
-      });
     }
     return 'submitted';
   } catch (error) {
