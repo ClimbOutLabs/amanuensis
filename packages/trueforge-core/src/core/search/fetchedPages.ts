@@ -1,6 +1,6 @@
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import { namesUrl } from '../permissions/webSearch';
-import { normalizedWords } from './groundPlace';
+import { normalizedWords, significantWords } from './groundPlace';
 import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 
 /**
@@ -17,6 +17,8 @@ export interface FetchedPage {
   fetched_at: string;
   /** True when this is one search result's own text rather than a page read in full. */
   is_snippet: boolean;
+  /** True for a search result, or a page read from a link a search of this chat returned. */
+  from_search: boolean;
 }
 
 /** The tenant and chat a page was read in; a stored page is only visible inside that one chat. */
@@ -37,6 +39,24 @@ const MAX_STORED_URL_CHARS = 2048;
 /** Searches remembered per chat, and chats remembered at once, so the query check stays bounded. */
 const MAX_QUERIES_PER_CHAT = 50;
 const MAX_CHATS_WITH_QUERIES = 200;
+/** Result links remembered per chat: every search kept, at up to 20 results each. */
+const MAX_RESULT_LINKS_PER_CHAT = MAX_QUERIES_PER_CHAT * 20;
+
+/**
+ * A claim is an echo when at least this share of its telling words are search words. Over half, so
+ * a real place may share its town or one name word with the search, while a claim built mostly from
+ * the search, in any order or with one word added, is refused.
+ */
+const QUERY_ECHO_SHARE = 0.6;
+
+interface ChatSearches {
+  queries: number;
+  /** Every word of every search this chat ran. */
+  words: Set<string>;
+  /** Store keys of the links those searches returned. */
+  result_links: Set<string>;
+  expires_at: number;
+}
 
 /**
  * The key a page is stored and looked up under. Spellings that reach the same page count as one:
@@ -65,19 +85,6 @@ function storeKey({ scope, url }: { scope: FetchedPageScope; url: string }): str
   return `${chatKey(scope)}${pageUrlKey(url)}`;
 }
 
-/** Whether the words appear, in order and side by side, inside the other words. */
-function containsRun({ haystack, needle }: { haystack: readonly string[]; needle: readonly string[] }): boolean {
-  if (needle.length === 0 || needle.length > haystack.length) {
-    return false;
-  }
-  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
-    if (needle.every((word, offset) => haystack[at + offset] === word)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function wordsOf(text: string): string[] {
   const words = normalizedWords(text).trim();
   return words === '' ? [] : words.split(' ');
@@ -85,8 +92,11 @@ function wordsOf(text: string): string[] {
 
 export class FetchedPageStore {
   readonly #pages = new Map<string, FetchedPage & { expires_at: number }>();
-  /** Each chat's search queries, as words. A snippet never outlives the queries of its chat. */
-  readonly #queries = new Map<string, { queries: string[][]; expires_at: number }>();
+  /**
+   * Each chat's searches. A page from a search never outlives them, so it is always checked
+   * against the searches it came from.
+   */
+  readonly #searches = new Map<string, ChatSearches>();
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #maxPages: number;
@@ -97,7 +107,10 @@ export class FetchedPageStore {
     this.#maxPages = input.maxPages;
   }
 
-  /** A page the person's read tool returned. It replaces any search snippet kept for the same link. */
+  /**
+   * A page the person's read tool returned. It replaces any search snippet kept for the same link.
+   * A page read from a link a search of this chat returned is checked against that chat's searches.
+   */
   remember({ scope, url, text }: { scope: FetchedPageScope; url: string; text: string }): FetchedPage {
     return this.#store({ scope, url, text, is_snippet: false });
   }
@@ -126,13 +139,20 @@ export class FetchedPageStore {
     is_snippet: boolean;
   }): FetchedPage {
     const now = this.#now();
-    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString(), is_snippet };
+    const searches = this.#liveSearches(chatKey(scope));
+    const from_search = is_snippet || searches?.result_links.has(pageUrlKey(url)) === true;
+    const page: FetchedPage = { url, text, fetched_at: new Date(now).toISOString(), is_snippet, from_search };
     if (url.length > MAX_STORED_URL_CHARS) {
       return page;
     }
     const key = storeKey({ scope, url });
     this.#pages.delete(key);
-    this.#pages.set(key, { ...page, expires_at: now + this.#ttlMs });
+    if (from_search && searches === undefined) {
+      // A search result with no search left to check it against is never a source.
+      return page;
+    }
+    const expires_at = Math.min(now + this.#ttlMs, searches?.expires_at ?? Number.POSITIVE_INFINITY);
+    this.#pages.set(key, { ...page, expires_at });
     while (this.#pages.size > this.#maxPages) {
       const victim = this.#evictionVictim();
       if (victim === undefined) {
@@ -162,67 +182,109 @@ export class FetchedPageStore {
     if (stored === undefined) {
       return undefined;
     }
-    if (stored.expires_at <= this.#now()) {
+    if (stored.expires_at <= this.#now() || (stored.from_search && this.#liveSearches(chatKey(scope)) === undefined)) {
       this.#pages.delete(key);
       return undefined;
     }
-    return { url: stored.url, text: stored.text, fetched_at: stored.fetched_at, is_snippet: stored.is_snippet };
+    return {
+      url: stored.url,
+      text: stored.text,
+      fetched_at: stored.fetched_at,
+      is_snippet: stored.is_snippet,
+      from_search: stored.from_search,
+    };
   }
 
   recall({ scope, url }: { scope: FetchedPageScope; url: string }): FetchedPage | undefined {
     return this.#live({ scope, url });
   }
 
-  /** A search this chat ran, kept so a place copied from the query is never taken as found. */
+  /** A search this chat ran, kept so a place copied from the search words is never taken as found. */
   rememberQuery({ scope, query }: { scope: FetchedPageScope; query: string }): void {
     const words = wordsOf(query);
     if (words.length === 0) {
       return;
     }
     const key = chatKey(scope);
-    const entry = this.#liveQueries(key) ?? { queries: [], expires_at: 0 };
-    this.#queries.delete(key);
-    entry.queries.push(words);
-    entry.expires_at = this.#now() + this.#ttlMs;
-    if (entry.queries.length > MAX_QUERIES_PER_CHAT) {
-      // A dropped query could have produced a kept snippet, so that chat's snippets go with it.
-      entry.queries.splice(0, entry.queries.length - MAX_QUERIES_PER_CHAT);
-      this.#dropSnippets(key);
+    const entry = this.#liveSearches(key) ?? {
+      queries: 0,
+      words: new Set<string>(),
+      result_links: new Set<string>(),
+      expires_at: 0,
+    };
+    this.#searches.delete(key);
+    entry.queries += 1;
+    for (const word of words) {
+      entry.words.add(word);
     }
-    this.#queries.set(key, entry);
-    while (this.#queries.size > MAX_CHATS_WITH_QUERIES) {
-      const oldest = this.#queries.keys().next().value;
+    entry.expires_at = this.#now() + this.#ttlMs;
+    if (entry.queries > MAX_QUERIES_PER_CHAT) {
+      // Too many searches to keep: start that chat afresh, with nothing taken from the old ones.
+      this.#dropFromSearch(key);
+      entry.queries = 1;
+      entry.words = new Set(words);
+      entry.result_links.clear();
+    }
+    this.#searches.set(key, entry);
+    while (this.#searches.size > MAX_CHATS_WITH_QUERIES) {
+      const oldest = this.#searches.keys().next().value;
       if (oldest === undefined) {
         break;
       }
-      this.#queries.delete(oldest);
-      this.#dropSnippets(oldest);
+      this.#searches.delete(oldest);
+      this.#dropFromSearch(oldest);
     }
   }
 
-  /** Whether any search this chat ran holds these words side by side. */
-  queriesContain({ scope, text }: { scope: FetchedPageScope; text: string }): boolean {
-    const needle = wordsOf(text);
-    const entry = this.#liveQueries(chatKey(scope));
-    return entry?.queries.some(query => containsRun({ haystack: query, needle })) === true;
+  /** A link a search of this chat returned, kept or not, so a page later read from it is checked too. */
+  rememberResultLink({ scope, url }: { scope: FetchedPageScope; url: string }): void {
+    const entry = this.#liveSearches(chatKey(scope));
+    if (entry === undefined) {
+      return;
+    }
+    const link = pageUrlKey(url);
+    entry.result_links.delete(link);
+    entry.result_links.add(link);
+    while (entry.result_links.size > MAX_RESULT_LINKS_PER_CHAT) {
+      const oldest = entry.result_links.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      entry.result_links.delete(oldest);
+    }
   }
 
-  #liveQueries(key: string): { queries: string[][]; expires_at: number } | undefined {
-    const entry = this.#queries.get(key);
+  /**
+   * Whether a name, address or result text is mostly words from this chat's searches, compared as a
+   * set so order, punctuation and an added word do not hide it. Deny by default: text with no telling
+   * words, or a chat with no searches left, counts as an echo.
+   */
+  echoesQueries({ scope, text }: { scope: FetchedPageScope; text: string }): boolean {
+    const entry = this.#liveSearches(chatKey(scope));
+    const telling = [...significantWords(text)];
+    if (entry === undefined || telling.length === 0) {
+      return true;
+    }
+    const searched = telling.filter(word => entry.words.has(word)).length;
+    return searched / telling.length >= QUERY_ECHO_SHARE;
+  }
+
+  #liveSearches(key: string): ChatSearches | undefined {
+    const entry = this.#searches.get(key);
     if (entry === undefined) {
       return undefined;
     }
     if (entry.expires_at <= this.#now()) {
-      this.#queries.delete(key);
-      this.#dropSnippets(key);
+      this.#searches.delete(key);
+      this.#dropFromSearch(key);
       return undefined;
     }
     return entry;
   }
 
-  #dropSnippets(chat: string): void {
+  #dropFromSearch(chat: string): void {
     for (const [key, stored] of this.#pages) {
-      if (stored.is_snippet && key.startsWith(chat)) {
+      if (stored.from_search && key.startsWith(chat)) {
         this.#pages.delete(key);
       }
     }
@@ -410,33 +472,17 @@ export function recordFetchedPages(input: {
  * The words one search result carries about itself: its title, its snippet, and any page text it
  * has. Only these fields, so a provider's summary or the call's own query never reaches the store.
  */
-function searchResultTextOf(record: Record<string, unknown>): string | undefined {
+function searchResultPartsOf(record: Record<string, unknown>): string[] {
   const parts = [stringField(record, 'title'), stringField(record, 'snippet'), pageTextOf(record)].filter(
     (part): part is string => part !== undefined,
   );
-  const unique = [...new Set(parts)];
-  return unique.length === 0 ? undefined : unique.join('\n');
-}
-
-/** A result that repeats this many query words side by side is an echo of the search, not a source. */
-const QUERY_ECHO_RUN_WORDS = 3;
-
-/** Every run of QUERY_ECHO_RUN_WORDS words in the call's text arguments. */
-function queryRuns(queries: readonly string[]): string[][] {
-  const runs: string[][] = [];
-  for (const query of queries) {
-    const words = wordsOf(query);
-    for (let at = 0; at + QUERY_ECHO_RUN_WORDS <= words.length; at += 1) {
-      runs.push(words.slice(at, at + QUERY_ECHO_RUN_WORDS));
-    }
-  }
-  return runs;
+  return [...new Set(parts)];
 }
 
 /**
  * Records each result a search tool returned as a source, keyed by that result's own link. Only the
- * results list counts: the query, a result that repeats it, and any answer a provider wrote are never
- * recorded. A call whose arguments name a link fetched something, so nothing from it is recorded.
+ * results list counts: the query, a result whose title or text is mostly this chat's search words,
+ * and any answer a provider wrote are never recorded. A call whose arguments name a link fetched something, so nothing from it is recorded.
  * A snippet only fills in a link no page read has covered. Returns how many results were recorded.
  */
 export function recordSearchResults(input: {
@@ -452,7 +498,6 @@ export function recordSearchResults(input: {
   for (const query of sent.values) {
     input.pages.rememberQuery({ scope: input.scope, query });
   }
-  const echoes = queryRuns(sent.values);
   let recorded = 0;
   for (const text of input.texts) {
     let parsed: unknown;
@@ -469,14 +514,15 @@ export function recordSearchResults(input: {
         continue;
       }
       const url = stringField(item, 'url');
-      const resultText = searchResultTextOf(item);
-      if (url === undefined || resultText === undefined || url.length > MAX_STORED_URL_CHARS) {
+      if (url === undefined || url.length > MAX_STORED_URL_CHARS) {
         continue;
       }
-      const resultWords = wordsOf(resultText);
-      if (echoes.some(run => containsRun({ haystack: resultWords, needle: run }))) {
+      input.pages.rememberResultLink({ scope: input.scope, url });
+      const parts = searchResultPartsOf(item);
+      if (parts.length === 0 || parts.some(part => input.pages.echoesQueries({ scope: input.scope, text: part }))) {
         continue;
       }
+      const resultText = parts.join('\n');
       input.pages.rememberSnippet({
         scope: input.scope,
         url,

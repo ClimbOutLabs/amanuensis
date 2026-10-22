@@ -15,6 +15,7 @@ function newStore(): FetchedPageStore {
 }
 
 const ARGS = { query: 'brunch in Riverside' };
+const KOWALSKI_QUERY = 'Dr Anna Kowalski 42 Elm Road Dover';
 
 const searchOutput = (extra: Record<string, unknown> = {}): string =>
   JSON.stringify({
@@ -88,27 +89,45 @@ describe('recordSearchResults', () => {
     ).toBeUndefined();
   });
 
-  it('drops a result whose title or snippet repeats three query words in a row', () => {
+  it('drops a result whose title or snippet is mostly the search words, in any order or spelling', () => {
     const pages = newStore();
-    const query = 'Dr Ana Ruiz 14 Hidden Orchard Lane Springfield';
+    const echoes = [
+      { title: 'Kowalski Anna Dr', snippet: 'Elm Road 42, Dover' },
+      { title: 'Anna Kowalski Clinic', snippet: 'Dover, Elm Road 42' },
+      { title: 'Anna Kowalski Practice', snippet: '42 Elm, Dover Road' },
+      { title: 'Anna Kowal\u200Bski', snippet: '42 Elm Ro\u200Bad Dover' },
+      { title: '\u0410nn\u0430 K\u043Ew\u0430lski', snippet: '42 \u0415lm R\u043E\u0430d D\u043Ev\u0435r' },
+    ];
     const recorded = recordSearchResults({
       pages,
       scope: SCOPE,
-      toolArguments: { query },
+      toolArguments: { query: KOWALSKI_QUERY },
       texts: [
         JSON.stringify({
           results: [
-            { url: 'https://echo.example/a', title: `Results for ${query}`, snippet: 'Nothing here.' },
-            { url: 'https://echo.example/b', title: 'Clinics', snippet: 'Ana Ruiz 14 Hidden Orchard, see more.' },
+            ...echoes.map((echo, at) => ({ url: `https://echo.example/${at}`, ...echo })),
             { url: SUNNY_URL, title: 'Sunny Table', snippet: '40 Harbour Road, Riverside.' },
           ],
         }),
       ],
     });
     expect(recorded).toBe(1);
-    expect(pages.recall({ scope: SCOPE, url: 'https://echo.example/a' })).toBeUndefined();
-    expect(pages.recall({ scope: SCOPE, url: 'https://echo.example/b' })).toBeUndefined();
+    for (let at = 0; at < echoes.length; at += 1) {
+      expect(pages.recall({ scope: SCOPE, url: `https://echo.example/${at}` })).toBeUndefined();
+    }
     expect(pages.recall({ scope: SCOPE, url: SUNNY_URL })).toBeDefined();
+  });
+
+  it('checks a result against every search of the chat, not only the one that returned it', () => {
+    const pages = newStore();
+    recordSearchResults({ pages, scope: SCOPE, toolArguments: { query: KOWALSKI_QUERY }, texts: [] });
+    const recorded = recordSearchResults({
+      pages,
+      scope: SCOPE,
+      toolArguments: ARGS,
+      texts: [JSON.stringify({ results: [{ url: 'https://echo.example/a', title: 'Kowalski Anna Dr' }] })],
+    });
+    expect(recorded).toBe(0);
   });
 
   it('records nothing from a call whose arguments name a link', () => {
@@ -123,7 +142,7 @@ describe('recordSearchResults', () => {
     expect(pages.recall({ scope: SCOPE, url: SUNNY_URL })).toBeUndefined();
   });
 
-  it('refuses a search result place whose name was in a query of this chat', () => {
+  it('refuses a place whose name was searched for, from the result or from a page its link led to', () => {
     const pages = newStore();
     recordSearchResults({ pages, scope: SCOPE, toolArguments: { query: 'Sunny Table' }, texts: [searchOutput()] });
     const claim = {
@@ -135,24 +154,80 @@ describe('recordSearchResults', () => {
       phone: null,
       source_url: SUNNY_URL,
     };
-    expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({ ok: false, reason: 'place_only_in_search_query' });
+    expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({ ok: false, reason: 'source_not_fetched' });
     pages.remember({ scope: SCOPE, url: SUNNY_URL, text: 'Sunny Table\n40 Harbour Road, Riverside' });
-    expect(groundPlace({ claim, pages, scope: SCOPE })).toMatchObject({ ok: true });
+    expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({ ok: false, reason: 'place_only_in_search_query' });
+    const other = 'https://guide.example/sunny-table';
+    pages.remember({ scope: SCOPE, url: other, text: 'Sunny Table\n40 Harbour Road, Riverside' });
+    expect(groundPlace({ claim: { ...claim, source_url: other }, pages, scope: SCOPE })).toMatchObject({ ok: true });
   });
 
-  it('pins a search result place whose words were never searched for', () => {
+  it('refuses a place built from the search words, from a snippet or a page its link led to', () => {
+    const claims = [
+      { name: 'Kowalski Anna Dr', address: 'Elm Road 42, Dover' },
+      { name: 'Anna Kowalski Clinic', address: 'Dover, Elm Road 42' },
+      { name: 'Anna Kowalski Practice', address: '42 Elm, Dover Road' },
+      { name: 'Anna Kowal\u200Bski', address: '42 Elm Ro\u200Bad Dover' },
+      { name: '\u0410nn\u0430 K\u043Ew\u0430lski', address: '42 \u0415lm R\u043E\u0430d D\u043Ev\u0435r' },
+    ];
+    for (const [at, place] of claims.entries()) {
+      const pages = newStore();
+      recordSearchResults({ pages, scope: SCOPE, toolArguments: { query: KOWALSKI_QUERY }, texts: [] });
+      const snippetUrl = `https://echo.example/snippet-${at}`;
+      const pageUrl = `https://echo.example/page-${at}`;
+      const text = `${place.name}\n${place.address}. Open on weekdays, with parking nearby and step free access.`;
+      pages.rememberSnippet({ scope: SCOPE, url: snippetUrl, text });
+      pages.rememberResultLink({ scope: SCOPE, url: pageUrl });
+      pages.remember({ scope: SCOPE, url: pageUrl, text });
+      for (const source_url of [snippetUrl, pageUrl]) {
+        const claim = { ...place, languages: null, hours: null, price: null, phone: null, source_url };
+        expect(groundPlace({ claim, pages, scope: SCOPE })).toEqual({
+          ok: false,
+          reason: 'place_only_in_search_query',
+        });
+      }
+    }
+  });
+
+  it('pins a listing whose name shares one word with the search', () => {
     const pages = newStore();
-    recordSearchResults({ pages, scope: SCOPE, toolArguments: ARGS, texts: [searchOutput()] });
+    const url = 'https://listings.example/maria-kowalski';
+    const recorded = recordSearchResults({
+      pages,
+      scope: SCOPE,
+      toolArguments: { query: KOWALSKI_QUERY },
+      texts: [
+        JSON.stringify({
+          results: [
+            { url, title: 'Maria Kowalski Dental', snippet: 'Maria Kowalski Dental, 7 Harbour Street, Folkestone.' },
+          ],
+        }),
+      ],
+    });
+    expect(recorded).toBe(1);
     const claim = {
-      name: 'Sunny Table',
-      address: '40 Harbour Road, Riverside',
+      name: 'Maria Kowalski Dental',
+      address: '7 Harbour Street, Folkestone',
       languages: null,
       hours: null,
       price: null,
       phone: null,
-      source_url: SUNNY_URL,
+      source_url: url,
     };
     expect(groundPlace({ claim, pages, scope: SCOPE })).toMatchObject({ ok: true });
+  });
+
+  it('pins both places from a normal restaurant search', () => {
+    const pages = newStore();
+    recordSearchResults({ pages, scope: SCOPE, toolArguments: ARGS, texts: [searchOutput()] });
+    const places = [
+      { name: 'Sunny Table', address: '40 Harbour Road, Riverside', source_url: SUNNY_URL },
+      { name: 'Blue Door Diner', address: '7 Mill Lane, Riverside', source_url: BLUE_URL },
+    ];
+    for (const place of places) {
+      const claim = { ...place, languages: null, hours: null, price: null, phone: null };
+      expect(groundPlace({ claim, pages, scope: SCOPE })).toMatchObject({ ok: true });
+    }
   });
 
   it('treats only true search tools as search tools', () => {

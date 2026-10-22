@@ -169,19 +169,21 @@ function decimalDigitValue(digit: string): number {
   return (code - start) % 10;
 }
 
+/** Drops format characters (zero-width joiners, bidi controls, tag characters) and folds the look-alike letters above. */
+export function foldHiddenAndLookalikeChars(text: string): string {
+  return text.replace(/\p{Cf}/gu, '').replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
+}
+
 /**
  * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width letters, ligatures),
  * digits from any script, combining marks, format characters (zero-width joiners, bidi controls, tag
  * characters) that split a token invisibly, and a few look-alike letters.
  */
 function normalizeForScan(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .normalize('NFKC')
-    .replace(/\p{Cf}/gu, '')
-    .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char)
-    .replace(/\p{Nd}/gu, digit => String(decimalDigitValue(digit)));
+  return foldHiddenAndLookalikeChars(text.normalize('NFKD').replace(/\p{M}/gu, '').normalize('NFKC')).replace(
+    /\p{Nd}/gu,
+    digit => String(decimalDigitValue(digit)),
+  );
 }
 
 /** The form every scan compares: look-alikes and digits folded, then percent escapes decoded until stable. */

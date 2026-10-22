@@ -404,6 +404,7 @@ describe('render_places with search results and the retry limit', () => {
 
   it('pins a place whose name and address are in one search result', async () => {
     const { service, pages, asked } = setup(query => hit('38.7', '-9.1', query));
+    pages.rememberQuery({ scope: SCOPE, query: 'English speaking doctor Lisbon' });
     pages.rememberSnippet({
       scope: SCOPE,
       url: SEARCH_URL,

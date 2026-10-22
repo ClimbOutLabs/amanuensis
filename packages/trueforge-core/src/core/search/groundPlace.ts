@@ -1,3 +1,4 @@
+import { foldHiddenAndLookalikeChars } from '../permissions/outboundGuard';
 import type { FetchedPageScope, FetchedPageStore } from './fetchedPages';
 
 /** What the model claims about one place. A claimed field the page does not contain is dropped. */
@@ -64,8 +65,8 @@ const ADDRESS_WORD_FORMS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Lower case, accents removed, every run of other characters one space, address words folded to
- * one spelling, padded so words match whole.
+ * Lower case, accents and invisible characters removed, look-alike letters folded, every run of
+ * other characters one space, address words folded to one spelling, padded so words match whole.
  */
 export function normalizedWords(text: string): string {
   return ` ${unfoldedWords(text)
@@ -75,9 +76,7 @@ export function normalizedWords(text: string): string {
 
 /** The words normalizedWords keeps, one for one, before address words are folded. */
 function unfoldedWords(text: string): string[] {
-  const plain = text
-    .normalize('NFKD')
-    .replace(/\p{M}+/gu, '')
+  const plain = foldHiddenAndLookalikeChars(text.normalize('NFKD').replace(/\p{M}+/gu, ''))
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
@@ -217,6 +216,59 @@ const STREET_WORDS_NEEDING_A_NUMBER: ReadonlySet<string> = new Set([
   'close',
 ]);
 
+/** Words too common to tell one place from another: articles, joining words and titles. */
+const COMMON_WORDS: ReadonlySet<string> = new Set([
+  'the',
+  'a',
+  'an',
+  'and',
+  'of',
+  'in',
+  'at',
+  'on',
+  'for',
+  'to',
+  'near',
+  'by',
+  'with',
+  'de',
+  'da',
+  'do',
+  'del',
+  'la',
+  'le',
+  'les',
+  'du',
+  'der',
+  'die',
+  'das',
+  'von',
+  'van',
+  'mr',
+  'mrs',
+  'ms',
+]);
+
+const ADDRESS_FORMS: ReadonlySet<string> = new Set(Object.values(ADDRESS_WORD_FORMS));
+
+/**
+ * The words of a name or address that tell it apart, as a set: common words, street words, single
+ * letters and house numbers on their own are left out.
+ */
+export function significantWords(text: string): Set<string> {
+  return new Set(
+    tokensOf(text).filter(
+      token =>
+        token.length > 1 &&
+        !/^\d+[a-z]?$/.test(token) &&
+        !COMMON_WORDS.has(token) &&
+        !ADDRESS_FORMS.has(token) &&
+        !STREET_WORDS.has(token) &&
+        !STREET_WORDS_NEEDING_A_NUMBER.has(token),
+    ),
+  );
+}
+
 /** German and Dutch street names are one word: "Hauptstrasse", "Bergweg". */
 const STREET_WORD_ENDINGS = ['strasse', 'straße', 'gasse', 'platz', 'straat', 'weg', 'laan'];
 
@@ -332,10 +384,10 @@ function siteOf(url: string): string {
 
 /**
  * Keeps only what the fetched source page really says. The name and address must be on the page,
- * in one listing block, or the place is refused; a search result whose place was in the chat's own
- * searches is refused too. Any other field it
- * cannot find is dropped, never guessed. The source must be a page this server fetched for this
- * chat, and the fetch time is the server's.
+ * in one listing block, or the place is refused; a place from a search result, or from a page
+ * reached from one, is refused too when its name or address is mostly the chat's own search words.
+ * Any other field it cannot find is dropped, never guessed. The source must be a page this server
+ * fetched for this chat, and the fetch time is the server's.
  */
 export function groundPlace({
   claim,
@@ -371,10 +423,10 @@ export function groundPlace({
     return { ok: false, reason: 'address_apart_from_name' };
   }
   if (
-    page.is_snippet &&
-    (pages.queriesContain({ scope, text: claim.name }) || pages.queriesContain({ scope, text: claim.address }))
+    page.from_search &&
+    (pages.echoesQueries({ scope, text: claim.name }) || pages.echoesQueries({ scope, text: claim.address }))
   ) {
-    // A search result can repeat the words it was searched with; those prove nothing about the place.
+    // A search result, or a page reached from one, can repeat its search words; they prove nothing.
     return { ok: false, reason: 'place_only_in_search_query' };
   }
   const found = (value: string | null): string | null =>
