@@ -5,7 +5,7 @@ import {
   type ExternalStoreThreadListAdapter,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -451,7 +451,11 @@ describe('ThreadListContainer', () => {
     // not appear here (desktop dropdown or mobile sheet) any more.
     expect(screen.queryByText('Show agent details')).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitemcheckbox')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(onDelete).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole('dialog', { name: 'Delete chat' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledWith('thread-1');
