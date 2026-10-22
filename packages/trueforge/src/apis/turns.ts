@@ -342,6 +342,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
+  /** The turn's input holds a new message from the person, not only approvals or tool responses. */
+  startsAnswer: boolean;
   personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
@@ -396,6 +398,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
+    startsAnswer,
     personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
@@ -815,6 +818,7 @@ function createTurnResolver(deps: {
       schedules,
       personas,
       logger,
+      startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
@@ -1329,6 +1333,7 @@ export async function beginTurnExecution(params: {
     userRef,
     session,
     turnId,
+    startsAnswer: input?.some(isAgentInputUserMessage) ?? false,
     boundRepository: deps.boundRepository,
     serverSandboxAvailable: await readServerSandboxAvailable({
       store: deps.sandboxProviderStore,
@@ -2163,6 +2168,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
+      startsAnswer: body.input?.some(isAgentInputUserMessage) ?? false,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,

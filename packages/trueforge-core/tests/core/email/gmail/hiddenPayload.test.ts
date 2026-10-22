@@ -6,7 +6,7 @@
 import { assessDraft } from '../../../../src/core/email/gmail/draftAssessment';
 import { hasHiddenCharacters, stripInvisible } from '../../../../src/core/email/gmail/mimeText';
 import { DraftEmailSchema, UpdateDraftSchema } from '../../../../src/core/email/gmail/toolContract';
-import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
+import { escapeDisplayText } from '../../../../src/core/permissions/displayText';
 import { message, plainDraft } from './fixtures';
 import { approvalProblem, build, json, route, sentDraft, text } from './harness';
 

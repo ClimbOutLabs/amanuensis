@@ -77,7 +77,7 @@ const GOOGLE_WRITE_SCOPES = [
 export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
+  recallMaxTokens: 600,
   recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
@@ -288,6 +288,7 @@ export async function buildPersonalInstance(input: {
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
     schedules: scheduleContext(logger),
+    startsAnswer: true,
   };
   const resolver = new SpaceTurnResourceResolver(
     {

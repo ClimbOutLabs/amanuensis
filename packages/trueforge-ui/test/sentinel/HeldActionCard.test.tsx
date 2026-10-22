@@ -48,10 +48,10 @@ describe('HeldActionCard', () => {
     renderCard();
     const text = screen.getByRole('listitem').textContent ?? '';
     expect(text.indexOf('ana@example.com')).toBeGreaterThan(-1);
-    expect(text.indexOf('Exactly what will be sent')).toBeGreaterThan(text.indexOf('ana@example.com'));
+    expect(text.indexOf('Full request')).toBeGreaterThan(text.indexOf('ana@example.com'));
     expect(screen.getByText(/Lunch at noon\?/)).toBeInTheDocument();
     const reason = screen.getByText('Agent says: It was on the Monday list.');
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Exactly what will be sent'));
+    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Full request'));
     expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf("can't be unsent"));
     expect(reason).toBeInTheDocument();
   });

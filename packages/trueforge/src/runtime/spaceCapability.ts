@@ -1359,6 +1359,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no specialist tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** The request carries a new message from the person, not an approval resuming the same answer. */
+  startsAnswer: boolean;
 }
 
 /**
@@ -1425,6 +1427,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           logger: this.#space.logger,
           pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
           timezone: this.clientTimezone,
+          starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),

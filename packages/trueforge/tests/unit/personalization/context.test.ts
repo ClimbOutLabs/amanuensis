@@ -183,12 +183,10 @@ describe('root identity from the profile', () => {
     expect(rootIdentityNames(undefined)).toEqual({ assistantName: undefined, personName: undefined });
   });
 
-  it('renders the identity with both names, with only the assistant name, and with neither', () => {
+  it('renders the static identity from the assistant name only, never the person name', () => {
     const both = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata', address_as: 'Maya' }));
-    expect(both.startsWith("You are Nata, Maya's chief of staff.")).toBe(true);
-
-    const assistantOnly = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: 'Nata' }));
-    expect(assistantOnly.startsWith('You are Nata, chief of staff to the person you work for.')).toBe(true);
+    expect(both.startsWith('You are Nata, chief of staff to the person you work for.')).toBe(true);
+    expect(both).not.toContain('Maya');
 
     const neither = rootAgentIdentity(rootIdentityNames({ ...profile, assistant_name: null }));
     expect(neither.startsWith('You are Aman, chief of staff to the person you work for.')).toBe(true);
