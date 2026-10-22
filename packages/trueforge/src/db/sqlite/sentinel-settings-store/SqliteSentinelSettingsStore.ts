@@ -26,6 +26,7 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         'offline_mode' as const,
         'search_without_asking' as const,
         'maps_without_asking' as const,
+        'sandbox_without_asking' as const,
         jsonText<SentinelUserSettings['tier2_auto_allow']>(eb.ref('tier2_auto_allow')).as('tier2_auto_allow'),
       ])
       .where('tenant_id', '=', input.tenant_id)
@@ -38,6 +39,7 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
           tier2_auto_allow: normalizeTier2AutoAllow(row.tier2_auto_allow),
           search_without_asking: row.search_without_asking === 1,
           maps_without_asking: row.maps_without_asking === 1,
+          sandbox_without_asking: row.sandbox_without_asking === 1,
         };
   }
 
@@ -56,6 +58,8 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         search_without_asking:
           (input.search_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking) ? 1 : 0,
         maps_without_asking: (input.maps_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.maps_without_asking) ? 1 : 0,
+        sandbox_without_asking:
+          (input.sandbox_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.sandbox_without_asking) ? 1 : 0,
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -70,6 +74,9 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
           ...(input.maps_without_asking === undefined
             ? {}
             : { maps_without_asking: input.maps_without_asking ? 1 : 0 }),
+          ...(input.sandbox_without_asking === undefined
+            ? {}
+            : { sandbox_without_asking: input.sandbox_without_asking ? 1 : 0 }),
         }),
       )
       .execute();

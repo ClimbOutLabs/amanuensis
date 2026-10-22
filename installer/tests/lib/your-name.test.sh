@@ -25,6 +25,7 @@ install_answering() { # reply...
   for reply in "$@"; do replies="$replies"$'\n'"What should Aman call you?=>$reply"; done
   run_install_tty "Name for this instance=>
 Your email=>$EMAIL$replies
+Connect a calendar?=>n
 Back up automatically=>y
 Go ahead?=>y
 Enter a password for $EMAIL=>$SENTINEL_PASSWORD

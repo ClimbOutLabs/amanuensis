@@ -6,6 +6,7 @@ import {
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   getErrorMessage,
+  HelpProvider,
   ImplementationPlanGrantProvider,
   MemoryRecallProvider,
   ModelUsageProvider,
@@ -48,6 +49,7 @@ import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
+import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
 import { LogoutButton } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
@@ -101,15 +103,10 @@ const AMAN_THEME: ThemeConfig = {
   },
 };
 
-/** Host brand: primary CTA fill is a gradient (see `index.css`); keep solid token for accents. */
+/** Host look: the kit's warm paper and gold. No host colour overrides. */
 const appTheme: ThemeConfig = {
-  className: 'harness-primary-gradient',
   // The shell CSP keeps stylesheets and fonts on the app origin.
   webFonts: false,
-  tokens: {
-    primaryButtonBg: '#6366F1',
-    primaryButtonHover: '#3d2dd4',
-  },
 };
 
 function Loader() {
@@ -445,6 +442,10 @@ export function App() {
   );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
+  const helpApi = useMemo(
+    () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
+    [personaApi],
+  );
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
   const repositoryWorkApi = useMemo(() => createRepositoryWorkApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
@@ -524,27 +525,31 @@ export function App() {
                       <MemoryRecallProvider api={memoryRecallApi}>
                         <ModelUsageProvider api={modelUsageApi}>
                           <PersonaProvider api={personaApi}>
-                            <AmanSetupProvider
-                              value={{
-                                modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                firstRunGuide,
-                                settingsHref: '/settings',
-                              }}
-                            >
-                              <ComposerDraftScopeProvider scope={draftScope}>
-                                <AmanShell
-                                  defaultAgentSpec={boot.defaultAgentSpec}
-                                  openSettings={boot.openSettings}
-                                  displayName={session.displayName}
-                                  overrides={overrides}
-                                  modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                                  memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                                  version={boot.build?.version}
-                                  buildRef={boot.build?.ref}
-                                />
-                              </ComposerDraftScopeProvider>
-                            </AmanSetupProvider>
+                            <HelpProvider api={helpApi}>
+                              <AmanSetupProvider
+                                value={{
+                                  modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                  hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                  firstRunGuide,
+                                  settingsHref: '/settings',
+                                }}
+                              >
+                                <ComposerDraftScopeProvider scope={draftScope}>
+                                  <AmanShell
+                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                    openSettings={boot.openSettings}
+                                    displayName={session.displayName}
+                                    overrides={overrides}
+                                    modelName={
+                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                    }
+                                    memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                                    version={boot.build?.version}
+                                    buildRef={boot.build?.ref}
+                                  />
+                                </ComposerDraftScopeProvider>
+                              </AmanSetupProvider>
+                            </HelpProvider>
                           </PersonaProvider>
                         </ModelUsageProvider>
                       </MemoryRecallProvider>

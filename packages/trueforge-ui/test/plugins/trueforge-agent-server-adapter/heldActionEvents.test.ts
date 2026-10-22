@@ -86,7 +86,8 @@ describe('held-action approval events', () => {
     assert.deepEqual(items, []);
     assert.equal(seen.length, 1);
     assert.equal(seen[0]?.toolCallId, 'call_held');
-    assert.deepEqual(seen[0]?.held, { alwaysAllowOffered: false, expiresAt: '2026-10-17T07:00:00.000Z' });
+    assert.deepEqual(seen[0]?.held, { expiresAt: '2026-10-17T07:00:00.000Z' });
+    assert.equal(seen[0]?.alwaysAllowOffered, false);
   });
 
   it('leave an ordinary approval request on its way to the runtime', async () => {

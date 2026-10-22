@@ -5,8 +5,8 @@ import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
   isGitControlPath,
+  isNewWriteTarget,
   isSandboxToolPath,
-  observeShellCreatedFiles,
   skipWrapperPrefix,
   writeTargetTouchesGitControl,
 } from '../../../src/core/permissions/trackedExecutables';
@@ -14,6 +14,7 @@ import {
 const SCOPE = {
   tenant_id: 't1',
   created_by: 'u1',
+  conversation_id: 'conv-1',
   repository_id: 'r1',
   workspace_cwd: '/repo',
 };
@@ -34,6 +35,13 @@ describe('InMemoryTrackedExecutableStore', () => {
     const identity = '/repo/dist/tool';
     store.track({ scope: SCOPE, file_identity: identity });
     expect(store.isTracked({ scope: { ...SCOPE, repository_id: 'r2' }, file_identity: identity })).toBe(false);
+  });
+
+  test('a file Aman wrote in one conversation is not tracked in another', () => {
+    const store = new InMemoryTrackedExecutableStore();
+    const identity = '/repo/dist/tool';
+    store.track({ scope: SCOPE, file_identity: identity });
+    expect(store.isTracked({ scope: { ...SCOPE, conversation_id: 'conv-2' }, file_identity: identity })).toBe(false);
   });
 
   test('grants are keyed by conversation and purged per conversation', () => {
@@ -71,23 +79,6 @@ describe('skipWrapperPrefix', () => {
     expect(skipWrapperPrefix(['env', 'FOO=bar', 'ls'])).toEqual(['ls']);
     expect(skipWrapperPrefix(['FOO=bar', 'ls'])).toEqual(['FOO=bar', 'ls']);
     expect(skipWrapperPrefix(['ls', '-la'])).toEqual(['ls', '-la']);
-  });
-});
-
-describe('observeShellCreatedFiles', () => {
-  test('detects redirect targets', () => {
-    expect(observeShellCreatedFiles({ command: 'echo hi > out.txt' })).toContain('out.txt');
-  });
-
-  test('detects touch/cp/mv/install targets', () => {
-    expect(observeShellCreatedFiles({ command: 'touch newfile' })).toContain('newfile');
-    // cp records the destination (the created file), not the source.
-    expect(observeShellCreatedFiles({ command: 'cp a b' })).toEqual(['b']);
-    expect(observeShellCreatedFiles({ command: 'mv old new' })).toContain('new');
-  });
-
-  test('returns nothing for read-only commands', () => {
-    expect(observeShellCreatedFiles({ command: 'ls -la' })).toEqual([]);
   });
 });
 
@@ -144,5 +135,41 @@ describe('writeTargetTouchesGitControl', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isNewWriteTarget', () => {
+  test('a path that does not exist yet is new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      expect(isNewWriteTarget({ p: 'fresh.py', cwd: dir })).toBe(true);
+      expect(isNewWriteTarget({ p: 'sub/fresh.py', cwd: dir })).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an existing file is not new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      writeFileSync(join(dir, 'README.md'), 'text');
+      expect(isNewWriteTarget({ p: 'README.md', cwd: dir })).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a dangling symlink is not new', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
+    try {
+      symlinkSync(join(dir, 'missing.txt'), join(dir, 'link.txt'));
+      expect(isNewWriteTarget({ p: 'link.txt', cwd: dir })).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a remote sandbox path is never new, because the server cannot see it', () => {
+    expect(isNewWriteTarget({ p: 'fresh.py', cwd: '/workspace', resolution: 'remote' })).toBe(false);
   });
 });

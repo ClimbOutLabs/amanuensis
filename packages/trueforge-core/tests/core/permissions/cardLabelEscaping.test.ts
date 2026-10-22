@@ -138,7 +138,13 @@ const LABEL_CASES: LabelCase[] = [
       const file = join(workspace, `tool${control}.sh`);
       writeFileSync(file, 'echo hi');
       services.tracked_store.track({
-        scope: { tenant_id: 't1', created_by: 'u1', repository_id: 'r1', workspace_cwd: workspace },
+        scope: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: 'r1',
+          workspace_cwd: workspace,
+        },
         file_identity: realpathSync(file),
       });
       return {

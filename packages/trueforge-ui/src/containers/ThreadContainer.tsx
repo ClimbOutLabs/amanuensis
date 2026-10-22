@@ -3,6 +3,8 @@
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
+import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
+import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
 import { ComposerBusyProvider } from '../hooks/useComposerBusyState.js';
 import { useSyncSessionTitle } from '../hooks/useSyncSessionTitle.js';
@@ -76,6 +78,10 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
 
   const isEmpty = useAuiState(isNewChatView);
   const isLoading = useAuiState(s => s.thread.isLoading);
+  const help = useOptionalHelp();
+  const localThreadId = useAuiState(s => s.threadListItem.id);
+  // The help chat takes the place of the welcome tour in the chat it was started in.
+  const helpHere = help !== null && help.isSessionFor(localThreadId);
   // Entrance animation gate: shells mounted during the thread's first paint stay
   // static; only messages arriving afterwards animate. Resets on thread switch
   // since the container does not remount between threads.
@@ -113,10 +119,11 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                   <ThreadRootShell>
                     <ThreadPrimitive.Viewport asChild autoScroll>
                       <ThreadViewportShell isEmpty={isEmpty}>
-                        {isEmpty && <WelcomeScreen heading={welcomeHeading} />}
+                        {helpHere ? <HelpChatPanel /> : null}
+                        {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
                         {isEmpty && !isLoading && (
                           <>
-                            <ThreadWorkOnRepoControls />
+                            {helpHere ? null : <ThreadWorkOnRepoControls />}
                             {composer}
                           </>
                         )}
@@ -140,6 +147,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                                 <TerminalErrorContainer />
                                 <ResumeUnavailableContainer />
                               </MessageGroup>
+                              {helpHere ? <HelpChoices /> : null}
                             </>
                           )
                         )}
