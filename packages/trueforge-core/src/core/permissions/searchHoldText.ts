@@ -77,10 +77,16 @@ export function withHoldSay(text: string, say: string): string {
   return `${text}${/[.!?]$/.test(text) ? '' : '.'} ${say}`;
 }
 
-/** Card sentence for a held search; the summary is already masked where it must be. */
+/**
+ * Card sentence for a held search; the summary is already masked where it must be. A query that ends in
+ * "." still gets the closing period, so the card can read the query back with its own period kept.
+ */
 export function searchHoldCardText({ summary, say }: { summary: string; say: string }): string {
-  const subject = summary === '' ? WEB_SEARCH_NAME : `${WEB_SEARCH_WHAT_PREFIX}${summary}`;
-  return withHoldSay(subject, say);
+  if (summary === '') {
+    return withHoldSay(WEB_SEARCH_NAME, say);
+  }
+  const subject = `${WEB_SEARCH_WHAT_PREFIX}${summary}`;
+  return /[!?]$/.test(subject) ? `${subject} ${say}` : `${subject}. ${say}`;
 }
 
 /** Audit row text for a held search: the rule that fired, never the query. */

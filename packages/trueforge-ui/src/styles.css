@@ -1597,11 +1597,13 @@
   border-top: 0.125rem dashed var(--border);
 }
 
-/* Ticket text: the question in the display face, and the mono labels on the badge and the stub. */
+/* Ticket text: the short title in the display face, and the mono labels on the badge and the stub. */
 .aui-ticket__title {
   font-family: var(--font-display);
   font-size: 1.25rem;
+  font-weight: 400;
   line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
 .aui-ticket__label {
@@ -2106,14 +2108,6 @@
   font-weight: 400;
   line-height: 1.05;
   letter-spacing: -0.02em;
-}
-
-.aui-ticket__title {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 400;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
 }
 
 .aui-ticket__sub {

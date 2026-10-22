@@ -1,13 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { approvalQuestion, approvalStub, approveVerb, declineVerb } from '../../src/sentinel/approvalCopy.js';
+import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+
+import {
+  approvalQuestion,
+  approvalStub,
+  approveVerb,
+  declineVerb,
+  searchHoldParts,
+} from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
-
-// The label has one owner in types.ts; a copy in approvalCopy would keep the old text when that owner changes.
-vi.mock('../../src/sentinel/types.js', async importOriginal => ({
-  ...(await importOriginal()),
-  WAITING_FOR_YOU_LABEL: 'Needs you now',
-}));
 
 function cardWith(overrides: Partial<SentinelApprovalCard>): SentinelApprovalCard {
   return {
@@ -59,8 +61,8 @@ describe('approval copy', () => {
       destination_host: 'Tavily',
     });
     const stub = approvalStub(card, { sentAt: null });
-    expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
-    expect(stub.detail).toBe('Open Details to see what it does');
+    expect(stub.what).toBe('Web search');
+    expect(stub.detail).toBeNull();
   });
 
   it('asks "Send this email?" for a new message, whatever the number of recipients', () => {
@@ -132,7 +134,28 @@ describe('approval copy', () => {
     expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Done 09:14');
   });
 
-  it('reads the waiting label from its one owner', () => {
-    expect(approvalStub(cardWith({ calendar_event: null }), { sentAt: null }).state).toBe('Needs you now');
+  it('leaves the stub state empty while a ticket waits, since the badge already says so', () => {
+    expect(approvalStub(cardWith({ calendar_event: null }), { sentAt: null }).state).toBeNull();
+  });
+});
+
+describe('searchHoldParts', () => {
+  it('reads the query and the reason back from a held search sentence', () => {
+    const text = searchHoldCardText({ summary: 'lamp: brass, 2 pack', say: HOLD_SAY.private_read });
+    expect(searchHoldParts(text)).toEqual({ query: 'lamp: brass, 2 pack', reason: HOLD_SAY.private_read });
+  });
+
+  it('keeps a period that ends the query', () => {
+    const text = searchHoldCardText({ summary: 'open hours of St. Mary Inc.', say: HOLD_SAY.search_setting });
+    expect(searchHoldParts(text)).toEqual({ query: 'open hours of St. Mary Inc.', reason: HOLD_SAY.search_setting });
+  });
+
+  it('drops only the closing period of a query that does not end in one', () => {
+    const text = searchHoldCardText({ summary: 'lamp', say: HOLD_SAY.search_setting });
+    expect(searchHoldParts(text)?.query).toBe('lamp');
+  });
+
+  it('returns undefined for a card that is not a held search', () => {
+    expect(searchHoldParts('Send $250 to Acme Corp')).toBeUndefined();
   });
 });

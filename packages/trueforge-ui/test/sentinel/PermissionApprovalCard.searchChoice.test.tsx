@@ -75,4 +75,52 @@ describe('PermissionApprovalCard for a held search', () => {
     expect(screen.getByText('Also sent by the search service')).toBeInTheDocument();
     expect(screen.getByText(/session_id: "sess-123"/)).toBeInTheDocument();
   });
+
+  it('titles the held search "Web search" and puts the query under it at body size', () => {
+    renderSearch();
+    expect(screen.getByRole('heading', { name: 'Web search' })).toBeInTheDocument();
+    const query = screen.getByText('Find quiet coffee shops in San Francisco');
+    expect(query.tagName.toLowerCase()).toBe('pre');
+    expect(query.className).toContain('font-mono');
+    expect(query.className).toContain('text-sm');
+    expect(query.className).not.toContain('aui-ticket__title');
+    expect(screen.getByText(HOLD_SAY.private_read)).toBeInTheDocument();
+  });
+
+  it('shows "Waiting for you" once, in the badge, and not again in the stub', () => {
+    renderSearch();
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
+  });
+
+  it('keeps Allow and Not now on screen for a 300-character query, folding the query after 160', () => {
+    const query = 'a'.repeat(300);
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-search"
+        card={{ ...SEARCH_CARD, plain_what: searchHoldCardText({ summary: query, say: HOLD_SAY.private_read }) }}
+        othersWaiting={0}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Allow it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show all (140 more characters)' })).toBeInTheDocument();
+  });
+
+  it('titles a Tavily search "Web search" and keeps its whole sentence as body text', () => {
+    const sentence = `Search the web with Tavily for: ${'b'.repeat(200)}. This sends those words to api.tavily.com.`;
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-search"
+        card={{ ...SEARCH_CARD, plain_what: sentence }}
+        othersWaiting={0}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Web search' })).toBeInTheDocument();
+    expect(screen.getByText(/^Search the web with Tavily for: b+\.\.\.$/)).toHaveClass('text-sm');
+    expect(screen.getByRole('button', { name: /show all/i })).toBeInTheDocument();
+  });
 });
