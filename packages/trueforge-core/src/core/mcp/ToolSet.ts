@@ -507,10 +507,11 @@ export class ToolSet implements IToolSet {
 
   /**
    * An approval was minted on the arguments the tool takes, so the dispatch check re-derives them the
-   * same way; the wire still carries what the model wrote.
+   * same way; the wire still carries what the model wrote. A connector that cannot list its tools leaves
+   * the wire arguments as written, which must still match the approval exactly.
    */
   async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
-    const tool = await this.resolveTool(params.name);
+    const tool = await this.resolveTool(params.name).catch(() => undefined);
     const named = this.withNamedArgumentsOnly({ params, tool });
     return named === params ? undefined : named.arguments;
   }
