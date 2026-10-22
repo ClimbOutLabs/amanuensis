@@ -24,16 +24,22 @@ export const STEP_REASONING_LEVEL = {
 } as const satisfies Record<ReasoningStepKind, string>;
 
 /**
- * Visible-output cap for tool-continuation steps. Most of a continuation is a short tool call or a
- * brief follow-up, so the normal limit is mostly wasted tokens there.
+ * Output cap for tool-continuation steps. The provider counts a tool call's arguments against the same
+ * limit as visible text, so a cap sized for prose would cut a large file write or edit mid-call.
  */
-export const CONTINUATION_VISIBLE_OUTPUT_TOKENS = 2_048;
+export const CONTINUATION_OUTPUT_TOKENS = 8_192;
 
 /**
- * Extra room for reasoning when a continuation has an effort set. Providers count reasoning against
- * the same max-output limit, so without it the visible cap would also cut the reasoning short.
+ * Visible-output cap for final-answer steps. Those offer no tools, so the output is prose alone and a
+ * short reply is all the step needs.
  */
-export const CONTINUATION_REASONING_ALLOWANCE_TOKENS = 4_096;
+export const FINAL_ANSWER_OUTPUT_TOKENS = 2_048;
+
+/**
+ * Extra room for reasoning when a capped step has an effort set. Providers count reasoning against
+ * the same max-output limit, so without it the cap would also cut the reasoning short.
+ */
+export const CAPPED_STEP_REASONING_ALLOWANCE_TOKENS = 4_096;
 
 /** Rank of each known effort, lowest first, so "nearest" means the smallest step between levels. */
 const EFFORT_RANK: ReadonlyMap<string, number> = new Map(
@@ -95,8 +101,8 @@ export function resolveStepReasoningEffort({
 }
 
 /**
- * The max-output cap for a request. Only tool-continuation steps are capped; every other step keeps
- * the configured limit, and an unset limit stays unset for them.
+ * The max-output cap for a request. Continuation and final-answer steps are capped; every other step
+ * keeps the configured limit, and an unset limit stays unset for them.
  */
 export function stepMaxOutputTokens({
   stepKind,
@@ -107,12 +113,18 @@ export function stepMaxOutputTokens({
   configured: number | undefined;
   reasoningEffort: string | undefined;
 }): number | undefined {
-  if (stepKind !== 'continuation') {
+  const visibleCap =
+    stepKind === 'continuation'
+      ? CONTINUATION_OUTPUT_TOKENS
+      : stepKind === 'final_answer'
+        ? FINAL_ANSWER_OUTPUT_TOKENS
+        : undefined;
+  if (visibleCap === undefined) {
     return configured;
   }
   const reasoningAllowance =
-    reasoningEffort !== undefined && reasoningEffort !== 'none' ? CONTINUATION_REASONING_ALLOWANCE_TOKENS : 0;
-  const cap = CONTINUATION_VISIBLE_OUTPUT_TOKENS + reasoningAllowance;
+    reasoningEffort !== undefined && reasoningEffort !== 'none' ? CAPPED_STEP_REASONING_ALLOWANCE_TOKENS : 0;
+  const cap = visibleCap + reasoningAllowance;
   return configured === undefined ? cap : Math.min(configured, cap);
 }
 

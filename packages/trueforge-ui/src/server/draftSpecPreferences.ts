@@ -51,9 +51,14 @@ function storageKeyForKind(kind: DraftPreferenceKind): string {
 // every other value from the host/provider defaults.
 function selectDraftModel(spec: AgentSpec): AgentSpec['model'] {
   const reasoningEffort = spec.model.params?.reasoningEffort;
+  const reasoningEffortMode = spec.model.params?.reasoningEffortMode;
+  const params = {
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(reasoningEffortMode === undefined ? {} : { reasoningEffortMode }),
+  };
   return {
     name: spec.model.name,
-    ...(reasoningEffort === undefined ? {} : { params: { reasoningEffort } }),
+    ...(Object.keys(params).length === 0 ? {} : { params }),
   };
 }
 

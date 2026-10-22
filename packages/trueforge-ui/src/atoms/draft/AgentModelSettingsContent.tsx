@@ -7,6 +7,7 @@ import { useSlot } from '../../theme/SlotsProvider.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
 import { auiInputClass } from '../lib/inputClasses.js';
+import { paramsWithThinkingMode, readThinkingMode, type ThinkingMode } from './reasoningEffort.js';
 
 export type AgentModelSettingsContentProps = {
   spec: AgentSpec;
@@ -19,7 +20,7 @@ enum ParamsView {
   JSON = 'json',
 }
 
-const CONTROLLED_PARAM_KEYS = new Set(['maxTokens', 'reasoningEffort']);
+const CONTROLLED_PARAM_KEYS = new Set(['maxTokens', 'reasoningEffort', 'reasoningEffortMode']);
 
 function finiteNumber(raw: string): number | null {
   if (raw.trim() === '') return null;
@@ -35,9 +36,11 @@ function isModelParams(value: unknown): value is ModelParams {
   if (!isRecord(value)) return false;
   const maxTokens = value['maxTokens'];
   const reasoningEffort = value['reasoningEffort'];
+  const thinkingMode = value['reasoningEffortMode'];
   return (
     (maxTokens === undefined || (typeof maxTokens === 'number' && Number.isFinite(maxTokens))) &&
-    (reasoningEffort === undefined || typeof reasoningEffort === 'string')
+    (reasoningEffort === undefined || typeof reasoningEffort === 'string') &&
+    (thinkingMode === undefined || thinkingMode === 'automatic' || thinkingMode === 'fixed')
   );
 }
 
@@ -119,6 +122,8 @@ export function AgentModelSettingsContent({ spec, model, onChange }: AgentModelS
   const maxOutputTokens = model?.properties.maxOutputTokens;
   const reasoningEfforts = model?.properties.reasoningEfforts ?? [];
   const firstReasoningEffort = reasoningEfforts[0];
+  const thinkingMode = readThinkingMode(params);
+  const setThinkingMode = (mode: ThinkingMode) => replaceParams(paramsWithThinkingMode(params, mode, reasoningEfforts));
 
   const rows: Array<{
     label: string;
@@ -213,6 +218,25 @@ export function AgentModelSettingsContent({ spec, model, onChange }: AgentModelS
       {view === ParamsView.UI ? (
         <div className="max-h-[min(30rem,calc(100dvh-8rem))] overflow-y-auto px-4">
           <div className="divide-y divide-border">
+            {reasoningEfforts.length > 0 ? (
+              <div className="py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-text-primary text-sm font-medium">Thinking</span>
+                  <select
+                    value={thinkingMode}
+                    aria-label="Thinking mode"
+                    className={auiInputClass('h-8 cursor-pointer py-1.5')}
+                    onChange={event => setThinkingMode(event.target.value === 'fixed' ? 'fixed' : 'automatic')}
+                  >
+                    <option value="automatic">Automatic (by step)</option>
+                    <option value="fixed">Always high</option>
+                  </select>
+                </div>
+                <p className="text-text-secondary mt-2 text-sm">
+                  Automatic thinks hard when planning and lightly between tool steps, which saves tokens.
+                </p>
+              </div>
+            ) : null}
             {rows.map(row => (
               <div key={row.label} className="py-3">
                 <div className="flex items-center justify-between gap-3">

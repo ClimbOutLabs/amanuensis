@@ -1,6 +1,10 @@
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import {
+  CAPPED_STEP_REASONING_ALLOWANCE_TOKENS,
+  FINAL_ANSWER_OUTPUT_TOKENS,
+} from '../../../src/core/llm/reasoningEffortPolicy';
 import type { ModelParams } from '../../../src/core/runtime/AgentDefinition';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadEvent, ContextMessage } from '../../../src/core/runtime/AgentThread.types';
@@ -106,7 +110,7 @@ describe('per-step reasoning effort and output cap', () => {
     expect(firstRequest(create)['reasoning_effort']).toBe('medium');
   });
 
-  it('a final-answer step after tool results sends medium and keeps the configured output limit', async () => {
+  it('a final-answer step after tool results sends medium and caps the output at the prose limit', async () => {
     const { thread, create } = makeThread({
       context: [
         { role: 'user', content: 'Look it up.' },
@@ -119,7 +123,7 @@ describe('per-step reasoning effort and output cap', () => {
 
     const body = firstRequest(create);
     expect(body['reasoning_effort']).toBe('medium');
-    expect(body['max_tokens']).toBe(16_000);
+    expect(body['max_tokens']).toBe(FINAL_ANSWER_OUTPUT_TOKENS + CAPPED_STEP_REASONING_ALLOWANCE_TOKENS);
   });
 
   it('records each request under the effort it was sent with', async () => {

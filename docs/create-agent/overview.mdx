@@ -262,7 +262,7 @@ The only required field.
 | `name`   | string | Yes      | UI + API | Model FQN: `provider/model`, e.g. `openai/gpt-5.2`. See [Models](/models). |
 | `params` | object | No       | API      | Model call parameters, passed through to the provider.                     |
 
-`model.params` recognizes `max_tokens`, `temperature`, `top_p`, `top_k`, `parallel_tool_calls` (boolean), and `reasoning_effort` (string). Extra keys are allowed and forwarded to the provider as-is.
+`model.params` recognizes `max_tokens`, `temperature`, `top_p`, `top_k`, `parallel_tool_calls` (boolean), `reasoning_effort` (string), and `reasoning_effort_mode` (`automatic`, the default, picks the effort per step; `fixed` sends `reasoning_effort` on every step). Extra keys are allowed and forwarded to the provider as-is.
 
 ### `instructions`
 
