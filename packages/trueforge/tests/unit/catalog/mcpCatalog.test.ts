@@ -29,10 +29,11 @@ describe('shipped MCP catalog', () => {
     expect(hindsight.description).toMatch(/\{apiBase\}\/mcp\/\{bank\}/);
   });
 
-  it('offers Parallel’s keyless hosted MCP as the one preset that becomes the web search provider', () => {
+  it('offers Parallel’s keyless hosted MCP and Tavily as the presets that can become the web search provider', () => {
     const presets = McpCatalog.loadShipped().list();
     expect(presets.filter(server => server.search_provider === true).map(server => server.name)).toEqual([
       'parallel-web',
+      'tavily',
     ]);
     const parallel = presets.find(server => server.name === 'parallel-web');
     if (parallel === undefined) {
@@ -43,12 +44,20 @@ describe('shipped MCP catalog', () => {
     expect(parallel.auth).toBeUndefined();
   });
 
-  it('keeps Tavily as a preset a user can pick as the search provider, without making it the default', () => {
-    const tavily = McpCatalog.loadShipped()
-      .list()
-      .find(server => server.name === 'tavily');
+  it('keeps Tavily as a preset a user can pick as the search provider, with its key asked for and no plumbing', () => {
+    const catalog = McpCatalog.loadShipped();
+    const tavily = catalog.list().find(server => server.name === 'tavily');
     expect(tavily?.url).toBe('https://mcp.tavily.com/mcp');
-    expect(tavily?.search_provider).toBeUndefined();
+    expect(tavily?.search_provider).toBe(true);
+    expect(tavily?.auth?.type).toBe('header');
+    // The default seed only takes a keyless preset, so Tavily is never added on its own.
+    expect(catalog.list().filter(server => server.search_provider === true && server.auth === undefined)).toHaveLength(
+      1,
+    );
+    expect(catalog.searchProviderGrant({ url: 'https://mcp.tavily.com/mcp', storedTools: [] })).toEqual({
+      tools: ['tavily_search', 'tavily_extract'],
+      plumbing_fields: [],
+    });
   });
 
   it('lists the real search tools of Parallel, Tavily and Exa, and none for a server that cannot search', () => {

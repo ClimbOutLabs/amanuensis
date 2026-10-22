@@ -11,11 +11,12 @@ import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
+import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import type { MemoryClient } from './memoryClient';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { summarizeTurnContent } from './memorySummarize';
+import { summarizeTurnContent, type SummaryFallbackReason } from './memorySummarize';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -92,6 +93,15 @@ export interface SummarizeTurnContext {
   modelUsage: TurnModelUsage;
 }
 
+/**
+ * Present for an interactive turn, so its memory outcomes are logged at info. Absent for
+ * scheduled turns and recovery resubmissions, which log nothing at info.
+ */
+export interface RetainOutcomeLog {
+  /** The persona whose vault the turn retains into; `shared` when no persona is active. */
+  personaName: string;
+}
+
 export interface SubmitRetainParams {
   client: MemoryClient;
   sessionId: string;
@@ -103,6 +113,7 @@ export interface SubmitRetainParams {
   /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
   origin?: AmanMemoryOrigin | undefined;
   logger: Logger;
+  outcomeLog?: RetainOutcomeLog | undefined;
   /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
@@ -169,6 +180,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       params.logger.debug('Memory summarization failed; falling back to verbatim transcript', {
         reason: result.reason,
       });
+      logFullTextFallback(params, result.fallback);
     } else {
       // `skipped` is an intentional no-op, but the reason must stay observable: a turn
       // that never summarizes (no model configured, overlong exchange) is otherwise
@@ -176,14 +188,45 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       params.logger.debug('Memory summarization skipped; falling back to verbatim transcript', {
         reason: result.reason,
       });
+      // An empty exchange stores nothing, so there is no full text to report.
+      if (result.reason !== 'empty-exchange') {
+        logFullTextFallback(params, result.reason === 'input-too-long' ? 'input_too_long' : 'model_unresolved');
+      }
     }
     return undefined;
   } catch (error) {
     params.logger.debug('Memory summarization threw; falling back to verbatim transcript', {
       reason: error instanceof Error ? error.message : String(error),
     });
+    logFullTextFallback(params, 'model_failed');
     return undefined;
   }
+}
+
+/** Info line for a turn stored verbatim while summarization was on; interactive turns only. */
+function logFullTextFallback(params: SubmitRetainParams, reason: SummaryFallbackReason): void {
+  if (params.outcomeLog === undefined) {
+    return;
+  }
+  params.logger.info('Turn saved as full text instead of a summary', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    reason,
+  });
+}
+
+/** Info line for a turn whose whole memory was Aman's ability notes, so nothing is stored; interactive turns only. */
+function logAbilityNotesOnly(params: SubmitRetainParams): void {
+  if (params.outcomeLog === undefined) {
+    return;
+  }
+  params.logger.info('Turn memory not saved: it only described what Aman could not do', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    reason: 'ability_notes_only',
+  });
 }
 
 async function attemptRetainSubmission(
@@ -201,6 +244,12 @@ async function attemptRetainSubmission(
   const summary = precomputed !== undefined ? precomputed.summarizedContent : await maybeSummarizeTurn(params);
   const item = buildRetainItem({ ...params, summarizedContent: summary });
   if (item === undefined) {
+    return 'skipped';
+  }
+  // Decided here, before any backend call, so every backend behaves the same. Returning
+  // 'skipped' also ends the verification pass, so this info line is logged once per turn.
+  if (stripAssistantAbilityNotes(item.content) === '') {
+    logAbilityNotesOnly(params);
     return 'skipped';
   }
   try {
@@ -238,23 +287,40 @@ async function attemptRetainSubmission(
  * exact exchange when the op is missing or unreadable. The deterministic id makes resubmission
  * idempotent, and a queued or running op is left for the next sweep. Never throws; a
  * still-unverified op is logged with its operation id rather than dropped silently.
+ *
+ * Resolves `true` only when the provider holds the exchange (completed, queued, running, or
+ * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
-export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<void> {
+export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
   // Precompute the summary once; the retry path below must reuse it rather than
   // invoking the LLM a second time (cost, latency, and non-determinism).
   // The wrapper ensures even an undefined result is not recomputed.
   const precomputed = { summarizedContent: await maybeSummarizeTurn(params) };
   const result = await attemptRetainSubmission(params, precomputed);
   if (result === 'skipped') {
-    return;
+    return false;
   }
   const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
   const timeoutMs = configuration.MEMORY_RETAIN_TIMEOUT_MS;
+  // Vanished, never landed, or unreadable: resubmit the exact exchange once.
+  // Reuse the precomputed summary; do not invoke the LLM again.
+  const resubmitOnce = async (reason?: string): Promise<boolean> => {
+    const retryResult = await attemptRetainSubmission(params, precomputed);
+    if (retryResult !== 'submitted') {
+      params.logger.warn('Memory retain unverified after single retry pass', {
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        operationId,
+        ...(reason === undefined ? {} : { reason }),
+      });
+    }
+    return retryResult === 'submitted';
+  };
   try {
     const check = await params.client.getOperation(operationId, timeoutMs);
     if (check.ok) {
       if (isOperationCompletedStatus(check.status)) {
-        return;
+        return true;
       }
       if (isOperationFailedStatus(check.status)) {
         const retried = await params.client.retryOperation(operationId, timeoutMs);
@@ -265,20 +331,10 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
             operationId,
           });
         }
-        return;
+        return retried.ok;
       }
       if (check.status === 'unknown') {
-        // Vanished (or never landed): resubmit the exact exchange once.
-        // Reuse the precomputed summary; do not invoke the LLM again.
-        const retryResult = await attemptRetainSubmission(params, precomputed);
-        if (retryResult !== 'submitted') {
-          params.logger.warn('Memory retain unverified after single retry pass', {
-            sessionId: params.sessionId,
-            turnId: params.turnId,
-            operationId,
-          });
-        }
-        return;
+        return await resubmitOnce();
       }
       // Still queued/running (or an unrecognized status): leave it for the next turn's sweep.
       params.logger.debug('Memory retain operation still pending after drain submission', {
@@ -287,19 +343,11 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
         operationId,
         status: check.status,
       });
-      return;
+      return true;
     }
     // Status unreadable: one deterministic resubmission is safe and may recover a submission
-    // whose response was lost. Reuse the precomputed summary; do not invoke the LLM again.
-    const retryResult = await attemptRetainSubmission(params, precomputed);
-    if (retryResult !== 'submitted') {
-      params.logger.warn('Memory retain unverified after single retry pass', {
-        sessionId: params.sessionId,
-        turnId: params.turnId,
-        operationId,
-        reason: check.reason,
-      });
-    }
+    // whose response was lost.
+    return await resubmitOnce(check.reason);
   } catch (error) {
     params.logger.warn('Memory retain verification pass threw unexpectedly', {
       sessionId: params.sessionId,
@@ -307,5 +355,6 @@ export async function submitRetainWithVerification(params: SubmitRetainParams): 
       operationId,
       reason: error instanceof Error ? error.message : String(error),
     });
+    return result === 'submitted';
   }
 }

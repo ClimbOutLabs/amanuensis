@@ -7,6 +7,12 @@ import { newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
 import { SEARCH_CHAT_GRANT_KEY } from '../core/mcp/approvalGrant';
 import {
+  createToolCallMemoState,
+  createTurnToolCallLedger,
+  mergeTurnToolCallLedgers,
+  type TurnToolCallLedger,
+} from '../core/mcp/executeToolCalls';
+import {
   isSerializedImplementationPlanGrant,
   serializeImplementationPlanGrant,
   type ImplementationPlanGrant,
@@ -553,6 +559,21 @@ export class SessionHandle<
       const sendBatch = toSendBatch(input.input);
       const isRequestContinuation = sendBatch.length > 0 && !sendBatch.some(isInputUserMessage);
 
+      // One ledger for the whole turn, shared by every thread built below. A continuation rebuilds it from
+      // the snapshots of the paused turn, so approval pauses do not reset the write cap or repeat counts.
+      const turnToolCallLedger =
+        isRequestContinuation && previous !== undefined
+          ? mergeTurnToolCallLedgers(
+              // The root goes first: its last call is the one that counts as consecutive.
+              [...threadIdsForCurrentTurn(previous)]
+                .sort((left, right) => Number(right === MAIN_THREAD_ID) - Number(left === MAIN_THREAD_ID))
+                .flatMap(threadId => {
+                  const snapshot = previous.snapshot.threads[threadId];
+                  return snapshot === undefined ? [] : [createToolCallMemoState(snapshot.tool_call_memo).turn];
+                }),
+            )
+          : createTurnToolCallLedger();
+
       const agentThreads = this.buildThreads({
         previous,
         resolver: input.resolver,
@@ -563,6 +584,7 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         isRequestContinuation,
+        turnToolCallLedger,
         sentinelServices,
         stopAfterToolResponse: input.stop_after_tool_response === true,
       });
@@ -1045,6 +1067,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
   }): Map<string, AgentThread> {
@@ -1068,6 +1091,7 @@ export class SessionHandle<
           chatApprovalGrants: input.chatApprovalGrants,
           loadImplementationPlanGrants: input.loadImplementationPlanGrants,
           isRequestContinuation: input.isRequestContinuation,
+          turnToolCallLedger: input.turnToolCallLedger,
           sentinelServices: input.sentinelServices,
           stopAfterToolResponse: input.stopAfterToolResponse,
         }),
@@ -1087,6 +1111,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
   }): AgentThread {
@@ -1112,6 +1137,7 @@ export class SessionHandle<
       threadId: input.threadId,
       title: input.previousThreadSnapshot?.agent_info?.name ?? (isChild ? input.threadId : 'main'),
       sandbox,
+      serverSandboxAvailable: input.resolver.serverSandboxAvailable ?? false,
       context:
         input.previousThreadSnapshot === undefined
           ? undefined
@@ -1123,6 +1149,7 @@ export class SessionHandle<
       capabilities,
       capabilityState: input.previousThreadSnapshot?.capability_state ?? undefined,
       toolCallMemo: input.previousThreadSnapshot?.tool_call_memo,
+      turnToolCallLedger: input.turnToolCallLedger,
       taskState: input.previousThreadSnapshot?.task_state,
       chatApprovalGrants: input.chatApprovalGrants,
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
@@ -1220,6 +1247,7 @@ export class SessionHandle<
         agentInfo: params.request,
         capabilities,
         toolCallMemo: undefined,
+        turnToolCallLedger: params.turnToolCallLedger,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,

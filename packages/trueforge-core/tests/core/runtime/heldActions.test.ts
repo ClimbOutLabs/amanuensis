@@ -227,6 +227,7 @@ function makeHarness(
         ],
         capabilityState: undefined,
         toolCallMemo: undefined,
+        turnToolCallLedger: undefined,
         taskState: undefined,
         isRequestContinuation: input.context !== undefined,
         sentinel,
@@ -830,7 +831,7 @@ describe('audit rows for a held web search', () => {
       await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
       expect(descriptions(h).length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(descriptions(h))).not.toContain(query);
-      expect(descriptions(h)[0]).toMatch(/Search the web through \S+\. This search contains /);
+      expect(descriptions(h)[0]).toMatch(/Search the web through [^.]+\. This search contains /);
     }
   });
 
@@ -949,7 +950,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
 
     expect(h.audit.length).toBeGreaterThanOrEqual(1);
     expectNoCaughtText(h);
-    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. ');
+    expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 
@@ -971,7 +972,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
 
     expect(h.audit.length).toBeGreaterThanOrEqual(2);
     expectNoCaughtText(h);
-    expect(h.audit.at(-1)?.description).toContain('Search the web through mail. ');
+    expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 });
@@ -1055,4 +1056,33 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     expect(h.callTool).not.toHaveBeenCalled();
     expect(brief.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);
   });
+
+  it.each([true, false])(
+    'writes one not-done audit row per call a 21-call reply drops (unattended: %s)',
+    async unattended => {
+      const calls = Array.from({ length: 21 }, (_, index) => ({
+        id: `call-read-${String(index)}`,
+        name: 'read_note',
+        args: JSON.stringify({ note: `n${String(index)}` }),
+      }));
+      const h = makeHarness([() => toolCallsStream(calls)]);
+      await h.base.tool_grants.recordToolGrant({
+        ...OWNER,
+        mcp_server_name: 'mail',
+        tool_name: 'read_note',
+        mcp_server_host: null,
+      });
+      const { orchestrator } = h.build({ unattended });
+      const turn = await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Read my notes' }],
+      });
+
+      const dropped = h.audit.filter(record => record.auto_deny_reason === 'tool_not_prepared');
+      expect(dropped).toHaveLength(21);
+      expect(dropped.every(record => record.outcome === 'auto_denied' && record.tool_name === 'read_note')).toBe(true);
+      expect(h.callTool).not.toHaveBeenCalled();
+      expect(turn.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);
+    },
+  );
 });

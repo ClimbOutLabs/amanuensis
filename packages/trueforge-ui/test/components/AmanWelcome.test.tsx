@@ -3,6 +3,7 @@ import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
+import { greetingFor } from '@/components/AmanTour.js';
 import { AmanWelcome, amanWelcomeHeading } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { TOUR_HIDDEN_STORAGE_KEY } from '@/utils/tourDisplayPreference.js';
@@ -69,7 +70,7 @@ function renderWelcome(input: RenderInput = {}) {
 
 const dismissed = { dismissed: true, dismiss: () => {} };
 const notDismissed = { dismissed: false, dismiss: () => {} };
-const TOUR_HEADING = 'Try a day with Aman';
+/** The tour's greeting, which depends on the hour the test runs at. */
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -88,23 +89,23 @@ describe('AmanWelcome on an ordinary new chat', () => {
   it('shows the tour in place of the plain greeting', async () => {
     renderWelcome({ assistantName: 'Testinatrix' });
 
-    expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
+    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /How can I help/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
   });
 
   it('keeps a heading the runtime passes in, such as an active agent name, on the plain screen', async () => {
     renderWelcome({ assistantName: 'Testinatrix', heading: 'Repo Reviewer' });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: TOUR_HEADING })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Hide the tour' })).not.toBeInTheDocument();
   });
 
-  it('sends a day card through the composer and then sends it', async () => {
+  it('sends the brief ticket through the composer and then sends it', async () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Your brief is ready/ }));
 
     expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
     expect(composer.send).toHaveBeenCalledTimes(1);
@@ -122,32 +123,31 @@ describe('AmanWelcome on an ordinary new chat', () => {
 
   it('hides the email and calendar prompts until Google grants them', async () => {
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByRole('heading', { name: TOUR_HEADING });
+    await screen.findByTestId('aman-tour');
 
     expect(screen.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
   });
 
-  it('shows the prompts an instance has the capability for', async () => {
+  it('shows the capability tickets an instance has the capability for', async () => {
     server.grantedFeatures = ['gmail_read', 'calendar_read'];
     server.sandboxEnabled = true;
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
 
-    expect(await screen.findByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Help me with doctor's appointments/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Keep your calendar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Handle your email/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Keep pages in Spaces/ })).toBeInTheDocument();
   });
 
   it('hides the Google prompts when the host has no Google port at all', async () => {
     server.hasCatalog = false;
     server.sandboxEnabled = true;
     renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByRole('heading', { name: TOUR_HEADING });
+    await screen.findByTestId('aman-tour');
 
-    expect(screen.queryByRole('button', { name: 'Handle your email' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Read files and run code' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Handle your email/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run things on a schedule/ })).toBeInTheDocument();
   });
 
   it('turns the cards off and says why when no model is set', async () => {
@@ -155,41 +155,39 @@ describe('AmanWelcome on an ordinary new chat', () => {
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('button', { name: /Your morning brief/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /Your brief is ready/ })).toBeDisabled();
     expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
   });
 });
 
-describe('the setup block in the tour', () => {
-  it('shows the Get set up checklist at the top while setup is incomplete', async () => {
+describe('the setup line in the tour', () => {
+  it('shows how many lines are set up, linking to the first open one', async () => {
     renderWelcome({
       setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
     });
 
-    expect(await screen.findByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Setup checklist' })).toHaveTextContent('Add a model');
-    expect(screen.getByRole('link', { name: 'Choose a model' })).toHaveAttribute('href', '/settings');
+    expect(await screen.findByRole('link', { name: '0 of 3 set up →' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
   });
 
-  it('drops the checklist once every line is done', async () => {
+  it('drops the line once every line is done', async () => {
     renderWelcome({
       userName: 'Sam',
       setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: notDismissed },
     });
 
-    expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'You are all set' })).not.toBeInTheDocument();
+    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
   });
 
-  it('shows the name line instead of the checklist once the owner has put the checklist away', async () => {
+  it('asks for the name in that line once the owner has put the guide away', async () => {
     renderWelcome({
       userName: null,
       setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: dismissed, settingsHref: '/settings' },
     });
 
     expect(await screen.findByTestId('aman-name-prompt')).toHaveTextContent('Aman does not know your name yet.');
-    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
   });
 });
 
@@ -201,9 +199,7 @@ describe('hiding and bringing back the tour', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Hide the tour' }));
 
-    expect(
-      await screen.findByRole('heading', { name: "Hi, I'm Testinatrix. What's on your mind?" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
     expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('true');
     unmount();
 
@@ -211,11 +207,11 @@ describe('hiding and bringing back the tour', () => {
       assistantName: 'Testinatrix',
       setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
     });
-    expect(await screen.findByRole('button', { name: 'Show the tour' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: TOUR_HEADING })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Replay the tour' })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show the tour' }));
-    expect(await screen.findByRole('heading', { name: TOUR_HEADING })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay the tour' }));
+    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
     expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
   });
 
@@ -223,17 +219,29 @@ describe('hiding and bringing back the tour', () => {
     window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
     renderWelcome({ setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed } });
 
-    expect(await screen.findByRole('heading', { name: 'How can I help you today?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: TOUR_HEADING })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
   });
 });
 
 describe('amanWelcomeHeading', () => {
-  it('names the assistant only when the owner picked a name', () => {
-    expect(amanWelcomeHeading('Testinatrix')).toBe("Hi, I'm Testinatrix. What's on your mind?");
-    expect(amanWelcomeHeading('  ')).toBe('How can I help you today?');
-    expect(amanWelcomeHeading('')).toBe('How can I help you today?');
-    expect(amanWelcomeHeading(undefined)).toBe('How can I help you today?');
+  it('greets the person by name at the time of day, and without a name when there is none', () => {
+    expect(amanWelcomeHeading({ name: 'Priya', now: new Date(2026, 0, 1, 9) })).toBe('Good morning, Priya.');
+    expect(amanWelcomeHeading({ name: '  ', now: new Date(2026, 0, 1, 14) })).toBe('Good afternoon.');
+    expect(amanWelcomeHeading({ name: undefined, now: new Date(2026, 0, 1, 20) })).toBe('Good evening.');
+  });
+});
+
+describe('AmanWelcome assistant name', () => {
+  it('shows no Aman anywhere on the first frame once the owner names the assistant', async () => {
+    renderWelcome({
+      assistantName: 'Maya',
+      setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed },
+    });
+
+    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
+    expect(screen.getByTestId('aman-tour').textContent).toContain('Maya is your chief of staff');
+    expect(screen.getByTestId('aman-tour').textContent).not.toMatch(/Aman/);
   });
 });

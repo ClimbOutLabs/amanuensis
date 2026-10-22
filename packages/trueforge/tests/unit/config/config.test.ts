@@ -12,6 +12,7 @@ import {
   parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
+  parseSearchProviderChoice,
   parseTokenFactoryMode,
   parseTrustedProxyAddresses,
   TrueForgeAuthMode,
@@ -341,6 +342,25 @@ describe('assertNetworkAuthRequirement', () => {
         }),
       ).not.toThrow();
     });
+  });
+});
+
+describe('parseSearchProviderChoice', () => {
+  const parse = (raw: string | undefined) => parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw });
+
+  it('defaults to parallel when unset or blank', () => {
+    expect(parse(undefined)).toBe('parallel');
+    expect(parse('  ')).toBe('parallel');
+  });
+
+  it('parses parallel and tavily case-insensitively', () => {
+    expect(parse('tavily')).toBe('tavily');
+    expect(parse('TAVILY')).toBe('tavily');
+    expect(parse('Parallel')).toBe('parallel');
+  });
+
+  it('rejects any other provider, naming the allowed ones', () => {
+    expect(() => parse('exa')).toThrow('SEARCH_PROVIDER must be one of parallel, tavily; got "exa"');
   });
 });
 

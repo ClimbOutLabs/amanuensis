@@ -11577,6 +11577,11 @@
       "TurnMetrics": {
         "description": "Optional billable aggregate for the whole turn.",
         "properties": {
+          "last_call_input_tokens": {
+            "description": "Input tokens of the last model call in this turn: the context size the model last saw.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "total_cache_read_tokens": {
             "description": "Total cache-read tokens across model calls in this turn.",
             "minimum": 0,
