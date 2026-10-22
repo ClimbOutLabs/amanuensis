@@ -44,8 +44,12 @@ import {
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
 import {
   CREATE_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
   isSpaceReadToolName,
   isSpaceWriteToolName,
+  LIST_BLOCKS_TOOL_NAME,
+  LIST_SPACES_TOOL_NAME,
+  REVERT_SPACE_TOOL_NAME,
   SPACE_SERVER_ID,
   UPDATE_SPACE_TOOL_NAME,
 } from '../spaces/toolContract';
@@ -2513,11 +2517,12 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
  * that revert_space can restore. Any other name fails closed.
  */
 function classifySpaceTool(action: SentinelAction): TierDecision {
-  if (isSpaceWriteToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_write', reason_detail: spaceWriteLine(action), sensitive_read: false });
+  const line = spaceToolLine(action);
+  if (line !== null && isSpaceWriteToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_write', reason_detail: line, sensitive_read: false });
   }
-  if (isSpaceReadToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_read', reason_detail: 'Read your spaces.', sensitive_read: false });
+  if (line !== null && isSpaceReadToolName(action.tool_name)) {
+    return tier1Decision({ reason: 'space_read', reason_detail: line, sensitive_read: false });
   }
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
@@ -2543,19 +2548,31 @@ function spaceDisplayName(name: string | null): string | null {
 }
 
 /**
- * The plain line a space write shows instead of a card, parallel to the line a silent search shows.
- * Create and update calls carry the space's name; a revert call names only the space's id, so its
- * line cannot.
+ * The plain line for a space tool, in the words the activity rail shows. A name is shown only when
+ * the call carries one: get_space, list_blocks and revert_space name the space by id alone, so their
+ * lines say "a space". Null for any tool that is not the host's own space tool.
  */
-function spaceWriteLine(action: SentinelAction): string {
-  const shown = spaceDisplayName(stringParam(action.canonical_params, 'name'));
-  if (action.tool_name === CREATE_SPACE_TOOL_NAME) {
-    return shown === null ? 'Created a space.' : `Created space: ${shown}`;
+function spaceToolLine(action: SentinelAction): string | null {
+  if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
+    return null;
   }
-  if (action.tool_name === UPDATE_SPACE_TOOL_NAME) {
-    return shown === null ? 'Updated a space.' : `Updated space: ${shown}`;
+  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
+  switch (action.tool_name) {
+    case LIST_SPACES_TOOL_NAME:
+      return 'Looked at your spaces.';
+    case GET_SPACE_TOOL_NAME:
+      return 'Read a space.';
+    case LIST_BLOCKS_TOOL_NAME:
+      return 'Looked at the sections of a space.';
+    case CREATE_SPACE_TOOL_NAME:
+      return name === null ? 'Created a space.' : `Created the space ${name}.`;
+    case UPDATE_SPACE_TOOL_NAME:
+      return name === null ? 'Updated a space.' : `Updated the space ${name}.`;
+    case REVERT_SPACE_TOOL_NAME:
+      return 'Restored an earlier version of a space.';
+    default:
+      return null;
   }
-  return 'Restored a space to an earlier version.';
 }
 
 /**
@@ -2869,6 +2886,7 @@ function connectorApprovalCard(input: {
   const { fields } = extraction;
   return {
     plain_what:
+      spaceToolLine(action) ??
       extraction.connector_what ??
       `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
     plain_why: plainWhy(input.agent_intent),

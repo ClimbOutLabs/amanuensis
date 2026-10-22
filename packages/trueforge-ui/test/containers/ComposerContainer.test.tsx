@@ -913,7 +913,7 @@ describe('ComposerContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('2 tools need your input')).toBeInTheDocument();
+    expect(screen.getByText('2 items need your approval')).toBeInTheDocument();
     expect(screen.getByText('(1/2)')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message input' })).toBeDisabled();
     expect(document.querySelector('[data-slot="aui_composer-approval-pause"]')).toBeInTheDocument();
