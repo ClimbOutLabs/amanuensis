@@ -9,6 +9,7 @@ import {
   SessionStoreInvariantError,
   SessionStoreNotFoundError,
   TurnNotFoundError,
+  withoutClearedApprovalEvent,
   type ISessionStore,
   type SessionHandle,
   type SessionRecord,
@@ -644,9 +645,15 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         types: query.types,
         after_event_id: query.after_event_id,
       });
+      // Cards cleared after their request ended stay cleared on reload, so the feed drops them too.
+      const cleared = await session.clearedApprovalKeys();
+      const visible = data.flatMap(item => {
+        const event = withoutClearedApprovalEvent(item.event, cleared);
+        return event === undefined ? [] : [{ ...item, event }];
+      });
       return c.json(
         {
-          data: data.map(item => upgradeStoredSessionEventItem(item)),
+          data: visible.map(item => upgradeStoredSessionEventItem(item)),
           pagination,
         },
         200,

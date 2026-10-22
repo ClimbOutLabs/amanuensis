@@ -25,7 +25,6 @@ import {
   type AmanAvatarMotionSources,
   type CurrentUser,
   type FirstRunGuideState,
-  type MemoryBankStatus,
   type RoutesConfig,
   type SlotOverrides,
   type ThemeConfig,
@@ -34,7 +33,6 @@ import {
 import {
   createTrueForgeClient,
   getCapabilities,
-  getMemoryBankStatus,
   listModels,
   type BuildIdentity,
   type HarnessAgentSpec,
@@ -135,8 +133,6 @@ type BootState =
       openSettings: boolean;
       /** Undefined against a server that predates the build identity in its capabilities. */
       build: BuildIdentity | undefined;
-      /** Memory bank, null when off, undefined when the boot read failed. */
-      memoryBank: MemoryBankStatus | null | undefined;
       /** Whether a chat exists yet; undefined when the boot read failed. */
       hasChatted: boolean | undefined;
       /** Whether the owner has put the first-run checklist away; a failed read shows it. */
@@ -154,6 +150,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides,
   onAgentActivity,
   onActiveSessionChange,
+  onPendingApprovalsChange,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
@@ -161,6 +158,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
   onActiveSessionChange: (sessionId: string | undefined) => void;
+  onPendingApprovalsChange: (approvalIds: readonly string[]) => void;
 }) {
   const agentConfig = useMemo(
     (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
@@ -182,6 +180,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
+        onPendingApprovalsChange={onPendingApprovalsChange}
         overrides={overrides}
         className="app-assistant"
       />
@@ -200,7 +199,6 @@ function AmanShell({
   displayName,
   overrides,
   modelName,
-  memoryBank,
   version,
   buildRef,
 }: {
@@ -209,7 +207,6 @@ function AmanShell({
   displayName: string;
   overrides: SlotOverrides;
   modelName: string;
-  memoryBank: MemoryBankStatus | null | undefined;
   version: string | undefined;
   buildRef: string | undefined;
 }) {
@@ -220,6 +217,8 @@ function AmanShell({
   // Active session id, lifted out of the chat runtime so the right-rail permissions
   // feed can follow the session the user is looking at.
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
+  // Approvals waiting in the active chat, for the rail's Needs you ticket.
+  const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -229,17 +228,17 @@ function AmanShell({
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
         onActiveSessionChange={setActiveSessionId}
+        onPendingApprovalsChange={setPendingApprovalIds}
       />
       <AmanRuntimeRail
         modelName={modelName}
-        userName={displayName}
         avatarSrc={apiPath('/aman-avatar.png')}
         avatarMotion={AMAN_AVATAR_MOTION_SOURCES}
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
-        memoryBank={memoryBank}
         settingsHref="/settings"
+        pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
     </div>
@@ -295,11 +294,9 @@ export function App() {
     const state = { cancelled: false };
     void (async () => {
       try {
-        const [models, capabilities, memoryBank, hasChatted, firstRunGuideDismissed] = await Promise.all([
+        const [models, capabilities, hasChatted, firstRunGuideDismissed] = await Promise.all([
           listModels(bootClient),
           getCapabilities(bootClient),
-          // Informational only: a failed read leaves memory unknown rather than failing boot.
-          getMemoryBankStatus(bootClient).catch((): undefined => undefined),
           hasAnyChat().catch((): undefined => undefined),
           // A failed read shows the checklist: one extra look at it is the harmless side.
           firstRunGuideApi.getDismissed().catch((): boolean => false),
@@ -315,7 +312,6 @@ export function App() {
             status: 'ready',
             openSettings: true,
             build,
-            memoryBank,
             hasChatted,
             firstRunGuideDismissed,
             defaultAgentSpec: {
@@ -333,7 +329,6 @@ export function App() {
           status: 'ready',
           openSettings: false,
           build,
-          memoryBank,
           hasChatted,
           firstRunGuideDismissed,
           defaultAgentSpec: {
@@ -375,7 +370,6 @@ export function App() {
     (boot.status === 'ready'
       ? {
           modelName: boot.defaultAgentSpec.model.name || null,
-          memoryBank: boot.memoryBank,
           hasChatted: boot.hasChatted,
         }
       : null);
@@ -387,14 +381,12 @@ export function App() {
     // Before the first re-read lands, the boot snapshot is what the screen shows; merge over it.
     const bootSnapshot: SetupSnapshot = {
       modelName: boot.defaultAgentSpec.model.name || null,
-      memoryBank: boot.memoryBank,
       hasChatted: boot.hasChatted,
     };
     const state = { cancelled: false };
     const refresh = async () => {
-      const [models, memoryBank, hasChatted] = await Promise.all([
+      const [models, hasChatted] = await Promise.all([
         listModels(bootClient).catch((): undefined => undefined),
-        getMemoryBankStatus(bootClient).catch((): undefined => undefined),
         hasAnyChat().catch((): undefined => undefined),
       ]);
       if (state.cancelled) {
@@ -403,7 +395,6 @@ export function App() {
       setSetupRead(previous =>
         mergeSetupRead(previous ?? bootSnapshot, {
           modelName: models === undefined ? undefined : (models[0]?.name ?? null),
-          memoryBank,
           hasChatted,
         }),
       );
@@ -543,7 +534,6 @@ export function App() {
                                     modelName={
                                       setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
                                     }
-                                    memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
                                     version={boot.build?.version}
                                     buildRef={boot.build?.ref}
                                   />

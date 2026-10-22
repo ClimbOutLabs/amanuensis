@@ -30,19 +30,18 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows Approve, Approve for this chat, Deny in that order, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Approve for this chat in Details, and never Always deny', () => {
     render(
       <PermissionApprovalCard
-        toolName="send_note"
+        othersWaiting={0}
         card={card}
-        tier={2}
         onApprove={vi.fn()}
         onApproveForChat={vi.fn()}
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Approve', 'Approve for this chat', 'Deny']);
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveAttribute('title', 'Allow this one call only.');
+    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
+    expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
     expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
       'title',
       'Allow this kind of call for the rest of this chat.',
@@ -105,6 +104,7 @@ describe('offersChangeIt', () => {
     body: 'Lunch at noon?',
     replaces: null,
     reply_in_thread: null,
+    reply_to: null,
   };
   const event = {
     action: 'create' as const,
