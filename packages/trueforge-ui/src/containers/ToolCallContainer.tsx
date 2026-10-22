@@ -292,6 +292,16 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     );
   }
 
+  // A reopened chat draws its calls before its saved cards are read. The stand-in card would offer
+  // different choices for a moment, so a waiting call shows a quiet line until the read is done.
+  if (sentinel !== null && !sentinel.savedCardsRead) {
+    return (
+      <p data-role="approval-loading" role="status" className="px-3 py-2 text-sm text-text-secondary">
+        Loading this request…
+      </p>
+    );
+  }
+
   return (
     <ToolApprovalContainer
       toolName={part.toolName}
