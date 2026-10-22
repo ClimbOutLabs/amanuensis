@@ -231,7 +231,9 @@ import {
   WRITE_CAP_STOP_MESSAGE,
 } from './replyActionChecks';
 import {
+  clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   REMOVED_TOOL_STREAK_STOP_AT,
@@ -241,9 +243,11 @@ import {
   STEP_BUDGET_SPENT_MESSAGE,
   stepBudgetFor,
   toolResultKind,
+  unfinishedKindFor,
   unfinishedNotice,
-  unfinishedReasonFor,
+  type ForcedAnswer,
   type ToolResultKind,
+  type UnfinishedKind,
 } from './replyBudget';
 import {
   admitToolCallsForBudget,
@@ -608,7 +612,7 @@ interface StepLLMCallOptions {
    * visible content. `undefined` when the caller does not want a terminal-failure fallback. */
   emptyTerminalFallback: string | undefined;
   /** True for the step past the reply's step budget: the request carries no tools, and any call written anyway is dropped. */
-  forcedAnswer: boolean;
+  forcedAnswer: ForcedAnswer | null;
   // Set by the caller only when the previous stepLLMCall call ended in the empty-answer nudge:
   // that call's response was never durably persisted, but its start/delta stream already reached
   // live clients under this id. Reusing it here (instead of a fresh id) keeps the id a live
@@ -672,6 +676,18 @@ function withoutToolCalls<M extends { tool_calls?: unknown }>(message: M): Omit<
   const rest = { ...message };
   delete rest.tool_calls;
   return rest;
+}
+
+/** The chunk as the client sees it on a forced answer: no tool call, and a finish that does not wait for one. */
+function chunkWithoutToolCalls(chunk: ExtendedChatCompletionChunk): ExtendedChatCompletionChunk {
+  return {
+    ...chunk,
+    choices: chunk.choices.map(choice => ({
+      ...choice,
+      delta: withoutToolCalls(choice.delta),
+      finish_reason: choice.finish_reason === 'tool_calls' ? 'stop' : choice.finish_reason,
+    })),
+  };
 }
 
 /**
@@ -3245,8 +3261,9 @@ export class AgentThread {
               toolMapping,
             });
           }
+          // On the forced answer no tool call is shown, since none of its calls will run.
           const event = await buildModelMessageDeltaEvent({
-            chunk,
+            chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
             threadId: this.threadId,
             toolMapping,
             usage: modelMessageUsage,
@@ -3324,8 +3341,15 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    if (forcedAnswer) {
+    // The forced answer is the reply's last step, so a tool call written on it is dropped, not run.
+    if (forcedAnswer !== null) {
+      if (forcedAnswer === 'budget' && result.value.output.tool_calls !== undefined) {
+        this.noteUnfinished('budget');
+      }
       result.value.output = withoutToolCalls(result.value.output);
+      if (result.value.finish_reason === 'tool_calls') {
+        result.value.finish_reason = 'stop';
+      }
     }
 
     if (result.value.tool_markup === 'leaked') {
@@ -3364,10 +3388,10 @@ export class AgentThread {
     const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
       // A reply whose last action did not finish says so, so it cannot read as done over a failure.
-      const unfinishedReason = this.toolCallMemo.turn.unfinishedReason;
+      const unfinishedKind = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
       const notice =
-        unfinishedReason !== null
-          ? unfinishedNotice(unfinishedReason)
+        unfinishedKind !== undefined
+          ? unfinishedNotice(unfinishedKind)
           : this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
             ? TOOL_MARKUP_NOTICE
             : claimsUnbackedAction({ text: replyText, successfulWrites })
@@ -3429,11 +3453,23 @@ export class AgentThread {
     // Calls the reply guard flagged (arguments that could not be repaired, a read of something
     // not yet created) never run and never ask for approval: they resolve as never ran, with the
     // plain reason as their result, so the model can fix the call and try once more.
+    // A tool removed from this reply is refused here, before any approval card or hold is made for it.
+    const removedTools = this.toolCallMemo.turn.removedTools;
     let assistantMessage = enrichedMessage;
-    if (replyGuard.invalidCalls.size > 0 && assistantMessage.tool_calls !== undefined) {
+    if (assistantMessage.tool_calls !== undefined) {
       assistantMessage = {
         ...assistantMessage,
         tool_calls: assistantMessage.tool_calls.map(call => {
+          if (removedTools.includes(call.tool_info.original_tool_name)) {
+            return {
+              ...call,
+              tool_info: {
+                ...call.tool_info,
+                is_approval_required: false,
+                pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: REMOVED_TOOL_RESULT },
+              },
+            };
+          }
           const problem = replyGuard.invalidCalls.get(call.id);
           // A call the policy already blocked keeps its policy failure: it feeds the
           // policy-block budget, and its message is the plainer one for the person.
@@ -3690,6 +3726,21 @@ export class AgentThread {
     return this.toolCallMemo.turn;
   }
 
+  /** Records why this thread's reply did not finish on the turn ledger; see recordUnfinished. */
+  private noteUnfinished(kind: UnfinishedKind): void {
+    const byThread = this.toolCallMemo.turn.unfinishedByThread;
+    byThread.set(this.threadId, recordUnfinished({ current: byThread.get(this.threadId), kind }));
+  }
+
+  /** Clears this thread's reason after a step finished; a decline or unavailable tool still stands. */
+  private clearUnfinished(): void {
+    const byThread = this.toolCallMemo.turn.unfinishedByThread;
+    const cleared = clearUnfinished({ current: byThread.get(this.threadId) });
+    if (cleared === undefined) {
+      byThread.delete(this.threadId);
+    }
+  }
+
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
    * whose exact arguments already ran or were refused earlier in the turn is not run again. A write
@@ -3720,10 +3771,6 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       const consecutive = signature === previous;
       previous = signature;
-      // A tool declined or unavailable earlier in the reply is not called again in it.
-      if (turn.removedTools.includes(call.tool_info.original_tool_name)) {
-        return blocked(call, REMOVED_TOOL_RESULT);
-      }
       // An identical call may run again once a write has run since it last ran, since the state may have changed.
       // A retryable error gets its one retry, whatever has run since.
       const lastRun = turn.callSignatures.get(signature);
@@ -4385,13 +4432,14 @@ export class AgentThread {
         failure: result.failure,
         unavailable: !toolMapping.has(call.function.name),
         removed: wasRemoved,
-        ruleRefused: result.remediation?.reason_code === 'tool_policy_blocked',
       });
-      lastKindThisBatch = kind;
-      if ((kind === 'refused' || kind === 'unavailable') && !wasRemoved) {
-        const reason = kind === 'refused' ? 'declined' : 'unavailable';
+      // A call to a removed tool was rejected unrun, so it says nothing about the reply's last action.
+      if (!wasRemoved) {
+        lastKindThisBatch = kind;
+      }
+      if (!wasRemoved && (kind === 'declined' || kind === 'unavailable')) {
         if (!removalNotices.some(notice => notice.toolName === toolName)) {
-          removalNotices.push({ toolName, reason });
+          removalNotices.push({ toolName, reason: kind });
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
@@ -4402,16 +4450,23 @@ export class AgentThread {
         );
       }
     }
+    if (lastKindThisBatch !== undefined) {
+      const unfinished = unfinishedKindFor(lastKindThisBatch);
+      if (unfinished === null) {
+        this.clearUnfinished();
+      } else {
+        this.noteUnfinished(unfinished);
+      }
+    }
     for (const notice of removalNotices) {
       replyTurn.removedTools.push(notice.toolName);
+      this.noteUnfinished(notice.reason);
     }
-    replyTurn.removedToolRejectionStreak =
-      toolCallResults.length > 0 && removedCallsThisBatch === toolCallResults.length
-        ? replyTurn.removedToolRejectionStreak + 1
-        : 0;
-    if (lastKindThisBatch !== undefined) {
-      replyTurn.unfinishedReason = unfinishedReasonFor(lastKindThisBatch);
-    }
+    const removedStreakBefore = replyTurn.removedToolRejectionStreaks.get(this.threadId) ?? 0;
+    replyTurn.removedToolRejectionStreaks.set(
+      this.threadId,
+      toolCallResults.length > 0 && removedCallsThisBatch === toolCallResults.length ? removedStreakBefore + 1 : 0,
+    );
 
     const countedCallIds = [
       ...toolCallResults.map(result => result.message.tool_call_id),
@@ -4928,25 +4983,35 @@ export class AgentThread {
                 isSubAgent: this.parent !== undefined,
                 budget: this.definition.stepBudget ?? DEFAULT_REPLY_STEP_BUDGET,
               });
-            const forcedAnswer = budgetSpent || replyLedger.removedToolRejectionStreak >= REMOVED_TOOL_STREAK_STOP_AT;
+            const removedStreak = replyLedger.removedToolRejectionStreaks.get(this.threadId) ?? 0;
+            const forcedAnswer: ForcedAnswer | null = budgetSpent
+              ? 'budget'
+              : removedStreak >= REMOVED_TOOL_STREAK_STOP_AT
+                ? 'removed_streak'
+                : null;
             replyLedger.stepsByThread.set(this.threadId, stepsSoFar + 1);
-            if (forcedAnswer) {
+            if (forcedAnswer !== null) {
               yield* this.appendToContext({
-                context: [internalSystemMessage(budgetSpent ? STEP_BUDGET_SPENT_MESSAGE : REMOVED_TOOL_STREAK_MESSAGE)],
+                context: [
+                  internalSystemMessage(
+                    forcedAnswer === 'budget' ? STEP_BUDGET_SPENT_MESSAGE : REMOVED_TOOL_STREAK_MESSAGE,
+                  ),
+                ],
                 output: [],
                 currentContextUsage: undefined,
                 usage: undefined,
               });
             }
-            const sentTools = forcedAnswer
-              ? []
-              : requestTools.filter(
-                  tool =>
-                    tool.type !== 'function' ||
-                    !replyLedger.removedTools.includes(
-                      toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
-                    ),
-                );
+            const sentTools =
+              forcedAnswer !== null
+                ? []
+                : requestTools.filter(
+                    tool =>
+                      tool.type !== 'function' ||
+                      !replyLedger.removedTools.includes(
+                        toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
+                      ),
+                  );
             const llmResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
               emptyTerminalFallback: undefined,
               retryModelMessageEventId: pendingRetryModelMessageEventId,

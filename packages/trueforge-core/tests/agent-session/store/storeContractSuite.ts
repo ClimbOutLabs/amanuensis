@@ -109,8 +109,8 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     tool_markup_retries_this_turn: 0,
     steps_by_thread: [],
     removed_tools: [],
-    removed_tool_rejection_streak: 0,
-    unfinished_reason: null,
+    removed_tool_rejection_streaks: [],
+    unfinished_by_thread: [],
     ...overrides,
   };
 }

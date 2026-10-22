@@ -37,7 +37,7 @@ import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { recordPrivateToolResult } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
-import type { ToolResultKind } from '../runtime/replyBudget';
+import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -245,9 +245,10 @@ export interface ToolCallMemoSnapshot {
   steps_by_thread: { thread_id: string; steps: number }[];
   /** Tools removed from the rest of the reply after a decline or an unavailable result. */
   removed_tools: string[];
-  removed_tool_rejection_streak: number;
-  /** Plain reason the last action did not finish, or null when it did. */
-  unfinished_reason: string | null;
+  /** Calls to removed tools in a row, per thread. */
+  removed_tool_rejection_streaks: { thread_id: string; streak: number }[];
+  /** Why each thread's reply did not finish, if it did not. */
+  unfinished_by_thread: { thread_id: string; kind: UnfinishedKind }[];
 }
 
 /** The guard kinds that can defer a host-authored note before stopping the turn. */
@@ -302,8 +303,8 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'tool_markup_retries_this_turn'
   | 'steps_by_thread'
   | 'removed_tools'
-  | 'removed_tool_rejection_streak'
-  | 'unfinished_reason'
+  | 'removed_tool_rejection_streaks'
+  | 'unfinished_by_thread'
 > & {
   read_results: { key: string; response: CallToolResponse; failure: boolean; count: number }[];
   // Explicit `| undefined` (the repo's dominant optional-property convention under
@@ -338,8 +339,8 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Added with the reply step budget: a snapshot written before it omits these keys.
   steps_by_thread?: { thread_id: string; steps: number }[] | undefined;
   removed_tools?: string[] | undefined;
-  removed_tool_rejection_streak?: number | undefined;
-  unfinished_reason?: string | null | undefined;
+  removed_tool_rejection_streaks?: { thread_id: string; streak: number }[] | undefined;
+  unfinished_by_thread?: { thread_id: string; kind: UnfinishedKind }[] | undefined;
 };
 
 /**
@@ -376,10 +377,13 @@ export interface TurnToolCallLedger {
   stepsByThread: Map<string, number>;
   /** Tool names removed from the rest of the reply after a decline or an unavailable result. */
   removedTools: string[];
-  /** Calls to removed tools in a row; two end the reply by forcing its answer. */
-  removedToolRejectionStreak: number;
-  /** Plain reason the last action did not finish, or null. Set by the latest batch that had calls. */
-  unfinishedReason: string | null;
+  /** Calls to removed tools in a row, per thread; two end that thread's reply by forcing its answer. */
+  removedToolRejectionStreaks: Map<string, number>;
+  /**
+   * Why each thread's reply did not finish, from its last action that did not end well. The first
+   * reason stays until a later action in the same thread finishes cleanly.
+   */
+  unfinishedByThread: Map<string, UnfinishedKind>;
 }
 
 export function createTurnToolCallLedger(): TurnToolCallLedger {
@@ -393,8 +397,8 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     stoppedForWriteCap: false,
     stepsByThread: new Map(),
     removedTools: [],
-    removedToolRejectionStreak: 0,
-    unfinishedReason: null,
+    removedToolRejectionStreaks: new Map(),
+    unfinishedByThread: new Map(),
   };
 }
 
@@ -406,7 +410,6 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
 export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[]): TurnToolCallLedger {
   const merged = createTurnToolCallLedger();
   merged.lastCallSignature = ledgers[0]?.lastCallSignature;
-  merged.unfinishedReason = ledgers[0]?.unfinishedReason ?? null;
   for (const ledger of ledgers) {
     for (const [signature, record] of ledger.callSignatures) {
       const existing = merged.callSignatures.get(signature);
@@ -423,7 +426,17 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
       merged.stepsByThread.set(threadId, Math.max(merged.stepsByThread.get(threadId) ?? 0, steps));
     }
     merged.removedTools = [...new Set([...merged.removedTools, ...ledger.removedTools])];
-    merged.removedToolRejectionStreak = Math.max(merged.removedToolRejectionStreak, ledger.removedToolRejectionStreak);
+    for (const [threadId, streak] of ledger.removedToolRejectionStreaks) {
+      merged.removedToolRejectionStreaks.set(
+        threadId,
+        Math.max(merged.removedToolRejectionStreaks.get(threadId) ?? 0, streak),
+      );
+    }
+    for (const [threadId, kind] of ledger.unfinishedByThread) {
+      if (!merged.unfinishedByThread.has(threadId)) {
+        merged.unfinishedByThread.set(threadId, kind);
+      }
+    }
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
     merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
@@ -584,8 +597,12 @@ export function createToolCallMemoState(
     state.turn.stepsByThread.set(entry.thread_id, entry.steps);
   }
   state.turn.removedTools = [...(snapshot.removed_tools ?? [])];
-  state.turn.removedToolRejectionStreak = snapshot.removed_tool_rejection_streak ?? 0;
-  state.turn.unfinishedReason = snapshot.unfinished_reason ?? null;
+  for (const entry of snapshot.removed_tool_rejection_streaks ?? []) {
+    state.turn.removedToolRejectionStreaks.set(entry.thread_id, entry.streak);
+  }
+  for (const entry of snapshot.unfinished_by_thread ?? []) {
+    state.turn.unfinishedByThread.set(entry.thread_id, entry.kind);
+  }
   return state;
 }
 
@@ -668,8 +685,12 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([thread_id, steps]) => ({ thread_id, steps })),
     removed_tools: [...state.turn.removedTools],
-    removed_tool_rejection_streak: state.turn.removedToolRejectionStreak,
-    unfinished_reason: state.turn.unfinishedReason,
+    removed_tool_rejection_streaks: [...state.turn.removedToolRejectionStreaks.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, streak]) => ({ thread_id, streak })),
+    unfinished_by_thread: [...state.turn.unfinishedByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, kind]) => ({ thread_id, kind })),
   };
 }
 

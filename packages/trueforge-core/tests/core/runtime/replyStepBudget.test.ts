@@ -10,6 +10,7 @@ import {
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   STEP_BUDGET_SPENT_MESSAGE,
+  unfinishedNotice,
 } from '../../../src/core/runtime/replyBudget';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
@@ -134,43 +135,55 @@ function scriptedModel(
 const doneEvents = (events: unknown[]) =>
   events.filter(event => JSON.stringify(event).includes('"internal.agent.done"'));
 
+/** A sentence as it reads inside a JSON-encoded event, so quotes in it match. */
+const escaped = (sentence: string) => JSON.stringify(sentence).slice(1, -1);
+
+/** A tool removed from the reply before the thread starts, as a decline earlier in the turn would leave it. */
+function ledgerWithRemoved(...tools: string[]): TurnToolCallLedger {
+  const ledger = createTurnToolCallLedger();
+  ledger.removedTools.push(...tools);
+  return ledger;
+}
+
 describe('reply step budget', () => {
-  it('a refused create_event is never retried, and the reply ends cleanly', async () => {
+  it('a call the tool policy refuses is blocked, not declined: the tool stays for the next call', async () => {
     const toolSet = makeBudgetToolSet({ refuse: true, runFails: false });
-    const createEvent = (id: string) =>
-      toolCallStream({ id, name: 'create_event', args: { title: 'Lunch', start: '12:00' } });
+    const createEvent = (id: string, title: string) =>
+      toolCallStream({ id, name: 'create_event', args: { title, start: '12:00' } });
     const model = scriptedModel(step => {
-      if (step === 1) return createEvent('create-1');
-      // The model tries the same declined call again; it must not reach the tool.
-      if (step === 2) return createEvent('create-2');
+      if (step === 1) return createEvent('create-1', 'Lunch');
+      if (step === 2) return createEvent('create-2', 'Dinner');
       return finalAnswerStream();
     });
 
     const { events, thread } = await runThread({ toolSet, create: model.create });
 
-    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
-    expect(model.requests[1]?.tools?.map(tool => tool.type === 'function' && tool.function.name)).not.toContain(
+    expect(toolSet.callTool).toHaveBeenCalledTimes(2);
+    expect(model.requests[2]?.tools?.map(tool => tool.type === 'function' && tool.function.name)).toContain(
       'create_event',
     );
-    expect(JSON.stringify(model.requests[1]?.messages)).toContain('The person declined create event');
-    expect(JSON.stringify(model.requests[2]?.messages)).toContain(REMOVED_TOOL_RESULT);
-    expect(thread.turnToolCallLedger.removedTools).toEqual(['create_event']);
+    expect(JSON.stringify(model.requests[2]?.messages)).not.toContain('declined');
+    expect(thread.turnToolCallLedger.removedTools).toEqual([]);
     const done = doneEvents(events);
     expect(done).toHaveLength(1);
     expect(JSON.stringify(done)).toContain('"status":"done"');
-    expect(JSON.stringify(done)).toContain('Not finished: a step failed.');
+    expect(JSON.stringify(done)).toContain(escaped(unfinishedNotice('blocked')));
   });
 
   it('two calls to removed tools in a row force the answer with no tools', async () => {
-    const toolSet = makeBudgetToolSet({ refuse: true, runFails: false });
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
     const createEvent = (id: string) => toolCallStream({ id, name: 'create_event', args: { title: 'Lunch' } });
     const model = scriptedModel(step => (step <= 3 ? createEvent(`create-${String(step)}`) : finalAnswerStream()));
 
-    const { events } = await runThread({ toolSet, create: model.create });
+    const { events } = await runThread({
+      toolSet,
+      create: model.create,
+      ledger: ledgerWithRemoved('create_event'),
+    });
 
-    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
-    expect(model.requests[3]?.tools).toBeUndefined();
-    expect(JSON.stringify(model.requests[3]?.messages)).toContain(REMOVED_TOOL_STREAK_MESSAGE);
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    expect(model.requests[2]?.tools).toBeUndefined();
+    expect(JSON.stringify(model.requests[2]?.messages)).toContain(REMOVED_TOOL_STREAK_MESSAGE);
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
   });
 
@@ -190,15 +203,27 @@ describe('reply step budget', () => {
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
   });
 
-  it('a call written on the forced answer is dropped, not run', async () => {
+  it('a call written on the forced answer is dropped, not run, and is not streamed either', async () => {
     const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
-    const model = scriptedModel(step => (step <= 8 ? lookupCall(step) : lookupCall(step)));
+    const model = scriptedModel(step => lookupCall(step));
 
     const { events } = await runThread({ toolSet, create: model.create });
 
     expect(model.requests).toHaveLength(9);
     expect(toolSet.callTool).toHaveBeenCalledTimes(8);
+    expect(JSON.stringify(events)).not.toContain('\\"q\\":9');
+    // The forced step wrote no text, so the plain sentence is the reply.
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(unfinishedNotice('budget')));
+  });
+
+  it('a forced answer with no text and no tool call still ends with a visible reply', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+    const model = scriptedModel(step => (step <= 8 ? lookupCall(step) : finalAnswerStream()));
+
+    const { events } = await runThread({ toolSet, create: model.create });
+
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
+    expect(JSON.stringify(events)).not.toContain(escaped(unfinishedNotice('budget')));
   });
 
   it("a sub-agent's 5th step forces its answer", async () => {
@@ -248,7 +273,7 @@ describe('reply step budget', () => {
 
     const { events } = await runThread({ toolSet, create: model.create });
 
-    expect(JSON.stringify(doneEvents(events))).toContain('Not finished: a step failed.');
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(unfinishedNotice('failed')));
   });
 
   it('a retryable error gets one retry, then becomes final', async () => {
@@ -265,14 +290,86 @@ describe('reply step budget', () => {
     expect(model.requests).toHaveLength(3);
   });
 
-  it('a removed tool call is rejected before dispatch as error_final', async () => {
-    const toolSet = makeBudgetToolSet({ refuse: true, runFails: false });
+  it('a removed tool raises no approval card, and a call to it is rejected unrun as error_final', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+    jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
+      Promise.resolve({
+        type: 'mcp',
+        mcp_server_id: toolSet.id,
+        mcp_server_name: toolSet.name,
+        original_tool_name: params.name,
+        is_approval_required: params.name === 'create_event',
+      }),
+    );
     const createEvent = (id: string) => toolCallStream({ id, name: 'create_event', args: { title: 'Lunch' } });
-    const model = scriptedModel(step => (step <= 2 ? createEvent(`create-${String(step)}`) : finalAnswerStream()));
+    const model = scriptedModel(step => (step === 1 ? createEvent('create-1') : finalAnswerStream()));
 
-    await runThread({ toolSet, create: model.create });
+    const { events, thread } = await runThread({
+      toolSet,
+      create: model.create,
+      ledger: ledgerWithRemoved('create_event'),
+    });
 
-    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(model.requests[2]?.messages)).toContain(REMOVED_TOOL_RESULT);
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(events)).not.toContain('"tool.approval_required"');
+    expect(JSON.stringify(model.requests[1]?.messages)).toContain(REMOVED_TOOL_RESULT);
+    expect(thread.turnToolCallLedger.removedTools).toEqual(['create_event']);
+  });
+
+  it('a rejected call to a tool already removed keeps the reason the reply did not finish', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+    const ledger = ledgerWithRemoved('create_event');
+    ledger.unfinishedByThread.set('main', 'declined');
+    const createEvent = (id: string) => toolCallStream({ id, name: 'create_event', args: { title: 'Lunch' } });
+    const model = scriptedModel(step => (step === 1 ? createEvent('create-1') : finalAnswerStream()));
+
+    const { events } = await runThread({ toolSet, create: model.create, ledger });
+
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(unfinishedNotice('declined')));
+  });
+
+  it("a sub-agent's rejections do not change the main thread's tools", async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+    const shared = ledgerWithRemoved('create_event');
+    const createEvent = (id: string) => toolCallStream({ id, name: 'create_event', args: { title: 'Lunch' } });
+    const sub = scriptedModel(step => (step <= 3 ? createEvent(`sub-${String(step)}`) : finalAnswerStream()));
+    await runThread({
+      toolSet,
+      create: sub.create,
+      threadId: 'sub-3',
+      parent: { thread_id: 'main', tool_call_id: 'spawn-3' },
+      ledger: shared,
+    });
+    expect(sub.requests[2]?.tools).toBeUndefined();
+
+    const main = scriptedModel(() => finalAnswerStream());
+    await runThread({ toolSet, create: main.create, ledger: shared });
+
+    expect(main.requests[0]?.tools).toBeDefined();
+    expect(main.requests[0]?.tools?.map(tool => tool.type === 'function' && tool.function.name)).toContain('lookup');
+  });
+
+  it("a sub-agent's failed step is not the main thread's reason", async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: true });
+    const shared = createTurnToolCallLedger();
+    const sub = scriptedModel(step =>
+      step === 1
+        ? toolCallStream({ id: 'run-1', name: 'run', args: { command: 'python3 a.py' } })
+        : finalAnswerStream(),
+    );
+    await runThread({
+      toolSet,
+      create: sub.create,
+      threadId: 'sub-4',
+      parent: { thread_id: 'main', tool_call_id: 'spawn-4' },
+      ledger: shared,
+    });
+    expect(shared.unfinishedByThread.get('sub-4')).toBe('failed');
+
+    const main = scriptedModel(() => finalAnswerStream());
+    const { events } = await runThread({ toolSet, create: main.create, ledger: shared });
+
+    expect(shared.unfinishedByThread.has('main')).toBe(false);
+    expect(JSON.stringify(doneEvents(events))).not.toContain(escaped(unfinishedNotice('failed')));
   });
 });

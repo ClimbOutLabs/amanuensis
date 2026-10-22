@@ -1,15 +1,17 @@
 import { createTurnToolCallLedger, mergeTurnToolCallLedgers } from '../../../src/core/mcp/executeToolCalls';
 import {
+  clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  recordUnfinished,
   REMOVED_TOOL_RESULT,
-  ToolResultKindSchema,
   removedToolMessage,
   retryIsDue,
   settleRetry,
   stepBudgetFor,
   toolResultKind,
+  ToolResultKindSchema,
+  unfinishedKindFor,
   unfinishedNotice,
-  unfinishedReasonFor,
 } from '../../../src/core/runtime/replyBudget';
 
 const ok = {
@@ -17,21 +19,21 @@ const ok = {
   failure: false,
   unavailable: false,
   removed: false,
-  ruleRefused: false,
 } as const;
 
 describe('toolResultKind', () => {
   it('maps each disposition to one kind', () => {
     expect(toolResultKind(ok)).toBe('ok');
-    expect(toolResultKind({ ...ok, disposition: 'denied' })).toBe('refused');
-    expect(toolResultKind({ ...ok, disposition: 'policy_blocked', ruleRefused: true })).toBe('refused');
+    expect(toolResultKind({ ...ok, disposition: 'denied' })).toBe('declined');
+    expect(toolResultKind({ ...ok, disposition: 'policy_blocked' })).toBe('blocked');
     expect(toolResultKind({ ...ok, disposition: 'executed_nonzero' })).toBe('error_retryable');
     expect(toolResultKind({ ...ok, disposition: 'never_ran' })).toBe('error_retryable');
     expect(toolResultKind({ ...ok, disposition: 'outcome_unknown' })).toBe('error_final');
   });
 
-  it('treats a policy block without the tool policy rule as a step to fix, not a refusal', () => {
-    expect(toolResultKind({ ...ok, disposition: 'policy_blocked', ruleRefused: false })).toBe('error_retryable');
+  it('keeps a rule block to its own call: it is a block, never a decline', () => {
+    expect(toolResultKind({ ...ok, disposition: 'policy_blocked' })).toBe('blocked');
+    expect(unfinishedKindFor('blocked')).toBe('blocked');
   });
 
   it('marks an executed call that reported a failure as retryable', () => {
@@ -104,11 +106,31 @@ describe('removed tool wording', () => {
 });
 
 describe('unfinished reply', () => {
-  it('gives a plain reason for each kind that did not finish', () => {
-    expect(unfinishedReasonFor('ok')).toBeNull();
-    expect(unfinishedReasonFor('refused')).toBe('a step was declined');
-    expect(unfinishedReasonFor('error_final')).toBe('a step failed');
-    expect(unfinishedNotice('a step failed')).toBe('Not finished: a step failed.');
+  it('gives one plain sentence with a next step for each reason', () => {
+    expect(unfinishedKindFor('ok')).toBeNull();
+    expect(unfinishedKindFor('declined')).toBe('declined');
+    expect(unfinishedKindFor('error_final')).toBe('failed');
+    expect(unfinishedNotice('declined')).toBe(
+      'You said no to one step, so Aman did not finish. Ask again if you want that step done.',
+    );
+    expect(unfinishedNotice('failed')).toBe(
+      'Aman could not finish because a step failed. Reply "try again" to let it retry.',
+    );
+    expect(unfinishedNotice('budget')).toBe(
+      'Aman stopped after many steps without finishing. Reply "continue" to let it carry on.',
+    );
+  });
+
+  it('keeps the first reason, so a later failure cannot overwrite it', () => {
+    const failed = recordUnfinished({ current: undefined, kind: 'failed' });
+    expect(recordUnfinished({ current: failed, kind: 'budget' })).toBe('failed');
+  });
+
+  it('lets a decline or an unavailable tool replace the reason, and keeps it through a clean step', () => {
+    const declined = recordUnfinished({ current: 'failed', kind: 'declined' });
+    expect(declined).toBe('declined');
+    expect(clearUnfinished({ current: declined })).toBe('declined');
+    expect(clearUnfinished({ current: 'failed' })).toBeUndefined();
   });
 });
 
@@ -127,5 +149,21 @@ describe('ledger', () => {
     expect(merged.stepsByThread.get('main')).toBe(5);
     expect(merged.stepsByThread.get('sub-1')).toBe(2);
     expect(merged.removedTools).toEqual(['create_event', 'send_mail']);
+  });
+
+  it('keeps each thread its own rejection streak and its own reason', () => {
+    const root = createTurnToolCallLedger();
+    root.removedToolRejectionStreaks.set('main', 1);
+    root.unfinishedByThread.set('main', 'failed');
+    const child = createTurnToolCallLedger();
+    child.removedToolRejectionStreaks.set('sub-1', 2);
+    child.unfinishedByThread.set('sub-1', 'blocked');
+
+    const merged = mergeTurnToolCallLedgers([root, child]);
+
+    expect(merged.removedToolRejectionStreaks.get('main')).toBe(1);
+    expect(merged.removedToolRejectionStreaks.get('sub-1')).toBe(2);
+    expect(merged.unfinishedByThread.get('main')).toBe('failed');
+    expect(merged.unfinishedByThread.get('sub-1')).toBe('blocked');
   });
 });

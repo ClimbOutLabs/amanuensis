@@ -211,7 +211,7 @@ describe('orchestration: pause then resume on tool approval', () => {
       {
         type: EventType.MODEL_MESSAGE_DELTA,
         thread_id: ROOT_ID,
-        content: expect.stringContaining('Not finished: a step was declined.'),
+        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
       },
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
@@ -224,7 +224,7 @@ describe('orchestration: pause then resume on tool approval', () => {
     const TURN_2_OUTPUT = {
       output: {
         thread_id: ROOT_ID,
-        content: expect.stringContaining('Not finished: a step was declined.'),
+        content: expect.stringContaining('You said no to one step, so Aman did not finish.'),
       },
       required_actions: [],
     };
