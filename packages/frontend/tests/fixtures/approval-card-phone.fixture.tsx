@@ -13,6 +13,7 @@ createRoot(rootElement).render(
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem', display: 'grid', gap: '1rem' }}>
       <section data-testid="ticket-card">
         <PermissionApprovalCard
+          approvalId="approval-phone"
           card={{
             plain_what:
               'Web search: Find quiet coffee shops near the Ferry Building in San Francisco. This chat has read your private data, so Aman is checking before searching.',
