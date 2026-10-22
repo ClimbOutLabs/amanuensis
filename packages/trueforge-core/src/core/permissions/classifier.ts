@@ -155,6 +155,7 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
+  chatPrivateReadHeld,
   hasReadPrivateData,
   markPrivateDataRead,
   namesHostAtFetchLimit,
@@ -1917,8 +1918,10 @@ async function classifySearchProviderTool(input: {
   }
   // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
   const readMode = hasReadPrivateData(ctx.web_search);
-  // A secret read's flag comes back with the chat's saved state, even after a restart clears the process-local mark.
-  const privateReadHeld = ctx.services.private_reads.hasPrivateDataRead(ctx) || ctx.web_search.chatFingerprints.secret;
+  const privateReadHeld = chatPrivateReadHeld({
+    state: ctx.web_search,
+    markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx),
+  });
   // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
   const chatGranted =
     (readMode || privateReadHeld) && ctx.web_search.searchChatGranted() && privateFingerprintsUsable(ctx.web_search);
@@ -2050,7 +2053,9 @@ async function classifyMapsSilently(input: {
   if (!verdict.ok) {
     return undefined;
   }
-  if (ctx.services.private_reads.hasPrivateDataRead(ctx)) {
+  if (
+    chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
+  ) {
     return undefined;
   }
   const readMode = hasReadPrivateData(ctx.web_search);

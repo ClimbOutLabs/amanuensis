@@ -289,6 +289,62 @@ describe('a chat grant from "Allow searches in this chat"', () => {
   });
 });
 
+/** The next turn of the chat in a new process, as after a restart: only the saved record comes back. */
+function afterRestart(saved: ChatPrivateFingerprints | null): ClassifyContext {
+  const ctx = makeCtx();
+  ctx.web_search.chatFingerprints = saved ?? ctx.web_search.chatFingerprints;
+  ctx.web_search.savedFingerprintsLoaded = saved !== null;
+  return ctx;
+}
+
+const MAP: SentinelAction = {
+  tool_name: 'render_map',
+  canonical_params: { place_name: 'Riverside Dental, Lisbon' },
+  tool_type: 'truefoundry-system',
+  mcp_server_name: 'maps',
+  mcp_first_party: true,
+  mcp_hints: {},
+  maps_hosts: MAPS_HOSTS,
+};
+
+describe('after a restart, a chat that read mail through a connector', () => {
+  async function connectorReadThenRestart(): Promise<ClassifyContext> {
+    const first = makeCtx();
+    await classifyAtHost({ ctx: first, action: CONNECTOR_MAIL_READ });
+    return afterRestart(savedAfter(first.web_search));
+  }
+
+  it('still holds a search and a map, with or without the chat grant', async () => {
+    for (const granted of [false, true]) {
+      const ctx = await connectorReadThenRestart();
+      ctx.services.mapsWithoutAsking = () => Promise.resolve(true);
+      if (granted) {
+        grantChat(ctx);
+      }
+      expect(await classifyTier(searchFor(CONNECTOR_MAIL_QUERY), ctx)).toMatchObject({
+        tier: 3,
+        reason: 'mcp_search_after_private_read',
+      });
+      expect((await classifyTier(MAP, ctx)).tier).toBe(3);
+    }
+  });
+
+  it('leaves a chat that read nothing private searching and mapping without asking', async () => {
+    const ctx = afterRestart(null);
+    ctx.services.mapsWithoutAsking = () => Promise.resolve(true);
+    expect((await classifyTier(searchFor(CONNECTOR_MAIL_QUERY), ctx)).tier).toBe(1);
+    expect((await classifyTier(MAP, ctx)).tier).toBe(1);
+  });
+
+  it('keeps the grant working for a chat whose only private read was checked', async () => {
+    const first = makeCtx();
+    await readMail(first);
+    const ctx = nextTurn({ saved: savedAfter(first.web_search) });
+    grantChat(ctx);
+    expect(await classifyTier(SEARCH, ctx)).toMatchObject({ tier: 1, reason: 'mcp_search_chat_granted' });
+  });
+});
+
 describe('the held search card folds the search service fields', () => {
   it('names the service fields separately so the card can fold them, while still listing every argument', async () => {
     const ctx = await chatWithEmailReadInEarlierTurn();
