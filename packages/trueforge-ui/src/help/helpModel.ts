@@ -77,8 +77,9 @@ export function youWereOnLine({ screen, lastError }: { screen: string; lastError
  */
 export function buildIrisHelpMessage({ check, screen, lastError }: IrisHelpMessageInput): string {
   const lines = check.items.map(item => `- ${item.name}: ${statusWord(item.status)}. ${item.message}`);
-  if (check.host_report.message !== null) {
-    lines.push(`- Last full check: ${check.host_report.message}`);
+  const report = check.host_report;
+  if (report.checked_at !== null && report.message !== null) {
+    lines.push(`- Last full check at ${report.checked_at}: ${report.message}.`);
   }
   return [
     `${AMAN_GUIDE_NAME}, I am stuck and need help. Start by asking me: Where are you stuck? Then wait for my answer.`,

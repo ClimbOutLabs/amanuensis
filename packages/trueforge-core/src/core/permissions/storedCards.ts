@@ -84,6 +84,8 @@ function archivedCard(email: Record<string, unknown>): Record<string, unknown> {
     cc: archivedRecipients(email['cc']),
     bcc: archivedRecipients(email['bcc']),
     replaces: isRecord(replaces) ? { ...replaces, to: archivedRecipients(replaces['to']) } : replaces,
+    // Archives written before reply addresses existed replied to the sender.
+    reply_to: email['reply_to'] ?? null,
   };
 }
 

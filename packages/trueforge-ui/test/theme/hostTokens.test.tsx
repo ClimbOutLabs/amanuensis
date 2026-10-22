@@ -112,7 +112,7 @@ describe('ThemeProvider host token application', () => {
     expect(root).toHaveAttribute('data-theme', 'dark');
     expect(root.style.getPropertyValue('--primary-bg')).toBe('#101010');
     // No dark override for the sidebar, so the preset's dark value stands.
-    expect(root.style.getPropertyValue('--sidebar-bg')).toBe(PRESETS.trueforge.dark.sidebarBg);
+    expect(root.style.getPropertyValue('--sidebar-bg')).toBe(PRESETS.paper.dark.sidebarBg);
   });
 
   it('renders the dark set when the system reports dark and nothing is stored', () => {
@@ -167,6 +167,6 @@ describe('ThemeProvider host token application', () => {
       screen.getByRole('button', { name: 'dark' }).click();
     });
     expect(root.style.getPropertyValue('--radius')).toBe('0.5rem');
-    expect(root.style.getPropertyValue('--primary-bg')).toBe(PRESETS.trueforge.dark.primaryBg);
+    expect(root.style.getPropertyValue('--primary-bg')).toBe(PRESETS.paper.dark.primaryBg);
   });
 });

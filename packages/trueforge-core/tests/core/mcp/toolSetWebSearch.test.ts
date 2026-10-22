@@ -1016,9 +1016,9 @@ describe('a sensitive read earlier in the chat', () => {
 
     const after = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'oslo weather' } });
     expect(after.tier).toBe(3);
-    expect(after.tier3_card?.plain_what).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(after.tier3_card?.plain_what).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
     expect(after.tier3_card?.why_asked_again).toBeNull();
     const refused = await h.toolSet.callTool({ name: 'lookup', arguments: { query: 'oslo weather' } });
-    expect(JSON.stringify(refused)).toContain('This chat has read your private data, so Aman is checking before searching.');
+    expect(JSON.stringify(refused)).toContain('This chat opened a file with passwords or keys, so Aman asks before every search.');
   });
 });

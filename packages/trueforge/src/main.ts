@@ -829,6 +829,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sandboxProviderStore,
     personalizationStore,
     personaStore,
+    modelProviderStore,
     spaceStore,
     repositoryStore,
     turnArtifactStore,

@@ -804,7 +804,7 @@ export function App() {
       }}
       layout="sidebar"
       theme={{
-        preset: 'chatgpt',
+        preset: 'high-contrast',
         brand: {
           mode: 'logo',
           name: 'MyCo',

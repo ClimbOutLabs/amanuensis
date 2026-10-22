@@ -174,7 +174,7 @@ describe('Settings Memory section', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Sharing' }));
     expect(screen.getByRole('tab', { name: 'Sharing' })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText(/nothing to share with/)).toBeInTheDocument();
+    expect(await screen.findByText(/nothing to share\./)).toBeInTheDocument();
   });
 
   it('moves between sub-tabs with the arrow keys, Home, and End', async () => {
