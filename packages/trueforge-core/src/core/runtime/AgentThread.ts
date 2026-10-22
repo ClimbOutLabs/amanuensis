@@ -67,7 +67,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
-import { noticeAfter, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
+import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -93,6 +93,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   NO_PROGRESS_NUDGE_AT,
   NO_PROGRESS_STOP_AT,
@@ -107,6 +108,7 @@ import {
   type PendingHostNoteKind,
   type ToolCallMemoState,
   type ToolCallResult,
+  type TurnToolCallLedger,
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
@@ -222,6 +224,7 @@ import {
 import {
   claimsUnbackedAction,
   REPEATED_ACTION_RESULT,
+  TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
 } from './replyActionChecks';
@@ -1498,10 +1501,10 @@ export class AgentThread {
   // continuation of the same turn (the harness rebuilds from the preceding
   // snapshot either way), so this cannot simply start empty in the constructor:
   // an approval continuation must keep counting toward the same request's
-  // guard. It is hydrated from toolCallMemo.callSignatures in the constructor
+  // guard. It is hydrated from toolCallMemo.turn.callSignatures in the constructor
   // only when input.isRequestContinuation is true, and reset alongside
   // toolCallMemo in send() when a genuinely new user message starts a new
-  // request, see both sites below. toolCallMemo.callSignatures itself stays
+  // request, see both sites below. toolCallMemo.turn.callSignatures itself stays
   // untouched here for the persistence contract and any other snapshot consumer.
   private callSignatureCountsThisTurn = new Map<string, number>();
   // Unlike groundingNudgeSentThisTurn, the empty-answer nudge's one-shot-per-turn guard is not an
@@ -1573,6 +1576,10 @@ export class AgentThread {
     this.sentinel = input.sentinel;
     this.stopAfterToolResponse = input.stopAfterToolResponse === true;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
+    // A sub-agent counts into the ledger of the turn that started it, not a fresh one.
+    if (input.turnToolCallLedger !== undefined) {
+      this.toolCallMemo.turn = input.turnToolCallLedger;
+    }
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
     // continuation of the same turn (rebuilt from the preceding snapshot), so
@@ -1588,7 +1595,7 @@ export class AgentThread {
     }
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     this.callSignatureCountsThisTurn = input.isRequestContinuation
-      ? new Map(this.toolCallMemo.callSignatures)
+      ? new Map(this.toolCallMemo.turn.callSignatures)
       : new Map<string, number>();
 
     const capabilities = input.capabilities ?? [];
@@ -3240,18 +3247,43 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
+    if (result.value.tool_markup === 'leaked') {
+      // The call written as text never ran. The model is told so in the next step, up to a cap for the
+      // turn; past it the reply ends as a final answer, with the no-change line if no write ran.
+      const turn = this.toolCallMemo.turn;
+      turn.toolMarkupLeaksThisTurn += 1;
+      this.logger.info('Model wrote a tool call as text; it did not run', {
+        threadId: this.threadId,
+        model: this.definition.modelId ?? 'unknown',
+        leaksThisTurn: turn.toolMarkupLeaksThisTurn,
+      });
+      if (
+        result.value.output.tool_calls === undefined &&
+        turn.toolMarkupRetriesThisTurn < MAX_TOOL_MARKUP_RETRIES_PER_TURN
+      ) {
+        turn.toolMarkupRetriesThisTurn += 1;
+        yield* this.appendToContext({
+          context: [internalSystemMessage(TOOL_MARKUP_RETRY_MESSAGE)],
+          output: [],
+          currentContextUsage: undefined,
+          usage: result.value.usage,
+        });
+        this.currentState = null;
+        return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: modelMessageEventId };
+      }
+    }
+
     if (result.value.repetition_stopped === true) {
       this.logger.info('Stopped a reply that was repeating itself', { threadId: this.threadId });
     }
 
-    // Leaked markup was held out of the reply and never ran, so nothing here is retried. The
-    // person is told only when no write succeeded in the turn; an earlier success means the
-    // reply's claim is not what this line is for.
+    // The person is told about leaked markup only when no write succeeded in the turn; an earlier
+    // success means the reply's claim is not what this line is for.
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
-    const successfulWrites = this.toolCallMemo.successfulWritesThisTurn;
+    const successfulWrites = this.toolCallMemo.turn.successfulWritesThisTurn;
     if (result.value.output.tool_calls === undefined) {
       const notice =
-        result.value.tool_markup === 'leaked' && successfulWrites === 0
+        this.toolCallMemo.turn.toolMarkupLeaksThisTurn > 0 && successfulWrites === 0
           ? TOOL_MARKUP_NOTICE
           : claimsUnbackedAction({ text: replyText, successfulWrites })
             ? UNBACKED_CLAIM_NOTE
@@ -3567,21 +3599,27 @@ export class AgentThread {
     return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: undefined };
   }
 
+  /** The turn-wide counts this thread shares with the sub-agents it starts. */
+  get turnToolCallLedger(): TurnToolCallLedger {
+    return this.toolCallMemo.turn;
+  }
+
   /**
-   * Host-owned per-turn loop guard, run before dispatch. A call whose exact arguments already ran
-   * or were refused earlier in the turn is not run again. A write (tier 3) past
-   * MAX_WRITE_CALLS_PER_TURN is not run either, and ends the turn once its batch has resolved.
-   * Both resolve as never ran with the reason as their result.
+   * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
+   * whose exact arguments already ran or were refused earlier in the turn is not run again. A write
+   * (tier 3) past MAX_WRITE_CALLS_PER_TURN is not run either. Both end the turn after their batch
+   * resolves, and the repeat also ends it when the same call comes straight after the one before.
    */
-  private applyToolCallLoopGuard({ calls, memo }: { calls: InternalEnrichedToolCall[]; memo: ToolCallMemoState }): {
+  private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
     calls: InternalEnrichedToolCall[];
-    writesAdmitted: number;
     writeCapHit: boolean;
+    repeatStop: boolean;
   } {
     const seenInBatch = new Set<string>();
-    let writesAdmitted = 0;
+    let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
     let repeatedBlocked = 0;
+    let repeatStop = false;
     const blocked = (call: InternalEnrichedToolCall, message: string): InternalEnrichedToolCall => ({
       ...call,
       tool_info: {
@@ -3594,32 +3632,37 @@ export class AgentThread {
         return call;
       }
       const signature = toolCallSignature(call);
-      const alreadySeen = (memo.callSignatures.get(signature) ?? 0) > 0 || seenInBatch.has(signature);
+      const consecutive = signature === previous;
+      previous = signature;
+      const alreadySeen = (turn.callSignatures.get(signature) ?? 0) > 0 || seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
+        repeatStop = repeatStop || consecutive;
         return blocked(call, REPEATED_ACTION_RESULT);
       }
       // A write held for the owner in an unattended run does not run now, so it does not count.
       if (call.tool_info.tier === 3 && call.tool_info.held_for_owner === undefined) {
-        if (memo.writeCallsThisTurn + writesAdmitted >= MAX_WRITE_CALLS_PER_TURN) {
+        if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked(call, WRITE_CAP_BLOCKED_RESULT);
         }
-        writesAdmitted += 1;
+        turn.writeCallsThisTurn += 1;
       }
       return call;
     });
+    turn.lastCallSignature = previous;
     const writeCapHit = writeCapBlocked > 0;
     if (repeatedBlocked > 0 || writeCapHit) {
-      this.logger.info('Blocked tool calls in this reply', {
+      this.logger.info('Blocked tool calls in this turn', {
         threadId: this.threadId,
         repeatedBlocked,
-        writeCallsThisTurn: memo.writeCallsThisTurn + writesAdmitted,
+        writeCallsThisTurn: turn.writeCallsThisTurn,
         writeCapHit,
+        repeatStop,
       });
     }
-    return { calls: guarded, writesAdmitted, writeCapHit };
+    return { calls: guarded, writeCapHit, repeatStop };
   }
 
   /**
@@ -3760,8 +3803,7 @@ export class AgentThread {
     // executeToolCalls can reach a provider. The tool-call budget admission
     // runs first, so an over-budget batch is capped deterministically before
     // any provider is reached.
-    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, memo: toolCallMemo });
-    nextToolCallMemo.writeCallsThisTurn = toolCallMemo.writeCallsThisTurn + loopGuard.writesAdmitted;
+    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn });
     const budgetAdmittedCalls = this.applyToolCallBudgetAdmission(loopGuard.calls);
     const callsForDispatch = signal?.aborted
       ? budgetAdmittedCalls.map(call =>
@@ -3915,7 +3957,7 @@ export class AgentThread {
       // Calls with no metadata count as writes, as isSafeToRepeat treats them.
       const writes = result.toolCallInfo === undefined || !isSafeToRepeat(result.toolCallInfo);
       if (result.disposition === 'executed_ok' && !result.failure && writes) {
-        nextToolCallMemo.successfulWritesThisTurn += 1;
+        nextToolCallMemo.turn.successfulWritesThisTurn += 1;
       }
     }
     this.metrics.total_sub_agents += createThreadEvents.length;
@@ -4241,7 +4283,10 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       // Durable count: kept for the persistence contract and any other consumer of the
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
-      nextToolCallMemo.callSignatures.set(signature, (nextToolCallMemo.callSignatures.get(signature) ?? 0) + 1);
+      nextToolCallMemo.turn.callSignatures.set(
+        signature,
+        (nextToolCallMemo.turn.callSignatures.get(signature) ?? 0) + 1,
+      );
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
       if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
@@ -4362,6 +4407,10 @@ export class AgentThread {
     }
     if (loopGuard.writeCapHit) {
       yield this.generateErrorEvent(WRITE_CAP_STOP_MESSAGE, undefined, 'model_stream_fault');
+      return 'exit';
+    }
+    if (loopGuard.repeatStop) {
+      yield this.generateErrorEvent(REPEAT_STOP_NOTE, undefined, 'model_stream_fault');
       return 'exit';
     }
     // Three policy denials in one turn means the model is pushing against a fixed

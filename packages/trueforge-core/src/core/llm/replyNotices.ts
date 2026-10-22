@@ -1,5 +1,5 @@
 /** The line that ends a reply a repetition guard stopped. */
-export const REPEAT_STOP_NOTE = 'The reply started repeating itself, so Aman stopped it.';
+export const REPEAT_STOP_NOTE = 'Stopped: the reply was repeating itself.';
 
 /** The line added to a reply that says an action was done when no write call succeeded in its turn. */
 export const UNBACKED_CLAIM_NOTE = 'Nothing was changed yet: no action ran in this reply.';

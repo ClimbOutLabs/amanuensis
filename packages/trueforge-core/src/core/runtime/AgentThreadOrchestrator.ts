@@ -525,6 +525,7 @@ export class AgentThreadOrchestrator {
         const subAgentThread = await resolveBeforeAbort(
           this.createDynamicSubAgentThread({
             parentDefinition: currentThread.definition,
+            turnToolCallLedger: currentThread.turnToolCallLedger,
             request: chunk.agent_info,
             threadId: subAgentThreadId,
             parent,

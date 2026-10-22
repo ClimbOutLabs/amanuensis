@@ -1,5 +1,9 @@
 import { MAX_WRITE_CALLS_PER_TURN } from '../mcp/executeToolCalls';
 
+/** Sent to the model when its reply carried a tool call as text, so that call did not run. */
+export const TOOL_MARKUP_RETRY_MESSAGE =
+  'That was written as text and did not run. If it is still needed, call the tool.';
+
 /** Result text for a call whose exact action already ran or was refused in this turn. Not run. */
 export const REPEATED_ACTION_RESULT =
   'This exact action already ran or was refused in this reply. Do not repeat it; tell the person what happened.';

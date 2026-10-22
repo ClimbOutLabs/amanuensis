@@ -13,14 +13,20 @@ import type {
   RawToolCall,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
-import { MAX_WRITE_CALLS_PER_TURN } from '../../../src/core/mcp/executeToolCalls';
+import {
+  createTurnToolCallLedger,
+  MAX_TOOL_MARKUP_RETRIES_PER_TURN,
+  MAX_WRITE_CALLS_PER_TURN,
+  type TurnToolCallLedger,
+} from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import {
   REPEATED_ACTION_RESULT,
+  TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
   WRITE_CAP_STOP_MESSAGE,
 } from '../../../src/core/runtime/replyActionChecks';
@@ -162,11 +168,13 @@ function makeThread(input: {
   toolSet: ReturnType<typeof makeToolSet>;
   create: ILLM['create'];
   context?: ContextMessage[];
+  turnToolCallLedger?: TurnToolCallLedger | undefined;
 }) {
   return new AgentThread({
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: input.turnToolCallLedger,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
@@ -216,7 +224,28 @@ function deliveredText(events: unknown[]): string {
 }
 
 describe('leaked markup', () => {
-  it('never runs a call written as text, never retries, and adds the plain line when no write succeeded', async () => {
+  it('never runs a call written as text, tells the model it did not run, and adds the plain line when no write succeeded', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      return round === 1
+        ? replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' })
+        : replyStream({ text: 'I could not set it.\n' });
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(create.mock.calls[1]?.[0])).toContain(TOOL_MARKUP_RETRY_MESSAGE);
+    // The retried answer reuses the leaked step's message id, so live clients replace that stream; the
+    // delivered deltas end with the retried answer and the plain line.
+    expect(deliveredText(events)).toMatch(new RegExp(`I could not set it\\.\\n\\n${TOOL_MARKUP_NOTICE}$`));
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('ends the turn after the retry cap, still with no call run', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({ text: 'Setting the reminder now.\n', toolMarkup: 'leaked' }),
@@ -225,8 +254,8 @@ describe('leaked markup', () => {
     const events = await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual([]);
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(deliveredText(events)).toBe(`Setting the reminder now.\n\n${TOOL_MARKUP_NOTICE}`);
+    expect(create).toHaveBeenCalledTimes(MAX_TOOL_MARKUP_RETRIES_PER_TURN + 1);
+    expect(deliveredText(events)).toContain(TOOL_MARKUP_NOTICE);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
@@ -606,5 +635,77 @@ describe('per-turn tool loop guard', () => {
     expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     expect(deliveredText(events)).toBe('Both appointments are in place.');
+  });
+});
+
+describe('turn-wide counts across threads', () => {
+  /** One create_event call per reply, with the given titles, then a plain final answer. */
+  function scriptedWrites({ prefix, titles }: { prefix: string; titles: string[] }): ILLM['create'] {
+    const replies = [
+      ...titles.map((title, index) => ({
+        calls: [{ id: `${prefix}-${String(index)}`, name: 'create_event', args: createArgs(title) }],
+      })),
+    ];
+    let round = 0;
+    return jest.fn((_request: LLMCreateParamsStreaming) => {
+      const reply = replies[round];
+      round += 1;
+      return reply === undefined ? finalAnswerStream() : replyStream(reply);
+    });
+  }
+
+  it('counts writes from the main thread and two sub-agents toward one turn cap', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Main 1', 'Main 2'] }),
+      turnToolCallLedger,
+    });
+    const subA = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'a', titles: ['A 1', 'A 2'] }),
+      turnToolCallLedger,
+    });
+    const subB = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'b', titles: ['B 1', 'B 2', 'B 3'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    await drain(subA);
+    const subBEvents = await drain(subB);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(turnToolCallLedger.writeCallsThisTurn).toBe(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(subB).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(subBEvents.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('refuses an identical call that a sibling thread already ran in the same turn', async () => {
+    const toolSet = makeTier3WriteToolSet();
+    const turnToolCallLedger = createTurnToolCallLedger();
+    const main = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'main', titles: ['Shared'] }),
+      turnToolCallLedger,
+    });
+    const sub = makeThread({
+      toolSet,
+      create: scriptedWrites({ prefix: 'sub', titles: ['Other', 'Shared'] }),
+      turnToolCallLedger,
+    });
+
+    await drain(main);
+    const subEvents = await drain(sub);
+
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+    expect(subEvents).not.toContainEqual(expect.objectContaining({ error: REPEAT_STOP_NOTE }));
   });
 });

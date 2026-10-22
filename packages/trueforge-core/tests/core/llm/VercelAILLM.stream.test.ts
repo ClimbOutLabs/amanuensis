@@ -297,24 +297,19 @@ describe('mapStreamToChunks', () => {
     );
   });
 
-  it('stops a sustained word loop in the answer, keeps what came before it, and says so', async () => {
-    const repeated = `${'the same uncertain identification keeps circling without reaching a useful conclusion '.repeat(45)}.`;
+  it('stops a reply that repeats one sentence three times, keeps the first two, and says so', async () => {
+    const sentence = 'Let me know if you need anything else. ';
     const parts: TextStreamPart<ToolSet>[] = [
-      { type: 'text-delta', id: 't1', text: repeated },
-      { type: 'text-delta', id: 't1', text: repeated },
+      { type: 'text-delta', id: 't1', text: sentence.repeat(5) },
+      makeFinishStep('stop'),
     ];
 
-    const { chunks, final } = await drainStream(
-      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
-    );
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
     expect(final.repetition_stopped).toBe(true);
-    expect(final.output.content).toMatch(/\n\nThe reply started repeating itself, so Aman stopped it\.$/);
-    const content = typeof final.output.content === 'string' ? final.output.content : '';
-    expect(content.split('the same uncertain identification').length).toBeLessThan(50);
-    expect(chunks.length).toBeGreaterThan(0);
+    expect(final.output.content).toBe(`${sentence.repeat(2).trimEnd()}\n\nStopped: the reply was repeating itself.`);
   });
 
-  it('cuts a closing-line loop at its first copy, so only one copy and the stop line remain', async () => {
+  it('stops a closing-line loop before its third copy, so two copies and the stop line remain', async () => {
     const closing = 'Done. ✅ All set for tomorrow.\n';
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-delta', id: 't1', text: 'Here is the summary of the calendar work.\n' },
@@ -324,7 +319,7 @@ describe('mapStreamToChunks', () => {
     const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
     expect(final.repetition_stopped).toBe(true);
     expect(final.output.content).toBe(
-      'Here is the summary of the calendar work.\nDone. ✅ All set for tomorrow.\n\nThe reply started repeating itself, so Aman stopped it.',
+      `Here is the summary of the calendar work.\n${closing.repeat(2)}\nStopped: the reply was repeating itself.`,
     );
   });
 
@@ -344,15 +339,26 @@ describe('mapStreamToChunks', () => {
     expect(final.output.content).toBe(answer);
   });
 
-  it('leaves two short closing lines in a row untouched', async () => {
+  it('leaves two identical short lines in a row untouched', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: 'Done.\nDone.\n' },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBeUndefined();
+    expect(final.output.content).toBe('Done.\nDone.\n');
+  });
+
+  it('stops a third identical short line and says so', async () => {
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-delta', id: 't1', text: 'Done.\nDone.\nDone.\n' },
       makeFinishStep('stop'),
     ];
 
     const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
-    expect(final.repetition_stopped).toBeUndefined();
-    expect(final.output.content).toBe('Done.\nDone.\nDone.\n');
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe('Done.\nDone.\n\nStopped: the reply was repeating itself.');
   });
 
   it('does not stop repetitive reasoning while the turn keeps issuing tool calls', async () => {

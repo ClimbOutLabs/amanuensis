@@ -125,6 +125,7 @@ export async function measurePromptRequest(input: PromptReportInput): Promise<Pr
     capabilities: input.capabilities ?? [],
     context: [{ role: 'user', content: 'Report.' }],
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

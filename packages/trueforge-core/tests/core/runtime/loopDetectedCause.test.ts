@@ -69,11 +69,15 @@ function makeSearchToolSet(): IToolSet {
 describe('loop_detected handoff cause', () => {
   it('recovers with a final answer (not an error) when a memoized read is repeated once', async () => {
     const toolSet = makeSearchToolSet();
-    const args = { query: 'Madrid rental market September 2026' };
+    const madrid = { query: 'Madrid rental market September 2026' };
+    const other = { query: 'NLV processing times' };
+    // The repeat is not the call straight after the first one, so it is refused as a repeat
+    // without ending the turn; the model then answers.
     const create = jest
       .fn()
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-1', args }))
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-2', args }))
+      .mockImplementationOnce(() => searchCallStream({ id: 'search-1', args: madrid }))
+      .mockImplementationOnce(() => searchCallStream({ id: 'search-2', args: other }))
+      .mockImplementationOnce(() => searchCallStream({ id: 'search-3', args: madrid }))
       .mockImplementation(() => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
@@ -81,6 +85,7 @@ describe('loop_detected handoff cause', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -101,10 +106,9 @@ describe('loop_detected handoff cause', () => {
       events.push(event);
     }
 
-    // The second identical search is served from the memo (no new information
-    // possible), so the loop guard triggers a recovery pass. The model answers,
-    // so the turn succeeds instead of ending blank.
-    expect(jest.mocked(toolSet.callTool)).toHaveBeenCalledTimes(1);
+    // The repeated search is refused before dispatch (no new information possible), so only the
+    // two distinct searches run. The model answers, so the turn succeeds instead of ending blank.
+    expect(jest.mocked(toolSet.callTool)).toHaveBeenCalledTimes(2);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     // The recovery must not be misreported as the step budget running out.
     expect(events).not.toContainEqual(
@@ -118,21 +122,25 @@ describe('loop_detected handoff cause', () => {
 
   it('reports loop_detected (not iteration_limit) when the model repeats after recovery', async () => {
     const toolSet = makeSearchToolSet();
-    const args = { query: 'Madrid rental market September 2026' };
-    const create = jest
-      .fn()
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-1', args }))
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-2', args }))
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-3', args }))
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-4', args }))
-      .mockImplementationOnce(() => searchCallStream({ id: 'search-5', args }))
-      .mockImplementation(() => finalAnswerStream());
+    const madrid = { query: 'Madrid rental market September 2026' };
+    const other = { query: 'NLV processing times' };
+    const third = { query: 'Valencia rental prices' };
+    // Madrid is searched four times, with other searches between, so no repeat is consecutive.
+    // The fourth Madrid search trips the repeat budget (first fire: recovery note). The model then
+    // searches Valencia, and its next Madrid search is the second fire, which ends the turn.
+    const sequence = [madrid, other, madrid, other, madrid, other, madrid, third, madrid];
+    const create = jest.fn();
+    sequence.forEach((args, index) => {
+      create.mockImplementationOnce(() => searchCallStream({ id: `search-${String(index + 1)}`, args }));
+    });
+    create.mockImplementation(() => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

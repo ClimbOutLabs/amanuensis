@@ -52,6 +52,7 @@ function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox
     capabilities: [currentDateTime({ tracing: NOOP_AGENT_TRACING })],
     capabilityState: undefined,
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

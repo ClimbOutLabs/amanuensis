@@ -11,6 +11,7 @@ async function systemPrompt(input: { instruction: string; network?: 'none' | und
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

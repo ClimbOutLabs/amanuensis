@@ -1462,12 +1462,11 @@ export async function* mapStreamToChunks({
   const toolCallStates = new Map<string, ToolCallState>();
   let nextToolIndex = 0;
   let accumulatedText = '';
-  // Leaked tool-call markup in the answer text is held back and never streamed or run; a reply that
-  // carried it is retried by the caller.
+  // Leaked tool-call markup in the answer text is held back and never streamed or run; the caller is
+  // told it did not run.
   const markupGuard = new ToolMarkupGuard();
-  // A loop of whole sentences or lines is cut at its first copy; a loop of words is stopped where it trips.
+  // A reply that repeats one sentence or line three times is stopped before the last copy.
   const answerUnits = new RepeatedUnitGuard();
-  const textRepetition = new StreamingRepetitionGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
   let repetitionStopped = false;
   const accumulatedThinking: ThinkingBlock[] = [];
@@ -1515,10 +1514,6 @@ export async function* mapStreamToChunks({
           break;
         }
         const answer = answerUnits.push(released);
-        if (answer.text !== '' && textRepetition.push(answer.text)) {
-          repetitionStopped = true;
-          break streamLoop;
-        }
         if (answer.text !== '') {
           // Answer text is real output: the reasoning guard must not mistake
           // long methodical work for a stuck loop while the turn is producing.
@@ -1752,8 +1747,9 @@ export async function* mapStreamToChunks({
   let tail = '';
   if (!repetitionStopped) {
     const flushed = answerUnits.push(markupOutcome === 'clean' ? markupGuard.heldText : '');
-    repetitionStopped = flushed.stopped;
-    tail = flushed.stopped ? flushed.text : flushed.text + answerUnits.finish();
+    const rest = flushed.stopped ? { text: '', stopped: false } : answerUnits.finish();
+    repetitionStopped = flushed.stopped || rest.stopped;
+    tail = flushed.text + rest.text;
   }
   if (repetitionStopped) {
     tail += noticeAfter({ text: accumulatedText + tail, notice: REPEAT_STOP_NOTE });
